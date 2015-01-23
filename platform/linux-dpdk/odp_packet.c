@@ -21,17 +21,21 @@ static inline uint8_t parse_ipv4(odp_packet_hdr_t *pkt_hdr,
 static inline uint8_t parse_ipv6(odp_packet_hdr_t *pkt_hdr,
 				 odph_ipv6hdr_t *ipv6, size_t *offset_out);
 
-odp_packet_t odp_packet_alloc(odp_buffer_pool_t pool_id)
+odp_packet_t odp_packet_alloc(odp_buffer_pool_t pool_hdl, uint32_t len)
 {
 	odp_packet_t pkt;
 	odp_buffer_t buf;
+	pool_entry_t *pool = odp_pool_to_entry(pool_hdl);
 
-	buf = odp_buffer_alloc(pool_id);
+	if (pool->s.buf_type != ODP_BUFFER_TYPE_PACKET)
+		return ODP_PACKET_INVALID;
+
+	buf = odp_buffer_alloc(pool_hdl);
 	if (odp_unlikely(!odp_buffer_is_valid(buf)))
 		return ODP_PACKET_INVALID;
 
 	pkt = odp_packet_from_buffer(buf);
-	odp_packet_init(pkt);
+	odp_packet_reset(pkt, len);
 
 	return pkt;
 }
@@ -43,7 +47,7 @@ void odp_packet_free(odp_packet_t pkt)
 	odp_buffer_free(buf);
 }
 
-void odp_packet_init(odp_packet_t pkt)
+int odp_packet_reset(odp_packet_t pkt, uint32_t len ODP_UNUSED)
 {
 	odp_packet_hdr_t *const pkt_hdr = odp_packet_hdr(pkt);
 	struct rte_mbuf *mb;

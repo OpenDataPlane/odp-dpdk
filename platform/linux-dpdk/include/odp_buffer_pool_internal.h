@@ -67,6 +67,12 @@ struct pool_entry_s {
 	size_t                  hdr_size;
 };
 
+typedef union pool_entry_u {
+	struct pool_entry_s s;
+
+	uint8_t pad[ODP_CACHE_LINE_SIZE_ROUNDUP(sizeof(struct pool_entry_s))];
+
+} pool_entry_t;
 
 extern void *pool_entry_ptr[];
 
