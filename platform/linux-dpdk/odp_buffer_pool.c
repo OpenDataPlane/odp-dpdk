@@ -190,9 +190,8 @@ odp_dpdk_mbuf_ctor(struct rte_mempool *mp,
 }
 
 odp_buffer_pool_t odp_buffer_pool_create(const char *name,
-					 void *base_addr, uint64_t size,
-					 size_t buf_size, size_t buf_align,
-					 int buf_type)
+					 odp_shm_t shm,
+					 odp_buffer_pool_param_t *params)
 {
 	struct rte_mempool *pool = NULL;
 	struct mbuf_pool_ctor_arg mbp_ctor_arg;
@@ -200,39 +199,32 @@ odp_buffer_pool_t odp_buffer_pool_create(const char *name,
 	unsigned mb_size;
 	size_t hdr_size;
 
-	/* Not used for rte_mempool; the new ODP buffer management introduces
-	 * rte_mempool_create_from_region where base_addr makes sense */
-	(void)base_addr;
+	ODP_DBG("odp_buffer_pool_create: %s, %u, %u, %u, %d\n", name,
+		params->num_bufs, params->buf_size, params->buf_align,
+		params->buf_type);
 
-	/* buf_align will be removed soon, no need to wory about it */
-	(void)buf_align;
-
-	ODP_DBG("odp_buffer_pool_create: %s, %lx, %u, %u, %u, %d\n", name,
-		(uint64_t) base_addr, (unsigned) size,
-		(unsigned) buf_size, (unsigned) buf_align,
-		buf_type);
-
-	switch (buf_type) {
+	switch (params->buf_type) {
 	case ODP_BUFFER_TYPE_RAW:
 		hdr_size = sizeof(odp_buffer_hdr_t);
-		mbp_ctor_arg.seg_buf_size = (uint16_t) buf_size;
+		mbp_ctor_arg.seg_buf_size = (uint16_t) params->buf_size;
 		break;
 	case ODP_BUFFER_TYPE_PACKET:
 		hdr_size = sizeof(odp_packet_hdr_t);
 		mbp_ctor_arg.seg_buf_size =
-			(uint16_t) (RTE_PKTMBUF_HEADROOM + buf_size);
+			(uint16_t) (RTE_PKTMBUF_HEADROOM + params->buf_size);
 		break;
 	case ODP_BUFFER_TYPE_TIMEOUT:
 		hdr_size = sizeof(odp_timeout_hdr_t);
-		mbp_ctor_arg.seg_buf_size = (uint16_t) buf_size;
+		mbp_ctor_arg.seg_buf_size = (uint16_t) params->buf_size;
 		break;
 	case ODP_BUFFER_TYPE_ANY:
 		hdr_size = sizeof(odp_any_buffer_hdr_t);
 		mbp_ctor_arg.seg_buf_size =
-			(uint16_t) (RTE_PKTMBUF_HEADROOM + buf_size);
+			(uint16_t) (RTE_PKTMBUF_HEADROOM + params->buf_size);
 		break;
 	default:
-		ODP_ERR("odp_buffer_pool_create: Bad type %i\n", buf_type);
+		ODP_ERR("odp_buffer_pool_create: Bad type %i\n",
+			params->buf_type);
 		return ODP_BUFFER_POOL_INVALID;
 		break;
 	}
@@ -240,7 +232,7 @@ odp_buffer_pool_t odp_buffer_pool_create(const char *name,
 	mb_ctor_arg.seg_buf_offset =
 		(uint16_t) ODP_CACHE_LINE_SIZE_ROUNDUP(hdr_size);
 	mb_ctor_arg.seg_buf_size = mbp_ctor_arg.seg_buf_size;
-	mb_ctor_arg.buf_type = buf_type;
+	mb_ctor_arg.buf_type = params->buf_type;
 	mb_size = mb_ctor_arg.seg_buf_offset + mb_ctor_arg.seg_buf_size;
 
 	pool = rte_mempool_create(name, NB_MBUF,

@@ -25,33 +25,83 @@ extern "C" {
 #include <odp_debug.h>
 #include <odp_align.h>
 #include <rte_mbuf.h>
+#include <odp_align_internal.h>
+#include <odp_config.h>
+#include <odp_byteorder.h>
+#include <odp_thread.h>
 
-/* TODO: move these to correct files */
 
-typedef uint64_t odp_phys_addr_t;
+#define ODP_BITSIZE(x) \
+       ((x) <=     2 ?  1 : \
+       ((x) <=     4 ?  2 : \
+       ((x) <=     8 ?  3 : \
+       ((x) <=    16 ?  4 : \
+       ((x) <=    32 ?  5 : \
+       ((x) <=    64 ?  6 : \
+       ((x) <=   128 ?  7 : \
+       ((x) <=   256 ?  8 : \
+       ((x) <=   512 ?  9 : \
+       ((x) <=  1024 ? 10 : \
+       ((x) <=  2048 ? 11 : \
+       ((x) <=  4096 ? 12 : \
+       ((x) <=  8196 ? 13 : \
+       ((x) <= 16384 ? 14 : \
+       ((x) <= 32768 ? 15 : \
+       ((x) <= 65536 ? 16 : \
+        (0/0)))))))))))))))))
+
+ODP_STATIC_ASSERT(ODP_CONFIG_PACKET_BUF_LEN_MIN >= 256,
+                 "ODP Segment size must be a minimum of 256 bytes");
+
+ODP_STATIC_ASSERT((ODP_CONFIG_PACKET_BUF_LEN_MIN % ODP_CACHE_LINE_SIZE) == 0,
+                 "ODP Segment size must be a multiple of cache line size");
+
+ODP_STATIC_ASSERT((ODP_CONFIG_PACKET_BUF_LEN_MAX %
+                  ODP_CONFIG_PACKET_BUF_LEN_MIN) == 0,
+                 "Packet max size must be a multiple of segment size");
+
+#define ODP_BUFFER_MAX_SEG \
+       (ODP_CONFIG_PACKET_BUF_LEN_MAX / ODP_CONFIG_PACKET_BUF_LEN_MIN)
+
+/* We can optimize storage of small raw buffers within metadata area */
+#define ODP_MAX_INLINE_BUF     ((sizeof(void *)) * (ODP_BUFFER_MAX_SEG - 1))
+
+#define ODP_BUFFER_POOL_BITS   ODP_BITSIZE(ODP_CONFIG_BUFFER_POOLS)
+#define ODP_BUFFER_SEG_BITS    ODP_BITSIZE(ODP_BUFFER_MAX_SEG)
+#define ODP_BUFFER_INDEX_BITS  (32 - ODP_BUFFER_POOL_BITS - ODP_BUFFER_SEG_BITS)
+#define ODP_BUFFER_PREFIX_BITS (ODP_BUFFER_POOL_BITS + ODP_BUFFER_INDEX_BITS)
+#define ODP_BUFFER_MAX_POOLS   (1 << ODP_BUFFER_POOL_BITS)
+#define ODP_BUFFER_MAX_BUFFERS (1 << ODP_BUFFER_INDEX_BITS)
 
 #define ODP_BUFFER_MAX_INDEX     (ODP_BUFFER_MAX_BUFFERS - 2)
 #define ODP_BUFFER_INVALID_INDEX (ODP_BUFFER_MAX_BUFFERS - 1)
 
-#define ODP_BUFS_PER_CHUNK       16
-#define ODP_BUFS_PER_SCATTER      4
-
-#define ODP_BUFFER_TYPE_CHUNK    0xffff
-
-
-#define ODP_BUFFER_POOL_BITS   4
-#define ODP_BUFFER_INDEX_BITS  (32 - ODP_BUFFER_POOL_BITS)
-#define ODP_BUFFER_MAX_POOLS   (1 << ODP_BUFFER_POOL_BITS)
-#define ODP_BUFFER_MAX_BUFFERS (1 << ODP_BUFFER_INDEX_BITS)
 
 typedef union odp_buffer_bits_t {
 	uint32_t     u32;
 	odp_buffer_t handle;
 
 	struct {
+#if ODP_BYTE_ORDER == ODP_BIG_ENDIAN
 		uint32_t pool:ODP_BUFFER_POOL_BITS;
 		uint32_t index:ODP_BUFFER_INDEX_BITS;
+		uint32_t seg:ODP_BUFFER_SEG_BITS;
+#else
+		uint32_t seg:ODP_BUFFER_SEG_BITS;
+		uint32_t index:ODP_BUFFER_INDEX_BITS;
+		uint32_t pool_id:ODP_BUFFER_POOL_BITS;
+#endif
 	};
+	struct {
+#if ODP_BYTE_ORDER == ODP_BIG_ENDIAN
+		uint32_t prefix:ODP_BUFFER_PREFIX_BITS;
+		uint32_t pfxseg:ODP_BUFFER_SEG_BITS;
+#else
+		uint32_t pfxseg:ODP_BUFFER_SEG_BITS;
+		uint32_t prefix:ODP_BUFFER_PREFIX_BITS;
+#endif
+       };
+
 } odp_buffer_bits_t;
 
 
