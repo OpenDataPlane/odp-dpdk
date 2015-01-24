@@ -106,17 +106,6 @@ static int odp_packet_set_offset_len(odp_packet_t pkt, size_t frame_offset,
 	return 0;
 }
 
-void odp_packet_set_len(odp_packet_t pkt, size_t len)
-{
-	(void)odp_packet_set_offset_len(pkt, 0, len);
-}
-
-size_t odp_packet_get_len(odp_packet_t pkt)
-{
-	struct rte_mbuf *mb = &(odp_packet_hdr(pkt)->buf_hdr.mb);
-	return mb->pkt.pkt_len;
-}
-
 void *odp_packet_head(odp_packet_t pkt)
 {
 	return odp_buffer_addr(odp_packet_to_buffer(pkt));
@@ -430,43 +419,49 @@ void odp_packet_print(odp_packet_t pkt)
 
 /* For now we can only copy between packets of the same segment size
  * We should probably refine this API, maybe introduce a clone API */
-int odp_packet_copy(odp_packet_t pkt_dst, odp_packet_t pkt_src)
+odp_packet_t odp_packet_copy(odp_packet_t pkt_src, odp_buffer_pool_t pool)
 {
+	odp_packet_t pkt_dst;
 	struct rte_mbuf *mb_dst, *mb_src;
 	uint8_t nb_segs, i;
 
-	ODP_ASSERT(odp_buffer_type(pkt_dst) == ODP_BUFFER_TYPE_PACKET &&
-		   odp_buffer_type(pkt_src) == ODP_BUFFER_TYPE_PACKET,
-		   "dst_pkt or src_pkt not of type ODP_BUFFER_TYPE_PACKET");
+	ODP_ASSERT(odp_buffer_type(pkt_src) == ODP_BUFFER_TYPE_PACKET,
+		   "pkt not of type ODP_BUFFER_TYPE_PACKET");
 
-	if (pkt_dst == ODP_PACKET_INVALID || pkt_src == ODP_PACKET_INVALID)
-		return -1;
+	if (pkt_src == ODP_PACKET_INVALID)
+		return ODP_PACKET_INVALID;
+
+	mb_src = &(odp_packet_hdr(pkt_src)->buf_hdr.mb);
+
+	pkt_dst = odp_packet_alloc(pool, mb_src->buf_len);
+
+	if (pkt_dst == ODP_PACKET_INVALID)
+		return ODP_PACKET_INVALID;
 
 	mb_dst = &(odp_packet_hdr(pkt_dst)->buf_hdr.mb);
-	mb_src = &(odp_packet_hdr(pkt_src)->buf_hdr.mb);
 
 	if (mb_dst->pkt.nb_segs != mb_src->pkt.nb_segs) {
 		ODP_ERR("Different nb_segs in pkt_dst and pkt_src");
-		return -1;
+		return ODP_PACKET_INVALID;
 	}
 
 	nb_segs = mb_src->pkt.nb_segs;
 
 	if (mb_dst->buf_len < mb_src->buf_len) {
 		ODP_ERR("dst_pkt smaller than src_pkt");
-		return -1;
+		return ODP_PACKET_INVALID;
 	}
 
 	for (i = 0; i < nb_segs; i++) {
 		if (mb_src == NULL || mb_dst == NULL) {
 			ODP_ERR("Corrupted packets");
-			return -1;
+			return ODP_PACKET_INVALID;
 		}
 		memcpy(mb_dst->buf_addr, mb_src->buf_addr, mb_src->buf_len);
 		mb_dst = mb_dst->pkt.next;
 		mb_src = mb_src->pkt.next;
 	}
-	return 0;
+	return pkt_dst;
 }
 
 void odp_packet_user_ptr_set(odp_packet_t pkt, const void *ctx)
