@@ -33,6 +33,7 @@ AC_LINK_IFELSE(
 AM_CONDITIONAL([HAVE_PCAP], [false])
 m4_include([platform/linux-dpdk/m4/odp_pthread.m4])
 m4_include([platform/linux-dpdk/m4/odp_openssl.m4])
+m4_include([platform/linux-dpdk/m4/odp_schedule.m4])
 
 #
 # Check that SDK_INSTALL_PATH provided to right dpdk version
