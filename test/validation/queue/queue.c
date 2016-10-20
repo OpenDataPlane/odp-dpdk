@@ -148,7 +148,6 @@ void queue_test_param(void)
 	int nr_deq_entries = 0;
 	int max_iteration = CONFIG_MAX_ITERATION;
 	odp_queue_param_t qparams;
-	odp_buffer_t enbuf;
 
 	/* Schedule type queue */
 	odp_queue_param_init(&qparams);
@@ -198,7 +197,7 @@ void queue_test_param(void)
 	}
 
 	for (i = 0; i < MAX_BUFFER_QUEUE; i++) {
-		buf = odp_buffer_alloc(msg_pool);
+		odp_buffer_t buf = odp_buffer_alloc(msg_pool);
 		enev[i] = odp_buffer_to_event(buf);
 	}
 
@@ -224,7 +223,7 @@ void queue_test_param(void)
 	} while (nr_deq_entries < MAX_BUFFER_QUEUE);
 
 	for (i = 0; i < MAX_BUFFER_QUEUE; i++) {
-		enbuf = odp_buffer_from_event(enev[i]);
+		odp_buffer_t enbuf = odp_buffer_from_event(enev[i]);
 		CU_ASSERT(enev[i] == deev[i]);
 		odp_buffer_free(enbuf);
 	}
@@ -284,7 +283,7 @@ void queue_test_info(void)
 	CU_ASSERT(info.param.sched.group == odp_queue_sched_group(q_order));
 	ret = odp_queue_lock_count(q_order);
 	CU_ASSERT(ret >= 0);
-	lock_count = (unsigned)ret;
+	lock_count = (unsigned) ret;
 	CU_ASSERT(info.param.sched.lock_count == lock_count);
 
 	CU_ASSERT(odp_queue_destroy(q_plain) == 0);

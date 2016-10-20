@@ -51,4 +51,5 @@ int hash_main(int argc, char *argv[])
 		ret = odp_cunit_run();
 
 	return ret;
+
 }

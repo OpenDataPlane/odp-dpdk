@@ -53,10 +53,6 @@ static void alg_test(odp_crypto_op_t op,
 	odp_event_t event;
 	odp_crypto_compl_t compl_event;
 	odp_crypto_op_result_t result;
-	odp_crypto_session_params_t ses_params;
-	odp_crypto_op_params_t op_params;
-	uint8_t *data_addr;
-	int data_off;
 
 	rc = odp_crypto_capability(&capability);
 	CU_ASSERT(!rc);
@@ -104,6 +100,7 @@ static void alg_test(odp_crypto_op_t op,
 	CU_ASSERT(!rc);
 
 	/* Create a crypto session */
+	odp_crypto_session_params_t ses_params;
 	memset(&ses_params, 0, sizeof(ses_params));
 	ses_params.op = op;
 	ses_params.auth_cipher_text = false;
@@ -126,11 +123,12 @@ static void alg_test(odp_crypto_op_t op,
 	odp_packet_t pkt = odp_packet_alloc(suite_context.pool,
 					    plaintext_len + digest_len);
 	CU_ASSERT(pkt != ODP_PACKET_INVALID);
-	data_addr = odp_packet_data(pkt);
+	uint8_t *data_addr = odp_packet_data(pkt);
 	memcpy(data_addr, plaintext, plaintext_len);
-	data_off = 0;
+	int data_off = 0;
 
 	/* Prepare input/output params */
+	odp_crypto_op_params_t op_params;
 	memset(&op_params, 0, sizeof(op_params));
 	op_params.session = session;
 	op_params.pkt = pkt;
@@ -201,10 +199,10 @@ void crypto_test_enc_alg_3des_cbc(void)
 	odp_crypto_key_t cipher_key = { .data = NULL, .length = 0 },
 			 auth_key   = { .data = NULL, .length = 0 };
 	odp_crypto_iv_t iv;
-	unsigned int test_vec_num = (sizeof(tdes_cbc_reference_length) /
+	unsigned int test_vec_num = (sizeof(tdes_cbc_reference_length)/
 				     sizeof(tdes_cbc_reference_length[0]));
-	unsigned int i;
 
+	unsigned int i;
 	for (i = 0; i < test_vec_num; i++) {
 		cipher_key.data = tdes_cbc_reference_key[i];
 		cipher_key.length = sizeof(tdes_cbc_reference_key[i]);
@@ -234,10 +232,10 @@ void crypto_test_enc_alg_3des_cbc_ovr_iv(void)
 	odp_crypto_key_t cipher_key = { .data = NULL, .length = 0 },
 			 auth_key   = { .data = NULL, .length = 0 };
 	odp_crypto_iv_t iv = { .data = NULL, .length = TDES_CBC_IV_LEN };
-	unsigned int test_vec_num = (sizeof(tdes_cbc_reference_length) /
+	unsigned int test_vec_num = (sizeof(tdes_cbc_reference_length)/
 				     sizeof(tdes_cbc_reference_length[0]));
-	unsigned int i;
 
+	unsigned int i;
 	for (i = 0; i < test_vec_num; i++) {
 		cipher_key.data = tdes_cbc_reference_key[i];
 		cipher_key.length = sizeof(tdes_cbc_reference_key[i]);
@@ -257,6 +255,7 @@ void crypto_test_enc_alg_3des_cbc_ovr_iv(void)
 	}
 }
 
+
 /* This test verifies the correctness of decode (ciphertext -> plaintext)
  * operation for 3DES_CBC algorithm. IV for the operation is the session IV
  * In addition the test verifies if the implementation can use the
@@ -267,10 +266,10 @@ void crypto_test_dec_alg_3des_cbc(void)
 	odp_crypto_key_t cipher_key = { .data = NULL, .length = 0 },
 			 auth_key   = { .data = NULL, .length = 0 };
 	odp_crypto_iv_t iv = { .data = NULL, .length = 0 };
-	unsigned int test_vec_num = (sizeof(tdes_cbc_reference_length) /
+	unsigned int test_vec_num = (sizeof(tdes_cbc_reference_length)/
 				     sizeof(tdes_cbc_reference_length[0]));
-	unsigned int i;
 
+	unsigned int i;
 	for (i = 0; i < test_vec_num; i++) {
 		cipher_key.data = tdes_cbc_reference_key[i];
 		cipher_key.length = sizeof(tdes_cbc_reference_key[i]);
@@ -302,10 +301,10 @@ void crypto_test_dec_alg_3des_cbc_ovr_iv(void)
 	odp_crypto_key_t cipher_key = { .data = NULL, .length = 0 },
 			 auth_key   = { .data = NULL, .length = 0 };
 	odp_crypto_iv_t iv = { .data = NULL, .length = TDES_CBC_IV_LEN };
-	unsigned int test_vec_num = (sizeof(tdes_cbc_reference_length) /
+	unsigned int test_vec_num = (sizeof(tdes_cbc_reference_length)/
 				     sizeof(tdes_cbc_reference_length[0]));
-	unsigned int i;
 
+	unsigned int i;
 	for (i = 0; i < test_vec_num; i++) {
 		cipher_key.data = tdes_cbc_reference_key[i];
 		cipher_key.length = sizeof(tdes_cbc_reference_key[i]);
@@ -608,6 +607,7 @@ void crypto_test_dec_alg_aes128_cbc_ovr_iv(void)
 	}
 }
 
+
 /* This test verifies the correctness of HMAC_MD5 digest operation.
  * The output check length is truncated to 12 bytes (96 bits) as
  * returned by the crypto operation API call.
@@ -621,10 +621,10 @@ void crypto_test_alg_hmac_md5(void)
 			 auth_key   = { .data = NULL, .length = 0 };
 	odp_crypto_iv_t iv = { .data = NULL, .length = 0 };
 
-	unsigned int test_vec_num = (sizeof(hmac_md5_reference_length) /
+	unsigned int test_vec_num = (sizeof(hmac_md5_reference_length)/
 				     sizeof(hmac_md5_reference_length[0]));
-	unsigned int i;
 
+	unsigned int i;
 	for (i = 0; i < test_vec_num; i++) {
 		auth_key.data = hmac_md5_reference_key[i];
 		auth_key.length = sizeof(hmac_md5_reference_key[i]);
