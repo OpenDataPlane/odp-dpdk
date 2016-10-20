@@ -1,14 +1,17 @@
 include $(top_srcdir)/test/Makefile.inc
 TESTS_ENVIRONMENT += TEST_DIR=${top_builddir}/test/common_plat/validation
 
+ODP_MODULES = pktio \
+	      ring \
+	      shmem
+
 ALL_API_VALIDATION_DIR = ${top_builddir}/test/common_plat/validation/api
 
-SUBDIRS =
-
 if test_vald
-TESTS = validation/api/pktio/pktio_run.sh \
-	validation/api/pktio/pktio_run_tap.sh \
-	validation/api/shmem/shmem_linux \
+TESTS = pktio/pktio_run.sh \
+	pktio/pktio_run_tap.sh \
+	ring/ring_main$(EXEEXT) \
+	shmem/shmem_linux \
 	$(ALL_API_VALIDATION_DIR)/atomic/atomic_main$(EXEEXT) \
 	$(ALL_API_VALIDATION_DIR)/barrier/barrier_main$(EXEEXT) \
 	$(ALL_API_VALIDATION_DIR)/buffer/buffer_main$(EXEEXT) \
@@ -32,32 +35,22 @@ TESTS = validation/api/pktio/pktio_run.sh \
 	$(ALL_API_VALIDATION_DIR)/timer/timer_main$(EXEEXT) \
 	$(ALL_API_VALIDATION_DIR)/traffic_mngr/traffic_mngr_main$(EXEEXT) \
 	$(ALL_API_VALIDATION_DIR)/shmem/shmem_main$(EXEEXT) \
-	$(ALL_API_VALIDATION_DIR)/system/system_main$(EXEEXT) \
-	ring/ring_main$(EXEEXT)
+	$(ALL_API_VALIDATION_DIR)/system/system_main$(EXEEXT)
 
-SUBDIRS += validation/api/pktio\
-	   validation/api/shmem\
-	   pktio_ipc\
-	   ring
+SUBDIRS = $(ODP_MODULES)
 
 if HAVE_PCAP
-TESTS += validation/api/pktio/pktio_run_pcap.sh
+TESTS += pktio/pktio_run_pcap.sh
 endif
-if netmap_support
-TESTS += validation/api/pktio/pktio_run_netmap.sh
-endif
-if PKTIO_DPDK
-TESTS += validation/api/pktio/pktio_run_dpdk.sh
-endif
-
 if PKTIO_IPC
 TESTS += pktio_ipc/pktio_ipc_run.sh
 SUBDIRS += pktio_ipc
 endif
-else
-#performance tests refer to pktio_env
-if test_perf
-SUBDIRS += validation/api/pktio
+if netmap_support
+TESTS += pktio/pktio_run_netmap.sh
+endif
+if PKTIO_DPDK
+TESTS += pktio/pktio_run_dpdk.sh
 endif
 endif
 
@@ -77,3 +70,7 @@ installcheck-local:
 	$(DESTDIR)/$(testdir)/run-test
 endif
 
+#performance tests refer to pktio_env
+if test_perf
+SUBDIRS = pktio
+endif

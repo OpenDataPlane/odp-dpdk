@@ -113,6 +113,22 @@ AC_SUBST([with_platform])
 AC_SUBST([platform_with_platform], ["platform/${with_platform}"])
 
 ##########################################################################
+# Run platform specific checks and settings
+##########################################################################
+IMPLEMENTATION_NAME=""
+if test "${with_platform}" == "linux-generic";
+then
+    m4_include([./platform/linux-generic/m4/configure.m4])
+    m4_include([./test/platform/linux-generic/m4/configure.m4])
+    IMPLEMENTATION_NAME="odp-linux"
+else
+    echo "UNSUPPORTED PLATFORM: ${with_platform}"
+    exit 1
+fi
+
+ODP_CFLAGS="$ODP_CFLAGS -DIMPLEMENTATION_NAME=$IMPLEMENTATION_NAME"
+
+##########################################################################
 # Include m4 files
 ##########################################################################
 m4_include([./doc/m4/configure.m4])
