@@ -17,7 +17,14 @@
 extern "C" {
 #endif
 
+/**
+ * @internal to linux-dpdk implementation
+ */
 extern const unsigned int ol_flags_offset;
+
+/**
+ * @internal to linux-dpdk implementation
+ */
 extern const uint64_t rss_flag;
 
 /*
