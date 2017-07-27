@@ -62,11 +62,13 @@ fi
 echo "running $1!"
 if [ ${1: -3} == ".sh" ]
 then
-	sudo TEST_DIR=${TEST_DIR} \
+        #Set LD_LIBRARY_PATH for travis to work.
+	sudo LD_LIBRARY_PATH="/usr/local/lib:$LD_LIBRARY_PATH" TEST_DIR=${TEST_DIR} \
 		ODP_PLATFORM_PARAMS="$ODP_PLATFORM_PARAMS" \
 			ODP_GDB=$ODP_GDB $1
 else
-	sudo TEST_DIR=${TEST_DIR} ODP_PLATFORM_PARAMS="$ODP_PLATFORM_PARAMS" \
+        #Set LD_LIBRARY_PATH for travis to work.
+	sudo LD_LIBRARY_PATH="/usr/local/lib:$LD_LIBRARY_PATH" TEST_DIR=${TEST_DIR} ODP_PLATFORM_PARAMS="$ODP_PLATFORM_PARAMS" \
 		$ODP_GDB $1
 fi
 res=$?
