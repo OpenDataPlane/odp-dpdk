@@ -1,24 +1,16 @@
 include $(top_srcdir)/platform/Makefile.inc
 include $(top_srcdir)/platform/@with_platform@/Makefile.inc
 
-PLAT_CFLAGS  =
-if ARCH_X86
-PLAT_CFLAGS  += -msse4.2
-endif
-
-if DPDK_DEFAULT_DIR
-PLAT_CFLAGS += -include /usr/include/dpdk/rte_config.h
-else
-PLAT_CFLAGS += -include $(SDK_INSTALL_PATH)/include/rte_config.h
-endif
-
-AM_CFLAGS +=  $(PLAT_CFLAGS)
+AM_CFLAGS +=  $(DPDK_CFLAGS)
 AM_CFLAGS +=  -I$(srcdir)/include
 AM_CFLAGS +=  -I$(top_srcdir)/platform/linux-generic/include
 AM_CFLAGS +=  -I$(top_srcdir)/include/odp/arch/@ARCH_ABI@
 AM_CFLAGS +=  -I$(top_srcdir)/include
 AM_CFLAGS +=  -I$(top_builddir)/include
 AM_CFLAGS +=  -Iinclude
+
+AM_CPPFLAGS +=  $(OPENSSL_CPPFLAGS)
+AM_CPPFLAGS +=  $(DPDK_CPPFLAGS)
 
 include_HEADERS = \
 		  $(top_srcdir)/include/odp.h \
@@ -72,8 +64,20 @@ odpapiinclude_HEADERS = \
 		  $(srcdir)/include/odp/api/time.h \
 		  $(srcdir)/include/odp/api/timer.h \
 		  $(srcdir)/include/odp/api/traffic_mngr.h \
-		  $(srcdir)/include/odp/api/version.h \
-		  $(srcdir)/arch/@ARCH_DIR@/odp/api/cpu_arch.h
+		  $(srcdir)/include/odp/api/version.h
+
+if ARCH_IS_ARM
+odpapiinclude_HEADERS += $(srcdir)/arch/arm/odp/api/cpu_arch.h
+endif
+if ARCH_IS_MIPS64
+odpapiinclude_HEADERS += $(srcdir)/arch/mips64/odp/api/cpu_arch.h
+endif
+if ARCH_IS_POWERPC
+odpapiinclude_HEADERS += $(srcdir)/arch/powerpc/odp/api/cpu_arch.h
+endif
+if ARCH_IS_X86
+odpapiinclude_HEADERS += $(srcdir)/arch/x86/odp/api/cpu_arch.h
+endif
 
 odpapiplatincludedir= $(includedir)/odp/api/plat
 odpapiplatinclude_HEADERS = \
@@ -141,7 +145,6 @@ noinst_HEADERS = \
 		  ${srcdir}/include/odp_packet_io_internal.h \
 		  ${srcdir}/include/odp_errno_define.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_packet_io_ipc_internal.h \
-		  ${top_srcdir}/platform/linux-generic/include/odp_packet_io_queue.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_packet_io_ring_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_packet_socket.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_pkt_queue_internal.h \
@@ -149,6 +152,7 @@ noinst_HEADERS = \
 		  ${srcdir}/include/odp_posix_extensions.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_queue_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_ring_internal.h \
+		  ${top_srcdir}/platform/linux-generic/include/odp_queue_if.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_schedule_if.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_sorted_list_internal.h \
 		  ${srcdir}/include/odp_shm_internal.h \
@@ -188,10 +192,12 @@ __LIB__libodp_dpdk_la_SOURCES = \
 			   ../linux-generic/odp_pkt_queue.c \
 			   odp_pool.c \
 			   ../linux-generic/odp_queue.c \
+			   ../linux-generic/odp_queue_if.c \
 			   ../linux-generic/odp_rwlock.c \
 			   ../linux-generic/odp_rwlock_recursive.c \
 			   ../linux-generic/odp_schedule.c \
 			   ../linux-generic/odp_schedule_if.c \
+			   ../linux-generic/odp_schedule_sp.c \
 			   ../linux-generic/odp_schedule_iquery.c \
 			   odp_shared_memory.c \
 			   ../linux-generic/odp_sorted_list.c \
@@ -208,15 +214,31 @@ __LIB__libodp_dpdk_la_SOURCES = \
 			   ../linux-generic/odp_timer_wheel.c \
 			   ../linux-generic/odp_traffic_mngr.c \
 			   ../linux-generic/odp_version.c \
-			   ../linux-generic/odp_weak.c \
-			   arch/@ARCH_DIR@/odp_cpu_arch.c \
-			   arch/@ARCH_DIR@/odp_sysinfo_parse.c
+			   ../linux-generic/odp_weak.c
+
+if ARCH_IS_ARM
+__LIB__libodp_dpdk_la_SOURCES += arch/arm/odp_cpu_arch.c \
+				  arch/arm/odp_sysinfo_parse.c
+endif
+if ARCH_IS_MIPS64
+__LIB__libodp_dpdk_la_SOURCES += arch/mips64/odp_cpu_arch.c \
+				  arch/mips64/odp_sysinfo_parse.c
+endif
+if ARCH_IS_POWERPC
+__LIB__libodp_dpdk_la_SOURCES += arch/powerpc/odp_cpu_arch.c \
+				  arch/powerpc/odp_sysinfo_parse.c
+endif
+if ARCH_IS_X86
+__LIB__libodp_dpdk_la_SOURCES += arch/x86/cpu_flags.c \
+				  arch/x86/odp_cpu_arch.c \
+				  arch/x86/odp_sysinfo_parse.c
+endif
 
 __LIB__libodp_dpdk_la_LIBADD = $(ATOMIC_LIBS)
-
-if ARCH_IS_X86
-__LIB__libodp_dpdk_la_SOURCES += arch/@ARCH_DIR@/cpu_flags.c
-endif
+__LIB__libodp_dpdk_la_LIBADD += $(OPENSSL_LIBS)
+__LIB__libodp_dpdk_la_LIBADD += $(DPDK_LIBS) $(DPDK_PMDS)
+__LIB__libodp_dpdk_la_LIBADD += $(PTHREAD_LIBS)
+__LIB__libodp_dpdk_la_LIBADD += $(TIMER_LIBS)
 
 # Create symlink for ABI header files. Application does not need to use the arch
 # specific include path for installed files.
