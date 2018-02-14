@@ -63,6 +63,10 @@ if test "x$shared_dpdk" = "xtrue"; then
     DPDK_LIBS="-Wl,--no-as-needed,-ldpdk,-as-needed -ldl -lm -lpcap"
 else
     AS_VAR_SET([DPDK_PMDS], [-Wl,--whole-archive,])
+    if test $(basename "$DPDK_DRIVER_DIR"/librte_pmd_*.a) = 'librte_pmd_*.a'
+    then
+        AC_MSG_FAILURE(["No PMDs found, try with --enable-shared-dpdk"])
+    fi
     for filename in "$DPDK_DRIVER_DIR"/librte_pmd_*.a; do
         cur_driver=`basename "$filename" .a | sed -e 's/^lib//'`
         # rte_pmd_nfp has external dependencies which break linking
