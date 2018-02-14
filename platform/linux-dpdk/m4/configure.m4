@@ -15,7 +15,7 @@ m4_include([platform/linux-dpdk/m4/odp_schedule.m4])
 # Set DPDK install path
 ##########################################################################
 AC_ARG_WITH([dpdk-path],
-AS_HELP_STRING([--with-dpdk-path=DIR   path to dpdk build directory]),
+AS_HELP_STRING([--with-dpdk-path=DIR],[path to dpdk build directory]),
     [DPDK_PATH=$withval
     dpdk_default_dir=no],
     [dpdk_default_dir=yes])
@@ -36,7 +36,7 @@ fi
 
 # Check if we should link against the static or dynamic DPDK library
 AC_ARG_ENABLE([shared-dpdk],
-	[  --enable-shared-dpdk    link against the shared DPDK library],
+AS_HELP_STRING([--enable-shared-dpdk],[link against the shared DPDK library]),
 	[if test "x$enableval" = "xyes"; then
 		shared_dpdk=true
 	fi])
