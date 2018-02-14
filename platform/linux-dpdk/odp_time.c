@@ -10,7 +10,7 @@
 #include <odp/api/time.h>
 #include <odp/api/hints.h>
 #include <odp_debug_internal.h>
-#include <odp_time_internal.h>
+#include <odp_arch_time_internal.h>
 #include <rte_cycles.h>
 #include <string.h>
 #include <inttypes.h>
@@ -274,6 +274,15 @@ odp_time_t odp_time_diff(odp_time_t t2, odp_time_t t1)
 	time.u64 = t2.u64 - t1.u64;
 
 	return time;
+}
+
+uint64_t odp_time_diff_ns(odp_time_t t2, odp_time_t t1)
+{
+	odp_time_t time;
+
+	time.u64 = t2.u64 - t1.u64;
+
+	return global.handler.time_to_ns(time);
 }
 
 uint64_t odp_time_to_ns(odp_time_t time)

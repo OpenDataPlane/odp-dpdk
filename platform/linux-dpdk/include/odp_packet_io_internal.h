@@ -44,23 +44,22 @@ struct pkt_dpdk_t;
 typedef struct {
 	odp_queue_t loopq;		/**< loopback queue for "loop" device */
 	odp_bool_t promisc;		/**< promiscuous mode state */
+	uint8_t idx;			/**< index of "loop" device */
 } pkt_loop_t;
 
 /** Packet socket using dpdk mmaped rings for both Rx and Tx */
 typedef struct {
-	odp_pktio_capability_t	capa;	  /**< interface capabilities */
-
-	/********************************/
-	char ifname[32];
-	uint8_t min_rx_burst;
-	uint8_t portid;
-	odp_bool_t vdev_sysc_promisc;	/**< promiscuous mode defined with
-					    system call */
+	uint16_t port_id;		  /**< DPDK port identifier */
+	uint16_t mtu;			  /**< maximum transmission unit */
+	uint8_t lockless_rx;		  /**< no locking for rx */
+	uint8_t lockless_tx;		  /**< no locking for tx */
+	uint8_t min_rx_burst;		  /**< minimum RX burst size */
 	odp_pktin_hash_proto_t hash;	  /**< Packet input hash protocol */
-	odp_bool_t lockless_rx;		  /**< no locking for rx */
-	odp_bool_t lockless_tx;		  /**< no locking for tx */
+	char ifname[32];
 	odp_ticketlock_t rx_lock[PKTIO_MAX_QUEUES];  /**< RX queue locks */
 	odp_ticketlock_t tx_lock[PKTIO_MAX_QUEUES];  /**< TX queue locks */
+	uint8_t vdev_sysc_promisc;	/**< promiscuous mode defined with
+					    system call */
 } pkt_dpdk_t;
 
 struct pktio_entry {
@@ -68,7 +67,8 @@ struct pktio_entry {
 	/* These two locks together lock the whole pktio device */
 	odp_ticketlock_t rxl;		/**< RX ticketlock */
 	odp_ticketlock_t txl;		/**< TX ticketlock */
-	int cls_enabled;		/**< is classifier enabled */
+	uint8_t cls_enabled;            /**< classifier enabled */
+	uint8_t chksum_insert_ena;      /**< pktout checksum offload enabled */
 	odp_pktio_t handle;		/**< pktio handle */
 	union {
 		pkt_loop_t pkt_loop;	/**< Using loopback for IO */
@@ -99,6 +99,7 @@ struct pktio_entry {
 					   pktio_open() */
 	odp_pool_t pool;
 	odp_pktio_param_t param;
+	odp_pktio_capability_t capa;	/**< Packet IO capabilities */
 
 	/* Storage for queue handles
 	 * Multi-queue support is pktio driver specific */
@@ -150,6 +151,7 @@ typedef struct pktio_if_ops {
 	int (*promisc_mode_set)(pktio_entry_t *pktio_entry,  int enable);
 	int (*promisc_mode_get)(pktio_entry_t *pktio_entry);
 	int (*mac_get)(pktio_entry_t *pktio_entry, void *mac_addr);
+	int (*mac_set)(pktio_entry_t *pktio_entry, const void *mac_addr);
 	int (*link_status)(pktio_entry_t *pktio_entry);
 	int (*capability)(pktio_entry_t *pktio_entry,
 			  odp_pktio_capability_t *capa);

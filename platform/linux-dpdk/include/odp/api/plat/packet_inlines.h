@@ -19,7 +19,9 @@ extern "C" {
 
 #include <odp/api/plat/packet_types.h>
 #include <odp/api/pool.h>
-#include <odp/api/packet_io.h>
+#include <odp/api/time.h>
+#include <odp/api/plat/packet_io_types.h>
+#include <odp/api/plat/buffer_types.h>
 #include <odp/api/hints.h>
 
 /* Required by rte_mbuf.h */
@@ -28,6 +30,41 @@ extern "C" {
 
 /** @internal Inline function offsets */
 extern const _odp_packet_inline_offset_t _odp_packet_inline;
+
+/** @internal Pool inline function offsets */
+extern const _odp_pool_inline_offset_t _odp_pool_inline;
+
+/** @internal Inline function @param pkt @param offset @param len @param seg
+ *  @return */
+static inline void *_odp_packet_offset(odp_packet_t pkt, uint32_t offset,
+				       uint32_t *len, odp_packet_seg_t *seg)
+{
+	struct rte_mbuf *mb = &_odp_pkt_get(pkt, struct rte_mbuf, mb);
+
+	if (odp_unlikely(offset == ODP_PACKET_OFFSET_INVALID))
+		goto err;
+
+	do {
+		if (mb->data_len > offset)
+			break;
+		offset -= mb->data_len;
+		mb = mb->next;
+	} while (mb);
+
+	if (mb) {
+		if (len)
+			*len = mb->data_len - offset;
+		if (seg)
+			*seg = (odp_packet_seg_t)(uintptr_t)mb;
+		return (void *)(rte_pktmbuf_mtod(mb, char *) + offset);
+	}
+err:
+	if (len)
+		*len = 0;
+	if (seg)
+		*seg = NULL;
+	return NULL;
+}
 
 /** @internal Inline function @param pkt @return */
 static inline void *_odp_packet_data(odp_packet_t pkt)
@@ -67,7 +104,9 @@ static inline uint32_t _odp_packet_tailroom(odp_packet_t pkt)
 /** @internal Inline function @param pkt @return */
 static inline odp_pool_t _odp_packet_pool(odp_packet_t pkt)
 {
-	return _odp_pkt_get(pkt, odp_pool_t, pool);
+	void *pool = _odp_pkt_get(pkt, void *, pool);
+
+	return _odp_pool_get(pool, odp_pool_t, pool_hdl);
 }
 
 /** @internal Inline function @param pkt @return */
@@ -79,7 +118,7 @@ static inline odp_pktio_t _odp_packet_input(odp_packet_t pkt)
 /** @internal Inline function @param pkt @return */
 static inline int _odp_packet_num_segs(odp_packet_t pkt)
 {
-	return _odp_pkt_get(pkt, uint8_t, nb_segs);
+	return _odp_pkt_get(pkt, uint16_t, nb_segs);
 }
 
 /** @internal Inline function @param pkt @return */
@@ -97,7 +136,48 @@ static inline void *_odp_packet_user_area(odp_packet_t pkt)
 /** @internal Inline function @param pkt @return */
 static inline uint32_t _odp_packet_user_area_size(odp_packet_t pkt)
 {
-	return _odp_pkt_get(pkt, uint32_t, udata_len);
+	void *pool = _odp_pkt_get(pkt, void *, pool);
+
+	return _odp_pool_get(pool, uint32_t, uarea_size);
+}
+
+/** @internal Inline function @param pkt @return */
+static inline uint32_t _odp_packet_l2_offset(odp_packet_t pkt)
+{
+	return _odp_pkt_get(pkt, uint16_t, l2_offset);
+}
+
+/** @internal Inline function @param pkt @return */
+static inline uint32_t _odp_packet_l3_offset(odp_packet_t pkt)
+{
+	return _odp_pkt_get(pkt, uint16_t, l3_offset);
+}
+
+/** @internal Inline function @param pkt @return */
+static inline uint32_t _odp_packet_l4_offset(odp_packet_t pkt)
+{
+	return _odp_pkt_get(pkt, uint16_t, l4_offset);
+}
+
+/** @internal Inline function @param pkt @param len @return */
+static inline void *_odp_packet_l2_ptr(odp_packet_t pkt, uint32_t *len)
+{
+	return _odp_packet_offset(pkt, _odp_pkt_get(pkt, uint16_t, l2_offset),
+				  len, NULL);
+}
+
+/** @internal Inline function @param pkt @param len @return */
+static inline void *_odp_packet_l3_ptr(odp_packet_t pkt, uint32_t *len)
+{
+	return _odp_packet_offset(pkt, _odp_pkt_get(pkt, uint16_t, l3_offset),
+				  len, NULL);
+}
+
+/** @internal Inline function @param pkt @param len @return */
+static inline void *_odp_packet_l4_ptr(odp_packet_t pkt, uint32_t *len)
+{
+	return _odp_packet_offset(pkt, _odp_pkt_get(pkt, uint16_t, l4_offset),
+				  len, NULL);
 }
 
 /** @internal Inline function @param pkt @return */
@@ -171,6 +251,12 @@ static inline void _odp_packet_prefetch(odp_packet_t pkt, uint32_t offset, uint3
 
 	for (ofs = 0; ofs < len; ofs += RTE_CACHE_LINE_SIZE)
 		rte_prefetch0(addr + ofs);
+}
+
+/** @internal Inline function @param pkt @return */
+static inline odp_buffer_t packet_to_buffer(odp_packet_t pkt)
+{
+	return (odp_buffer_t)pkt;
 }
 
 /* Include inlined versions of API functions */

@@ -97,7 +97,7 @@ static void name_to_mz_name(const char *name, char *mz_name)
 
 	/* Use pid and counter to make name unique */
 	do {
-		snprintf(mz_name, RTE_MEMZONE_NAMESIZE - 1, SHM_BLOCK_NAME,
+		snprintf(mz_name, RTE_MEMZONE_NAMESIZE, SHM_BLOCK_NAME,
 			 (odp_instance_t)odp_global_data.main_pid, i++, name);
 		mz_name[RTE_MEMZONE_NAMESIZE - 1] = 0;
 	} while (mz_name_used(mz_name));
@@ -270,7 +270,7 @@ odp_shm_t odp_shm_reserve(const char *name, uint64_t size, uint64_t align,
 	}
 
 	block->mz = mz;
-	snprintf(block->name, ODP_SHM_NAME_LEN - 1, "%s", name);
+	snprintf(block->name, ODP_SHM_NAME_LEN, "%s", name);
 	block->name[ODP_SHM_NAME_LEN - 1] = 0;
 	block->type = SHM_TYPE_LOCAL;
 	/* Note: ODP_SHM_SW_ONLY/ODP_SHM_PROC/ODP_SHM_SINGLE_VA flags are
@@ -290,7 +290,7 @@ odp_shm_t odp_shm_import(const char *remote_name, odp_instance_t odp_inst,
 	char mz_name[RTE_MEMZONE_NAMESIZE];
 	int idx;
 
-	snprintf(mz_name, RTE_MEMZONE_NAMESIZE - 1, SHM_BLOCK_NAME, odp_inst, 0,
+	snprintf(mz_name, RTE_MEMZONE_NAMESIZE, SHM_BLOCK_NAME, odp_inst, 0,
 		 remote_name);
 	mz_name[RTE_MEMZONE_NAMESIZE - 1] = 0;
 
@@ -316,7 +316,7 @@ odp_shm_t odp_shm_import(const char *remote_name, odp_instance_t odp_inst,
 	block = &shm_tbl->block[idx];
 
 	block->mz = mz;
-	snprintf(block->name, ODP_SHM_NAME_LEN - 1, "%s", local_name);
+	snprintf(block->name, ODP_SHM_NAME_LEN, "%s", local_name);
 	block->name[ODP_SHM_NAME_LEN - 1] = 0;
 	block->type = SHM_TYPE_REMOTE;
 
@@ -432,6 +432,34 @@ void odp_shm_print_all(void)
 		       "%" PRIu64 "\n", block->name, block->mz->addr,
 		       shm_size(block->mz), block->mz->hugepage_sz);
 	}
+
+	odp_spinlock_unlock(&shm_tbl->lock);
+}
+
+void odp_shm_print(odp_shm_t shm)
+{
+	shm_block_t *block;
+	int idx = handle_to_idx(shm);
+
+	odp_spinlock_lock(&shm_tbl->lock);
+
+	if (!handle_is_valid(shm)) {
+		odp_spinlock_unlock(&shm_tbl->lock);
+		return;
+	}
+
+	block = &shm_tbl->block[idx];
+
+	ODP_PRINT("\nSHM block info\n--------------\n");
+	ODP_PRINT(" name:       %s\n",   block->name);
+	ODP_PRINT(" type:       %s\n",   block->type == SHM_TYPE_LOCAL ? "local"
+			: "remote");
+	ODP_PRINT(" flags:      0x%x\n", shm_zone(block->mz)->flags);
+	ODP_PRINT(" start:      %p\n",   block->mz->addr);
+	ODP_PRINT(" len:        %" PRIu64 "\n",  shm_size(block->mz));
+	ODP_PRINT(" page size:  %" PRIu64 "\n", block->mz->hugepage_sz);
+	ODP_PRINT(" NUMA ID:    %" PRIi32 "\n",  block->mz->socket_id);
+	ODP_PRINT("\n");
 
 	odp_spinlock_unlock(&shm_tbl->lock);
 }
