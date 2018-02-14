@@ -14,7 +14,6 @@ m4_include([platform/linux-dpdk/m4/odp_schedule.m4])
 ##########################################################################
 # Set DPDK install path
 ##########################################################################
-dpdk_default_dir=yes
 AC_ARG_WITH([dpdk-path],
 AS_HELP_STRING([--with-dpdk-path=DIR   path to dpdk build directory]),
     [DPDK_PATH=$withval
