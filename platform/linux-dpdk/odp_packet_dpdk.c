@@ -182,7 +182,6 @@ static int setup_pkt_dpdk(odp_pktio_t pktio ODP_UNUSED, pktio_entry_t *pktio_ent
 
 	port_id = atoi(netdev);
 	pkt_dpdk->port_id = port_id;
-	memset(&dev_info, 0, sizeof(struct rte_eth_dev_info));
 	rte_eth_dev_info_get(port_id, &dev_info);
 	if (dev_info.driver_name == NULL) {
 		ODP_DBG("No driver found for interface: %s\n", netdev);
@@ -513,7 +512,7 @@ static int send_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 	uint16_t num_tx = 0;
 
 	for (i = 0; i < len; i++) {
-		struct rte_mbuf *mbuf = (struct rte_mbuf *)pkt_table[i];
+		struct rte_mbuf *mbuf = pkt_to_mbuf(pkt_table[i]);
 
 		if (odp_unlikely(mbuf->pkt_len > mtu))
 			break;
@@ -533,7 +532,7 @@ static int send_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 		odp_ticketlock_unlock(&pkt_dpdk->tx_lock[index]);
 
 	if (pkts == 0) {
-		struct rte_mbuf *mbuf = (struct rte_mbuf *)pkt_table[0];
+		struct rte_mbuf *mbuf = pkt_to_mbuf(pkt_table[0]);
 
 		if (odp_unlikely(rte_errno != 0))
 			return -1;
@@ -549,7 +548,7 @@ static int send_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 
 static uint32_t _dpdk_vdev_mtu(uint16_t port_id)
 {
-	struct rte_eth_dev_info dev_info = {0};
+	struct rte_eth_dev_info dev_info;
 	struct ifreq ifr;
 	int ret;
 	int sockfd;
@@ -593,7 +592,7 @@ static uint32_t dpdk_frame_maxlen(pktio_entry_t *pktio_entry)
 
 static int _dpdk_vdev_promisc_mode_set(uint16_t port_id, int enable)
 {
-	struct rte_eth_dev_info dev_info = {0};
+	struct rte_eth_dev_info dev_info;
 	struct ifreq ifr;
 	int ret;
 	int sockfd;
@@ -653,7 +652,7 @@ static int promisc_mode_set_pkt_dpdk(pktio_entry_t *pktio_entry,  int enable)
 
 static int _dpdk_vdev_promisc_mode(uint16_t port_id)
 {
-	struct rte_eth_dev_info dev_info = {0};
+	struct rte_eth_dev_info dev_info;
 	struct ifreq ifr;
 	int ret;
 	int sockfd;
