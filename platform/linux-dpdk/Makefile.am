@@ -6,6 +6,7 @@ AM_CFLAGS +=  $(DPDK_CFLAGS)
 AM_CPPFLAGS  =  $(ODP_INCLUDES)
 AM_CPPFLAGS +=  -I$(top_srcdir)/platform/linux-generic/include
 AM_CPPFLAGS +=  -I$(top_srcdir)/platform/$(with_platform)/arch
+AM_CPPFLAGS +=  -I$(top_srcdir)/platform/$(with_platform)/arch/@ARCH_DIR@
 AM_CPPFLAGS +=  -I$(top_srcdir)/platform/$(with_platform)/arch/default
 
 AM_CPPFLAGS +=  $(OPENSSL_CPPFLAGS)
@@ -73,49 +74,59 @@ odpapiinclude_HEADERS = \
 odpapiplatincludedir= $(includedir)/odp/api/plat
 odpapiplatinclude_HEADERS = \
 		  include/odp/api/plat/atomic_inlines.h \
-		  include/odp/api/plat/atomic_types.h \
-		  include/odp/api/plat/barrier_types.h \
-		  include/odp/api/plat/buffer_types.h \
 		  include/odp/api/plat/byteorder_inlines.h \
-		  include/odp/api/plat/byteorder_types.h \
-		  include/odp/api/plat/classification_types.h \
-		  include/odp/api/plat/cpumask_types.h \
-		  include/odp/api/plat/crypto_types.h \
-		  include/odp/api/plat/event_types.h \
-		  include/odp/api/plat/init_types.h \
-		  include/odp/api/plat/ipsec_types.h \
 		  include/odp/api/plat/packet_flag_inlines.h \
 		  include/odp/api/plat/packet_flag_inlines_api.h \
+		  include/odp/api/plat/packet_inline_types.h \
 		  include/odp/api/plat/packet_inlines.h \
 		  include/odp/api/plat/packet_inlines_api.h \
-		  include/odp/api/plat/packet_io_types.h \
-		  include/odp/api/plat/packet_types.h \
-		  include/odp/api/plat/pool_types.h \
-		  include/odp/api/plat/queue_types.h \
-		  include/odp/api/plat/rwlock_types.h \
-		  include/odp/api/plat/rwlock_recursive_types.h \
-		  include/odp/api/plat/schedule_types.h \
-		  include/odp/api/plat/shared_memory_types.h \
-		  include/odp/api/plat/spinlock_types.h \
-		  include/odp/api/plat/spinlock_recursive_types.h \
+		  include/odp/api/plat/pool_inline_types.h \
 		  include/odp/api/plat/std_clib_inlines.h \
 		  include/odp/api/plat/strong_types.h \
 		  include/odp/api/plat/sync_inlines.h \
-		  include/odp/api/plat/thread_types.h \
-		  include/odp/api/plat/thrmask_types.h \
 		  include/odp/api/plat/ticketlock_inlines.h \
-		  include/odp/api/plat/ticketlock_inlines_api.h \
-		  include/odp/api/plat/ticketlock_types.h \
-		  include/odp/api/plat/time_types.h \
-		  include/odp/api/plat/timer_types.h \
-		  include/odp/api/plat/traffic_mngr_types.h \
-		  include/odp/api/plat/version_types.h
+		  include/odp/api/plat/ticketlock_inlines_api.h
 
 nodist_odpapiplatinclude_HEADERS = \
 		  include/odp/api/plat/static_inline.h
 
 if !ODP_ABI_COMPAT
 odpapiabiarchincludedir = $(archincludedir)/odp/api/abi
+odpapiabiarchinclude_HEADERS = \
+		  include-abi/odp/api/abi/align.h \
+		  include-abi/odp/api/abi/atomic.h \
+		  include-abi/odp/api/abi/barrier.h \
+		  include-abi/odp/api/abi/buffer.h \
+		  include-abi/odp/api/abi/byteorder.h \
+		  include-abi/odp/api/abi/classification.h \
+		  include-abi/odp/api/abi/cpumask.h \
+		  include-abi/odp/api/abi/crypto.h \
+		  include-abi/odp/api/abi/debug.h \
+		  include-abi/odp/api/abi/event.h \
+		  include-abi/odp/api/abi/init.h \
+		  include-abi/odp/api/abi/ipsec.h \
+		  include-abi/odp/api/abi/packet.h \
+		  include-abi/odp/api/abi/packet_flags.h \
+		  include-abi/odp/api/abi/packet_io.h \
+		  include-abi/odp/api/abi/pool.h \
+		  include-abi/odp/api/abi/queue.h \
+		  include-abi/odp/api/abi/rwlock.h \
+		  include-abi/odp/api/abi/rwlock_recursive.h \
+		  include-abi/odp/api/abi/schedule.h \
+		  include-abi/odp/api/abi/schedule_types.h \
+		  include-abi/odp/api/abi/shared_memory.h \
+		  include-abi/odp/api/abi/spinlock.h \
+		  include-abi/odp/api/abi/spinlock_recursive.h \
+		  include-abi/odp/api/abi/std_clib.h \
+		  include-abi/odp/api/abi/std_types.h \
+		  include-abi/odp/api/abi/sync.h \
+		  include-abi/odp/api/abi/thread.h \
+		  include-abi/odp/api/abi/thrmask.h \
+		  include-abi/odp/api/abi/ticketlock.h \
+		  include-abi/odp/api/abi/time.h \
+		  include-abi/odp/api/abi/timer.h \
+		  include-abi/odp/api/abi/traffic_mngr.h \
+		  include-abi/odp/api/abi/version.h
 endif
 
 noinst_HEADERS = \
@@ -222,7 +233,9 @@ if ARCH_IS_ARM
 __LIB__libodp_dpdk_la_SOURCES += arch/default/odp_cpu_cycles.c \
 				 arch/default/odp_global_time.c \
 				 arch/default/odp_sysinfo_parse.c
-arch_odp_headers = arch/arm/odp/api/cpu_arch.h
+if !ODP_ABI_COMPAT
+odpapiabiarchinclude_HEADERS += arch/arm/odp/api/abi/cpu.h
+endif
 noinst_HEADERS += arch/arm/odp_atomic.h \
 		  arch/arm/odp_cpu.h \
 		  arch/arm/odp_cpu_idling.h \
@@ -233,7 +246,9 @@ if ARCH_IS_AARCH64
 __LIB__libodp_dpdk_la_SOURCES += arch/default/odp_cpu_cycles.c \
 				 arch/aarch64/odp_global_time.c \
 				 arch/default/odp_sysinfo_parse.c
-arch_odp_headers = arch/aarch64/odp/api/cpu_arch.h
+if !ODP_ABI_COMPAT
+odpapiabiarchinclude_HEADERS += arch/aarch64/odp/api/abi/cpu.h
+endif
 noinst_HEADERS += arch/aarch64/odp_atomic.h \
 		  arch/aarch64/odp_cpu.h \
 		  arch/aarch64/odp_cpu_idling.h \
@@ -244,7 +259,9 @@ if ARCH_IS_MIPS64
 __LIB__libodp_dpdk_la_SOURCES += arch/mips64/odp_cpu_cycles.c \
 				 arch/default/odp_global_time.c \
 				 arch/mips64/odp_sysinfo_parse.c
-arch_odp_headers = arch/mips64/odp/api/cpu_arch.h
+if !ODP_ABI_COMPAT
+odpapiabiarchinclude_HEADERS += arch/mips64/odp/api/abi/cpu.h
+endif
 noinst_HEADERS += arch/default/odp_cpu.h \
 		  arch/default/odp_cpu_idling.h
 endif
@@ -252,7 +269,9 @@ if ARCH_IS_POWERPC
 __LIB__libodp_dpdk_la_SOURCES += arch/default/odp_cpu_cycles.c \
 				 arch/default/odp_global_time.c \
 				 arch/powerpc/odp_sysinfo_parse.c
-arch_odp_headers = arch/powerpc/odp/api/cpu_arch.h
+if !ODP_ABI_COMPAT
+odpapiabiarchinclude_HEADERS += arch/powerpc/odp/api/abi/cpu.h
+endif
 noinst_HEADERS += arch/default/odp_cpu.h \
 		  arch/default/odp_cpu_idling.h
 endif
@@ -261,16 +280,13 @@ __LIB__libodp_dpdk_la_SOURCES += arch/x86/cpu_flags.c \
 				 arch/x86/odp_cpu_cycles.c \
 				 arch/x86/odp_global_time.c \
 				 arch/x86/odp_sysinfo_parse.c
-arch_odp_headers = arch/x86/odp/api/cpu_arch.h
+if !ODP_ABI_COMPAT
+odpapiabiarchinclude_HEADERS += arch/x86/odp/api/abi/cpu.h
+endif
 noinst_HEADERS += arch/x86/cpu_flags.h
 noinst_HEADERS += arch/default/odp_cpu.h \
 		  arch/default/odp_cpu_idling.h
 endif
-
-noinst_HEADERS += arch/default/odp/api/cpu_arch.h
-
-odpapiarchincludedir = $(archincludedir)/odp/api
-odpapiarchinclude_HEADERS = $(arch_odp_headers)
 
 __LIB__libodp_dpdk_la_LIBADD = $(ATOMIC_LIBS)
 __LIB__libodp_dpdk_la_LIBADD += $(OPENSSL_LIBS)

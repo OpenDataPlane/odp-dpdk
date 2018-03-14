@@ -27,6 +27,8 @@
 #include <math.h>
 #include <inttypes.h>
 
+#include <odp/api/plat/pool_inline_types.h>
+
 /* for DPDK */
 #include <odp_packet_dpdk.h>
 
