@@ -19,8 +19,6 @@ AC_ARG_WITH([dpdk-path],
     [DPDK_PATH="$withval"],
     [DPDK_PATH=system])
 
-
-AS_CASE($host_cpu, [x86_64], [DPDK_CPPFLAGS="-msse4.2"])
 AS_IF([test "x$DPDK_PATH" = "xsystem"],
       [DPDK_CPPFLAGS="$DPDK_CPPFLAGS -isystem/usr/include/dpdk"
        DPDK_LDFLAGS=""
@@ -38,11 +36,8 @@ AS_IF([test "x$DPDK_PATH" = "xsystem"],
 # DPDK pmd drivers are not linked unless the --whole-archive option is
 # used. No spaces are allowed between the --whole-arhive flags.
 ##########################################################################
-
-ODP_DPDK_CHECK([$DPDK_CPPFLAGS], [$DPDK_LDFLAGS], [],
-               [AC_MSG_FAILURE([can't find DPDK])])
-
-ODP_DPDK_PMDS([$DPDK_PMD_PATH])
+ODP_DPDK([$DPDK_PATH], [],
+	 [AC_MSG_FAILURE([can't find DPDK])])
 
 AC_DEFINE([ODP_PKTIO_DPDK], [1],
 	  [Define to 1 to enable DPDK packet I/O support])
