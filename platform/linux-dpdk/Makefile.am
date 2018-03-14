@@ -16,6 +16,10 @@ AM_CPPFLAGS +=  -I$(top_srcdir)/platform/$(with_platform)/arch/default
 AM_CPPFLAGS +=  $(OPENSSL_CPPFLAGS)
 AM_CPPFLAGS +=  $(DPDK_CPPFLAGS)
 
+if ARCH_IS_X86
+AM_CFLAGS += -msse4.2
+endif
+
 odpincludedir= $(includedir)/odp
 odpinclude_HEADERS = \
 		  include/odp/visibility_begin.h \
@@ -270,6 +274,6 @@ odpapiinclude_HEADERS += $(arch_odp_headers)
 
 __LIB__libodp_dpdk_la_LIBADD = $(ATOMIC_LIBS)
 __LIB__libodp_dpdk_la_LIBADD += $(OPENSSL_LIBS)
-__LIB__libodp_dpdk_la_LIBADD += $(DPDK_LIBS) $(DPDK_PMDS)
+__LIB__libodp_dpdk_la_LIBADD += $(DPDK_LIBS_LT)
 __LIB__libodp_dpdk_la_LIBADD += $(PTHREAD_LIBS)
 __LIB__libodp_dpdk_la_LIBADD += $(TIMER_LIBS)
