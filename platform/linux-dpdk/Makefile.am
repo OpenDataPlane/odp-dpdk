@@ -179,6 +179,8 @@ if ODP_ABI_COMPAT
 __LIB__libodp_dpdk_la_SOURCES += \
 			   ../linux-generic/odp_atomic_api.c \
 			   ../linux-generic/odp_byteorder.c \
+			   ../linux-generic/odp_packet_api.c \
+			   ../linux-generic/odp_packet_flags_api.c \
 			   odp_std_clib.c \
 			   ../linux-generic/odp_sync.c \
 			   ../linux-generic/odp_ticketlock.c
