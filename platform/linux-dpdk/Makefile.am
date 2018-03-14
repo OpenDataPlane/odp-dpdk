@@ -131,7 +131,6 @@ __LIB__libodp_dpdk_la_SOURCES = \
 			   ../linux-generic/odp_barrier.c \
 			   ../linux-generic/odp_bitmap.c \
 			   odp_buffer.c \
-			   ../linux-generic/odp_byteorder.c \
 			   ../linux-generic/odp_chksum.c \
 			   ../linux-generic/odp_classification.c \
 			   ../linux-generic/odp_cpu.c \
@@ -166,18 +165,24 @@ __LIB__libodp_dpdk_la_SOURCES = \
 			   ../linux-generic/odp_sorted_list.c \
 			   ../linux-generic/odp_spinlock.c \
 			   ../linux-generic/odp_spinlock_recursive.c \
-			   odp_std_clib.c \
-			   ../linux-generic/odp_sync.c \
 			   ../linux-generic/odp_system_info.c \
 			   odp_thread.c \
 			   ../linux-generic/odp_thrmask.c \
-			   ../linux-generic/odp_ticketlock.c \
 			   odp_time.c \
 			   ../linux-generic/odp_timer.c \
 			   ../linux-generic/odp_timer_wheel.c \
 			   ../linux-generic/odp_traffic_mngr.c \
 			   ../linux-generic/odp_version.c \
 			   ../linux-generic/odp_weak.c
+
+if ODP_ABI_COMPAT
+__LIB__libodp_dpdk_la_SOURCES += \
+			   ../linux-generic/odp_atomic_api.c \
+			   ../linux-generic/odp_byteorder.c \
+			   odp_std_clib.c \
+			   ../linux-generic/odp_sync.c \
+			   ../linux-generic/odp_ticketlock.c
+endif
 
 if ARCH_IS_ARM
 __LIB__libodp_dpdk_la_SOURCES += arch/default/odp_cpu_cycles.c \
