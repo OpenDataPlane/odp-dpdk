@@ -11,14 +11,12 @@
 extern "C" {
 #endif
 
-#include <odp/api/spec/std_types.h>
 #include <string.h>
-
-extern void* (*const dpdk_memcpy)(void*, const void*, size_t);
+#include <rte_memcpy.h>
 
 _ODP_INLINE void *odp_memcpy(void *dst, const void *src, size_t num)
 {
-	return (*dpdk_memcpy)(dst, src, num);
+	return rte_memcpy(dst, src, num);
 }
 
 _ODP_INLINE void *odp_memset(void *ptr, int value, size_t num)
