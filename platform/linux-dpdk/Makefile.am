@@ -114,6 +114,10 @@ odpapiplatinclude_HEADERS = \
 nodist_odpapiplatinclude_HEADERS = \
 		  include/odp/api/plat/static_inline.h
 
+if !ODP_ABI_COMPAT
+odpapiabiarchincludedir= $(includedir)/odp/api/abi
+endif
+
 noinst_HEADERS = \
 		  arch/odp_arch_time_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_align_internal.h \
