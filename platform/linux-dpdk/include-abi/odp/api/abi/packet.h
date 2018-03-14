@@ -18,13 +18,6 @@
 extern "C" {
 #endif
 
-#include <stddef.h>
-
-#include <odp/api/plat/static_inline.h>
-#if ODP_ABI_COMPAT == 1
-#include <odp/api/abi/packet.h>
-#else
-
 #include <odp/api/std_types.h>
 #include <odp/api/plat/strong_types.h>
 
@@ -51,11 +44,13 @@ typedef enum {
 
 #define ODP_NUM_PACKET_COLORS 3
 
+#define _ODP_INLINE static inline
+#include <odp/api/plat/packet_inlines.h>
+#include <odp/api/plat/packet_inlines_api.h>
+
 /**
  * @}
  */
-
-#endif
 
 #ifdef __cplusplus
 }
