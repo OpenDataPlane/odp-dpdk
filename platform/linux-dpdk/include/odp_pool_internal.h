@@ -48,9 +48,9 @@ extern "C" {
 
 typedef struct ODP_ALIGNED_CACHE {
 #ifdef POOL_USE_TICKETLOCK
-	odp_ticketlock_t	lock ODP_ALIGNED_CACHE;
+	odp_ticketlock_t ODP_ALIGNED_CACHE lock;
 #else
-	odp_spinlock_t		lock ODP_ALIGNED_CACHE;
+	odp_spinlock_t ODP_ALIGNED_CACHE lock ;
 #endif
 	char			name[ODP_POOL_NAME_LEN];
 	odp_pool_param_t	params;
