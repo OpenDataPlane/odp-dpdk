@@ -49,6 +49,7 @@
 const pktio_if_ops_t * const pktio_if_ops[]  = {
 	&loopback_pktio_ops,
 	&dpdk_pktio_ops,
+	&null_pktio_ops,
 	NULL
 };
 
