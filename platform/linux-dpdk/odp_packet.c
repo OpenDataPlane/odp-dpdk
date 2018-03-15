@@ -27,7 +27,7 @@
 
 /* Fill in packet header field offsets for inline functions */
 
-const _odp_packet_inline_offset_t _odp_packet_inline ODP_ALIGNED_CACHE = {
+const _odp_packet_inline_offset_t ODP_ALIGNED_CACHE _odp_packet_inline = {
 	.mb               = offsetof(odp_packet_hdr_t, buf_hdr.mb),
 	.pool             = offsetof(odp_packet_hdr_t, buf_hdr.pool_ptr),
 	.input            = offsetof(odp_packet_hdr_t, input),
