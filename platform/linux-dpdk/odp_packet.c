@@ -66,15 +66,14 @@ ODP_STATIC_ASSERT(sizeof(dummy.hash.rss) == sizeof(uint32_t),
 ODP_STATIC_ASSERT(sizeof(dummy.ol_flags) == sizeof(uint64_t),
 		  "ol_flags should be uint64_t");
 
-static inline odp_buffer_t buffer_handle(odp_packet_hdr_t *pkt_hdr)
-{
-	return (odp_buffer_t)pkt_hdr;
-}
-
-static inline odp_packet_hdr_t *buf_to_packet_hdr(odp_buffer_t buf)
-{
-	return (odp_packet_hdr_t *)buf_hdl_to_hdr(buf);
-}
+/* Check that invalid values are the same. Some versions of Clang have trouble
+ * with the strong type casting, and complain that these invalid values are not
+ * integral constants. */
+#ifndef __clang__
+ODP_STATIC_ASSERT(ODP_PACKET_INVALID == 0, "Packet invalid not 0");
+ODP_STATIC_ASSERT(ODP_BUFFER_INVALID == 0, "Buffer invalid not 0");
+ODP_STATIC_ASSERT(ODP_EVENT_INVALID  == 0, "Event invalid not 0");
+#endif
 
 odp_packet_t _odp_packet_from_buf_hdr(odp_buffer_hdr_t *buf_hdr)
 {
@@ -233,40 +232,6 @@ int odp_packet_reset(odp_packet_t pkt, uint32_t len)
 
 	mb->nb_segs = nb_segs;
 	return 0;
-}
-
-odp_packet_t odp_packet_from_event(odp_event_t ev)
-{
-	if (odp_unlikely(ev == ODP_EVENT_INVALID))
-		return ODP_PACKET_INVALID;
-
-	return (odp_packet_t)buf_to_packet_hdr((odp_buffer_t)ev);
-}
-
-odp_event_t odp_packet_to_event(odp_packet_t pkt)
-{
-	if (odp_unlikely(pkt == ODP_PACKET_INVALID))
-		return ODP_EVENT_INVALID;
-
-	return (odp_event_t)buffer_handle(packet_hdr(pkt));
-}
-
-void odp_packet_from_event_multi(odp_packet_t pkt[], const odp_event_t ev[],
-				 int num)
-{
-	int i;
-
-	for (i = 0; i < num; i++)
-		pkt[i] = odp_packet_from_event(ev[i]);
-}
-
-void odp_packet_to_event_multi(const odp_packet_t pkt[], odp_event_t ev[],
-			       int num)
-{
-	int i;
-
-	for (i = 0; i < num; i++)
-		ev[i] = odp_packet_to_event(pkt[i]);
 }
 
 int odp_event_filter_packet(const odp_event_t event[],
