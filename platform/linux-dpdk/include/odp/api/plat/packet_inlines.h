@@ -275,6 +275,41 @@ static inline int _odp_packet_copy_from_mem(odp_packet_t pkt, uint32_t offset,
 	return 0;
 }
 
+static inline odp_packet_t _odp_packet_from_event(odp_event_t ev)
+{
+	if (odp_unlikely(ev == ODP_EVENT_INVALID))
+		return ODP_PACKET_INVALID;
+
+	return (odp_packet_t)ev;
+}
+
+static inline odp_event_t _odp_packet_to_event(odp_packet_t pkt)
+{
+	if (odp_unlikely(pkt == ODP_PACKET_INVALID))
+		return ODP_EVENT_INVALID;
+
+	return (odp_event_t)pkt;
+}
+
+static inline void _odp_packet_from_event_multi(odp_packet_t pkt[],
+						const odp_event_t ev[],
+						int num)
+{
+	int i;
+
+	for (i = 0; i < num; i++)
+		pkt[i] = _odp_packet_from_event(ev[i]);
+}
+
+static inline void _odp_packet_to_event_multi(const odp_packet_t pkt[],
+					      odp_event_t ev[], int num)
+{
+	int i;
+
+	for (i = 0; i < num; i++)
+		ev[i] = _odp_packet_to_event(pkt[i]);
+}
+
 #ifdef __cplusplus
 }
 #endif

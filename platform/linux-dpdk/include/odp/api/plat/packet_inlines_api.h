@@ -163,4 +163,26 @@ _ODP_INLINE int odp_packet_copy_to_mem(odp_packet_t pkt, uint32_t offset,
 	return _odp_packet_copy_to_mem(pkt, offset, len, dst);
 }
 
+_ODP_INLINE odp_packet_t odp_packet_from_event(odp_event_t ev)
+{
+	return _odp_packet_from_event(ev);
+}
+
+_ODP_INLINE odp_event_t odp_packet_to_event(odp_packet_t pkt)
+{
+	return _odp_packet_to_event(pkt);
+}
+
+_ODP_INLINE void odp_packet_from_event_multi(odp_packet_t pkt[],
+					     const odp_event_t ev[], int num)
+{
+	return _odp_packet_from_event_multi(pkt, ev, num);
+}
+
+_ODP_INLINE void odp_packet_to_event_multi(const odp_packet_t pkt[],
+					   odp_event_t ev[], int num)
+{
+	return _odp_packet_to_event_multi(pkt, ev, num);
+}
+
 #endif
