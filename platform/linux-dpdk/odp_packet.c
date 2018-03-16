@@ -81,6 +81,11 @@ odp_packet_t _odp_packet_from_buf_hdr(odp_buffer_hdr_t *buf_hdr)
 	return (odp_packet_t)buf_hdr;
 }
 
+static inline odp_buffer_t packet_to_buffer(odp_packet_t pkt)
+{
+	return (odp_buffer_t)pkt;
+}
+
 void packet_parse_reset(odp_packet_hdr_t *pkt_hdr)
 {
 	/* Reset parser metadata before new parse */
@@ -180,7 +185,7 @@ void odp_packet_free_sp(const odp_packet_t pkt[], int num)
 
 int odp_packet_reset(odp_packet_t pkt, uint32_t len)
 {
-	odp_packet_hdr_t *const pkt_hdr = odp_packet_hdr(pkt);
+	odp_packet_hdr_t *const pkt_hdr = packet_hdr(pkt);
 	struct rte_mbuf *ms, *mb = &pkt_hdr->buf_hdr.mb;
 	uint8_t nb_segs = 0;
 	int32_t lenleft = len;
@@ -243,7 +248,7 @@ odp_event_t odp_packet_to_event(odp_packet_t pkt)
 	if (odp_unlikely(pkt == ODP_PACKET_INVALID))
 		return ODP_EVENT_INVALID;
 
-	return (odp_event_t)buffer_handle(odp_packet_hdr(pkt));
+	return (odp_event_t)buffer_handle(packet_hdr(pkt));
 }
 
 void odp_packet_from_event_multi(odp_packet_t pkt[], const odp_event_t ev[],
@@ -287,19 +292,19 @@ int odp_event_filter_packet(const odp_event_t event[],
 
 uint32_t odp_packet_buf_len(odp_packet_t pkt)
 {
-	return odp_packet_hdr(pkt)->buf_hdr.totsize;
+	return packet_hdr(pkt)->buf_hdr.totsize;
 }
 
 void *odp_packet_tail(odp_packet_t pkt)
 {
-	struct rte_mbuf *mb = &(odp_packet_hdr(pkt)->buf_hdr.mb);
+	struct rte_mbuf *mb = &(packet_hdr(pkt)->buf_hdr.mb);
 	mb = rte_pktmbuf_lastseg(mb);
 	return (void *)(rte_pktmbuf_mtod(mb, char *) + mb->data_len);
 }
 
 void *odp_packet_push_head(odp_packet_t pkt, uint32_t len)
 {
-	struct rte_mbuf *mb = &(odp_packet_hdr(pkt)->buf_hdr.mb);
+	struct rte_mbuf *mb = &(packet_hdr(pkt)->buf_hdr.mb);
 	return (void *)rte_pktmbuf_prepend(mb, len);
 }
 
@@ -307,7 +312,7 @@ static void _copy_head_metadata(struct rte_mbuf *newhead,
 				struct rte_mbuf *oldhead)
 {
 	odp_packet_t pkt = (odp_packet_t)newhead;
-	uint32_t saved_index = odp_packet_hdr(pkt)->buf_hdr.index;
+	uint32_t saved_index = packet_hdr(pkt)->buf_hdr.index;
 
 	rte_mbuf_refcnt_set(newhead, rte_mbuf_refcnt_read(oldhead));
 	newhead->port = oldhead->port;
@@ -321,13 +326,13 @@ static void _copy_head_metadata(struct rte_mbuf *newhead,
 	memcpy(&newhead->tx_offload, &oldhead->tx_offload,
 	       sizeof(odp_packet_hdr_t) -
 	       offsetof(struct rte_mbuf, tx_offload));
-	odp_packet_hdr(pkt)->buf_hdr.index = saved_index;
+	packet_hdr(pkt)->buf_hdr.index = saved_index;
 }
 
 int odp_packet_extend_head(odp_packet_t *pkt, uint32_t len, void **data_ptr,
 			   uint32_t *seg_len)
 {
-	struct rte_mbuf *mb = &(odp_packet_hdr(*pkt)->buf_hdr.mb);
+	struct rte_mbuf *mb = &(packet_hdr(*pkt)->buf_hdr.mb);
 	int addheadsize = len - rte_pktmbuf_headroom(mb);
 
 	if (addheadsize > 0) {
@@ -368,7 +373,7 @@ int odp_packet_extend_head(odp_packet_t *pkt, uint32_t len, void **data_ptr,
 		_copy_head_metadata(newhead, mb);
 		mb = newhead;
 		*pkt = (odp_packet_t)newhead;
-		odp_packet_hdr(*pkt)->buf_hdr.totsize += totsize_change;
+		packet_hdr(*pkt)->buf_hdr.totsize += totsize_change;
 	} else {
 		rte_pktmbuf_prepend(mb, len);
 	}
@@ -383,14 +388,14 @@ int odp_packet_extend_head(odp_packet_t *pkt, uint32_t len, void **data_ptr,
 
 void *odp_packet_pull_head(odp_packet_t pkt, uint32_t len)
 {
-	struct rte_mbuf *mb = &(odp_packet_hdr(pkt)->buf_hdr.mb);
+	struct rte_mbuf *mb = &(packet_hdr(pkt)->buf_hdr.mb);
 	return (void *)rte_pktmbuf_adj(mb, len);
 }
 
 int odp_packet_trunc_head(odp_packet_t *pkt, uint32_t len, void **data_ptr,
 			  uint32_t *seg_len)
 {
-	struct rte_mbuf *mb = &(odp_packet_hdr(*pkt)->buf_hdr.mb);
+	struct rte_mbuf *mb = &(packet_hdr(*pkt)->buf_hdr.mb);
 
 	if (odp_packet_len(*pkt) < len)
 		return -1;
@@ -417,7 +422,7 @@ int odp_packet_trunc_head(odp_packet_t *pkt, uint32_t len, void **data_ptr,
 		prev->next = NULL;
 		rte_pktmbuf_free(mb);
 		*pkt = (odp_packet_t)newhead;
-		odp_packet_hdr(*pkt)->buf_hdr.totsize -= totsize_change;
+		packet_hdr(*pkt)->buf_hdr.totsize -= totsize_change;
 	} else {
 		rte_pktmbuf_adj(mb, len);
 	}
@@ -432,7 +437,7 @@ int odp_packet_trunc_head(odp_packet_t *pkt, uint32_t len, void **data_ptr,
 
 void *odp_packet_push_tail(odp_packet_t pkt, uint32_t len)
 {
-	struct rte_mbuf *mb = &(odp_packet_hdr(pkt)->buf_hdr.mb);
+	struct rte_mbuf *mb = &(packet_hdr(pkt)->buf_hdr.mb);
 
 	return (void *)rte_pktmbuf_append(mb, len);
 }
@@ -440,7 +445,7 @@ void *odp_packet_push_tail(odp_packet_t pkt, uint32_t len)
 int odp_packet_extend_tail(odp_packet_t *pkt, uint32_t len, void **data_ptr,
 			   uint32_t *seg_len)
 {
-	struct rte_mbuf *mb = &(odp_packet_hdr(*pkt)->buf_hdr.mb);
+	struct rte_mbuf *mb = &(packet_hdr(*pkt)->buf_hdr.mb);
 	int newtailsize = len - odp_packet_tailroom(*pkt);
 	uint32_t old_pkt_len = odp_packet_len(*pkt);
 
@@ -485,7 +490,7 @@ int odp_packet_extend_tail(odp_packet_t *pkt, uint32_t len, void **data_ptr,
 		/* Expand the original tail */
 		m_last->data_len = m_last->buf_len - m_last->data_off;
 		mb->pkt_len += len - newtailsize;
-		odp_packet_hdr(*pkt)->buf_hdr.totsize +=
+		packet_hdr(*pkt)->buf_hdr.totsize +=
 				newtail->nb_segs * newtail->buf_len;
 	} else {
 		rte_pktmbuf_append(mb, len);
@@ -499,7 +504,7 @@ int odp_packet_extend_tail(odp_packet_t *pkt, uint32_t len, void **data_ptr,
 
 void *odp_packet_pull_tail(odp_packet_t pkt, uint32_t len)
 {
-	struct rte_mbuf *mb = &(odp_packet_hdr(pkt)->buf_hdr.mb);
+	struct rte_mbuf *mb = &(packet_hdr(pkt)->buf_hdr.mb);
 
 	if (rte_pktmbuf_trim(mb, len))
 		return NULL;
@@ -510,7 +515,7 @@ void *odp_packet_pull_tail(odp_packet_t pkt, uint32_t len)
 int odp_packet_trunc_tail(odp_packet_t *pkt, uint32_t len, void **tail_ptr,
 			  uint32_t *tailroom)
 {
-	struct rte_mbuf *mb = &(odp_packet_hdr(*pkt)->buf_hdr.mb);
+	struct rte_mbuf *mb = &(packet_hdr(*pkt)->buf_hdr.mb);
 
 	if (odp_packet_len(*pkt) < len)
 		return -1;
@@ -560,17 +565,17 @@ int odp_packet_trunc_tail(odp_packet_t *pkt, uint32_t len, void **tail_ptr,
 
 int odp_packet_input_index(odp_packet_t pkt)
 {
-	return odp_pktio_index(odp_packet_hdr(pkt)->input);
+	return odp_pktio_index(packet_hdr(pkt)->input);
 }
 
 void odp_packet_user_ptr_set(odp_packet_t pkt, const void *ctx)
 {
-	odp_packet_hdr(pkt)->buf_hdr.buf_cctx = ctx;
+	packet_hdr(pkt)->buf_hdr.buf_cctx = ctx;
 }
 
 int odp_packet_l2_offset_set(odp_packet_t pkt, uint32_t offset)
 {
-	odp_packet_hdr_t *pkt_hdr = odp_packet_hdr(pkt);
+	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
 
 	if (odp_unlikely(offset >= (odp_packet_len(pkt) - 1)))
 		return -1;
@@ -582,7 +587,7 @@ int odp_packet_l2_offset_set(odp_packet_t pkt, uint32_t offset)
 
 int odp_packet_l3_offset_set(odp_packet_t pkt, uint32_t offset)
 {
-	odp_packet_hdr_t *pkt_hdr = odp_packet_hdr(pkt);
+	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
 
 	if (odp_unlikely(offset >= (odp_packet_len(pkt) - 1)))
 		return -1;
@@ -593,7 +598,7 @@ int odp_packet_l3_offset_set(odp_packet_t pkt, uint32_t offset)
 
 int odp_packet_l4_offset_set(odp_packet_t pkt, uint32_t offset)
 {
-	odp_packet_hdr_t *pkt_hdr = odp_packet_hdr(pkt);
+	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
 
 	if (odp_unlikely(offset >= (odp_packet_len(pkt) - 1)))
 		return -1;
@@ -612,7 +617,7 @@ uint16_t odp_packet_ones_comp(odp_packet_t pkt, odp_packet_data_range_t *range)
 
 void odp_packet_l3_chksum_insert(odp_packet_t pkt, int insert)
 {
-	odp_packet_hdr_t *pkt_hdr = odp_packet_hdr(pkt);
+	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
 
 	pkt_hdr->p.output_flags.l3_chksum_set = 1;
 	pkt_hdr->p.output_flags.l3_chksum = insert;
@@ -620,7 +625,7 @@ void odp_packet_l3_chksum_insert(odp_packet_t pkt, int insert)
 
 void odp_packet_l4_chksum_insert(odp_packet_t pkt, int insert)
 {
-	odp_packet_hdr_t *pkt_hdr = odp_packet_hdr(pkt);
+	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
 
 	pkt_hdr->p.output_flags.l4_chksum_set = 1;
 	pkt_hdr->p.output_flags.l4_chksum = insert;
@@ -628,7 +633,7 @@ void odp_packet_l4_chksum_insert(odp_packet_t pkt, int insert)
 
 odp_packet_chksum_status_t odp_packet_l3_chksum_status(odp_packet_t pkt)
 {
-	odp_packet_hdr_t *pkt_hdr = odp_packet_hdr(pkt);
+	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
 
 	if (!pkt_hdr->p.input_flags.l3_chksum_done)
 		return ODP_PACKET_CHKSUM_UNKNOWN;
@@ -641,7 +646,7 @@ odp_packet_chksum_status_t odp_packet_l3_chksum_status(odp_packet_t pkt)
 
 odp_packet_chksum_status_t odp_packet_l4_chksum_status(odp_packet_t pkt)
 {
-	odp_packet_hdr_t *pkt_hdr = odp_packet_hdr(pkt);
+	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
 
 	if (!pkt_hdr->p.input_flags.l4_chksum_done)
 		return ODP_PACKET_CHKSUM_UNKNOWN;
@@ -654,7 +659,7 @@ odp_packet_chksum_status_t odp_packet_l4_chksum_status(odp_packet_t pkt)
 
 void odp_packet_ts_set(odp_packet_t pkt, odp_time_t timestamp)
 {
-	odp_packet_hdr_t *pkt_hdr = odp_packet_hdr(pkt);
+	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
 
 	packet_set_ts(pkt_hdr, &timestamp);
 }
@@ -687,7 +692,7 @@ uint32_t odp_packet_seg_data_len(odp_packet_t pkt ODP_UNUSED,
 int odp_packet_add_data(odp_packet_t *pkt_ptr, uint32_t offset, uint32_t len)
 {
 	odp_packet_t pkt = *pkt_ptr;
-	odp_packet_hdr_t *pkt_hdr = odp_packet_hdr(pkt);
+	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
 	uint32_t pktlen = odp_packet_len(pkt);
 	pool_t *pool = pkt_hdr->buf_hdr.pool_ptr;
 	odp_packet_t newpkt;
@@ -717,7 +722,7 @@ int odp_packet_add_data(odp_packet_t *pkt_ptr, uint32_t offset, uint32_t len)
 int odp_packet_rem_data(odp_packet_t *pkt_ptr, uint32_t offset, uint32_t len)
 {
 	odp_packet_t pkt = *pkt_ptr;
-	odp_packet_hdr_t *pkt_hdr = odp_packet_hdr(pkt);
+	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
 	uint32_t pktlen = odp_packet_len(pkt);
 	pool_t *pool = pkt_hdr->buf_hdr.pool_ptr;
 	odp_packet_t newpkt;
@@ -787,8 +792,8 @@ int odp_packet_align(odp_packet_t *pkt, uint32_t offset, uint32_t len,
 
 int odp_packet_concat(odp_packet_t *dst, odp_packet_t src)
 {
-	odp_packet_hdr_t *dst_hdr = odp_packet_hdr(*dst);
-	odp_packet_hdr_t *src_hdr = odp_packet_hdr(src);
+	odp_packet_hdr_t *dst_hdr = packet_hdr(*dst);
+	odp_packet_hdr_t *src_hdr = packet_hdr(src);
 	struct rte_mbuf *mb_dst = pkt_to_mbuf(*dst);
 	struct rte_mbuf *mb_src = pkt_to_mbuf(src);
 	odp_packet_t new_dst;
@@ -883,8 +888,8 @@ int odp_packet_copy_from_pkt(odp_packet_t dst, uint32_t dst_offset,
 			     odp_packet_t src, uint32_t src_offset,
 			     uint32_t len)
 {
-	odp_packet_hdr_t *dst_hdr = odp_packet_hdr(dst);
-	odp_packet_hdr_t *src_hdr = odp_packet_hdr(src);
+	odp_packet_hdr_t *dst_hdr = packet_hdr(dst);
+	odp_packet_hdr_t *src_hdr = packet_hdr(src);
 	void *dst_map;
 	void *src_map;
 	uint32_t cpylen, minseg;
@@ -953,7 +958,7 @@ int _odp_packet_set_data(odp_packet_t pkt, uint32_t offset,
 	void *mapaddr;
 	uint32_t seglen = 0; /* GCC */
 	uint32_t setlen;
-	odp_packet_hdr_t *pkt_hdr = odp_packet_hdr(pkt);
+	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
 
 	if (offset + len > packet_len(pkt_hdr))
 		return -1;
@@ -979,7 +984,7 @@ int _odp_packet_cmp_data(odp_packet_t pkt, uint32_t offset,
 	uint32_t seglen = 0; /* GCC */
 	uint32_t cmplen;
 	int ret;
-	odp_packet_hdr_t *pkt_hdr = odp_packet_hdr(pkt);
+	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
 
 	ODP_ASSERT(offset + len <= packet_len(pkt_hdr));
 
@@ -1011,7 +1016,7 @@ void odp_packet_print(odp_packet_t pkt)
 	char str[max_len];
 	int len = 0;
 	int n = max_len - 1;
-	odp_packet_hdr_t *hdr = odp_packet_hdr(pkt);
+	odp_packet_hdr_t *hdr = packet_hdr(pkt);
 	odp_buffer_t buf      = packet_to_buffer(pkt);
 
 	len += snprintf(&str[len], n - len, "Packet ");
@@ -1062,7 +1067,7 @@ void odp_packet_print(odp_packet_t pkt)
 void odp_packet_print_data(odp_packet_t pkt, uint32_t offset,
 			   uint32_t byte_len)
 {
-	odp_packet_hdr_t *hdr = odp_packet_hdr(pkt);
+	odp_packet_hdr_t *hdr = packet_hdr(pkt);
 	uint32_t bytes_per_row = 16;
 	int num_rows = (byte_len + bytes_per_row - 1) / bytes_per_row;
 	int max_len = 256 + (3 * byte_len) + (3 * num_rows);
@@ -1141,8 +1146,8 @@ int odp_packet_is_valid(odp_packet_t pkt)
 
 int _odp_packet_copy_md_to_packet(odp_packet_t srcpkt, odp_packet_t dstpkt)
 {
-	odp_packet_hdr_t *srchdr = odp_packet_hdr(srcpkt);
-	odp_packet_hdr_t *dsthdr = odp_packet_hdr(dstpkt);
+	odp_packet_hdr_t *srchdr = packet_hdr(srcpkt);
+	odp_packet_hdr_t *dsthdr = packet_hdr(dstpkt);
 	uint32_t src_size = odp_packet_user_area_size(srcpkt);
 	uint32_t dst_size = odp_packet_user_area_size(dstpkt);
 
@@ -1556,7 +1561,7 @@ int packet_parse_l3_l4(odp_packet_hdr_t *pkt_hdr,
 int odp_packet_parse(odp_packet_t pkt, uint32_t offset,
 		     const odp_packet_parse_param_t *param)
 {
-	odp_packet_hdr_t *pkt_hdr = odp_packet_hdr(pkt);
+	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
 	void *data;
 	uint32_t seg_len;
 	uint32_t len = packet_len(pkt_hdr);
