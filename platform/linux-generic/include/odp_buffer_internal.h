@@ -1,4 +1,4 @@
-/* Copyright (c) 2013, Linaro Limited
+/* Copyright (c) 2013-2018, Linaro Limited
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -42,7 +42,7 @@ typedef struct seg_entry_t {
 } seg_entry_t;
 
 /* Common buffer header */
-struct odp_buffer_hdr_t {
+struct ODP_ALIGNED_CACHE odp_buffer_hdr_t {
 
 	/* Buffer index in the pool */
 	uint32_t  index;
@@ -84,13 +84,7 @@ struct odp_buffer_hdr_t {
 	struct odp_buffer_hdr_t *burst[BUFFER_BURST_SIZE];
 
 	/* --- Mostly read only data --- */
-
-	/* User context pointer or u64 */
-	union {
-		uint64_t    buf_u64;
-		void       *buf_ctx;
-		const void *buf_cctx; /* const alias for ctx */
-	};
+	const void *user_ptr;
 
 	/* Reference count */
 	odp_atomic_u32_t ref_cnt;
@@ -110,7 +104,7 @@ struct odp_buffer_hdr_t {
 
 	/* Data or next header */
 	uint8_t data[0];
-} ODP_ALIGNED_CACHE;
+};
 
 ODP_STATIC_ASSERT(CONFIG_PACKET_SEGS_PER_HDR < 256,
 		  "CONFIG_PACKET_SEGS_PER_HDR_TOO_LARGE");

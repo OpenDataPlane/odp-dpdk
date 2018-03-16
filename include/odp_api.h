@@ -1,4 +1,4 @@
-/* Copyright (c) 2013, Linaro Limited
+/* Copyright (c) 2013-2018, Linaro Limited
  * All rights reserved
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -21,7 +21,6 @@ extern "C" {
 #include <odp/api/deprecated.h>
 #include <odp/api/version.h>
 #include <odp/api/std_types.h>
-#include <odp/api/compiler.h>
 #include <odp/api/align.h>
 #include <odp/api/hash.h>
 #include <odp/api/chksum.h>

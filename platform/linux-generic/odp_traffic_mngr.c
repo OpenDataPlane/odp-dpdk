@@ -1,6 +1,6 @@
 /* Copyright 2015 EZchip Semiconductor Ltd. All Rights Reserved.
  *
- * Copyright (c) 2015, Linaro Limited
+ * Copyright (c) 2015-2018, Linaro Limited
  * All rights reserved.
  *
  * SPDX-License-Identifier: BSD-3-Clause
@@ -27,6 +27,8 @@
 #include <protocols/ip.h>
 #include <odp_traffic_mngr_internal.h>
 #include <odp/api/plat/packet_inlines.h>
+#include <odp/api/plat/byteorder_inlines.h>
+#include <odp_macros_internal.h>
 
 /* Local vars */
 static const
@@ -109,7 +111,7 @@ static int queue_tm_reenq(queue_t queue, odp_buffer_hdr_t *buf_hdr)
 	odp_tm_queue_t tm_queue = MAKE_ODP_TM_QUEUE((uint8_t *)queue -
 						    offsetof(tm_queue_obj_t,
 							     tm_qentry));
-	odp_packet_t pkt = _odp_packet_from_buf_hdr(buf_hdr);
+	odp_packet_t pkt = packet_from_buf_hdr(buf_hdr);
 
 	return odp_tm_enq(tm_queue, pkt);
 }
@@ -730,7 +732,8 @@ static uint64_t time_till_not_red(tm_shaper_params_t *shaper_params,
 		commit_delay = (-shaper_obj->commit_cnt)
 			/ shaper_params->commit_rate;
 
-	min_time_delay = MAX(shaper_obj->shaper_params->min_time_delta, 256);
+	min_time_delay =
+	    MAX(shaper_obj->shaper_params->min_time_delta, UINT64_C(256));
 	commit_delay = MAX(commit_delay, min_time_delay);
 	if (shaper_params->peak_rate == 0)
 		return commit_delay;
@@ -1669,7 +1672,7 @@ static odp_tm_percent_t tm_queue_fullness(tm_wred_params_t      *wred_params,
 		return 0;
 
 	fullness = (10000 * current_cnt) / max_cnt;
-	return (odp_tm_percent_t)MIN(fullness, 50000);
+	return (odp_tm_percent_t)MIN(fullness, UINT64_C(50000));
 }
 
 static odp_bool_t tm_local_random_drop(tm_system_t      *tm_system,
@@ -1940,12 +1943,12 @@ static void egress_vlan_marking(tm_vlan_marking_t *vlan_marking,
 	 * correctness rather then performance. */
 	split_hdr = hdr_len < (_ODP_ETHHDR_LEN + _ODP_VLANHDR_LEN);
 	if (split_hdr) {
-		odp_packet_copy_to_mem(odp_pkt, _ODP_ETHHDR_LEN,
-				       _ODP_VLANHDR_LEN, &vlan_hdr);
+		_odp_packet_copy_to_mem(odp_pkt, _ODP_ETHHDR_LEN,
+					_ODP_VLANHDR_LEN, &vlan_hdr);
 		vlan_hdr_ptr = &vlan_hdr;
 	}
 
-	old_tci = odp_be_to_cpu_16(vlan_hdr_ptr->tci);
+	old_tci = _odp_be_to_cpu_16(vlan_hdr_ptr->tci);
 	new_tci = old_tci;
 	if (vlan_marking->drop_eligible_enabled)
 		new_tci |= _ODP_VLANHDR_DEI_MASK;
@@ -1953,10 +1956,10 @@ static void egress_vlan_marking(tm_vlan_marking_t *vlan_marking,
 	if (new_tci == old_tci)
 		return;
 
-	vlan_hdr_ptr->tci = odp_cpu_to_be_16(new_tci);
+	vlan_hdr_ptr->tci = _odp_cpu_to_be_16(new_tci);
 	if (split_hdr)
-		odp_packet_copy_from_mem(odp_pkt, _ODP_ETHHDR_LEN,
-					 _ODP_VLANHDR_LEN, &vlan_hdr);
+		_odp_packet_copy_from_mem(odp_pkt, _ODP_ETHHDR_LEN,
+					  _ODP_VLANHDR_LEN, &vlan_hdr);
 }
 
 static void egress_ipv4_tos_marking(tm_tos_marking_t *tos_marking,
@@ -1979,8 +1982,8 @@ static void egress_ipv4_tos_marking(tm_tos_marking_t *tos_marking,
 	 * correctness rather then performance. */
 	split_hdr = hdr_len < 12;
 	if (split_hdr) {
-		odp_packet_copy_to_mem(odp_pkt, l3_offset,
-				       _ODP_IPV4HDR_LEN, &ipv4_hdr);
+		_odp_packet_copy_to_mem(odp_pkt, l3_offset,
+					_ODP_IPV4HDR_LEN, &ipv4_hdr);
 		ipv4_hdr_ptr = &ipv4_hdr;
 	}
 
@@ -2010,7 +2013,7 @@ static void egress_ipv4_tos_marking(tm_tos_marking_t *tos_marking,
 	 * in this specific case the carry out check does NOT need to be
 	 * repeated since it can be proven that the carry in sum cannot
 	 * cause another carry out. */
-	old_chksum     = (uint32_t)odp_be_to_cpu_16(ipv4_hdr_ptr->chksum);
+	old_chksum     = (uint32_t)_odp_be_to_cpu_16(ipv4_hdr_ptr->chksum);
 	ones_compl_sum = (~old_chksum) & 0xFFFF;
 	tos_diff       = ((uint32_t)new_tos) + ((~(uint32_t)old_tos) & 0xFFFF);
 	ones_compl_sum += tos_diff;
@@ -2019,10 +2022,10 @@ static void egress_ipv4_tos_marking(tm_tos_marking_t *tos_marking,
 				 (ones_compl_sum & 0xFFFF);
 
 	ipv4_hdr_ptr->tos    = new_tos;
-	ipv4_hdr_ptr->chksum = odp_cpu_to_be_16((~ones_compl_sum) & 0xFFFF);
+	ipv4_hdr_ptr->chksum = _odp_cpu_to_be_16((~ones_compl_sum) & 0xFFFF);
 	if (split_hdr)
-		odp_packet_copy_from_mem(odp_pkt, l3_offset,
-					 _ODP_IPV4HDR_LEN, &ipv4_hdr);
+		_odp_packet_copy_from_mem(odp_pkt, l3_offset,
+					  _ODP_IPV4HDR_LEN, &ipv4_hdr);
 }
 
 static void egress_ipv6_tc_marking(tm_tos_marking_t *tos_marking,
@@ -2045,12 +2048,12 @@ static void egress_ipv6_tc_marking(tm_tos_marking_t *tos_marking,
 	 * correctness rather then performance. */
 	split_hdr = hdr_len < 4;
 	if (split_hdr) {
-		odp_packet_copy_to_mem(odp_pkt, l3_offset,
-				       _ODP_IPV6HDR_LEN, &ipv6_hdr);
+		_odp_packet_copy_to_mem(odp_pkt, l3_offset,
+					_ODP_IPV6HDR_LEN, &ipv6_hdr);
 		ipv6_hdr_ptr = &ipv6_hdr;
 	}
 
-	old_ver_tc_flow = odp_be_to_cpu_32(ipv6_hdr_ptr->ver_tc_flow);
+	old_ver_tc_flow = _odp_be_to_cpu_32(ipv6_hdr_ptr->ver_tc_flow);
 	old_tc          = (old_ver_tc_flow & _ODP_IPV6HDR_TC_MASK)
 				>> _ODP_IPV6HDR_TC_SHIFT;
 	new_tc          = old_tc;
@@ -2071,11 +2074,11 @@ static void egress_ipv6_tc_marking(tm_tos_marking_t *tos_marking,
 
 	new_ver_tc_flow = (old_ver_tc_flow & ~_ODP_IPV6HDR_TC_MASK) |
 			  (new_tc << _ODP_IPV6HDR_TC_SHIFT);
-	ipv6_hdr_ptr->ver_tc_flow = odp_cpu_to_be_32(new_ver_tc_flow);
+	ipv6_hdr_ptr->ver_tc_flow = _odp_cpu_to_be_32(new_ver_tc_flow);
 
 	if (split_hdr)
-		odp_packet_copy_from_mem(odp_pkt, l3_offset,
-					 _ODP_IPV6HDR_LEN, &ipv6_hdr);
+		_odp_packet_copy_from_mem(odp_pkt, l3_offset,
+					  _ODP_IPV6HDR_LEN, &ipv6_hdr);
 }
 
 static void tm_egress_marking(tm_system_t *tm_system, odp_packet_t odp_pkt)
@@ -2500,7 +2503,7 @@ static void tm_system_capabilities_set(odp_tm_capabilities_t *cap_ptr,
 	memset(cap_ptr, 0, sizeof(odp_tm_capabilities_t));
 
 	max_queues       = MIN(req_ptr->max_tm_queues,
-			       ODP_TM_MAX_NUM_TM_NODES);
+			       (uint32_t)ODP_TM_MAX_NUM_TM_NODES);
 	shaper_supported = req_ptr->tm_queue_shaper_needed;
 	wred_supported   = req_ptr->tm_queue_wred_needed;
 	dual_slope       = req_ptr->tm_queue_dual_slope_needed;
@@ -2524,8 +2527,9 @@ static void tm_system_capabilities_set(odp_tm_capabilities_t *cap_ptr,
 		per_level_req = &req_ptr->per_level[level_idx];
 
 		max_nodes        = MIN(per_level_req->max_num_tm_nodes,
-				       ODP_TM_MAX_NUM_TM_NODES);
-		max_fanin        = MIN(per_level_req->max_fanin_per_node, 1024);
+				       (uint32_t)ODP_TM_MAX_NUM_TM_NODES);
+		max_fanin        = MIN(per_level_req->max_fanin_per_node,
+				       UINT32_C(1024));
 		max_priority     = MIN(per_level_req->max_priority,
 				       ODP_TM_MAX_PRIORITIES - 1);
 		min_weight       = MAX(per_level_req->min_weight,

@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# Copyright (c) 2015, Linaro Limited
+# Copyright (c) 2015-2018, Linaro Limited
 # All rights reserved.
 #
 # SPDX-License-Identifier:	BSD-3-Clause
@@ -25,6 +25,7 @@ if [ -x "$pktio_main_path" ] ; then
 	echo "running with $pktio_main_path"
 else
 	echo "cannot find pktio_main${EXEEXT}: please set you PATH for it."
+	exit 1
 fi
 
 PCAP_FNAME=vald.pcap

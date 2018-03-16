@@ -1,6 +1,6 @@
 /* Copyright 2015 EZchip Semiconductor Ltd. All Rights Reserved.
  *
- * Copyright (c) 2015, Linaro Limited
+ * Copyright (c) 2015-2018, Linaro Limited
  * All rights reserved.
  *
  * SPDX-License-Identifier: BSD-3-Clause
@@ -33,9 +33,6 @@ extern "C" {
 #include <odp_packet_internal.h>
 
 typedef struct stat  file_stat_t;
-
-#define MAX(a, b) (((a) > (b)) ? (a) : (b))
-#define MIN(a, b) (((a) < (b)) ? (a) : (b))
 
 #define INPUT_WORK_RING_SIZE  (16 * 1024)
 

@@ -1,4 +1,4 @@
-/* Copyright (c) 2015, Linaro Limited
+/* Copyright (c) 2015-2018, Linaro Limited
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -7,9 +7,6 @@
 #include "config.h"
 
 #include <odp/api/atomic.h>
-#if ODP_ABI_COMPAT == 1
-#include <odp/api/plat/atomic_inlines.h>
-#endif
 
 int odp_atomic_lock_free_u64(odp_atomic_op_t *atomic_op)
 {
