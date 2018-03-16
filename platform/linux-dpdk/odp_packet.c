@@ -6,8 +6,8 @@
 
 #include "config.h"
 
-#include <odp/api/plat/packet_inlines.h>
 #include <odp/api/packet.h>
+#include <odp/api/plat/packet_inlines.h>
 #include <odp_packet_internal.h>
 #include <odp_debug_internal.h>
 #include <odp/api/hints.h>
@@ -1490,10 +1490,10 @@ int packet_parse_common_l3_l4(packet_parser_t *prs, const uint8_t *parseptr,
 
 	/* Parse Layer 4 headers */
 	switch (ip_proto) {
-	case _ODP_IPPROTO_ICMPv4:
+	case _ODP_IPPROTO_ICMPV4:
 	/* Fall through */
 
-	case _ODP_IPPROTO_ICMPv6:
+	case _ODP_IPPROTO_ICMPV6:
 		prs->input_flags.icmp = 1;
 		break;
 
@@ -1733,8 +1733,3 @@ int odp_packet_has_ref(odp_packet_t pkt)
 
 	return 0;
 }
-
-/* Include non-inlined versions of API functions */
-#if ODP_ABI_COMPAT == 1
-#include <odp/api/plat/packet_inlines_api.h>
-#endif

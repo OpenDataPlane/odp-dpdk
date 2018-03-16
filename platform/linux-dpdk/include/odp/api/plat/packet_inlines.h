@@ -17,12 +17,15 @@
 extern "C" {
 #endif
 
-#include <odp/api/plat/packet_types.h>
+#include <odp/api/abi/packet.h>
 #include <odp/api/pool.h>
-#include <odp/api/time.h>
-#include <odp/api/plat/packet_io_types.h>
-#include <odp/api/plat/buffer_types.h>
+#include <odp/api/abi/packet_io.h>
 #include <odp/api/hints.h>
+#include <odp/api/time.h>
+#include <odp/api/abi/buffer.h>
+
+#include <odp/api/plat/packet_inline_types.h>
+#include <odp/api/plat/pool_inline_types.h>
 
 /* Required by rte_mbuf.h */
 #include <sys/types.h>
@@ -258,15 +261,6 @@ static inline odp_buffer_t packet_to_buffer(odp_packet_t pkt)
 {
 	return (odp_buffer_t)pkt;
 }
-
-/* Include inlined versions of API functions */
-#include <odp/api/plat/static_inline.h>
-
-#if ODP_ABI_COMPAT == 0
-
-#include <odp/api/plat/packet_inlines_api.h>
-
-#endif /* ODP_ABI_COMPAT */
 
 #ifdef __cplusplus
 }
