@@ -18,6 +18,8 @@
 extern "C" {
 #endif
 
+#include <odp/api/packet_io.h>
+#include <odp/api/plat/pktio_inlines.h>
 #include <odp/api/spinlock.h>
 #include <odp/api/ticketlock.h>
 #include <odp_classification_datamodel.h>
@@ -31,6 +33,7 @@ extern "C" {
 #define PKTIO_MAX_QUEUES 64
 #include <linux/if_ether.h>
 #include <odp_packet_dpdk.h>
+#include <odp_packet_null.h>
 
 #define PKTIO_NAME_LEN 256
 
@@ -73,6 +76,7 @@ struct pktio_entry {
 	union {
 		pkt_loop_t pkt_loop;	/**< Using loopback for IO */
 		pkt_dpdk_t pkt_dpdk;	/**< using DPDK API for IO */
+		pkt_null_t pkt_null;	/**< using null for IO */
 	};
 	enum {
 		/* Not allocated */
@@ -145,6 +149,12 @@ typedef struct pktio_if_ops {
 	odp_time_t (*pktin_ts_from_ns)(pktio_entry_t *pktio_entry, uint64_t ns);
 	int (*recv)(pktio_entry_t *entry, int index, odp_packet_t packets[],
 		    int num);
+	int (*recv_tmo)(pktio_entry_t *entry, int index, odp_packet_t packets[],
+			int num, uint64_t wait_usecs);
+	int (*recv_mq_tmo)(pktio_entry_t *entry[], int index[], int num_q,
+			   odp_packet_t packets[], int num, unsigned *from,
+			   uint64_t wait_usecs);
+	int (*fd_set)(pktio_entry_t *entry, int index, fd_set *readfds);
 	int (*send)(pktio_entry_t *entry, int index,
 		    const odp_packet_t packets[], int num);
 	uint32_t (*mtu_get)(pktio_entry_t *pktio_entry);
@@ -165,13 +175,10 @@ typedef struct pktio_if_ops {
 
 extern void *pktio_entry_ptr[];
 
-static inline int pktio_to_id(odp_pktio_t pktio)
-{
-	return _odp_typeval(pktio) - 1;
-}
-
 static inline pktio_entry_t *get_pktio_entry(odp_pktio_t pktio)
 {
+	int idx;
+
 	if (odp_unlikely(pktio == ODP_PKTIO_INVALID))
 		return NULL;
 
@@ -181,7 +188,9 @@ static inline pktio_entry_t *get_pktio_entry(odp_pktio_t pktio)
 		return NULL;
 	}
 
-	return pktio_entry_ptr[pktio_to_id(pktio)];
+	idx = _odp_pktio_index(pktio);
+
+	return pktio_entry_ptr[idx];
 }
 
 static inline int pktio_cls_enabled(pktio_entry_t *entry)
@@ -195,8 +204,24 @@ static inline void pktio_cls_enabled_set(pktio_entry_t *entry, int ena)
 }
 
 extern const pktio_if_ops_t loopback_pktio_ops;
+extern const pktio_if_ops_t null_pktio_ops;
 extern const pktio_if_ops_t dpdk_pktio_ops;
 extern const pktio_if_ops_t * const pktio_if_ops[];
+
+/* Dummy function required by odp_pktin_recv_mq_tmo() */
+static inline int
+sock_recv_mq_tmo_try_int_driven(const struct odp_pktin_queue_t queues[],
+				unsigned num_q ODP_UNUSED,
+				unsigned *from ODP_UNUSED,
+				odp_packet_t packets[] ODP_UNUSED,
+				int num ODP_UNUSED,
+				uint64_t usecs ODP_UNUSED,
+				int *trial_successful) {
+	(void)queues;
+
+	*trial_successful = 0;
+	return 0;
+}
 
 #ifdef __cplusplus
 }

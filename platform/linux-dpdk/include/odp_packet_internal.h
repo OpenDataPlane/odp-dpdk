@@ -25,11 +25,12 @@ extern "C" {
 #include <odp_buffer_inlines.h>
 #include <odp_pool_internal.h>
 #include <odp/api/packet.h>
+#include <odp/api/plat/packet_inline_types.h>
 #include <odp/api/packet_io.h>
 #include <odp/api/crypto.h>
-#include <odp/api/ipsec.h>
+#include <odp_ipsec_internal.h>
+#include <odp/api/abi/packet.h>
 #include <protocols/eth.h>
-#include <odp/api/plat/packet_types.h>
 #include <odp_queue_if.h>
 
 #include <rte_acl_osdep.h>
@@ -149,7 +150,7 @@ typedef struct {
 /**
  * Return the packet header
  */
-static inline odp_packet_hdr_t *odp_packet_hdr(odp_packet_t pkt)
+static inline odp_packet_hdr_t *packet_hdr(odp_packet_t pkt)
 {
 	return (odp_packet_hdr_t *)(uintptr_t)pkt;
 }
@@ -161,7 +162,7 @@ static inline struct rte_mbuf *pkt_to_mbuf(odp_packet_t  pkt)
 
 static inline odp_buffer_hdr_t *packet_to_buf_hdr(odp_packet_t pkt)
 {
-	return &odp_packet_hdr(pkt)->buf_hdr;
+	return &packet_hdr(pkt)->buf_hdr;
 }
 
 static inline odp_packet_t packet_from_buf_hdr(odp_buffer_hdr_t *buf_hdr)
@@ -171,12 +172,12 @@ static inline odp_packet_t packet_from_buf_hdr(odp_buffer_hdr_t *buf_hdr)
 
 static inline odp_event_subtype_t packet_subtype(odp_packet_t pkt)
 {
-	return odp_packet_hdr(pkt)->subtype;
+	return packet_hdr(pkt)->subtype;
 }
 
 static inline void packet_subtype_set(odp_packet_t pkt, int ev)
 {
-	odp_packet_hdr(pkt)->subtype = ev;
+	packet_hdr(pkt)->subtype = ev;
 }
 
 /**

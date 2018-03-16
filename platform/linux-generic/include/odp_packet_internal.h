@@ -23,10 +23,11 @@ extern "C" {
 #include <odp_pool_internal.h>
 #include <odp_buffer_inlines.h>
 #include <odp/api/packet.h>
+#include <odp/api/plat/packet_inline_types.h>
 #include <odp/api/packet_io.h>
 #include <odp/api/crypto.h>
-#include <odp/api/ipsec.h>
-#include <odp/api/plat/packet_types.h>
+#include <odp_ipsec_internal.h>
+#include <odp/api/abi/packet.h>
 #include <odp_queue_if.h>
 
 /** Minimum segment length expected by packet_parse_common() */
@@ -155,7 +156,7 @@ typedef struct {
 	/* Type of extra data */
 	uint8_t extra_type;
 	/* Extra space for packet descriptors. E.g. DPDK mbuf  */
-	uint8_t extra[PKT_EXTRA_LEN] ODP_ALIGNED_CACHE;
+	uint8_t ODP_ALIGNED_CACHE extra[PKT_EXTRA_LEN];
 #endif
 
 	/* Context for IPsec */
@@ -168,7 +169,7 @@ typedef struct {
 /**
  * Return the packet header
  */
-static inline odp_packet_hdr_t *odp_packet_hdr(odp_packet_t pkt)
+static inline odp_packet_hdr_t *packet_hdr(odp_packet_t pkt)
 {
 	return (odp_packet_hdr_t *)(uintptr_t)pkt;
 }
@@ -180,7 +181,7 @@ static inline odp_packet_t packet_handle(odp_packet_hdr_t *pkt_hdr)
 
 static inline odp_buffer_hdr_t *packet_to_buf_hdr(odp_packet_t pkt)
 {
-	return &odp_packet_hdr(pkt)->buf_hdr;
+	return &packet_hdr(pkt)->buf_hdr;
 }
 
 static inline odp_packet_t packet_from_buf_hdr(odp_buffer_hdr_t *buf_hdr)
@@ -200,12 +201,12 @@ static inline seg_entry_t *seg_entry_last(odp_packet_hdr_t *hdr)
 
 static inline odp_event_subtype_t packet_subtype(odp_packet_t pkt)
 {
-	return odp_packet_hdr(pkt)->subtype;
+	return packet_hdr(pkt)->subtype;
 }
 
 static inline void packet_subtype_set(odp_packet_t pkt, int ev)
 {
-	odp_packet_hdr(pkt)->subtype = ev;
+	packet_hdr(pkt)->subtype = ev;
 }
 
 /**
@@ -328,6 +329,13 @@ static inline int packet_hdr_has_eth(odp_packet_hdr_t *pkt_hdr)
 static inline int packet_hdr_has_ipv6(odp_packet_hdr_t *pkt_hdr)
 {
 	return pkt_hdr->p.input_flags.ipv6;
+}
+
+static inline void packet_set_flow_hash(odp_packet_hdr_t *pkt_hdr,
+					uint32_t flow_hash)
+{
+	pkt_hdr->flow_hash = flow_hash;
+	pkt_hdr->p.input_flags.flow_hash = 1;
 }
 
 static inline void packet_set_ts(odp_packet_hdr_t *pkt_hdr, odp_time_t *ts)

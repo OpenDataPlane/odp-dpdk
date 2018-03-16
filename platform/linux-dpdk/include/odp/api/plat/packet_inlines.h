@@ -17,25 +17,28 @@
 extern "C" {
 #endif
 
-#include <odp/api/plat/packet_types.h>
+#include <odp/api/abi/packet.h>
 #include <odp/api/pool.h>
-#include <odp/api/time.h>
-#include <odp/api/plat/packet_io_types.h>
-#include <odp/api/plat/buffer_types.h>
+#include <odp/api/abi/packet_io.h>
 #include <odp/api/hints.h>
+#include <odp/api/time.h>
+#include <odp/api/abi/buffer.h>
 
+#include <odp/api/plat/packet_inline_types.h>
+#include <odp/api/plat/pool_inline_types.h>
+#include <odp/api/plat/pktio_inlines.h>
+
+#include <string.h>
 /* Required by rte_mbuf.h */
 #include <sys/types.h>
 #include <rte_mbuf.h>
 
-/** @internal Inline function offsets */
+/** @cond _ODP_HIDE_FROM_DOXYGEN_ */
+
 extern const _odp_packet_inline_offset_t _odp_packet_inline;
 
-/** @internal Pool inline function offsets */
 extern const _odp_pool_inline_offset_t _odp_pool_inline;
 
-/** @internal Inline function @param pkt @param offset @param len @param seg
- *  @return */
 static inline void *_odp_packet_offset(odp_packet_t pkt, uint32_t offset,
 				       uint32_t *len, odp_packet_seg_t *seg)
 {
@@ -66,7 +69,6 @@ err:
 	return NULL;
 }
 
-/** @internal Inline function @param pkt @return */
 static inline void *_odp_packet_data(odp_packet_t pkt)
 {
 	uint8_t *buf_addr = (uint8_t *)_odp_pkt_get(pkt, void *, buf_addr);
@@ -75,25 +77,21 @@ static inline void *_odp_packet_data(odp_packet_t pkt)
 	return (void *)(buf_addr + data_off);
 }
 
-/** @internal Inline function @param pkt @return */
 static inline uint32_t _odp_packet_seg_len(odp_packet_t pkt)
 {
 	return _odp_pkt_get(pkt, uint16_t, seg_len);
 }
 
-/** @internal Inline function @param pkt @return */
 static inline uint32_t _odp_packet_len(odp_packet_t pkt)
 {
 	return _odp_pkt_get(pkt, uint32_t, pkt_len);
 }
 
-/** @internal Inline function @param pkt @return */
 static inline uint32_t _odp_packet_headroom(odp_packet_t pkt)
 {
 	return rte_pktmbuf_headroom(&_odp_pkt_get(pkt, struct rte_mbuf, mb));
 }
 
-/** @internal Inline function @param pkt @return */
 static inline uint32_t _odp_packet_tailroom(odp_packet_t pkt)
 {
 	struct rte_mbuf *mb = &_odp_pkt_get(pkt, struct rte_mbuf, mb);
@@ -101,7 +99,6 @@ static inline uint32_t _odp_packet_tailroom(odp_packet_t pkt)
 	return rte_pktmbuf_tailroom(rte_pktmbuf_lastseg(mb));
 }
 
-/** @internal Inline function @param pkt @return */
 static inline odp_pool_t _odp_packet_pool(odp_packet_t pkt)
 {
 	void *pool = _odp_pkt_get(pkt, void *, pool);
@@ -109,31 +106,33 @@ static inline odp_pool_t _odp_packet_pool(odp_packet_t pkt)
 	return _odp_pool_get(pool, odp_pool_t, pool_hdl);
 }
 
-/** @internal Inline function @param pkt @return */
 static inline odp_pktio_t _odp_packet_input(odp_packet_t pkt)
 {
 	return _odp_pkt_get(pkt, odp_pktio_t, input);
 }
 
-/** @internal Inline function @param pkt @return */
+static inline int _odp_packet_input_index(odp_packet_t pkt)
+{
+	odp_pktio_t pktio = _odp_packet_input(pkt);
+
+	return _odp_pktio_index(pktio);
+}
+
 static inline int _odp_packet_num_segs(odp_packet_t pkt)
 {
 	return _odp_pkt_get(pkt, uint16_t, nb_segs);
 }
 
-/** @internal Inline function @param pkt @return */
 static inline void *_odp_packet_user_ptr(odp_packet_t pkt)
 {
 	return _odp_pkt_get(pkt, void *, user_ptr);
 }
 
-/** @internal Inline function @param pkt @return */
 static inline void *_odp_packet_user_area(odp_packet_t pkt)
 {
 	return (void *)((char *)pkt + _odp_packet_inline.udata);
 }
 
-/** @internal Inline function @param pkt @return */
 static inline uint32_t _odp_packet_user_area_size(odp_packet_t pkt)
 {
 	void *pool = _odp_pkt_get(pkt, void *, pool);
@@ -141,52 +140,44 @@ static inline uint32_t _odp_packet_user_area_size(odp_packet_t pkt)
 	return _odp_pool_get(pool, uint32_t, uarea_size);
 }
 
-/** @internal Inline function @param pkt @return */
 static inline uint32_t _odp_packet_l2_offset(odp_packet_t pkt)
 {
 	return _odp_pkt_get(pkt, uint16_t, l2_offset);
 }
 
-/** @internal Inline function @param pkt @return */
 static inline uint32_t _odp_packet_l3_offset(odp_packet_t pkt)
 {
 	return _odp_pkt_get(pkt, uint16_t, l3_offset);
 }
 
-/** @internal Inline function @param pkt @return */
 static inline uint32_t _odp_packet_l4_offset(odp_packet_t pkt)
 {
 	return _odp_pkt_get(pkt, uint16_t, l4_offset);
 }
 
-/** @internal Inline function @param pkt @param len @return */
 static inline void *_odp_packet_l2_ptr(odp_packet_t pkt, uint32_t *len)
 {
 	return _odp_packet_offset(pkt, _odp_pkt_get(pkt, uint16_t, l2_offset),
 				  len, NULL);
 }
 
-/** @internal Inline function @param pkt @param len @return */
 static inline void *_odp_packet_l3_ptr(odp_packet_t pkt, uint32_t *len)
 {
 	return _odp_packet_offset(pkt, _odp_pkt_get(pkt, uint16_t, l3_offset),
 				  len, NULL);
 }
 
-/** @internal Inline function @param pkt @param len @return */
 static inline void *_odp_packet_l4_ptr(odp_packet_t pkt, uint32_t *len)
 {
 	return _odp_packet_offset(pkt, _odp_pkt_get(pkt, uint16_t, l4_offset),
 				  len, NULL);
 }
 
-/** @internal Inline function @param pkt @return */
 static inline uint32_t _odp_packet_flow_hash(odp_packet_t pkt)
 {
 	return _odp_pkt_get(pkt, uint32_t, rss);
 }
 
-/** @internal Inline function @param pkt @param flow_hash */
 static inline void _odp_packet_flow_hash_set(odp_packet_t pkt, uint32_t flow_hash)
 {
 	uint32_t *rss = &_odp_pkt_get(pkt, uint32_t, rss);
@@ -196,19 +187,16 @@ static inline void _odp_packet_flow_hash_set(odp_packet_t pkt, uint32_t flow_has
 	*ol_flags |= _odp_packet_inline.rss_flag;
 }
 
-/** @internal Inline function @param pkt @return */
 static inline odp_time_t _odp_packet_ts(odp_packet_t pkt)
 {
 	return _odp_pkt_get(pkt, odp_time_t, timestamp);
 }
 
-/** @internal Inline function @param pkt @return */
 static inline void *_odp_packet_head(odp_packet_t pkt)
 {
 	return (uint8_t *)_odp_packet_data(pkt) - _odp_packet_headroom(pkt);
 }
 
-/** @internal Inline function @param pkt @return */
 static inline int _odp_packet_is_segmented(odp_packet_t pkt)
 {
 	struct rte_mbuf *mb = &_odp_pkt_get(pkt, struct rte_mbuf, mb);
@@ -216,13 +204,11 @@ static inline int _odp_packet_is_segmented(odp_packet_t pkt)
 	return !rte_pktmbuf_is_contiguous(mb);
 }
 
-/** @internal Inline function @param pkt @return */
 static inline odp_packet_seg_t _odp_packet_first_seg(odp_packet_t pkt)
 {
 	return (odp_packet_seg_t)(uintptr_t)pkt;
 }
 
-/** @internal Inline function @param pkt @return */
 static inline odp_packet_seg_t _odp_packet_last_seg(odp_packet_t pkt)
 {
 	struct rte_mbuf *mb = &_odp_pkt_get(pkt, struct rte_mbuf, mb);
@@ -230,7 +216,6 @@ static inline odp_packet_seg_t _odp_packet_last_seg(odp_packet_t pkt)
 	return (odp_packet_seg_t)(uintptr_t)rte_pktmbuf_lastseg(mb);
 }
 
-/** @internal Inline function @param pkt @param seg @return */
 static inline odp_packet_seg_t _odp_packet_next_seg(odp_packet_t pkt,
 						    odp_packet_seg_t seg)
 {
@@ -243,7 +228,6 @@ static inline odp_packet_seg_t _odp_packet_next_seg(odp_packet_t pkt,
 		return (odp_packet_seg_t)(uintptr_t)mb->next;
 }
 
-/** @internal Inline function @param pkt @param offset @param len */
 static inline void _odp_packet_prefetch(odp_packet_t pkt, uint32_t offset, uint32_t len)
 {
 	const char *addr = (char *)_odp_packet_data(pkt) + offset;
@@ -253,23 +237,91 @@ static inline void _odp_packet_prefetch(odp_packet_t pkt, uint32_t offset, uint3
 		rte_prefetch0(addr + ofs);
 }
 
-/** @internal Inline function @param pkt @return */
-static inline odp_buffer_t packet_to_buffer(odp_packet_t pkt)
+static inline int _odp_packet_copy_to_mem(odp_packet_t pkt, uint32_t offset,
+					  uint32_t len, void *dst)
 {
-	return (odp_buffer_t)pkt;
+	void *mapaddr;
+	uint32_t seglen = 0; /* GCC */
+	uint32_t cpylen;
+	uint8_t *dstaddr = (uint8_t *)dst;
+
+	if (offset + len > _odp_packet_len(pkt))
+		return -1;
+
+	while (len > 0) {
+		mapaddr = _odp_packet_offset(pkt, offset, &seglen, NULL);
+		cpylen = len > seglen ? seglen : len;
+		memcpy(dstaddr, mapaddr, cpylen);
+		offset  += cpylen;
+		dstaddr += cpylen;
+		len     -= cpylen;
+	}
+
+	return 0;
 }
 
-/* Include inlined versions of API functions */
-#include <odp/api/plat/static_inline.h>
+static inline int _odp_packet_copy_from_mem(odp_packet_t pkt, uint32_t offset,
+					    uint32_t len, const void *src)
+{
+	void *mapaddr;
+	uint32_t seglen = 0; /* GCC */
+	uint32_t cpylen;
+	const uint8_t *srcaddr = (const uint8_t *)src;
 
-#if ODP_ABI_COMPAT == 0
+	if (offset + len > _odp_packet_len(pkt))
+		return -1;
 
-#include <odp/api/plat/packet_inlines_api.h>
+	while (len > 0) {
+		mapaddr = _odp_packet_offset(pkt, offset, &seglen, NULL);
+		cpylen = len > seglen ? seglen : len;
+		memcpy(mapaddr, srcaddr, cpylen);
+		offset  += cpylen;
+		srcaddr += cpylen;
+		len     -= cpylen;
+	}
 
-#endif /* ODP_ABI_COMPAT */
+	return 0;
+}
+
+static inline odp_packet_t _odp_packet_from_event(odp_event_t ev)
+{
+	if (odp_unlikely(ev == ODP_EVENT_INVALID))
+		return ODP_PACKET_INVALID;
+
+	return (odp_packet_t)ev;
+}
+
+static inline odp_event_t _odp_packet_to_event(odp_packet_t pkt)
+{
+	if (odp_unlikely(pkt == ODP_PACKET_INVALID))
+		return ODP_EVENT_INVALID;
+
+	return (odp_event_t)pkt;
+}
+
+static inline void _odp_packet_from_event_multi(odp_packet_t pkt[],
+						const odp_event_t ev[],
+						int num)
+{
+	int i;
+
+	for (i = 0; i < num; i++)
+		pkt[i] = _odp_packet_from_event(ev[i]);
+}
+
+static inline void _odp_packet_to_event_multi(const odp_packet_t pkt[],
+					      odp_event_t ev[], int num)
+{
+	int i;
+
+	for (i = 0; i < num; i++)
+		ev[i] = _odp_packet_to_event(pkt[i]);
+}
 
 #ifdef __cplusplus
 }
 #endif
+
+/** @endcond */
 
 #endif /* ODP_PLAT_PACKET_INLINES_H_ */

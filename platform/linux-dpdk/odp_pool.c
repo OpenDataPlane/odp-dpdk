@@ -27,6 +27,8 @@
 #include <math.h>
 #include <inttypes.h>
 
+#include <odp/api/plat/pool_inline_types.h>
+
 /* for DPDK */
 #include <odp_packet_dpdk.h>
 
@@ -51,7 +53,7 @@ pool_table_t *pool_tbl;
 #include <odp/visibility_begin.h>
 
 /* Fill in pool header field offsets for inline functions */
-const _odp_pool_inline_offset_t _odp_pool_inline ODP_ALIGNED_CACHE = {
+const _odp_pool_inline_offset_t ODP_ALIGNED_CACHE _odp_pool_inline = {
 	.pool_hdl          = offsetof(pool_t, pool_hdl),
 	.uarea_size        = offsetof(pool_t, params.pkt.uarea_size)
 };

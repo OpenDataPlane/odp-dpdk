@@ -10,8 +10,8 @@
 
 #include <odp_posix_extensions.h>
 
-#include <odp/api/plat/packet_inlines.h>
 #include <odp/api/packet.h>
+#include <odp/api/plat/packet_inlines.h>
 
 #include <odp_packet_io_internal.h>
 #include <odp_packet_netmap.h>
@@ -350,9 +350,6 @@ static int netmap_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t *pktio_entry,
 	pkt_nm->sockfd = -1;
 	pkt_nm->pool = pool;
 
-	/* max frame len taking into account the l2-offset */
-	pkt_nm->max_frame_len = pool_entry_from_hdl(pool)->max_len;
-
 	/* allow interface to be opened with or without the 'netmap:' prefix */
 	prefix = "netmap:";
 	if (strncmp(netdev, "netmap:", 7) == 0)
@@ -417,14 +414,13 @@ static int netmap_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t *pktio_entry,
 	}
 	pkt_nm->sockfd = sockfd;
 
-	/* Use either interface MTU (+ ethernet header length) or netmap buffer
-	 * size as MTU, whichever is smaller. */
+	/* Use either interface MTU or netmap buffer size as MTU, whichever is
+	 * smaller. */
 	mtu = mtu_get_fd(pktio_entry->s.pkt_nm.sockfd, pkt_nm->if_name);
 	if (mtu == 0) {
 		ODP_ERR("Unable to read interface MTU\n");
 		goto error;
 	}
-	mtu += _ODP_ETHHDR_LEN;
 	pkt_nm->mtu = (mtu < buf_size) ? mtu : buf_size;
 
 	/* Check if RSS is supported. If not, set 'max_input_queues' to 1. */
@@ -643,12 +639,6 @@ static inline int netmap_pkt_to_odp(pktio_entry_t *pktio_entry,
 
 		odp_prefetch(slot.buf);
 
-		if (odp_unlikely(len > pktio_entry->s.pkt_nm.max_frame_len)) {
-			ODP_ERR("RX: frame too big %" PRIu16 " %zu!\n", len,
-				pktio_entry->s.pkt_nm.max_frame_len);
-			goto fail;
-		}
-
 		if (pktio_cls_enabled(pktio_entry)) {
 			if (cls_classify_packet(pktio_entry,
 						(const uint8_t *)slot.buf, len,
@@ -657,12 +647,12 @@ static inline int netmap_pkt_to_odp(pktio_entry_t *pktio_entry,
 		}
 
 		pkt = pkt_tbl[i];
-		pkt_hdr = odp_packet_hdr(pkt);
+		pkt_hdr = packet_hdr(pkt);
 		pull_tail(pkt_hdr, alloc_len - len);
 
 		/* For now copy the data in the mbuf,
 		   worry about zero-copy later */
-		if (odp_packet_copy_from_mem(pkt, 0, len, slot.buf) != 0)
+		if (_odp_packet_copy_from_mem(pkt, 0, len, slot.buf) != 0)
 			goto fail;
 
 		pkt_hdr->input = pktio_entry->s.handle;
@@ -693,6 +683,7 @@ static inline int netmap_recv_desc(pktio_entry_t *pktio_entry,
 	netmap_slot_t slot_tbl[num];
 	char *buf;
 	uint32_t slot_id;
+	uint32_t mtu = pktio_entry->s.pkt_nm.mtu;
 	int i;
 	int ring_id = desc->cur_rx_ring;
 	int num_rx = 0;
@@ -712,10 +703,12 @@ static inline int netmap_recv_desc(pktio_entry_t *pktio_entry,
 			slot_id = ring->cur;
 			buf = NETMAP_BUF(ring, ring->slot[slot_id].buf_idx);
 
-			slot_tbl[num_rx].buf = buf;
-			slot_tbl[num_rx].len = ring->slot[slot_id].len;
-			num_rx++;
-
+			if (odp_likely(ring->slot[slot_id].len <= mtu)) {
+				slot_tbl[num_rx].buf = buf;
+				slot_tbl[num_rx].len = ring->slot[slot_id].len;
+				ODP_DBG("dropped oversized packet\n");
+				num_rx++;
+			}
 			ring->cur = nm_ring_next(ring, slot_id);
 		}
 		ring->head = ring->cur;
@@ -730,6 +723,44 @@ static inline int netmap_recv_desc(pktio_entry_t *pktio_entry,
 					 num_rx, ts);
 	}
 	return 0;
+}
+
+static int netmap_fd_set(pktio_entry_t *pktio_entry, int index, fd_set *readfds)
+{
+	struct nm_desc *desc;
+	pkt_netmap_t *pkt_nm = &pktio_entry->s.pkt_nm;
+	unsigned first_desc_id = pkt_nm->rx_desc_ring[index].s.first;
+	unsigned last_desc_id = pkt_nm->rx_desc_ring[index].s.last;
+	unsigned desc_id;
+	int num_desc = pkt_nm->rx_desc_ring[index].s.num;
+	int i;
+	int max_fd = 0;
+
+	if (odp_unlikely(pktio_entry->s.state != PKTIO_STATE_STARTED))
+		return 0;
+
+	if (!pkt_nm->lockless_rx)
+		odp_ticketlock_lock(&pkt_nm->rx_desc_ring[index].s.lock);
+
+	desc_id = pkt_nm->rx_desc_ring[index].s.cur;
+
+	for (i = 0; i < num_desc; i++) {
+		if (desc_id > last_desc_id)
+			desc_id = first_desc_id;
+
+		desc = pkt_nm->rx_desc_ring[index].s.desc[desc_id];
+
+		FD_SET(desc->fd, readfds);
+		if (desc->fd > max_fd)
+			max_fd = desc->fd;
+		desc_id++;
+	}
+	pkt_nm->rx_desc_ring[index].s.cur = desc_id;
+
+	if (!pkt_nm->lockless_rx)
+		odp_ticketlock_unlock(&pkt_nm->rx_desc_ring[index].s.lock);
+
+	return max_fd;
 }
 
 static int netmap_recv(pktio_entry_t *pktio_entry, int index,
@@ -786,6 +817,78 @@ static int netmap_recv(pktio_entry_t *pktio_entry, int index,
 	return num_rx;
 }
 
+static int netmap_recv_tmo(pktio_entry_t *pktio_entry, int index,
+			   odp_packet_t pkt_table[], int num, uint64_t usecs)
+{
+	struct timeval timeout;
+	int ret;
+	int maxfd;
+	fd_set readfds;
+
+	ret = netmap_recv(pktio_entry, index, pkt_table, num);
+	if (ret != 0)
+		return ret;
+
+	timeout.tv_sec = usecs / (1000 * 1000);
+	timeout.tv_usec = usecs - timeout.tv_sec * (1000ULL * 1000ULL);
+	FD_ZERO(&readfds);
+	maxfd = netmap_fd_set(pktio_entry, index, &readfds);
+
+	if (select(maxfd + 1, &readfds, NULL, NULL,
+		   usecs == ODP_PKTIN_WAIT ? NULL : &timeout) == 0)
+		return 0;
+
+	return netmap_recv(pktio_entry, index, pkt_table, num);
+}
+
+static int netmap_recv_mq_tmo(pktio_entry_t *pktio_entry[], int index[],
+			      int num_q, odp_packet_t pkt_table[], int num,
+			      unsigned *from, uint64_t usecs)
+{
+	struct timeval timeout;
+	int i;
+	int ret;
+	int maxfd = -1, maxfd2;
+	fd_set readfds;
+
+	for (i = 0; i < num_q; i++) {
+		ret = netmap_recv(pktio_entry[i], index[i], pkt_table, num);
+
+		if (ret > 0 && from)
+			*from = i;
+
+		if (ret != 0)
+			return ret;
+	}
+
+	FD_ZERO(&readfds);
+
+	for (i = 0; i < num_q; i++) {
+		maxfd2 = netmap_fd_set(pktio_entry[i], index[i], &readfds);
+		if (maxfd2 > maxfd)
+			maxfd = maxfd2;
+	}
+
+	timeout.tv_sec = usecs / (1000 * 1000);
+	timeout.tv_usec = usecs - timeout.tv_sec * (1000ULL * 1000ULL);
+
+	if (select(maxfd + 1, &readfds, NULL, NULL,
+		   usecs == ODP_PKTIN_WAIT ? NULL : &timeout) == 0)
+		return 0;
+
+	for (i = 0; i < num_q; i++) {
+		ret = netmap_recv(pktio_entry[i], index[i], pkt_table, num);
+
+		if (ret > 0 && from)
+			*from = i;
+
+		if (ret != 0)
+			return ret;
+	}
+
+	return 0;
+}
+
 static int netmap_send(pktio_entry_t *pktio_entry, int index,
 		       const odp_packet_t pkt_table[], int num)
 {
@@ -835,7 +938,7 @@ static int netmap_send(pktio_entry_t *pktio_entry, int index,
 
 			buf = NETMAP_BUF(ring, ring->slot[slot_id].buf_idx);
 
-			if (odp_packet_copy_to_mem(pkt, 0, pkt_len, buf)) {
+			if (_odp_packet_copy_to_mem(pkt, 0, pkt_len, buf)) {
 				i = NM_INJECT_RETRIES;
 				break;
 			}
@@ -975,7 +1078,10 @@ const pktio_if_ops_t netmap_pktio_ops = {
 	.input_queues_config = netmap_input_queues_config,
 	.output_queues_config = netmap_output_queues_config,
 	.recv = netmap_recv,
-	.send = netmap_send
+	.recv_tmo = netmap_recv_tmo,
+	.recv_mq_tmo = netmap_recv_mq_tmo,
+	.send = netmap_send,
+	.fd_set = netmap_fd_set
 };
 
 #endif /* ODP_NETMAP */
