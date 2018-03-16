@@ -87,6 +87,13 @@ static inline uint32_t _odp_packet_len(odp_packet_t pkt)
 	return _odp_pkt_get(pkt, uint32_t, pkt_len);
 }
 
+static inline void *_odp_packet_data_seg_len(odp_packet_t pkt,
+					     uint32_t *seg_len)
+{
+	*seg_len = _odp_packet_seg_len(pkt);
+	return _odp_packet_data(pkt);
+}
+
 static inline uint32_t _odp_packet_headroom(odp_packet_t pkt)
 {
 	return rte_pktmbuf_headroom(&_odp_pkt_get(pkt, struct rte_mbuf, mb));
