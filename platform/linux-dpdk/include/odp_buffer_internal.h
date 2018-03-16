@@ -43,8 +43,6 @@ ODP_STATIC_ASSERT(CONFIG_PACKET_SEG_LEN_MIN >= 256,
 ODP_STATIC_ASSERT(CONFIG_PACKET_MAX_SEGS < 256,
 		  "Maximum of 255 segments supported");
 
-#define BUFFER_BURST_SIZE    CONFIG_BURST_SIZE
-
 struct odp_buffer_hdr_t {
 	/* Underlying DPDK rte_mbuf */
 	struct rte_mbuf mb;
@@ -61,24 +59,12 @@ struct odp_buffer_hdr_t {
 	/* Event type. Maybe different than pool type (crypto compl event) */
 	int8_t    event_type;
 
-	/* Burst counts */
-	uint8_t   burst_num;
-	uint8_t   burst_first;
-
-	/* Next buf in a list */
-	struct odp_buffer_hdr_t *next;
-
-	/* Burst table */
-	struct odp_buffer_hdr_t *burst[BUFFER_BURST_SIZE];
-
 	/* --- Mostly read only data --- */
 	const void *user_ptr;
 
 	/* Pool pointer */
 	void *pool_ptr;
 };
-
-ODP_STATIC_ASSERT(BUFFER_BURST_SIZE < 256, "BUFFER_BURST_SIZE_TOO_LARGE");
 
 int odp_buffer_snprint(char *str, uint32_t n, odp_buffer_t buf);
 
