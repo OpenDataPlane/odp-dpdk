@@ -559,7 +559,6 @@ static odp_buffer_t buffer_alloc(pool_t *pool)
 	}
 
 	buf_hdr = mbuf_to_buf_hdr(mbuf);
-	buf_hdr->next = NULL;
 
 	return buf_from_buf_hdr(buf_hdr);
 }
