@@ -1505,23 +1505,6 @@ int packet_parse_layer(odp_packet_hdr_t *pkt_hdr,
 	return packet_parse_common(&pkt_hdr->p, base, len, seg_len, layer);
 }
 
-int packet_parse_l3_l4(odp_packet_hdr_t *pkt_hdr,
-		       odp_proto_layer_t layer,
-		       uint32_t l3_offset,
-		       uint16_t ethtype)
-{
-	uint32_t seg_len = 0;
-	void *base = _odp_packet_offset((odp_packet_t)pkt_hdr, l3_offset,
-					&seg_len, NULL);
-
-	if (seg_len == 0)
-		return -1;
-
-	return packet_parse_common_l3_l4(&pkt_hdr->p, base, l3_offset,
-					 packet_len(pkt_hdr), seg_len,
-					 layer, ethtype);
-}
-
 int odp_packet_parse(odp_packet_t pkt, uint32_t offset,
 		     const odp_packet_parse_param_t *param)
 {
