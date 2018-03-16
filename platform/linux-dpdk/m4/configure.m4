@@ -27,8 +27,11 @@ AC_ARG_WITH([dpdk-path],
 ODP_DPDK([$DPDK_PATH], [],
 	 [AC_MSG_FAILURE([can't find DPDK])])
 
-AS_CASE($host_cpu, [x86_64],
-	[AS_VAR_APPEND([DPDK_CPPFLAGS], [" -msse4.2"])])
+case "${host}" in
+  i?86* | x86*)
+    DPDK_CPPFLAGS="${DPDK_CPPFLAGS} -msse4.2"
+  ;;
+esac
 
 AC_CONFIG_COMMANDS_PRE([dnl
 AM_CONDITIONAL([PLATFORM_IS_LINUX_DPDK],
