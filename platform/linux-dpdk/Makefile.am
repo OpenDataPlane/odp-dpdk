@@ -26,6 +26,8 @@ odpapiplatinclude_HEADERS = \
 		  include/odp/api/plat/std_clib_inlines.h \
 		  include/odp/api/plat/strong_types.h \
 		  include/odp/api/plat/sync_inlines.h \
+		  include/odp/api/plat/thread_inlines.h \
+		  include/odp/api/plat/thread_inlines_api.h \
 		  include/odp/api/plat/ticketlock_inlines.h \
 		  include/odp/api/plat/ticketlock_inlines_api.h
 
@@ -172,6 +174,7 @@ __LIB__libodp_dpdk_la_SOURCES += \
 			   ../linux-generic/odp_packet_flags_api.c \
 			   odp_std_clib.c \
 			   ../linux-generic/odp_sync.c \
+			   ../linux-generic/odp_thread_api.c \
 			   ../linux-generic/odp_ticketlock.c
 endif
 
