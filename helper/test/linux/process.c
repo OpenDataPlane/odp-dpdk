@@ -1,4 +1,4 @@
-/* Copyright (c) 2015, Linaro Limited
+/* Copyright (c) 2015-2018, Linaro Limited
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -10,6 +10,8 @@
 #include <odp_api.h>
 #include <odp/helper/linux/pthread.h>
 #include <odp/helper/linux/process.h>
+
+#include <string.h>
 
 #define NUMBER_WORKERS 16 /* 0 = max */
 

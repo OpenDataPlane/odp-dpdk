@@ -1,4 +1,4 @@
-/* Copyright (c) 2013, Linaro Limited
+/* Copyright (c) 2013-2018, Linaro Limited
  * Copyright (c) 2013, Nokia Solutions and Networks
  * All rights reserved.
  *
@@ -143,7 +143,7 @@ uint32_t mtu_get_fd(int fd, const char *name)
 			ifr.ifr_name);
 		return 0;
 	}
-	return ifr.ifr_mtu;
+	return ifr.ifr_mtu + _ODP_ETHHDR_LEN;
 }
 
 /*
@@ -601,15 +601,15 @@ static uint32_t _rx_pkt_to_iovec(odp_packet_t pkt,
  * ODP_PACKET_SOCKET_MMSG:
  */
 static int sock_mmsg_recv(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
-			  odp_packet_t pkt_table[], int len)
+			  odp_packet_t pkt_table[], int num)
 {
 	pkt_sock_t *pkt_sock = &pktio_entry->s.pkt_sock;
 	odp_pool_t pool = pkt_sock->pool;
 	odp_time_t ts_val;
 	odp_time_t *ts = NULL;
 	const int sockfd = pkt_sock->sockfd;
-	struct mmsghdr msgvec[len];
-	struct iovec iovecs[len][MAX_SEGS];
+	struct mmsghdr msgvec[num];
+	struct iovec iovecs[num][MAX_SEGS];
 	int nb_rx = 0;
 	int nb_pkts;
 	int recv_msgs;
@@ -623,7 +623,7 @@ static int sock_mmsg_recv(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 
 	memset(msgvec, 0, sizeof(msgvec));
 
-	nb_pkts = packet_alloc_multi(pool, pkt_sock->mtu, pkt_table, len);
+	nb_pkts = packet_alloc_multi(pool, pkt_sock->mtu, pkt_table, num);
 	for (i = 0; i < nb_pkts; i++) {
 		msgvec[i].msg_hdr.msg_iovlen =
 			_rx_pkt_to_iovec(pkt_table[i], iovecs[i]);
@@ -639,10 +639,15 @@ static int sock_mmsg_recv(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 		void *base = msgvec[i].msg_hdr.msg_iov->iov_base;
 		struct ethhdr *eth_hdr = base;
 		odp_packet_t pkt = pkt_table[i];
-		odp_packet_hdr_t *pkt_hdr = odp_packet_hdr(pkt);
+		odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
 		uint16_t pkt_len = msgvec[i].msg_len;
 		int ret;
 
+		if (odp_unlikely(msgvec[i].msg_hdr.msg_flags & MSG_TRUNC)) {
+			odp_packet_free(pkt);
+			ODP_DBG("dropped truncated packet\n");
+			continue;
+		}
 		if (pktio_cls_enabled(pktio_entry)) {
 			uint16_t seg_len =  pkt_len;
 
@@ -693,6 +698,87 @@ static int sock_mmsg_recv(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 	return nb_rx;
 }
 
+static int sock_fd_set(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
+		       fd_set *readfds)
+{
+	pkt_sock_t *pkt_sock = &pktio_entry->s.pkt_sock;
+	const int sockfd = pkt_sock->sockfd;
+
+	FD_SET(sockfd, readfds);
+	return sockfd;
+}
+
+static int sock_recv_tmo(pktio_entry_t *pktio_entry, int index,
+			 odp_packet_t pkt_table[], int num, uint64_t usecs)
+{
+	struct timeval timeout;
+	int ret;
+	int maxfd;
+	fd_set readfds;
+
+	ret = sock_mmsg_recv(pktio_entry, index, pkt_table, num);
+	if (ret != 0)
+		return ret;
+
+	timeout.tv_sec = usecs / (1000 * 1000);
+	timeout.tv_usec = usecs - timeout.tv_sec * (1000ULL * 1000ULL);
+
+	FD_ZERO(&readfds);
+	maxfd = sock_fd_set(pktio_entry, index, &readfds);
+
+	if (select(maxfd + 1, &readfds, NULL, NULL, &timeout) == 0)
+		return 0;
+
+	return sock_mmsg_recv(pktio_entry, index, pkt_table, num);
+}
+
+static int sock_recv_mq_tmo(pktio_entry_t *pktio_entry[], int index[],
+			    int num_q, odp_packet_t pkt_table[], int num,
+			    unsigned *from, uint64_t usecs)
+{
+	struct timeval timeout;
+	int i;
+	int ret;
+	int maxfd = -1, maxfd2;
+	fd_set readfds;
+
+	for (i = 0; i < num_q; i++) {
+		ret = sock_mmsg_recv(pktio_entry[i], index[i], pkt_table, num);
+
+		if (ret > 0 && from)
+			*from = i;
+
+		if (ret != 0)
+			return ret;
+	}
+
+	timeout.tv_sec = usecs / (1000 * 1000);
+	timeout.tv_usec = usecs - timeout.tv_sec * (1000ULL * 1000ULL);
+
+	FD_ZERO(&readfds);
+
+	for (i = 0; i < num_q; i++) {
+		maxfd2 = sock_fd_set(pktio_entry[i], index[i], &readfds);
+		if (maxfd2 > maxfd)
+			maxfd = maxfd2;
+	}
+
+	if (select(maxfd + 1, &readfds, NULL, NULL, &timeout) == 0)
+		return 0;
+
+	for (i = 0; i < num_q; i++) {
+		ret = sock_mmsg_recv(pktio_entry[i], index[i], pkt_table, num);
+
+		if (ret > 0 && from)
+			*from = i;
+
+		if (ret != 0)
+			return ret;
+	}
+
+	return 0;
+}
+
 static uint32_t _tx_pkt_to_iovec(odp_packet_t pkt,
 				 struct iovec iovecs[MAX_SEGS])
 {
@@ -716,11 +802,11 @@ static uint32_t _tx_pkt_to_iovec(odp_packet_t pkt,
  * ODP_PACKET_SOCKET_MMSG:
  */
 static int sock_mmsg_send(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
-			  const odp_packet_t pkt_table[], int len)
+			  const odp_packet_t pkt_table[], int num)
 {
 	pkt_sock_t *pkt_sock = &pktio_entry->s.pkt_sock;
-	struct mmsghdr msgvec[len];
-	struct iovec iovecs[len][MAX_SEGS];
+	struct mmsghdr msgvec[num];
+	struct iovec iovecs[num][MAX_SEGS];
 	int ret;
 	int sockfd;
 	int n, i;
@@ -730,14 +816,14 @@ static int sock_mmsg_send(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 	sockfd = pkt_sock->sockfd;
 	memset(msgvec, 0, sizeof(msgvec));
 
-	for (i = 0; i < len; i++) {
+	for (i = 0; i < num; i++) {
 		msgvec[i].msg_hdr.msg_iov = iovecs[i];
 		msgvec[i].msg_hdr.msg_iovlen = _tx_pkt_to_iovec(pkt_table[i],
 				iovecs[i]);
 	}
 
-	for (i = 0; i < len; ) {
-		ret = sendmmsg(sockfd, &msgvec[i], len - i, MSG_DONTWAIT);
+	for (i = 0; i < num; ) {
+		ret = sendmmsg(sockfd, &msgvec[i], num - i, MSG_DONTWAIT);
 		if (odp_unlikely(ret <= -1)) {
 			if (i == 0 && SOCK_ERR_REPORT(errno)) {
 				__odp_errno = errno;
@@ -868,6 +954,9 @@ const pktio_if_ops_t sock_mmsg_pktio_ops = {
 	.stats = sock_stats,
 	.stats_reset = sock_stats_reset,
 	.recv = sock_mmsg_recv,
+	.recv_tmo = sock_recv_tmo,
+	.recv_mq_tmo = sock_recv_mq_tmo,
+	.fd_set = sock_fd_set,
 	.send = sock_mmsg_send,
 	.mtu_get = sock_mtu_get,
 	.promisc_mode_set = sock_promisc_mode_set,

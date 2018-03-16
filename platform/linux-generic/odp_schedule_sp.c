@@ -1,4 +1,4 @@
-/* Copyright (c) 2016, Linaro Limited
+/* Copyright (c) 2016-2018, Linaro Limited
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -61,20 +61,20 @@ struct sched_cmd_s {
 	int                pktin_idx[NUM_PKTIN];
 };
 
-typedef struct sched_cmd_t {
+typedef struct ODP_ALIGNED_CACHE sched_cmd_t {
 	struct sched_cmd_s s;
 	uint8_t            pad[ROUNDUP_CACHE_LINE(sizeof(struct sched_cmd_s)) -
 			       sizeof(struct sched_cmd_s)];
-} sched_cmd_t ODP_ALIGNED_CACHE;
+} sched_cmd_t;
 
-typedef struct {
+typedef struct ODP_ALIGNED_CACHE {
 	/* Ring header */
 	ring_t ring;
 
 	/* Ring data: queue indexes */
 	uint32_t ring_idx[RING_SIZE];
 
-} prio_queue_t ODP_ALIGNED_CACHE;
+} prio_queue_t;
 
 typedef struct thr_group_t {
 	/* A generation counter for fast comparison if groups have changed */
@@ -88,7 +88,7 @@ typedef struct thr_group_t {
 
 } thr_group_t;
 
-typedef struct sched_group_t {
+typedef struct ODP_ALIGNED_CACHE sched_group_t {
 	struct {
 		odp_ticketlock_t  lock;
 
@@ -104,7 +104,7 @@ typedef struct sched_group_t {
 
 	} s;
 
-} sched_group_t ODP_ALIGNED_CACHE;
+} sched_group_t;
 
 typedef struct {
 	sched_cmd_t   queue_cmd[NUM_QUEUE];
@@ -829,6 +829,16 @@ static void schedule_order_unlock_lock(uint32_t unlock_index,
 	(void)lock_index;
 }
 
+static void schedule_order_lock_start(uint32_t lock_index)
+{
+	(void)lock_index;
+}
+
+static void schedule_order_lock_wait(uint32_t lock_index)
+{
+	(void)lock_index;
+}
+
 static void order_lock(void)
 {
 }
@@ -879,5 +889,7 @@ const schedule_api_t schedule_sp_api = {
 	.schedule_group_info      = schedule_group_info,
 	.schedule_order_lock      = schedule_order_lock,
 	.schedule_order_unlock    = schedule_order_unlock,
-	.schedule_order_unlock_lock	= schedule_order_unlock_lock
+	.schedule_order_unlock_lock	= schedule_order_unlock_lock,
+	.schedule_order_lock_start	= schedule_order_lock_start,
+	.schedule_order_lock_wait	= schedule_order_lock_wait
 };

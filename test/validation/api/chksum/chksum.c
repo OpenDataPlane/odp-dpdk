@@ -1,4 +1,4 @@
-/* Copyright (c) 2017, Linaro Limited
+/* Copyright (c) 2017-2018, Linaro Limited
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -6,7 +6,6 @@
 
 #include <odp_api.h>
 #include <odp_cunit_common.h>
-#include "chksum.h"
 
 #define NUM_IP_HDR   5
 #define IP_HDR_LEN   20
@@ -14,7 +13,7 @@
 #define NUM_UDP      4
 #define MAX_UDP_LEN  128
 
-static uint8_t ip_hdr_test_vect[NUM_IP_HDR][IP_HDR_LEN] ODP_ALIGNED(4) = {
+static uint8_t ODP_ALIGNED(4) ip_hdr_test_vect[NUM_IP_HDR][IP_HDR_LEN] = {
 	{	0x45, 0x00, 0x00, 0x2E, 0x00, 0x00, 0x00, 0x00, 0x40, 0x11,
 		0xAB, 0x33, 0xC0, 0xA8, 0x2C, 0xA2, 0xC0, 0xA8, 0x21, 0x99
 	},
@@ -38,7 +37,7 @@ struct udp_test_vect_s {
 	uint8_t data[MAX_UDP_LEN];
 };
 
-static struct udp_test_vect_s udp_test_vect[NUM_UDP] ODP_ALIGNED(4) = {
+static struct udp_test_vect_s ODP_ALIGNED(4) udp_test_vect[NUM_UDP] = {
 	{.len = 38,
 	.data = { 0x00, 0x11, 0x00, 0x1A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 		  0x00, 0x00, 0x00, 0x3F, 0x00, 0x3F, 0x00, 0x1A, 0xFF, 0x3C,
@@ -86,7 +85,7 @@ static struct udp_test_vect_s udp_test_vect[NUM_UDP] ODP_ALIGNED(4) = {
 /* Long UDP packet with pseudo header. Checksum field is set to zero.
  * The array contains padding, so that a possible overrun is more likely
  * detected (overrun bytes are not all zeros). */
-static uint8_t udp_test_vect_long[] ODP_ALIGNED(4) = {
+static uint8_t ODP_ALIGNED(4) udp_test_vect_long[] = {
 	0x00, 0x11, 0x05, 0xED, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 	0x00, 0x00, 0x00, 0x3F, 0x00, 0x3F, 0x05, 0xED, 0x00, 0x00,
 	0x0B, 0x2C, 0x9C, 0x06, 0x07, 0xF3, 0x51, 0x05, 0xF7, 0xA7,
@@ -244,7 +243,7 @@ static uint8_t udp_test_vect_long[] ODP_ALIGNED(4) = {
 };
 
 /* Test ones complement sum with IPv4 headers */
-void chksum_ones_complement_ip(void)
+static void chksum_ones_complement_ip(void)
 {
 	int i;
 	uint16_t sum, res;
@@ -258,7 +257,7 @@ void chksum_ones_complement_ip(void)
 }
 
 /* Test ones complement sum with various length pseudo UDP packets */
-void chksum_ones_complement_udp(void)
+static void chksum_ones_complement_udp(void)
 {
 	int i;
 	uint16_t sum, res;
@@ -273,7 +272,7 @@ void chksum_ones_complement_udp(void)
 }
 
 /* Test ones complement sum with a long pseudo UDP packet */
-void chksum_ones_complement_udp_long(void)
+static void chksum_ones_complement_udp_long(void)
 {
 	int i;
 	uint16_t sum, res;
@@ -326,7 +325,7 @@ odp_suiteinfo_t chksum_suites[] = {
 	ODP_SUITE_INFO_NULL
 };
 
-int chksum_main(int argc, char *argv[])
+int main(int argc, char *argv[])
 {
 	int ret;
 

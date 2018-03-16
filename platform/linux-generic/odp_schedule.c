@@ -1,4 +1,4 @@
-/* Copyright (c) 2013, Linaro Limited
+/* Copyright (c) 2013-2018, Linaro Limited
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -177,24 +177,24 @@ typedef struct {
 } sched_local_t;
 
 /* Priority queue */
-typedef struct {
+typedef struct ODP_ALIGNED_CACHE {
 	/* Ring header */
 	ring_t ring;
 
 	/* Ring data: queue indexes */
 	uint32_t queue_index[PRIO_QUEUE_RING_SIZE];
 
-} prio_queue_t ODP_ALIGNED_CACHE;
+} prio_queue_t;
 
 /* Packet IO queue */
-typedef struct {
+typedef struct ODP_ALIGNED_CACHE {
 	/* Ring header */
 	ring_t ring;
 
 	/* Ring data: pktio poll command indexes */
 	uint32_t cmd_index[PKTIO_RING_SIZE];
 
-} pktio_queue_t ODP_ALIGNED_CACHE;
+} pktio_queue_t;
 
 /* Packet IO poll command */
 typedef struct {
@@ -205,17 +205,17 @@ typedef struct {
 } pktio_cmd_t;
 
 /* Order context of a queue */
-typedef struct {
+typedef struct ODP_ALIGNED_CACHE {
 	/* Current ordered context id */
-	odp_atomic_u64_t  ctx ODP_ALIGNED_CACHE;
+	odp_atomic_u64_t ODP_ALIGNED_CACHE ctx;
 
 	/* Next unallocated context id */
-	odp_atomic_u64_t  next_ctx;
+	odp_atomic_u64_t next_ctx;
 
 	/* Array of ordered locks */
-	odp_atomic_u64_t  lock[CONFIG_QUEUE_MAX_ORD_LOCKS];
+	odp_atomic_u64_t lock[CONFIG_QUEUE_MAX_ORD_LOCKS];
 
-} order_context_t ODP_ALIGNED_CACHE;
+} order_context_t;
 
 typedef struct {
 	pri_mask_t     pri_mask[NUM_PRIO];
@@ -1152,6 +1152,16 @@ static void schedule_order_unlock_lock(uint32_t unlock_index,
 	schedule_order_lock(lock_index);
 }
 
+static void schedule_order_lock_start(uint32_t lock_index)
+{
+	(void)lock_index;
+}
+
+static void schedule_order_lock_wait(uint32_t lock_index)
+{
+	schedule_order_lock(lock_index);
+}
+
 static void schedule_pause(void)
 {
 	sched_local.pause = 1;
@@ -1438,5 +1448,7 @@ const schedule_api_t schedule_default_api = {
 	.schedule_group_info      = schedule_group_info,
 	.schedule_order_lock      = schedule_order_lock,
 	.schedule_order_unlock    = schedule_order_unlock,
-	.schedule_order_unlock_lock    = schedule_order_unlock_lock
+	.schedule_order_unlock_lock    = schedule_order_unlock_lock,
+	.schedule_order_lock_start	= schedule_order_lock_start,
+	.schedule_order_lock_wait      = schedule_order_lock_wait
 };

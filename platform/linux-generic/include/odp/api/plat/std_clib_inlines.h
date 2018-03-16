@@ -1,4 +1,4 @@
-/* Copyright (c) 2016, Linaro Limited
+/* Copyright (c) 2016-2018, Linaro Limited
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -11,7 +11,6 @@
 extern "C" {
 #endif
 
-#include <odp/api/spec/std_types.h>
 #include <string.h>
 
 _ODP_INLINE void *odp_memcpy(void *dst, const void *src, size_t num)

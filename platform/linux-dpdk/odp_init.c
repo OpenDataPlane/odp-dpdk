@@ -1,4 +1,4 @@
-/* Copyright (c) 2013, Linaro Limited
+/* Copyright (c) 2013-2018, Linaro Limited
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -195,7 +195,7 @@ int odp_init_global(odp_instance_t *instance,
 	}
 	stage = SYSINFO_INIT;
 
-	if (_odp_shm_init_global()) {
+	if (_odp_shm_init_global(params)) {
 		ODP_ERR("ODP shm init failed.\n");
 		goto init_failed;
 	}
@@ -446,6 +446,12 @@ int odp_init_local(odp_instance_t instance, odp_thread_type_t thr_type)
 	}
 	stage = PKTIO_INIT;
 
+	if (_odp_crypto_init_local()) {
+		ODP_ERR("ODP crypto local init failed.\n");
+		goto init_fail;
+	}
+	stage = CRYPTO_INIT;
+
 	if (odp_pool_init_local()) {
 		ODP_ERR("ODP pool local init failed.\n");
 		goto init_fail;
@@ -494,6 +500,13 @@ int _odp_term_local(enum init_stage stage)
 	case QUEUE_INIT:
 		if (queue_fn->term_local()) {
 			ODP_ERR("ODP queue local term failed.\n");
+			rc = -1;
+		}
+		/* Fall through */
+
+	case CRYPTO_INIT:
+		if (_odp_crypto_term_local()) {
+			ODP_ERR("ODP crypto local term failed.\n");
 			rc = -1;
 		}
 		/* Fall through */

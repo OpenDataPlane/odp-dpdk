@@ -1,4 +1,4 @@
-/* Copyright (c) 2013, Linaro Limited
+/* Copyright (c) 2013-2018, Linaro Limited
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -10,6 +10,7 @@
 #define _GNU_SOURCE
 #endif
 #include <sched.h>
+#include <string.h>
 #include <unistd.h>
 #include <sys/wait.h>
 #include <sys/prctl.h>

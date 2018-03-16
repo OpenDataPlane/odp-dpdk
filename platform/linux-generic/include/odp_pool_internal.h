@@ -1,4 +1,4 @@
-/* Copyright (c) 2013, Linaro Limited
+/* Copyright (c) 2013-2018, Linaro Limited
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -26,27 +26,27 @@ extern "C" {
 #include <odp_ring_internal.h>
 #include <odp/api/plat/strong_types.h>
 
-typedef struct pool_cache_t {
+typedef struct ODP_ALIGNED_CACHE pool_cache_t {
 	uint32_t num;
 	uint32_t buf_index[CONFIG_POOL_CACHE_SIZE];
 
-} pool_cache_t ODP_ALIGNED_CACHE;
+} pool_cache_t;
 
 /* Buffer header ring */
-typedef struct {
+typedef struct ODP_ALIGNED_CACHE {
 	/* Ring header */
 	ring_t   hdr;
 
 	/* Ring data: buffer handles */
 	uint32_t buf[CONFIG_POOL_MAX_NUM];
 
-} pool_ring_t ODP_ALIGNED_CACHE;
+} pool_ring_t;
 
 /* Callback function for pool destroy */
 typedef void (*pool_destroy_cb_fn)(void *pool);
 
 typedef struct pool_t {
-	odp_ticketlock_t lock ODP_ALIGNED_CACHE;
+	odp_ticketlock_t ODP_ALIGNED_CACHE lock;
 
 	char             name[ODP_POOL_NAME_LEN];
 	odp_pool_param_t params;
@@ -55,6 +55,8 @@ typedef struct pool_t {
 	uint32_t         ring_mask;
 	odp_shm_t        shm;
 	odp_shm_t        uarea_shm;
+	uint64_t         shm_size;
+	uint64_t         uarea_shm_size;
 	int              reserved;
 	uint32_t         num;
 	uint32_t         align;
@@ -65,8 +67,6 @@ typedef struct pool_t {
 	uint32_t         max_len;
 	uint32_t         uarea_size;
 	uint32_t         block_size;
-	uint32_t         shm_size;
-	uint32_t         uarea_shm_size;
 	uint8_t         *base_addr;
 	uint8_t         *uarea_base_addr;
 

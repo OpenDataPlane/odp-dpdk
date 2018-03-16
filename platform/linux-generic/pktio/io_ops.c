@@ -1,4 +1,4 @@
-/* Copyright (c) 2013, Linaro Limited
+/* Copyright (c) 2013-2018, Linaro Limited
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -25,6 +25,7 @@ const pktio_if_ops_t * const pktio_if_ops[]  = {
 #endif
 	&ipc_pktio_ops,
 	&tap_pktio_ops,
+	&null_pktio_ops,
 	&sock_mmap_pktio_ops,
 	&sock_mmsg_pktio_ops,
 	NULL

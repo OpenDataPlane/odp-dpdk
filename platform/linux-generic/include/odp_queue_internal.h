@@ -1,4 +1,4 @@
-/* Copyright (c) 2013, Linaro Limited
+/* Copyright (c) 2013-2018, Linaro Limited
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -18,6 +18,7 @@
 extern "C" {
 #endif
 
+#include <odp/api/plat/strong_types.h>
 #include <odp/api/queue.h>
 #include <odp_forward_typedefs_internal.h>
 #include <odp_queue_if.h>
@@ -36,13 +37,13 @@ extern "C" {
 #define QUEUE_STATUS_SCHED        4
 
 struct queue_entry_s {
-	odp_ticketlock_t  lock ODP_ALIGNED_CACHE;
+	odp_ticketlock_t  ODP_ALIGNED_CACHE lock;
 
 	odp_buffer_hdr_t *head;
 	odp_buffer_hdr_t *tail;
 	int               status;
 
-	queue_enq_fn_t       enqueue ODP_ALIGNED_CACHE;
+	queue_enq_fn_t       ODP_ALIGNED_CACHE enqueue;
 	queue_deq_fn_t       dequeue;
 	queue_enq_multi_fn_t enqueue_multi;
 	queue_deq_multi_fn_t dequeue_multi;
@@ -53,6 +54,7 @@ struct queue_entry_s {
 	odp_queue_param_t param;
 	odp_pktin_queue_t pktin;
 	odp_pktout_queue_t pktout;
+	void             *queue_lf;
 	char              name[ODP_QUEUE_NAME_LEN];
 };
 

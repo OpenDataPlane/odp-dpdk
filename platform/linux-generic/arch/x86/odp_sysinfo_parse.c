@@ -1,4 +1,4 @@
-/* Copyright (c) 2016, Linaro Limited
+/* Copyright (c) 2016-2018, Linaro Limited
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -7,7 +7,7 @@
 #include "config.h"
 
 #include <odp_internal.h>
-#include <cpu_flags.h>
+#include "cpu_flags.h"
 #include <string.h>
 
 int cpuinfo_parser(FILE *file, system_info_t *sysinfo)

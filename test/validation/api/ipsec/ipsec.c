@@ -1,4 +1,4 @@
-/* Copyright (c) 2017, Linaro Limited
+/* Copyright (c) 2017-2018, Linaro Limited
  * All rights reserved.
  *
  * SPDX-License-Identifier:	 BSD-3-Clause
@@ -177,6 +177,10 @@ int ipsec_check(odp_bool_t ah,
 		if (!capa.ciphers.bit.aes_gcm)
 			return ODP_TEST_INACTIVE;
 		break;
+	case ODP_CIPHER_ALG_CHACHA20_POLY1305:
+		if (!capa.ciphers.bit.chacha20_poly1305)
+			return ODP_TEST_INACTIVE;
+		break;
 	default:
 		fprintf(stderr, "Unsupported cipher algorithm\n");
 		return ODP_TEST_INACTIVE;
@@ -210,6 +214,10 @@ int ipsec_check(odp_bool_t ah,
 		break;
 	case ODP_AUTH_ALG_AES_GMAC:
 		if (!capa.auths.bit.aes_gmac)
+			return ODP_TEST_INACTIVE;
+		break;
+	case ODP_AUTH_ALG_CHACHA20_POLY1305:
+		if (!capa.auths.bit.chacha20_poly1305)
 			return ODP_TEST_INACTIVE;
 		break;
 	default:
@@ -311,6 +319,12 @@ int ipsec_check_esp_null_aes_gmac_128(void)
 {
 	return  ipsec_check_esp(ODP_CIPHER_ALG_NULL, 0,
 				ODP_AUTH_ALG_AES_GMAC, 128);
+}
+
+int ipsec_check_esp_chacha20_poly1305(void)
+{
+	return  ipsec_check_esp(ODP_CIPHER_ALG_CHACHA20_POLY1305, 256,
+				ODP_AUTH_ALG_CHACHA20_POLY1305, 0);
 }
 
 void ipsec_sa_param_fill(odp_ipsec_sa_param_t *param,
@@ -789,14 +803,14 @@ static int ipsec_suite_term(odp_testinfo_t *suite)
 	if (suite_context.pktio != ODP_PKTIO_INVALID)
 		pktio_stop(suite_context.pktio);
 
-	for (i = 0; suite[i].pName; i++) {
+	for (i = 0; suite[i].name; i++) {
 		if (suite[i].check_active &&
 		    suite[i].check_active() == ODP_TEST_INACTIVE) {
 			if (first) {
 				first = 0;
 				printf("\n\n  Inactive tests:\n");
 			}
-			printf("    %s\n", suite[i].pName);
+			printf("    %s\n", suite[i].name);
 		}
 	}
 

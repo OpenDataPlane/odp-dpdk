@@ -1,4 +1,4 @@
-# Copyright (c) 2016, Linaro Limited
+# Copyright (c) 2016-2018, Linaro Limited
 # All rights reserved.
 # SPDX-License-Identifier:     BSD-3-Clause
 #
@@ -209,6 +209,7 @@ jobs:
                             --with-dpdk-path=`pwd`/dpdk/${TARGET}
                           - make -j $(nproc)
                 - stage: test
+                  canfail: yes
                   env: TEST=checkpatch
                   compiler: gcc
                   install:
@@ -217,6 +218,8 @@ jobs:
                           - echo ${TRAVIS_COMMIT_RANGE};
                           - ODP_PATCHES=`echo ${TRAVIS_COMMIT_RANGE} | sed 's/\.//'`;
                           - ./scripts/ci-checkpatches.sh ${ODP_PATCHES};
+        allow_failures:
+          - canfail: yes
 
 after_failure:
   - cat config.log

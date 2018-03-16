@@ -1,4 +1,4 @@
-/* Copyright (c) 2017, Linaro Limited
+/* Copyright (c) 2017-2018, Linaro Limited
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -500,6 +500,48 @@ static void test_out_ipv4_esp_null_aes_gmac_128(void)
 	ipsec_sa_destroy(sa);
 }
 
+static void test_out_ipv4_esp_chacha20_poly1305(void)
+{
+	odp_ipsec_sa_param_t param;
+	odp_ipsec_sa_t sa;
+	odp_ipsec_sa_t sa2;
+
+	ipsec_sa_param_fill(&param,
+			    false, false, 123, NULL,
+			    ODP_CIPHER_ALG_CHACHA20_POLY1305, &key_rfc7634,
+			    ODP_AUTH_ALG_CHACHA20_POLY1305, NULL,
+			    &key_rfc7634_salt);
+
+	sa = odp_ipsec_sa_create(&param);
+
+	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+
+	ipsec_sa_param_fill(&param,
+			    true, false, 123, NULL,
+			    ODP_CIPHER_ALG_CHACHA20_POLY1305, &key_rfc7634,
+			    ODP_AUTH_ALG_CHACHA20_POLY1305, NULL,
+			    &key_rfc7634_salt);
+
+	sa2 = odp_ipsec_sa_create(&param);
+
+	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa2);
+
+	ipsec_test_part test = {
+		.pkt_in = &pkt_ipv4_icmp_0,
+		.out_pkt = 1,
+		.out = {
+			{ .status.warn.all = 0,
+			  .status.error.all = 0,
+			  .pkt_out = &pkt_ipv4_icmp_0 },
+		},
+	};
+
+	ipsec_check_out_in_one(&test, sa, sa2);
+
+	ipsec_sa_destroy(sa2);
+	ipsec_sa_destroy(sa);
+}
+
 static void test_out_ipv4_ah_sha256_frag_check(void)
 {
 	odp_ipsec_sa_param_t param;
@@ -530,7 +572,7 @@ static void test_out_ipv4_ah_sha256_frag_check(void)
 	ipsec_test_part test2 = {
 		.pkt_in = &pkt_ipv4_icmp_0,
 		.num_opt = 1,
-		.opt = { .mode = ODP_IPSEC_FRAG_DISABLED, },
+		.opt = { .frag_mode = ODP_IPSEC_FRAG_DISABLED, },
 		.out_pkt = 1,
 		.out = {
 			{ .status.warn.all = 0,
@@ -623,7 +665,7 @@ static void test_out_ipv4_esp_null_sha256_frag_check(void)
 	ipsec_test_part test2 = {
 		.pkt_in = &pkt_ipv4_icmp_0,
 		.num_opt = 1,
-		.opt = { .mode = ODP_IPSEC_FRAG_DISABLED, },
+		.opt = { .frag_mode = ODP_IPSEC_FRAG_DISABLED, },
 		.out_pkt = 1,
 		.out = {
 			{ .status.warn.all = 0,
@@ -978,6 +1020,8 @@ odp_testinfo_t ipsec_out_suite[] = {
 				  ipsec_check_ah_aes_gmac_128),
 	ODP_TEST_INFO_CONDITIONAL(test_out_ipv4_esp_null_aes_gmac_128,
 				  ipsec_check_esp_null_aes_gmac_128),
+	ODP_TEST_INFO_CONDITIONAL(test_out_ipv4_esp_chacha20_poly1305,
+				  ipsec_check_esp_chacha20_poly1305),
 	ODP_TEST_INFO_CONDITIONAL(test_out_ipv4_ah_sha256_frag_check,
 				  ipsec_check_ah_sha256),
 	ODP_TEST_INFO_CONDITIONAL(test_out_ipv4_ah_sha256_frag_check_2,

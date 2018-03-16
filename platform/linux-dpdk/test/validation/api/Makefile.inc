@@ -1,1 +1,1 @@
-include $(top_srcdir)/platform/linux-dpdk/test/validation/Makefile.inc
+include $(top_srcdir)/test/validation/api/Makefile.inc

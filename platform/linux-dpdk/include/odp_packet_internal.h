@@ -1,4 +1,4 @@
-/* Copyright (c) 2014, Linaro Limited
+/* Copyright (c) 2014-2018, Linaro Limited
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -25,11 +25,12 @@ extern "C" {
 #include <odp_buffer_inlines.h>
 #include <odp_pool_internal.h>
 #include <odp/api/packet.h>
+#include <odp/api/plat/packet_inline_types.h>
 #include <odp/api/packet_io.h>
 #include <odp/api/crypto.h>
-#include <odp/api/ipsec.h>
+#include <odp_ipsec_internal.h>
+#include <odp/api/abi/packet.h>
 #include <protocols/eth.h>
-#include <odp/api/plat/packet_types.h>
 #include <odp_queue_if.h>
 
 #include <rte_acl_osdep.h>
@@ -40,31 +41,8 @@ extern "C" {
 ODP_STATIC_ASSERT(sizeof(_odp_packet_input_flags_t) == sizeof(uint64_t),
 		  "INPUT_FLAGS_SIZE_ERROR");
 
-/**
- * Packet error flags
- */
-typedef union {
-	/* All error flags */
-	uint32_t all;
-
-	struct {
-		/* Bitfield flags for each detected error */
-		uint32_t app_error:1; /**< Error bit for application use */
-		uint32_t frame_len:1; /**< Frame length error */
-		uint32_t snap_len:1;  /**< Snap length error */
-		uint32_t l2_chksum:1; /**< L2 checksum error, checks TBD */
-		uint32_t ip_err:1;    /**< IP error,  checks TBD */
-		uint32_t l3_chksum:1; /**< L3 checksum error */
-		uint32_t tcp_err:1;   /**< TCP error, checks TBD */
-		uint32_t udp_err:1;   /**< UDP error, checks TBD */
-		uint32_t ipsec_err:1; /**< IPsec error */
-		uint32_t crypto_err:1; /**< Crypto packet operation error */
-		uint32_t l4_chksum:1; /**< L4 checksum error */
-	};
-} error_flags_t;
-
-ODP_STATIC_ASSERT(sizeof(error_flags_t) == sizeof(uint32_t),
-		  "ERROR_FLAGS_SIZE_ERROR");
+ODP_STATIC_ASSERT(sizeof(_odp_packet_flags_t) == sizeof(uint32_t),
+		  "PACKET_FLAGS_SIZE_ERROR");
 
 /**
  * Packet output flags
@@ -92,9 +70,11 @@ ODP_STATIC_ASSERT(sizeof(output_flags_t) == sizeof(uint32_t),
  * Packet parser metadata
  */
 typedef struct {
+	/* Packet input flags */
 	_odp_packet_input_flags_t  input_flags;
-	error_flags_t  error_flags;
-	output_flags_t output_flags;
+
+	/* Other flags */
+	_odp_packet_flags_t        flags;
 
 	 /* offset to L2 hdr, e.g. Eth */
 	uint16_t l2_offset;
@@ -149,7 +129,7 @@ typedef struct {
 /**
  * Return the packet header
  */
-static inline odp_packet_hdr_t *odp_packet_hdr(odp_packet_t pkt)
+static inline odp_packet_hdr_t *packet_hdr(odp_packet_t pkt)
 {
 	return (odp_packet_hdr_t *)(uintptr_t)pkt;
 }
@@ -161,7 +141,7 @@ static inline struct rte_mbuf *pkt_to_mbuf(odp_packet_t  pkt)
 
 static inline odp_buffer_hdr_t *packet_to_buf_hdr(odp_packet_t pkt)
 {
-	return &odp_packet_hdr(pkt)->buf_hdr;
+	return &packet_hdr(pkt)->buf_hdr;
 }
 
 static inline odp_packet_t packet_from_buf_hdr(odp_buffer_hdr_t *buf_hdr)
@@ -171,12 +151,12 @@ static inline odp_packet_t packet_from_buf_hdr(odp_buffer_hdr_t *buf_hdr)
 
 static inline odp_event_subtype_t packet_subtype(odp_packet_t pkt)
 {
-	return odp_packet_hdr(pkt)->subtype;
+	return packet_hdr(pkt)->subtype;
 }
 
 static inline void packet_subtype_set(odp_packet_t pkt, int ev)
 {
-	odp_packet_hdr(pkt)->subtype = ev;
+	packet_hdr(pkt)->subtype = ev;
 }
 
 /**
@@ -185,8 +165,7 @@ static inline void packet_subtype_set(odp_packet_t pkt, int ev)
 static inline void packet_init(odp_packet_hdr_t *pkt_hdr)
 {
 	pkt_hdr->p.input_flags.all  = 0;
-	pkt_hdr->p.output_flags.all = 0;
-	pkt_hdr->p.error_flags.all  = 0;
+	pkt_hdr->p.flags.all_flags  = 0;
 
 	pkt_hdr->p.l2_offset        = 0;
 	pkt_hdr->p.l3_offset        = ODP_PACKET_OFFSET_INVALID;
@@ -229,17 +208,8 @@ int _odp_packet_copy_md_to_packet(odp_packet_t srcpkt, odp_packet_t dstpkt);
 int packet_parse_layer(odp_packet_hdr_t *pkt_hdr,
 		       odp_proto_layer_t layer);
 
-/* Perform L3 and L4 parsing up to a given protocol layer */
-int packet_parse_l3_l4(odp_packet_hdr_t *pkt_hdr,
-		       odp_proto_layer_t layer,
-		       uint32_t l3_offset,
-		       uint16_t ethtype);
-
 /* Reset parser metadata for a new parse */
 void packet_parse_reset(odp_packet_hdr_t *pkt_hdr);
-
-/* Convert a buffer handle to a packet handle */
-odp_packet_t _odp_packet_from_buf_hdr(odp_buffer_hdr_t *buf_hdr);
 
 static inline int packet_hdr_has_l2(odp_packet_hdr_t *pkt_hdr)
 {

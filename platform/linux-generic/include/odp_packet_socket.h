@@ -1,4 +1,4 @@
-/* Copyright (c) 2013, Linaro Limited
+/* Copyright (c) 2013-2018, Linaro Limited
  * Copyright (c) 2013, Nokia Solutions and Networks
  * All rights reserved.
  *
@@ -67,12 +67,13 @@ ODP_STATIC_ASSERT(offsetof(struct ring, mm_space) <= ODP_CACHE_LINE_SIZE,
 /** Packet socket using mmap rings for both Rx and Tx */
 typedef struct {
 	/** Packet mmap ring for Rx */
-	struct ring rx_ring ODP_ALIGNED_CACHE;
+	struct ring ODP_ALIGNED_CACHE rx_ring;
 	/** Packet mmap ring for Tx */
-	struct ring tx_ring ODP_ALIGNED_CACHE;
+	struct ring ODP_ALIGNED_CACHE tx_ring;
 
-	int sockfd ODP_ALIGNED_CACHE;
+	int ODP_ALIGNED_CACHE sockfd;
 	odp_pool_t pool;
+	int mtu; /**< maximum transmission unit */
 	size_t frame_offset; /**< frame start offset from start of pkt buf */
 	uint8_t *mmap_base;
 	unsigned mmap_len;

@@ -1,7 +1,7 @@
 include ../Makefile.inc
 
 test_PROGRAMS = classification_main
-classification_main_SOURCES = classification_main.c \
+classification_main_SOURCES = \
 				   odp_classification_basic.c \
 				   odp_classification_tests.c \
 				   odp_classification_testsuites.h \
@@ -9,4 +9,3 @@ classification_main_SOURCES = classification_main.c \
 				   odp_classification_common.c \
 				   classification.c \
 				   classification.h
-classification_main_LDADD = $(LIBCUNIT_COMMON) $(LIBODP)

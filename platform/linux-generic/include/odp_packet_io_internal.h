@@ -1,4 +1,4 @@
-/* Copyright (c) 2013, Linaro Limited
+/* Copyright (c) 2013-2018, Linaro Limited
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -18,6 +18,8 @@
 extern "C" {
 #endif
 
+#include <odp/api/packet_io.h>
+#include <odp/api/plat/pktio_inlines.h>
 #include <odp/api/spinlock.h>
 #include <odp/api/ticketlock.h>
 #include <odp_classification_datamodel.h>
@@ -34,6 +36,7 @@ extern "C" {
 #include <odp_packet_socket.h>
 #include <odp_packet_netmap.h>
 #include <odp_packet_tap.h>
+#include <odp_packet_null.h>
 #include <odp_packet_dpdk.h>
 
 #define PKTIO_NAME_LEN 256
@@ -129,6 +132,7 @@ struct pktio_entry {
 #endif
 		pkt_tap_t pkt_tap;		/**< using TAP for IO */
 		_ipc_pktio_t ipc;		/**< IPC pktio data */
+		pkt_null_t pkt_null;		/**< using null for IO */
 	};
 	enum {
 		/* Not allocated */
@@ -207,6 +211,12 @@ typedef struct pktio_if_ops {
 	odp_time_t (*pktin_ts_from_ns)(pktio_entry_t *pktio_entry, uint64_t ns);
 	int (*recv)(pktio_entry_t *entry, int index, odp_packet_t packets[],
 		    int num);
+	int (*recv_tmo)(pktio_entry_t *entry, int index, odp_packet_t packets[],
+			int num, uint64_t wait_usecs);
+	int (*recv_mq_tmo)(pktio_entry_t *entry[], int index[], int num_q,
+			   odp_packet_t packets[], int num, unsigned *from,
+			   uint64_t wait_usecs);
+	int (*fd_set)(pktio_entry_t *entry, int index, fd_set *readfds);
 	int (*send)(pktio_entry_t *entry, int index,
 		    const odp_packet_t packets[], int num);
 	uint32_t (*mtu_get)(pktio_entry_t *pktio_entry);
@@ -227,13 +237,10 @@ typedef struct pktio_if_ops {
 
 extern void *pktio_entry_ptr[];
 
-static inline int pktio_to_id(odp_pktio_t pktio)
-{
-	return _odp_typeval(pktio) - 1;
-}
-
 static inline pktio_entry_t *get_pktio_entry(odp_pktio_t pktio)
 {
+	int idx;
+
 	if (odp_unlikely(pktio == ODP_PKTIO_INVALID))
 		return NULL;
 
@@ -243,7 +250,9 @@ static inline pktio_entry_t *get_pktio_entry(odp_pktio_t pktio)
 		return NULL;
 	}
 
-	return pktio_entry_ptr[pktio_to_id(pktio)];
+	idx = _odp_pktio_index(pktio);
+
+	return pktio_entry_ptr[idx];
 }
 
 static inline int pktio_cls_enabled(pktio_entry_t *entry)
@@ -265,6 +274,7 @@ extern const pktio_if_ops_t loopback_pktio_ops;
 extern const pktio_if_ops_t pcap_pktio_ops;
 #endif
 extern const pktio_if_ops_t tap_pktio_ops;
+extern const pktio_if_ops_t null_pktio_ops;
 extern const pktio_if_ops_t ipc_pktio_ops;
 extern const pktio_if_ops_t * const pktio_if_ops[];
 
@@ -274,6 +284,26 @@ int sock_stats_fd(pktio_entry_t *pktio_entry,
 		  odp_pktio_stats_t *stats,
 		  int fd);
 int sock_stats_reset_fd(pktio_entry_t *pktio_entry, int fd);
+
+/**
+ * Try interrupt-driven receive
+ *
+ * @param queues Pktin queues
+ * @param num_q Number of queues
+ * @param packets Output packet slots
+ * @param num Number of output packet slots
+ * @param from Queue from which the call received packets
+ * @param usecs Microseconds to wait
+ * @param trial_successful Will receive information whether trial was successful
+ *
+ * @return >=0 on success, number of packets received
+ * @return <0 on failure
+ */
+int sock_recv_mq_tmo_try_int_driven(const struct odp_pktin_queue_t queues[],
+				    unsigned num_q, unsigned *from,
+				    odp_packet_t packets[], int num,
+				    uint64_t usecs,
+				    int *trial_successful);
 
 #ifdef __cplusplus
 }

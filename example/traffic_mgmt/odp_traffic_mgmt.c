@@ -1,6 +1,6 @@
 /* Copyright 2015 EZchip Semiconductor Ltd. All Rights Reserved.
  *
- * Copyright (c) 2015, Linaro Limited
+ * Copyright (c) 2015-2018, Linaro Limited
  * All rights reserved.
  *
  * SPDX-License-Identifier: BSD-3-Clause
@@ -10,6 +10,7 @@
 
 #include <unistd.h>
 #include <signal.h>
+#include <string.h>
 #include <inttypes.h>
 #include <sys/resource.h>
 #include <execinfo.h>
