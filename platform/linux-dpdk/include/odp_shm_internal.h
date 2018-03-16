@@ -17,7 +17,9 @@
 extern "C" {
 #endif
 
-int _odp_shm_init_global(void);
+#include <odp/api/init.h>
+
+int _odp_shm_init_global(const odp_init_t *init);
 
 int _odp_shm_init_local(void);
 
