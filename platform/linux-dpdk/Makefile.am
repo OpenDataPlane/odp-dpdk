@@ -148,12 +148,12 @@ __LIB__libodp_dpdk_la_SOURCES = \
 			   ../linux-generic/pktio/null.c \
 			   ../linux-generic/odp_pkt_queue.c \
 			   odp_pool.c \
-			   ../linux-generic/odp_queue.c \
+			   ../linux-generic/odp_queue_basic.c \
 			   ../linux-generic/odp_queue_if.c \
 			   ../linux-generic/odp_queue_lf.c \
 			   ../linux-generic/odp_rwlock.c \
 			   ../linux-generic/odp_rwlock_recursive.c \
-			   ../linux-generic/odp_schedule.c \
+			   ../linux-generic/odp_schedule_basic.c \
 			   ../linux-generic/odp_schedule_if.c \
 			   ../linux-generic/odp_schedule_sp.c \
 			   ../linux-generic/odp_schedule_iquery.c \
