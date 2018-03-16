@@ -27,6 +27,7 @@ extern "C" {
 #include <odp/api/plat/packet_inline_types.h>
 #include <odp/api/plat/pool_inline_types.h>
 
+#include <string.h>
 /* Required by rte_mbuf.h */
 #include <sys/types.h>
 #include <rte_mbuf.h>
@@ -231,6 +232,52 @@ static inline void _odp_packet_prefetch(odp_packet_t pkt, uint32_t offset, uint3
 static inline odp_buffer_t packet_to_buffer(odp_packet_t pkt)
 {
 	return (odp_buffer_t)pkt;
+}
+
+static inline int _odp_packet_copy_to_mem(odp_packet_t pkt, uint32_t offset,
+					  uint32_t len, void *dst)
+{
+	void *mapaddr;
+	uint32_t seglen = 0; /* GCC */
+	uint32_t cpylen;
+	uint8_t *dstaddr = (uint8_t *)dst;
+
+	if (offset + len > _odp_packet_len(pkt))
+		return -1;
+
+	while (len > 0) {
+		mapaddr = _odp_packet_offset(pkt, offset, &seglen, NULL);
+		cpylen = len > seglen ? seglen : len;
+		memcpy(dstaddr, mapaddr, cpylen);
+		offset  += cpylen;
+		dstaddr += cpylen;
+		len     -= cpylen;
+	}
+
+	return 0;
+}
+
+static inline int _odp_packet_copy_from_mem(odp_packet_t pkt, uint32_t offset,
+					    uint32_t len, const void *src)
+{
+	void *mapaddr;
+	uint32_t seglen = 0; /* GCC */
+	uint32_t cpylen;
+	const uint8_t *srcaddr = (const uint8_t *)src;
+
+	if (offset + len > _odp_packet_len(pkt))
+		return -1;
+
+	while (len > 0) {
+		mapaddr = _odp_packet_offset(pkt, offset, &seglen, NULL);
+		cpylen = len > seglen ? seglen : len;
+		memcpy(mapaddr, srcaddr, cpylen);
+		offset  += cpylen;
+		srcaddr += cpylen;
+		len     -= cpylen;
+	}
+
+	return 0;
 }
 
 #ifdef __cplusplus
