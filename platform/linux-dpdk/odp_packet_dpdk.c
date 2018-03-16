@@ -624,7 +624,7 @@ static int recv_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 		odp_ticketlock_unlock(&pkt_dpdk->rx_lock[index]);
 
 	for (i = 0; i < nb_rx; ++i) {
-		odp_packet_hdr_t *pkt_hdr = odp_packet_hdr(pkt_table[i]);
+		odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt_table[i]);
 
 		packet_init(pkt_hdr);
 		pkt_hdr->input = pktio_entry->s.handle;
@@ -656,8 +656,7 @@ static int recv_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 			uint8_t *pkt_addr;
 			odp_packet_hdr_t parsed_hdr;
 			int ret;
-			odp_packet_hdr_t *pkt_hdr =
-					odp_packet_hdr(pkt_table[i]);
+			odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt_table[i]);
 
 			pkt_addr = odp_packet_data(pkt_table[i]);
 			ret = cls_classify_packet(pktio_entry, pkt_addr,
@@ -700,8 +699,7 @@ static int recv_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 		for (i = 0, j = 0; i < nb_rx; i++) {
 			pkt = pkt_table[i];
 
-			if (pkt_set_ol_rx(pktin_cfg,
-					  odp_packet_hdr(pkt),
+			if (pkt_set_ol_rx(pktin_cfg, packet_hdr(pkt),
 					  pkt_to_mbuf(pkt))) {
 				rte_pktmbuf_free(pkt_to_mbuf(pkt));
 				continue;
@@ -847,7 +845,7 @@ static int send_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 		mbuf->ol_flags = 0;
 		if (chksum_insert_ena)
 			pkt_set_ol_tx(pktout_cfg, pktout_capa,
-				      odp_packet_hdr(pkt_table[i]), mbuf,
+				      packet_hdr(pkt_table[i]), mbuf,
 				      rte_pktmbuf_mtod(mbuf, char *));
 
 		num_tx++;
