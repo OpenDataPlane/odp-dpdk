@@ -530,11 +530,6 @@ int odp_packet_trunc_tail(odp_packet_t *pkt, uint32_t len, void **tail_ptr,
  *
  */
 
-int odp_packet_input_index(odp_packet_t pkt)
-{
-	return _odp_pktio_index(packet_hdr(pkt)->input);
-}
-
 void odp_packet_user_ptr_set(odp_packet_t pkt, const void *ctx)
 {
 	packet_hdr(pkt)->buf_hdr.buf_cctx = ctx;
