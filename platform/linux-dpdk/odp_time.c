@@ -21,9 +21,7 @@ typedef odp_time_t (*time_from_ns_fn) (uint64_t ns);
 typedef uint64_t (*time_res_fn)(void);
 
 typedef struct time_handler_ {
-	time_to_ns_fn   time_to_ns;
 	time_cur_fn    time_cur;
-	time_from_ns_fn time_from_ns;
 	time_res_fn     time_res;
 } time_handler_t;
 
@@ -34,8 +32,6 @@ typedef struct time_global_t {
 	uint64_t        hw_freq_hz;
 	/* DPDK specific */
 	time_handler_t  handler;
-	double tick_per_nsec;
-	double nsec_per_tick;
 } time_global_t;
 
 static time_global_t global;
@@ -220,25 +216,11 @@ static inline uint64_t time_res_dpdk(void)
 	return rte_get_timer_hz();
 }
 
-static inline uint64_t time_to_ns_dpdk(odp_time_t time)
-{
-	return (time.u64 * global.nsec_per_tick);
-}
-
 static inline odp_time_t time_cur_dpdk(void)
 {
 	odp_time_t time;
 
 	time.u64 = rte_get_timer_cycles() - global.hw_start;
-
-	return time;
-}
-
-static inline odp_time_t time_from_ns_dpdk(uint64_t ns)
-{
-	odp_time_t time;
-
-	time.u64 = ns * global.tick_per_nsec;
 
 	return time;
 }
@@ -282,22 +264,22 @@ uint64_t odp_time_diff_ns(odp_time_t t2, odp_time_t t1)
 
 	time.u64 = t2.u64 - t1.u64;
 
-	return global.handler.time_to_ns(time);
+	return time_to_ns(time);
 }
 
 uint64_t odp_time_to_ns(odp_time_t time)
 {
-	return global.handler.time_to_ns(time);
+	return time_to_ns(time);
 }
 
 odp_time_t odp_time_local_from_ns(uint64_t ns)
 {
-	return global.handler.time_from_ns(ns);
+	return time_from_ns(ns);
 }
 
 odp_time_t odp_time_global_from_ns(uint64_t ns)
 {
-	return global.handler.time_from_ns(ns);
+	return time_from_ns(ns);
 }
 
 int odp_time_cmp(odp_time_t t2, odp_time_t t1)
@@ -323,7 +305,7 @@ uint64_t odp_time_global_res(void)
 void odp_time_wait_ns(uint64_t ns)
 {
 	odp_time_t cur = time_local();
-	odp_time_t wait = global.handler.time_from_ns(ns);
+	odp_time_t wait = time_from_ns(ns);
 	odp_time_t end_time = time_sum(cur, wait);
 
 	time_wait_until(end_time);
@@ -385,15 +367,10 @@ int odp_time_init_global(void)
 	memset(&global, 0, sizeof(time_global_t));
 
 	if (is_dpdk_timer_cycles_support()) {
-		global.handler.time_to_ns   = time_to_ns_dpdk;
 		global.handler.time_cur     = time_cur_dpdk;
-		global.handler.time_from_ns = time_from_ns_dpdk;
 		global.handler.time_res     = time_res_dpdk;
-		global.tick_per_nsec = (double)time_res_dpdk() /
-				(double)ODP_TIME_SEC_IN_NS;
-		global.nsec_per_tick = (double)ODP_TIME_SEC_IN_NS /
-				(double)time_res_dpdk();
-
+		global.hw_freq_hz  = time_res_dpdk();
+		global.use_hw = 1;
 		global.hw_start = rte_get_timer_cycles();
 		if (global.hw_start == 0)
 				return -1;
@@ -401,9 +378,7 @@ int odp_time_init_global(void)
 				return 0;
 	}
 
-	global.handler.time_to_ns   = time_to_ns;
 	global.handler.time_cur     = time_cur;
-	global.handler.time_from_ns = time_from_ns;
 	global.handler.time_res     = time_res;
 
 	if (cpu_has_global_time()) {
