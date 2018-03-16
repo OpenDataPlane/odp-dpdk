@@ -42,7 +42,7 @@
 #define SLEEP_CHECK 32
 
 /* Max wait time supported to avoid potential overflow */
-#define MAX_WAIT_TIME (UINT64_MAX / 1024)
+#define MAX_WAIT_TIME (UINT64_MAX / (10 * 1024))
 
 static pktio_table_t *pktio_tbl;
 
