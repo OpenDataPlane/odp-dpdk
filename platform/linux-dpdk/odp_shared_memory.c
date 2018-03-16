@@ -153,7 +153,7 @@ static inline odp_bool_t handle_is_valid(odp_shm_t shm)
 	return 1;
 }
 
-int _odp_shm_init_global(void)
+int _odp_shm_init_global(const odp_init_t *init ODP_UNUSED)
 {
 	void *addr;
 
