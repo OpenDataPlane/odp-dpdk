@@ -6,7 +6,7 @@ ODP_ATOMIC
 # linux-generic PCAP support is not relevant as the code doesn't use
 # linux-generic pktio at all. And DPDK has its own PCAP support anyway
 AM_CONDITIONAL([HAVE_PCAP], [false])
-m4_include([platform/linux-dpdk/m4/odp_pthread.m4])
+ODP_PTHREAD
 ODP_TIMER
 ODP_OPENSSL
 m4_include([platform/linux-dpdk/m4/odp_schedule.m4])
