@@ -34,7 +34,7 @@ const _odp_packet_inline_offset_t ODP_ALIGNED_CACHE _odp_packet_inline = {
 	.mb               = offsetof(odp_packet_hdr_t, buf_hdr.mb),
 	.pool             = offsetof(odp_packet_hdr_t, buf_hdr.pool_ptr),
 	.input            = offsetof(odp_packet_hdr_t, input),
-	.user_ptr         = offsetof(odp_packet_hdr_t, buf_hdr.buf_ctx),
+	.user_ptr         = offsetof(odp_packet_hdr_t, buf_hdr.user_ptr),
 	.l2_offset        = offsetof(odp_packet_hdr_t, p.l2_offset),
 	.l3_offset        = offsetof(odp_packet_hdr_t, p.l3_offset),
 	.l4_offset        = offsetof(odp_packet_hdr_t, p.l4_offset),
@@ -525,9 +525,9 @@ int odp_packet_trunc_tail(odp_packet_t *pkt, uint32_t len, void **tail_ptr,
  *
  */
 
-void odp_packet_user_ptr_set(odp_packet_t pkt, const void *ctx)
+void odp_packet_user_ptr_set(odp_packet_t pkt, const void *ptr)
 {
-	packet_hdr(pkt)->buf_hdr.buf_cctx = ctx;
+	packet_hdr(pkt)->buf_hdr.user_ptr = ptr;
 }
 
 int odp_packet_l2_offset_set(odp_packet_t pkt, uint32_t offset)
@@ -1110,7 +1110,7 @@ int _odp_packet_copy_md_to_packet(odp_packet_t srcpkt, odp_packet_t dstpkt)
 
 	dsthdr->input = srchdr->input;
 	dsthdr->dst_queue = srchdr->dst_queue;
-	dsthdr->buf_hdr.buf_u64 = srchdr->buf_hdr.buf_u64;
+	dsthdr->buf_hdr.user_ptr = srchdr->buf_hdr.user_ptr;
 
 	dsthdr->buf_hdr.mb.port = srchdr->buf_hdr.mb.port;
 	dsthdr->buf_hdr.mb.ol_flags = srchdr->buf_hdr.mb.ol_flags;
