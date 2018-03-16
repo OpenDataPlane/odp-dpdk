@@ -36,6 +36,7 @@ typedef struct _odp_packet_inline_offset_t {
 	uint16_t l4_offset;
 	uint16_t timestamp;
 	uint16_t input_flags;
+	uint16_t flags;
 	uint16_t buf_addr;
 	uint16_t data;
 	uint16_t pkt_len;
@@ -107,7 +108,12 @@ typedef union {
 	uint32_t all_flags;
 
 	struct {
-		uint32_t reserved1:     12;
+		uint32_t reserved1:     11;
+
+	/*
+	 * Init flags
+	 */
+		uint32_t user_ptr_set:   1; /* User has set a non-NULL value */
 
 	/*
 	 * Packet output flags
@@ -133,8 +139,8 @@ typedef union {
 
 	/* Flag groups */
 	struct {
-		uint32_t reserved2:     12;
-		uint32_t other:         12; /* All other flags */
+		uint32_t reserved2:     11;
+		uint32_t other:         13; /* All other flags */
 		uint32_t error:          8; /* All error flags */
 	} all;
 
