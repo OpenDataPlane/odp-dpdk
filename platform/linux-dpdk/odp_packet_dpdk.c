@@ -598,6 +598,8 @@ static int recv_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 	odp_packet_t *saved_pkt_table;
 	pkt_dpdk_t * const pkt_dpdk = &pktio_entry->s.pkt_dpdk;
 	odp_pktin_config_opt_t *pktin_cfg = &pktio_entry->s.config.pktin;
+	odp_proto_layer_t parse_layer = pktio_entry->s.config.parser.layer;
+	odp_pktio_t input = pktio_entry->s.handle;
 	uint8_t min = pkt_dpdk->min_rx_burst;
 	odp_time_t ts_val;
 	odp_time_t *ts = NULL;
@@ -638,12 +640,11 @@ static int recv_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 		odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt_table[i]);
 
 		packet_init(pkt_hdr);
-		pkt_hdr->input = pktio_entry->s.handle;
+		pkt_hdr->input = input;
 
 		if (!pktio_cls_enabled(pktio_entry) &&
-		    pktio_entry->s.config.parser.layer)
-			packet_parse_layer(pkt_hdr,
-					   pktio_entry->s.config.parser.layer);
+		    parse_layer != ODP_PROTO_LAYER_NONE)
+			packet_parse_layer(pkt_hdr, parse_layer);
 		packet_set_ts(pkt_hdr, ts);
 	}
 
