@@ -1105,7 +1105,7 @@ void odp_packet_print_data(odp_packet_t pkt, uint32_t offset,
 		else
 			copy_len = byte_len;
 
-		odp_packet_copy_to_mem(pkt, offset, copy_len, data);
+		_odp_packet_copy_to_mem(pkt, offset, copy_len, data);
 
 		len += snprintf(&str[len], n - len, " ");
 
