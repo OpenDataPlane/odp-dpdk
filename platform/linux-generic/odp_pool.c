@@ -1,4 +1,4 @@
-/* Copyright (c) 2013, Linaro Limited
+/* Copyright (c) 2013-2018, Linaro Limited
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -24,6 +24,7 @@
 #include <stdio.h>
 #include <inttypes.h>
 
+#include <odp/api/plat/pool_inline_types.h>
 #include <odp/api/plat/ticketlock_inlines.h>
 #define LOCK(a)      _odp_ticketlock_lock(a)
 #define UNLOCK(a)    _odp_ticketlock_unlock(a)
@@ -60,7 +61,7 @@ static __thread pool_local_t local;
 #include <odp/visibility_begin.h>
 
 /* Fill in pool header field offsets for inline functions */
-const _odp_pool_inline_offset_t _odp_pool_inline ODP_ALIGNED_CACHE = {
+const _odp_pool_inline_offset_t ODP_ALIGNED_CACHE _odp_pool_inline = {
 	.pool_hdl          = offsetof(pool_t, pool_hdl),
 	.uarea_size        = offsetof(pool_t, params.pkt.uarea_size)
 };
@@ -77,20 +78,6 @@ static inline pool_t *pool_from_buf(odp_buffer_t buf)
 	odp_buffer_hdr_t *buf_hdr = buf_hdl_to_hdr(buf);
 
 	return buf_hdr->pool_ptr;
-}
-
-static inline odp_buffer_hdr_t *buf_hdr_from_index(pool_t *pool,
-						   uint32_t buffer_idx)
-{
-	uint32_t block_offset;
-	odp_buffer_hdr_t *buf_hdr;
-
-	block_offset = buffer_idx * pool->block_size;
-
-	/* clang requires cast to uintptr_t */
-	buf_hdr = (odp_buffer_hdr_t *)(uintptr_t)&pool->base_addr[block_offset];
-
-	return buf_hdr;
 }
 
 int odp_pool_init_global(void)
@@ -235,7 +222,7 @@ static pool_t *reserve_pool(void)
 
 static void init_buffers(pool_t *pool)
 {
-	uint32_t i;
+	uint64_t i;
 	odp_buffer_hdr_t *buf_hdr;
 	odp_packet_hdr_t *pkt_hdr;
 	odp_shm_info_t shm_info;
@@ -295,7 +282,9 @@ static void init_buffers(pool_t *pool)
 		memset(buf_hdr, 0, (uintptr_t)data - (uintptr_t)buf_hdr);
 
 		/* Initialize buffer metadata */
-		buf_hdr->index = i;
+		buf_hdr->index.u32    = 0;
+		buf_hdr->index.pool   = pool->pool_idx;
+		buf_hdr->index.buffer = i;
 		buf_hdr->type = type;
 		buf_hdr->event_type = type;
 		buf_hdr->pool_ptr = pool;
@@ -477,8 +466,8 @@ static odp_pool_t pool_create(const char *name, odp_pool_param_t *params,
 	pool->tailroom       = tailroom;
 	pool->block_size     = block_size;
 	pool->uarea_size     = uarea_size;
-	pool->shm_size       = (num + num_extra) * block_size;
-	pool->uarea_shm_size = num * uarea_size;
+	pool->shm_size       = (num + num_extra) * (uint64_t)block_size;
+	pool->uarea_shm_size = num * (uint64_t)uarea_size;
 	pool->ext_desc       = NULL;
 	pool->ext_destroy    = NULL;
 
@@ -692,6 +681,9 @@ int odp_pool_info(odp_pool_t pool_hdl, odp_pool_info_t *info)
 	if (pool->params.type == ODP_POOL_PACKET)
 		info->pkt.max_num = pool->num;
 
+	info->min_data_addr = (uintptr_t)pool->base_addr;
+	info->max_data_addr = (uintptr_t)pool->base_addr + pool->shm_size - 1;
+
 	return 0;
 }
 
@@ -781,7 +773,7 @@ static inline void buffer_free_to_pool(pool_t *pool,
 		ring  = &pool->ring->hdr;
 		mask  = pool->ring_mask;
 		for (i = 0; i < num; i++)
-			buf_index[i] = buf_hdr[i]->index;
+			buf_index[i] = buf_hdr[i]->index.buffer;
 
 		ring_enq_multi(ring, mask, buf_index, num);
 
@@ -821,7 +813,7 @@ static inline void buffer_free_to_pool(pool_t *pool,
 	}
 
 	for (i = 0; i < num; i++)
-		cache->buf_index[cache_num + i] = buf_hdr[i]->index;
+		cache->buf_index[cache_num + i] = buf_hdr[i]->index.buffer;
 
 	cache->num = cache_num + num;
 }
@@ -955,9 +947,9 @@ void odp_pool_print(odp_pool_t pool_hdl)
 	ODP_PRINT("  tailroom        %u\n", pool->tailroom);
 	ODP_PRINT("  block size      %u\n", pool->block_size);
 	ODP_PRINT("  uarea size      %u\n", pool->uarea_size);
-	ODP_PRINT("  shm size        %u\n", pool->shm_size);
+	ODP_PRINT("  shm size        %" PRIu64 "\n", pool->shm_size);
 	ODP_PRINT("  base addr       %p\n", pool->base_addr);
-	ODP_PRINT("  uarea shm size  %u\n", pool->uarea_shm_size);
+	ODP_PRINT("  uarea shm size  %" PRIu64 "\n", pool->uarea_shm_size);
 	ODP_PRINT("  uarea base addr %p\n", pool->uarea_base_addr);
 	ODP_PRINT("\n");
 }

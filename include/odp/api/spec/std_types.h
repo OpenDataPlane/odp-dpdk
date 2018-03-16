@@ -1,4 +1,4 @@
-/* Copyright (c) 2013, Linaro Limited
+/* Copyright (c) 2013-2018, Linaro Limited
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -12,8 +12,8 @@
  *
  */
 
-#ifndef ODP_API_STD_TYPES_H_
-#define ODP_API_STD_TYPES_H_
+#ifndef ODP_API_SPEC_STD_TYPES_H_
+#define ODP_API_SPEC_STD_TYPES_H_
 #include <odp/visibility_begin.h>
 /* uint64_t, uint32_t, etc */
 #include <stdint.h>

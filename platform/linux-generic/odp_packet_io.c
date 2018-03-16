@@ -1,4 +1,4 @@
-/* Copyright (c) 2013, Linaro Limited
+/* Copyright (c) 2013-2018, Linaro Limited
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -9,6 +9,7 @@
 #include <odp_posix_extensions.h>
 
 #include <odp/api/packet_io.h>
+#include <odp/api/plat/pktio_inlines.h>
 #include <odp_packet_io_internal.h>
 #include <odp/api/packet.h>
 #include <odp_packet_internal.h>
@@ -32,12 +33,16 @@
 #include <errno.h>
 #include <time.h>
 
-/* Sleep this many nanoseconds between pktin receive calls */
-#define SLEEP_NSEC  1000
+/* Sleep this many microseconds between pktin receive calls. Must be smaller
+ * than 1000000 (a million), i.e. smaller than a second. */
+#define SLEEP_USEC  1
 
-/* Check total sleep time about every SLEEP_CHECK * SLEEP_NSEC nanoseconds.
+/* Check total sleep time about every SLEEP_CHECK * SLEEP_USEC microseconds.
  * Must be power of two. */
 #define SLEEP_CHECK 32
+
+/* Max wait time supported to avoid potential overflow */
+#define MAX_WAIT_TIME (UINT64_MAX / 1024)
 
 static pktio_table_t *pktio_tbl;
 
@@ -480,7 +485,7 @@ int odp_pktio_start(odp_pktio_t hdl)
 			}
 		}
 
-		sched_fn->pktio_start(pktio_to_id(hdl), num, index, odpq);
+		sched_fn->pktio_start(_odp_pktio_index(hdl), num, index, odpq);
 	}
 
 	return res;
@@ -569,7 +574,7 @@ static inline int pktin_recv_buf(odp_pktin_queue_t queue,
 
 	for (i = 0; i < pkts; i++) {
 		pkt = packets[i];
-		pkt_hdr = odp_packet_hdr(pkt);
+		pkt_hdr = packet_hdr(pkt);
 		buf_hdr = packet_to_buf_hdr(pkt);
 
 		if (pkt_hdr->p.input_flags.dst_queue) {
@@ -697,7 +702,7 @@ int sched_cb_pktin_poll_one(int pktio_index,
 	num_rx = 0;
 	for (i = 0; i < num_pkts; i++) {
 		pkt = packets[i];
-		pkt_hdr = odp_packet_hdr(pkt);
+		pkt_hdr = packet_hdr(pkt);
 		if (odp_unlikely(pkt_hdr->p.input_flags.dst_queue)) {
 			queue = pkt_hdr->dst_queue;
 			buf_hdr = packet_to_buf_hdr(pkt);
@@ -1019,16 +1024,6 @@ int odp_pktio_info(odp_pktio_t hdl, odp_pktio_info_t *info)
 	memcpy(&info->param, &entry->s.param, sizeof(odp_pktio_param_t));
 
 	return 0;
-}
-
-int odp_pktio_index(odp_pktio_t pktio)
-{
-	pktio_entry_t *entry = get_pktio_entry(pktio);
-
-	if (!entry || is_free(entry))
-		return -1;
-
-	return pktio_to_id(pktio);
 }
 
 uint64_t odp_pktin_ts_res(odp_pktio_t hdl)
@@ -1360,7 +1355,7 @@ int odp_pktin_queue_config(odp_pktio_t pktio,
 		    mode == ODP_PKTIN_MODE_SCHED) {
 			odp_queue_param_t queue_param;
 			char name[ODP_QUEUE_NAME_LEN];
-			int pktio_id = pktio_to_id(pktio);
+			int pktio_id = _odp_pktio_index(pktio);
 
 			snprintf(name, sizeof(name), "odp-pktin-%i-%i",
 				 pktio_id, i);
@@ -1495,7 +1490,7 @@ int odp_pktout_queue_config(odp_pktio_t pktio,
 			odp_queue_param_t queue_param;
 			queue_t q_int;
 			char name[ODP_QUEUE_NAME_LEN];
-			int pktio_id = pktio_to_id(pktio);
+			int pktio_id = _odp_pktio_index(pktio);
 
 			snprintf(name, sizeof(name), "odp-pktout-%i-%i",
 				 pktio_id, i);
@@ -1679,41 +1674,50 @@ int odp_pktin_recv_tmo(odp_pktin_queue_t queue, odp_packet_t packets[], int num,
 	odp_time_t t1, t2;
 	struct timespec ts;
 	int started = 0;
+	uint64_t sleep_round = 0;
+	pktio_entry_t *entry;
 
 	ts.tv_sec  = 0;
-	ts.tv_nsec = SLEEP_NSEC;
+	ts.tv_nsec = 1000 * SLEEP_USEC;
+
+	entry = get_pktio_entry(queue.pktio);
+	if (entry == NULL) {
+		ODP_DBG("pktio entry %d does not exist\n", queue.pktio);
+		return -1;
+	}
+
+	if (entry->s.ops->recv_tmo && wait != ODP_PKTIN_NO_WAIT)
+		return entry->s.ops->recv_tmo(entry, queue.index, packets, num,
+					      wait);
 
 	while (1) {
-		ret = odp_pktin_recv(queue, packets, num);
+		ret = entry->s.ops->recv(entry, queue.index, packets, num);
 
-		if (ret != 0)
+		if (ret != 0 || wait == 0)
 			return ret;
 
-		if (wait == 0)
-			return 0;
+		/* Avoid unnecessary system calls. Record the start time
+		 * only when needed and after the first call to recv. */
+		if (odp_unlikely(!started)) {
+			odp_time_t t;
 
-		if (wait != ODP_PKTIN_WAIT) {
-			/* Avoid unnecessary system calls. Record the start time
-			 * only when needed and after the first call to recv. */
-			if (odp_unlikely(!started)) {
-				odp_time_t t;
-
-				t = odp_time_local_from_ns(wait * SLEEP_NSEC);
-				started = 1;
-				t1 = odp_time_sum(odp_time_local(), t);
-			}
-
-			/* Check every SLEEP_CHECK rounds if total wait time
-			 * has been exceeded. */
-			if ((wait & (SLEEP_CHECK - 1)) == 0) {
-				t2 = odp_time_local();
-
-				if (odp_time_cmp(t2, t1) > 0)
-					return 0;
-			}
-
-			wait--;
+			/* Avoid overflow issues for large wait times */
+			if (wait > MAX_WAIT_TIME)
+				wait = MAX_WAIT_TIME;
+			t = odp_time_local_from_ns(wait * 1000);
+			started = 1;
+			t1 = odp_time_sum(odp_time_local(), t);
 		}
+
+		/* Check every SLEEP_CHECK rounds if total wait time
+		 * has been exceeded. */
+		if ((++sleep_round & (SLEEP_CHECK - 1)) == 0) {
+			t2 = odp_time_local();
+
+			if (odp_time_cmp(t2, t1) > 0)
+				return 0;
+		}
+		wait = wait > SLEEP_USEC ? wait - SLEEP_USEC : 0;
 
 		nanosleep(&ts, NULL);
 	}
@@ -1728,9 +1732,30 @@ int odp_pktin_recv_mq_tmo(const odp_pktin_queue_t queues[], unsigned num_q,
 	odp_time_t t1, t2;
 	struct timespec ts;
 	int started = 0;
+	uint64_t sleep_round = 0;
+	int trial_successful = 0;
+
+	for (i = 0; i < num_q; i++) {
+		ret = odp_pktin_recv(queues[i], packets, num);
+
+		if (ret > 0 && from)
+			*from = i;
+
+		if (ret != 0)
+			return ret;
+	}
+
+	if (wait == 0)
+		return 0;
+
+	ret = sock_recv_mq_tmo_try_int_driven(queues, num_q, from,
+					      packets, num, wait,
+					      &trial_successful);
+	if (trial_successful)
+		return ret;
 
 	ts.tv_sec  = 0;
-	ts.tv_nsec = SLEEP_NSEC;
+	ts.tv_nsec = 1000 * SLEEP_USEC;
 
 	while (1) {
 		for (i = 0; i < num_q; i++) {
@@ -1746,24 +1771,26 @@ int odp_pktin_recv_mq_tmo(const odp_pktin_queue_t queues[], unsigned num_q,
 		if (wait == 0)
 			return 0;
 
-		if (wait != ODP_PKTIN_WAIT) {
-			if (odp_unlikely(!started)) {
-				odp_time_t t;
+		if (odp_unlikely(!started)) {
+			odp_time_t t;
 
-				t = odp_time_local_from_ns(wait * SLEEP_NSEC);
-				started = 1;
-				t1 = odp_time_sum(odp_time_local(), t);
-			}
-
-			if ((wait & (SLEEP_CHECK - 1)) == 0) {
-				t2 = odp_time_local();
-
-				if (odp_time_cmp(t2, t1) > 0)
-					return 0;
-			}
-
-			wait--;
+			/* Avoid overflow issues for large wait times */
+			if (wait > MAX_WAIT_TIME)
+				wait = MAX_WAIT_TIME;
+			t = odp_time_local_from_ns(wait * 1000);
+			started = 1;
+			t1 = odp_time_sum(odp_time_local(), t);
 		}
+
+		/* Check every SLEEP_CHECK rounds if total wait time
+		 * has been exceeded. */
+		if ((++sleep_round & (SLEEP_CHECK - 1)) == 0) {
+			t2 = odp_time_local();
+
+			if (odp_time_cmp(t2, t1) > 0)
+				return 0;
+		}
+		wait = wait > SLEEP_USEC ? wait - SLEEP_USEC : 0;
 
 		nanosleep(&ts, NULL);
 	}
@@ -1774,9 +1801,9 @@ uint64_t odp_pktin_wait_time(uint64_t nsec)
 	if (nsec == 0)
 		return 0;
 
-	/* number of nanosleep calls rounded up by one, so that
+	/* number of microseconds rounded up by one, so that
 	 * recv_mq_tmo call waits at least 'nsec' nanoseconds. */
-	return (nsec / SLEEP_NSEC) + 1;
+	return (nsec / (1000)) + 1;
 }
 
 int odp_pktout_send(odp_pktout_queue_t queue, const odp_packet_t packets[],
@@ -1792,4 +1819,10 @@ int odp_pktout_send(odp_pktout_queue_t queue, const odp_packet_t packets[],
 	}
 
 	return entry->s.ops->send(entry, queue.index, packets, num);
+}
+
+/** Get printable format of odp_pktio_t */
+uint64_t odp_pktio_to_u64(odp_pktio_t hdl)
+{
+	return _odp_pri(hdl);
 }

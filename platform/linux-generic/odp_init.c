@@ -1,4 +1,4 @@
-/* Copyright (c) 2013, Linaro Limited
+/* Copyright (c) 2013-2018, Linaro Limited
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -66,7 +66,7 @@ int odp_init_global(odp_instance_t *instance,
 	}
 	stage = SYSINFO_INIT;
 
-	if (_odp_ishm_init_global()) {
+	if (_odp_ishm_init_global(params)) {
 		ODP_ERR("ODP ishm init failed.\n");
 		goto init_failed;
 	}
@@ -90,13 +90,13 @@ int odp_init_global(odp_instance_t *instance,
 	}
 	stage = POOL_INIT;
 
-	if (queue_fn->init_global()) {
+	if (_odp_queue_init_global()) {
 		ODP_ERR("ODP queue init failed.\n");
 		goto init_failed;
 	}
 	stage = QUEUE_INIT;
 
-	if (sched_fn->init_global()) {
+	if (_odp_schedule_init_global()) {
 		ODP_ERR("ODP schedule init failed.\n");
 		goto init_failed;
 	}
@@ -150,6 +150,12 @@ int odp_init_global(odp_instance_t *instance,
 	}
 	stage = IPSEC_SAD_INIT;
 
+	if (_odp_ipsec_init_global()) {
+		ODP_ERR("ODP IPsec init failed.\n");
+		goto init_failed;
+	}
+	stage = IPSEC_INIT;
+
 	*instance = (odp_instance_t)odp_global_data.main_pid;
 
 	return 0;
@@ -174,6 +180,13 @@ int _odp_term_global(enum init_stage stage)
 
 	switch (stage) {
 	case ALL_INIT:
+	case IPSEC_INIT:
+		if (_odp_ipsec_term_global()) {
+			ODP_ERR("ODP IPsec term failed.\n");
+			rc = -1;
+		}
+		/* Fall through */
+
 	case IPSEC_SAD_INIT:
 		if (_odp_ipsec_sad_term_global()) {
 			ODP_ERR("ODP IPsec SAD term failed.\n");
@@ -231,14 +244,14 @@ int _odp_term_global(enum init_stage stage)
 		/* Fall through */
 
 	case SCHED_INIT:
-		if (sched_fn->term_global()) {
+		if (_odp_schedule_term_global()) {
 			ODP_ERR("ODP schedule term failed.\n");
 			rc = -1;
 		}
 		/* Fall through */
 
 	case QUEUE_INIT:
-		if (queue_fn->term_global()) {
+		if (_odp_queue_term_global()) {
 			ODP_ERR("ODP queue term failed.\n");
 			rc = -1;
 		}
@@ -327,6 +340,12 @@ int odp_init_local(odp_instance_t instance, odp_thread_type_t thr_type)
 	}
 	stage = PKTIO_INIT;
 
+	if (_odp_crypto_init_local()) {
+		ODP_ERR("ODP crypto local init failed.\n");
+		goto init_fail;
+	}
+	stage = CRYPTO_INIT;
+
 	if (odp_pool_init_local()) {
 		ODP_ERR("ODP pool local init failed.\n");
 		goto init_fail;
@@ -375,6 +394,13 @@ int _odp_term_local(enum init_stage stage)
 	case QUEUE_INIT:
 		if (queue_fn->term_local()) {
 			ODP_ERR("ODP queue local term failed.\n");
+			rc = -1;
+		}
+		/* Fall through */
+
+	case CRYPTO_INIT:
+		if (_odp_crypto_term_local()) {
+			ODP_ERR("ODP crypto local term failed.\n");
 			rc = -1;
 		}
 		/* Fall through */

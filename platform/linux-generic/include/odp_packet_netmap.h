@@ -1,4 +1,4 @@
-/* Copyright (c) 2015, Linaro Limited
+/* Copyright (c) 2015-2018, Linaro Limited
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -30,10 +30,10 @@ struct netmap_ring_t {
 	odp_ticketlock_t lock;  /**< Queue lock */
 };
 
-typedef union {
+typedef union ODP_ALIGNED_CACHE {
 	struct netmap_ring_t s;
 	uint8_t pad[ROUNDUP_CACHE_LINE(sizeof(struct netmap_ring_t))];
-} netmap_ring_t ODP_ALIGNED_CACHE;
+} netmap_ring_t;
 
 /** Netmap ring slot */
 typedef struct  {
@@ -44,7 +44,6 @@ typedef struct  {
 /** Packet socket using netmap mmaped rings for both Rx and Tx */
 typedef struct {
 	odp_pool_t pool;		/**< pool to alloc packets from */
-	size_t max_frame_len;		/**< buf_size - sizeof(pkt_hdr) */
 	uint32_t if_flags;		/**< interface flags */
 	uint32_t mtu;			/**< maximum transmission unit */
 	int sockfd;			/**< control socket */

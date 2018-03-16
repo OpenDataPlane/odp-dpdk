@@ -1,4 +1,4 @@
-/* Copyright (c) 2016, Linaro Limited
+/* Copyright (c) 2016-2018, Linaro Limited
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -429,7 +429,7 @@ static int test_creation_with_bad_parameters(void)
 	return 0;
 }
 
-#define PERFORMANCE_CAPACITY 1000000
+#define PERFORMANCE_CAPACITY 4000
 
 /*
  * Test the performance of cuckoo hash table.

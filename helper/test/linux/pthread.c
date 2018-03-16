@@ -1,4 +1,4 @@
-/* Copyright (c) 2015, Linaro Limited
+/* Copyright (c) 2015-2018, Linaro Limited
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -9,6 +9,8 @@
 #include <odph_debug.h>
 #include <odp_api.h>
 #include <odp/helper/linux/pthread.h>
+
+#include <string.h>
 
 #define NUMBER_WORKERS 16
 static void *worker_fn(void *arg ODPH_UNUSED)

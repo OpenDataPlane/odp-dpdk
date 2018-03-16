@@ -1,4 +1,4 @@
-/* Copyright (c) 2015, Linaro Limited
+/* Copyright (c) 2015-2018, Linaro Limited
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -20,7 +20,6 @@
 #include <odp/helper/odph_api.h>
 #include "odp_cunit_common.h"
 #include "test_debug.h"
-#include "timer.h"
 
 #define MAX(a, b) (((a) > (b)) ? (a) : (b))
 
@@ -56,7 +55,7 @@ struct test_timer {
 
 #define TICK_INVALID (~(uint64_t)0)
 
-void timer_test_timeout_pool_alloc(void)
+static void timer_test_timeout_pool_alloc(void)
 {
 	odp_pool_t pool;
 	const int num = 3;
@@ -110,7 +109,7 @@ void timer_test_timeout_pool_alloc(void)
 	CU_ASSERT(odp_pool_destroy(pool) == 0);
 }
 
-void timer_test_timeout_pool_free(void)
+static void timer_test_timeout_pool_free(void)
 {
 	odp_pool_t pool;
 	odp_timeout_t tmo;
@@ -141,7 +140,7 @@ void timer_test_timeout_pool_free(void)
 	CU_ASSERT(odp_pool_destroy(pool) == 0);
 }
 
-void timer_test_odp_timer_cancel(void)
+static void timer_test_odp_timer_cancel(void)
 {
 	odp_pool_t pool;
 	odp_pool_param_t params;
@@ -275,15 +274,10 @@ static void handle_tmo(odp_event_t ev, bool stale, uint64_t prev_tick)
 		CU_FAIL("odp_timeout_user_ptr() wrong user ptr");
 	if (ttp && ttp->tim != tim)
 		CU_FAIL("odp_timeout_timer() wrong timer");
-	if (stale) {
-		if (odp_timeout_fresh(tmo))
-			CU_FAIL("Wrong status (fresh) for stale timeout");
-		/* Stale timeout => local timer must have invalid tick */
-		if (ttp && ttp->tick != TICK_INVALID)
-			CU_FAIL("Stale timeout for active timer");
-	} else {
-		if (!odp_timeout_fresh(tmo))
-			CU_FAIL("Wrong status (stale) for fresh timeout");
+
+	if (!odp_timeout_fresh(tmo))
+		CU_FAIL("Wrong status (stale) for fresh timeout");
+	if (!stale) {
 		/* Fresh timeout => local timer must have matching tick */
 		if (ttp && ttp->tick != tick) {
 			LOG_DBG("Wrong tick: expected %" PRIu64
@@ -291,6 +285,9 @@ static void handle_tmo(odp_event_t ev, bool stale, uint64_t prev_tick)
 				ttp->tick, tick);
 			CU_FAIL("odp_timeout_tick() wrong tick");
 		}
+		if (ttp && ttp->ev != ODP_EVENT_INVALID)
+			CU_FAIL("Wrong state for fresh timer (event)");
+
 		/* Check that timeout was delivered 'timely' */
 		if (tick > odp_timer_current_tick(tp))
 			CU_FAIL("Timeout delivered early");
@@ -373,7 +370,10 @@ static int worker_entrypoint(void *arg TEST_UNUSED)
 		      odp_timer_ns_to_tick(tp, (rand_r(&seed) % RANGE_MS)
 					       * 1000000ULL);
 		timer_rc = odp_timer_set_abs(tt[i].tim, tck, &tt[i].ev);
-		if (timer_rc != ODP_TIMER_SUCCESS) {
+		if (timer_rc == ODP_TIMER_TOOEARLY) {
+			LOG_ERR("Missed tick, setting timer\n");
+		} else if (timer_rc != ODP_TIMER_SUCCESS) {
+			LOG_ERR("Failed to set timer: %d\n", timer_rc);
 			CU_FAIL("Failed to set timer");
 		} else {
 			tt[i].tick = tck;
@@ -401,11 +401,14 @@ static int worker_entrypoint(void *arg TEST_UNUSED)
 		    (rand_r(&seed) % 2 == 0)) {
 			/* Timer active, cancel it */
 			rc = odp_timer_cancel(tt[i].tim, &tt[i].ev);
-			if (rc != 0)
+			if (rc != 0) {
 				/* Cancel failed, timer already expired */
 				ntoolate++;
-			tt[i].tick = TICK_INVALID;
-			ncancel++;
+				LOG_DBG("Failed to cancel timer, probably already expired\n");
+			} else {
+				tt[i].tick = TICK_INVALID;
+				ncancel++;
+			}
 		} else {
 			if (tt[i].ev != ODP_EVENT_INVALID)
 				/* Timer inactive => set */
@@ -459,7 +462,7 @@ static int worker_entrypoint(void *arg TEST_UNUSED)
 		thr, ntoolate);
 	LOG_DBG("Thread %u: %" PRIu32 " timeouts received\n", thr, nrcv);
 	LOG_DBG("Thread %u: %" PRIu32
-		" stale timeout(s) after odp_timer_free()\n",
+		" stale timeout(s) after odp_timer_cancel()\n",
 		thr, nstale);
 
 	/* Delay some more to ensure timeouts for expired timers can be
@@ -504,7 +507,7 @@ static int worker_entrypoint(void *arg TEST_UNUSED)
 }
 
 /* @private Timer test case entrypoint */
-void timer_test_odp_timer_all(void)
+static void timer_test_odp_timer_all(void)
 {
 	int rc;
 	odp_pool_param_t params;
@@ -630,7 +633,7 @@ odp_suiteinfo_t timer_suites[] = {
 	ODP_SUITE_INFO_NULL,
 };
 
-int timer_main(int argc, char *argv[])
+int main(int argc, char *argv[])
 {
 	/* parse common options: */
 	if (odp_cunit_parse_options(argc, argv))

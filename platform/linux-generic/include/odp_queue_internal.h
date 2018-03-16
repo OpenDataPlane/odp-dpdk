@@ -1,4 +1,4 @@
-/* Copyright (c) 2013, Linaro Limited
+/* Copyright (c) 2013-2018, Linaro Limited
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -18,6 +18,7 @@
 extern "C" {
 #endif
 
+#include <odp/api/plat/strong_types.h>
 #include <odp/api/queue.h>
 #include <odp_forward_typedefs_internal.h>
 #include <odp_queue_if.h>
@@ -28,6 +29,7 @@ extern "C" {
 #include <odp/api/hints.h>
 #include <odp/api/ticketlock.h>
 #include <odp_config_internal.h>
+#include <odp_ring_st_internal.h>
 
 #define QUEUE_STATUS_FREE         0
 #define QUEUE_STATUS_DESTROYED    1
@@ -36,13 +38,11 @@ extern "C" {
 #define QUEUE_STATUS_SCHED        4
 
 struct queue_entry_s {
-	odp_ticketlock_t  lock ODP_ALIGNED_CACHE;
-
-	odp_buffer_hdr_t *head;
-	odp_buffer_hdr_t *tail;
+	odp_ticketlock_t  ODP_ALIGNED_CACHE lock;
+	ring_st_t         ring_st;
 	int               status;
 
-	queue_enq_fn_t       enqueue ODP_ALIGNED_CACHE;
+	queue_enq_fn_t       ODP_ALIGNED_CACHE enqueue;
 	queue_deq_fn_t       dequeue;
 	queue_enq_multi_fn_t enqueue_multi;
 	queue_deq_multi_fn_t dequeue_multi;
@@ -53,6 +53,7 @@ struct queue_entry_s {
 	odp_queue_param_t param;
 	odp_pktin_queue_t pktin;
 	odp_pktout_queue_t pktout;
+	void             *queue_lf;
 	char              name[ODP_QUEUE_NAME_LEN];
 };
 
@@ -61,9 +62,14 @@ union queue_entry_u {
 	uint8_t pad[ROUNDUP_CACHE_LINE(sizeof(struct queue_entry_s))];
 };
 
-static inline uint32_t queue_to_id(odp_queue_t handle)
+static inline uint32_t queue_to_index(odp_queue_t handle)
 {
 	return _odp_typeval(handle) - 1;
+}
+
+static inline odp_queue_t queue_from_index(uint32_t queue_id)
+{
+	return _odp_cast_scalar(odp_queue_t, queue_id + 1);
 }
 
 static inline queue_entry_t *qentry_from_int(queue_t q_int)

@@ -1,4 +1,4 @@
-/* Copyright (c) 2014, Linaro Limited
+/* Copyright (c) 2014-2018, Linaro Limited
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -8,7 +8,6 @@
 
 #include <odp_api.h>
 #include <odp_cunit_common.h>
-#include "shmem.h"
 #include <stdlib.h>
 
 #define ALIGN_SIZE  (128)
@@ -22,6 +21,8 @@
 #define STRESS_SIZE 32		/* power of 2 and <=256 */
 #define STRESS_RANDOM_SZ 5
 #define STRESS_ITERATION 5000
+#define MAX_SIZE_TESTED  (100 * 1000000UL)
+#define MAX_ALIGN_TESTED (1024 * 1024)
 
 typedef enum {
 	STRESS_FREE, /* entry is free and can be allocated */
@@ -129,7 +130,7 @@ static int run_test_basic_thread(void *arg ODP_UNUSED)
 /*
  * test basic things: shmem creation, info, share, and free
  */
-void shmem_test_basic(void)
+static void shmem_test_basic(void)
 {
 	pthrd_arg thrdarg;
 	odp_shm_t shm;
@@ -142,7 +143,7 @@ void shmem_test_basic(void)
 	for (i = 0; i < ODP_SHM_NAME_LEN; i++)
 		max_name[i] = 'A' + (i % 26);
 
-	max_name[ODP_QUEUE_NAME_LEN - 1] = 0;
+	max_name[ODP_SHM_NAME_LEN - 1] = 0;
 
 	/* NULL name */
 	shm = odp_shm_reserve(NULL,
@@ -210,6 +211,57 @@ void shmem_test_basic(void)
 	odp_shm_print(shm);
 
 	CU_ASSERT(0 == odp_shm_free(shm));
+}
+
+/*
+ * maximum size reservation
+ */
+static void shmem_test_max_reserve(void)
+{
+	odp_shm_capability_t capa;
+	odp_shm_t shm;
+	uint64_t size, align;
+	uint8_t *data;
+	uint64_t i;
+
+	memset(&capa, 0, sizeof(odp_shm_capability_t));
+	CU_ASSERT_FATAL(odp_shm_capability(&capa) == 0);
+
+	CU_ASSERT(capa.max_blocks > 0);
+
+	size  = capa.max_size;
+	align = capa.max_align;
+
+	/* Assuming that system has at least MAX_SIZE_TESTED bytes available */
+	if (capa.max_size == 0 || capa.max_size > MAX_SIZE_TESTED)
+		size = MAX_SIZE_TESTED;
+
+	if (capa.max_align == 0 || capa.max_align > MAX_ALIGN_TESTED)
+		align = MAX_ALIGN_TESTED;
+
+	printf("\n    size:  %" PRIu64 "\n", size);
+	printf("    align: %" PRIu64 "\n", align);
+
+	shm = odp_shm_reserve("test_max_reserve", size, align, 0);
+	CU_ASSERT(shm != ODP_SHM_INVALID);
+
+	data = odp_shm_addr(shm);
+	CU_ASSERT(data != NULL);
+
+	if (data) {
+		memset(data, 0xde, size);
+		for (i = 0; i < size; i++) {
+			if (data[i] != 0xde) {
+				printf("    data error i:%" PRIu64 ", data %x"
+				       "\n", i, data[i]);
+				CU_FAIL("Data error");
+				break;
+			}
+		}
+	}
+
+	if (shm != ODP_SHM_INVALID)
+		CU_ASSERT(odp_shm_free(shm) == 0);
 }
 
 /*
@@ -289,7 +341,7 @@ static int run_test_reserve_after_fork(void *arg ODP_UNUSED)
 /*
  * test sharing memory reserved after odp_thread creation (e.g. fork()):
  */
-void shmem_test_reserve_after_fork(void)
+static void shmem_test_reserve_after_fork(void)
 {
 	pthrd_arg thrdarg;
 	odp_shm_t shm;
@@ -478,7 +530,7 @@ static int run_test_singleva_after_fork(void *arg ODP_UNUSED)
  * test sharing memory reserved after odp_thread creation (e.g. fork()):
  * with single VA flag.
  */
-void shmem_test_singleva_after_fork(void)
+static void shmem_test_singleva_after_fork(void)
 {
 	pthrd_arg thrdarg;
 	odp_shm_t shm;
@@ -718,7 +770,7 @@ static int run_test_stress(void *arg ODP_UNUSED)
 /*
  * stress tests
  */
-void shmem_test_stress(void)
+static void shmem_test_stress(void)
 {
 	pthrd_arg thrdarg;
 	odp_shm_t shm;
@@ -769,6 +821,7 @@ void shmem_test_stress(void)
 
 odp_testinfo_t shmem_suite[] = {
 	ODP_TEST_INFO(shmem_test_basic),
+	ODP_TEST_INFO(shmem_test_max_reserve),
 	ODP_TEST_INFO(shmem_test_reserve_after_fork),
 	ODP_TEST_INFO(shmem_test_singleva_after_fork),
 	ODP_TEST_INFO(shmem_test_stress),
@@ -780,7 +833,7 @@ odp_suiteinfo_t shmem_suites[] = {
 	ODP_SUITE_INFO_NULL,
 };
 
-int shmem_main(int argc, char *argv[])
+int main(int argc, char *argv[])
 {
 	int ret;
 

@@ -1,4 +1,4 @@
-/* Copyright (c) 2015, Linaro Limited
+/* Copyright (c) 2015-2018, Linaro Limited
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -10,8 +10,8 @@
  * ODP version of often used C library calls
  */
 
-#ifndef ODP_API_STD_CLIB_H_
-#define ODP_API_STD_CLIB_H_
+#ifndef ODP_API_SPEC_STD_CLIB_H_
+#define ODP_API_SPEC_STD_CLIB_H_
 #include <odp/visibility_begin.h>
 
 #ifdef __cplusplus

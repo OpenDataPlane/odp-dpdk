@@ -3,7 +3,7 @@ AC_PREREQ([2.5])
 # Set correct API version
 ##########################################################################
 m4_define([odpapi_generation_version], [1])
-m4_define([odpapi_major_version], [17])
+m4_define([odpapi_major_version], [18])
 m4_define([odpapi_minor_version], [0])
 m4_define([odpapi_point_version], [0])
 m4_define([odpapi_version],
@@ -16,7 +16,7 @@ ODP_VERSION_API_MAJOR=odpapi_major_version
 AC_SUBST(ODP_VERSION_API_MAJOR)
 ODP_VERSION_API_MINOR=odpapi_minor_version
 AC_SUBST(ODP_VERSION_API_MINOR)
-AM_INIT_AUTOMAKE([1.9 tar-pax subdir-objects foreign nostdinc])
+AM_INIT_AUTOMAKE([1.9 tar-pax subdir-objects foreign nostdinc -Wall -Werror])
 AC_CONFIG_SRCDIR([include/odp/api/spec/init.h])
 AM_CONFIG_HEADER([include/config.h])
 
@@ -36,10 +36,10 @@ AM_SILENT_RULES([yes])
 # 3. if interfaces were removed, then use C+1:0:0
 ##########################################################################
 
-ODP_LIBSO_VERSION=117:0:0
+ODP_LIBSO_VERSION=118:0:0
 AC_SUBST(ODP_LIBSO_VERSION)
 
-ODPHELPER_LIBSO_VERSION=113:2:1
+ODPHELPER_LIBSO_VERSION=114:0:2
 AC_SUBST(ODPHELPER_LIBSO_VERSION)
 
 # Checks for programs.
@@ -94,12 +94,60 @@ CC_VERSION_MINOR=$(echo $CC_VERSION | cut -d'.' -f2)
 CC_VERSION_PATCH=$(echo $CC_VERSION | cut -d'.' -f3)
 
 ##########################################################################
+# Default warning setup
+##########################################################################
+ODP_CFLAGS="$ODP_CFLAGS -W -Wall -Werror"
+ODP_CXXFLAGS="$ODP_CXXFLAGS -W -Wall -Werror"
+
+ODP_CHECK_CFLAG([-Wstrict-prototypes])
+ODP_CHECK_CFLAG([-Wmissing-prototypes])
+ODP_CHECK_CFLAG([-Wmissing-declarations])
+ODP_CHECK_CFLAG([-Wold-style-definition])
+ODP_CHECK_CFLAG([-Wpointer-arith])
+ODP_CHECK_CFLAG([-Wcast-align])
+ODP_CHECK_CFLAG([-Wnested-externs])
+ODP_CHECK_CFLAG([-Wcast-qual])
+ODP_CHECK_CFLAG([-Wformat-nonliteral])
+ODP_CHECK_CFLAG([-Wformat-security])
+ODP_CHECK_CFLAG([-Wundef])
+ODP_CHECK_CFLAG([-Wwrite-strings])
+ODP_CHECK_CFLAG([-Wformat-truncation=0])
+ODP_CHECK_CFLAG([-Wformat-overflow=0])
+
+ODP_CFLAGS="$ODP_CFLAGS -std=c99"
+ODP_CXXFLAGS="$ODP_CXXFLAGS -std=c++11"
+
+# Extra flags for example to suppress certain warning types
+ODP_CFLAGS="$ODP_CFLAGS $ODP_CFLAGS_EXTRA"
+
+##########################################################################
+# Check if compiler supports cmpxchng16 on x86-based architectures
+##########################################################################
+case "${host}" in
+  i?86* | x86*)
+  if test "${CC}" != "gcc" -o ${CC_VERSION_MAJOR} -ge 5; then
+     ODP_CHECK_CFLAG([-mcx16])
+  fi
+  ;;
+esac
+
+##########################################################################
 # Allow valgrind suite to run against the defined tests
 ##########################################################################
 AX_VALGRIND_DFLT([sgcheck], [off])
 AX_VALGRIND_DFLT([helgrind], [off])
 AX_VALGRIND_DFLT([drd], [off])
 AX_VALGRIND_CHECK
+
+##########################################################################
+# Architecture-specific dir
+##########################################################################
+AC_ARG_WITH([archincludedir],
+	    [AS_HELP_STRING([--with-archincludedir=DIR],
+	     [directory to hold arch-specific headers (${includedir})])],
+	    [archincludedir=$with_archincludedir],
+	    [archincludedir="${includedir}"])
+AC_SUBST([archincludedir])
 
 ##########################################################################
 # Which architecture optimizations will we use
@@ -111,18 +159,9 @@ AS_CASE([$host],
   [powerpc*], [ARCH_DIR=powerpc],
   [aarch64*], [ARCH_DIR=aarch64],
   [arm*], [ARCH_DIR=arm],
-  [ARCH_DIR=undefined]
+  [ARCH_DIR=default]
 )
 AC_SUBST([ARCH_DIR])
-
-##########################################################################
-# Warn on the defaults if arch is undefined
-##########################################################################
-if test "${ARCH_DIR}" = "undefined";
-then
-    echo "ARCH_DIR is undefined, please add your ARCH_DIR based on host=${host}"
-    exit 1
-fi
 
 ##########################################################################
 # Architecture for ABI support
@@ -134,14 +173,30 @@ AS_CASE([$host],
   [powerpc*], [ARCH_ABI=power64-linux],
   [aarch64*], [ARCH_ABI=arm64-linux],
   [arm*],     [ARCH_ABI=arm32-linux],
-  [ARCH_ABI=undefined]
+  [ARCH_ABI=default-linux]
 )
 AC_SUBST([ARCH_ABI])
 
-if test "${ARCH_ABI}" = "undefined";
+AC_ARG_ENABLE([host-optimization],
+	      [AS_HELP_STRING([--disable-host-optimization],
+			      [disables using host-specific ARCH and ABI files])],
+			      [], [enable_host_optimization=yes])
+if test "x$enable_host_optimization" = "xno" ; then
+	ARCH_DIR=default
+	ARCH_ABI=default-linux
+fi
+
+##########################################################################
+# Warn on the defaults if arch is undefined
+##########################################################################
+if test "${ARCH_DIR}" = "default";
 then
-    echo "ARCH_ABI is undefined, please add your ARCH_ABI based on host=${host}"
-    exit 1
+    AC_MSG_WARN([ARCH_DIR is undefined, please add your ARCH_DIR based on host=${host}])
+fi
+
+if test "${ARCH_ABI}" = "default-linux";
+then
+    AC_MSG_WARN([ARCH_ABI is undefined, please add your ARCH_ABI based on host=${host}])
 fi
 
 ##########################################################################
@@ -149,6 +204,22 @@ fi
 ##########################################################################
 PKGCONFIG_VERSION=$(echo $VERSION | awk -F '.git' '{print $1}')
 AC_SUBST(PKGCONFIG_VERSION)
+
+##########################################################################
+# Enable/disable ABI compatible build
+##########################################################################
+ODP_ABI_COMPAT=1
+abi_compat=yes
+AC_ARG_ENABLE([abi-compat],
+    [AS_HELP_STRING([--disable-abi-compat],
+		    [disables ABI compatible mode, enables inline code in header files])],
+    [if test "x$enableval" = "xno"; then
+	ODP_ABI_COMPAT=0
+	abi_compat=no
+	#if there is no ABI compatibility the .so numbers are meaningless
+	ODP_LIBSO_VERSION=0:0:0
+    fi])
+AM_CONDITIONAL(ODP_ABI_COMPAT, [test "x$ODP_ABI_COMPAT" = "x1"])
 
 ##########################################################################
 # Determine which platform to build for
@@ -161,6 +232,22 @@ AC_ARG_WITH([platform],
     ])
 
 AC_SUBST([with_platform])
+
+##########################################################################
+# Build examples/tests dynamically
+##########################################################################
+AC_ARG_ENABLE([static-applications],
+	      [AS_HELP_STRING([--disable-static-applications],
+			      [disable static linking of examples and tests]
+			      [ with ODP])], [],
+	      [enable_static_applications=yes])
+AM_CONDITIONAL([STATIC_APPS], [test "x$enable_static_applications" != "xno"])
+if test "x$DPDK_SHARED" = "xyes" -a "x$enable_static_applications" != "xno" ;
+then
+	AC_MSG_WARN([Static linking of examples and tests might fail when ]
+	   [shared DPDK is detected. If build fails please retry with ]
+	   [--disable-static-applications])
+fi
 
 ##########################################################################
 # Include m4 files
@@ -201,6 +288,7 @@ AM_CONDITIONAL([HAVE_MSCGEN], [test "x${MSCGEN}" = "xmscgen"])
 AM_CONDITIONAL([helper_linux], [test x$helper_linux = xyes ])
 AM_CONDITIONAL([ARCH_IS_ARM], [test "x${ARCH_DIR}" = "xarm"])
 AM_CONDITIONAL([ARCH_IS_AARCH64], [test "x${ARCH_DIR}" = "xaarch64"])
+AM_CONDITIONAL([ARCH_IS_DEFAULT], [test "x${ARCH_DIR}" = "xdefault"])
 AM_CONDITIONAL([ARCH_IS_MIPS64], [test "x${ARCH_DIR}" = "xmips64"])
 AM_CONDITIONAL([ARCH_IS_POWERPC], [test "x${ARCH_DIR}" = "xpowerpc"])
 AM_CONDITIONAL([ARCH_IS_X86], [test "x${ARCH_DIR}" = "xx86"])
@@ -257,21 +345,6 @@ AC_DEFINE_UNQUOTED([ODPH_DEBUG_PRINT], [$ODPH_DEBUG_PRINT],
 		   [Define to 1 to display helper debug information])
 
 ##########################################################################
-# Enable/disable ABI compatible build
-##########################################################################
-ODP_ABI_COMPAT=1
-abi_compat=yes
-AC_ARG_ENABLE([abi-compat],
-    [  --disable-abi-compat    disables ABI compatible mode, enables inline code in header files],
-    [if test "x$enableval" = "xno"; then
-	ODP_ABI_COMPAT=0
-	abi_compat=no
-	#if there is no ABI compatibility the .so numbers are meaningless
-	ODP_LIBSO_VERSION=0:0:0
-    fi])
-AC_SUBST(ODP_ABI_COMPAT)
-
-##########################################################################
 # Enable/disable deprecated API definitions
 ##########################################################################
 ODP_DEPRECATED_API=0
@@ -283,51 +356,6 @@ AC_ARG_ENABLE([deprecated],
 	deprecated=yes
     fi])
 AC_SUBST(ODP_DEPRECATED_API)
-
-##########################################################################
-# Default warning setup
-##########################################################################
-ODP_CFLAGS="$ODP_CFLAGS -W -Wall -Werror"
-
-dnl Use -Werror in the checks below since Clang emits a warning instead of
-dnl an error when it encounters an unknown warning option.
-AC_DEFUN([ODP_CHECK_CFLAG],
-	 [AX_CHECK_COMPILE_FLAG([$1],
-				[ODP_CFLAGS="$ODP_CFLAGS $1"],
-				[], [-W -Wall -Werror],
-				[AC_LANG_SOURCE([int main(void)
-						{return 0;}])])])
-ODP_CHECK_CFLAG([-Wstrict-prototypes])
-ODP_CHECK_CFLAG([-Wmissing-prototypes])
-ODP_CHECK_CFLAG([-Wmissing-declarations])
-ODP_CHECK_CFLAG([-Wold-style-definition])
-ODP_CHECK_CFLAG([-Wpointer-arith])
-ODP_CHECK_CFLAG([-Wcast-align])
-ODP_CHECK_CFLAG([-Wnested-externs])
-ODP_CHECK_CFLAG([-Wcast-qual])
-ODP_CHECK_CFLAG([-Wformat-nonliteral])
-ODP_CHECK_CFLAG([-Wformat-security])
-ODP_CHECK_CFLAG([-Wundef])
-ODP_CHECK_CFLAG([-Wwrite-strings])
-ODP_CHECK_CFLAG([-Wformat-truncation=0])
-ODP_CHECK_CFLAG([-Wformat-overflow=0])
-
-ODP_CFLAGS="$ODP_CFLAGS -std=c99"
-ODP_CXXFLAGS="$ODP_CXXFLAGS -std=c++11"
-
-# Extra flags for example to suppress certain warning types
-ODP_CFLAGS="$ODP_CFLAGS $ODP_CFLAGS_EXTRA"
-
-##########################################################################
-# Check if compiler supports cmpxchng16 on x86-based architectures
-##########################################################################
-case "${host}" in
-  i?86? | x86*)
-  if test "${CC}" != "gcc" -o ${CC_VERSION_MAJOR} -ge 5; then
-     ODP_CHECK_CFLAG([-mcx16])
-  fi
-  ;;
-esac
 
 ##########################################################################
 # Default include setup
@@ -383,6 +411,7 @@ AC_MSG_RESULT([
 	Deprecated APIs:	${deprecated}
 	debug:			${enable_debug}
 	cunit:			${cunit_support}
+	static tests linkage:	${enable_static_applications}
 	test_vald:		${test_vald}
 	test_perf:		${test_perf}
 	test_perf_proc:		${test_perf_proc}
