@@ -43,4 +43,9 @@ _ODP_INLINE int odp_packet_has_ts(odp_packet_t pkt)
 	return _odp_packet_has_ts(pkt);
 }
 
+_ODP_INLINE int odp_packet_has_ipsec(odp_packet_t pkt)
+{
+	return _odp_packet_has_ipsec(pkt);
+}
+
 #endif
