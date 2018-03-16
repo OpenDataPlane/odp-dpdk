@@ -879,52 +879,6 @@ odp_packet_t odp_packet_copy_part(odp_packet_t pkt, uint32_t offset,
 	return newpkt;
 }
 
-int odp_packet_copy_to_mem(odp_packet_t pkt, uint32_t offset,
-			   uint32_t len, void *dst)
-{
-	void *mapaddr;
-	uint32_t seglen = 0; /* GCC */
-	uint32_t cpylen;
-	uint8_t *dstaddr = (uint8_t *)dst;
-
-	if (offset + len > odp_packet_len(pkt))
-		return -1;
-
-	while (len > 0) {
-		mapaddr = odp_packet_offset(pkt, offset, &seglen, NULL);
-		cpylen = len > seglen ? seglen : len;
-		memcpy(dstaddr, mapaddr, cpylen);
-		offset  += cpylen;
-		dstaddr += cpylen;
-		len     -= cpylen;
-	}
-
-	return 0;
-}
-
-int odp_packet_copy_from_mem(odp_packet_t pkt, uint32_t offset,
-			     uint32_t len, const void *src)
-{
-	void *mapaddr;
-	uint32_t seglen = 0; /* GCC */
-	uint32_t cpylen;
-	const uint8_t *srcaddr = (const uint8_t *)src;
-
-	if (offset + len > odp_packet_len(pkt))
-		return -1;
-
-	while (len > 0) {
-		mapaddr = odp_packet_offset(pkt, offset, &seglen, NULL);
-		cpylen = len > seglen ? seglen : len;
-		memcpy(mapaddr, srcaddr, cpylen);
-		offset  += cpylen;
-		srcaddr += cpylen;
-		len     -= cpylen;
-	}
-
-	return 0;
-}
-
 int odp_packet_copy_from_pkt(odp_packet_t dst, uint32_t dst_offset,
 			     odp_packet_t src, uint32_t src_offset,
 			     uint32_t len)
