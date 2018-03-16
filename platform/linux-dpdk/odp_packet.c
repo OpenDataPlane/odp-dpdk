@@ -656,8 +656,7 @@ void odp_packet_ts_set(odp_packet_t pkt, odp_time_t timestamp)
 {
 	odp_packet_hdr_t *pkt_hdr = odp_packet_hdr(pkt);
 
-	pkt_hdr->timestamp = timestamp;
-	pkt_hdr->p.input_flags.timestamp = 1;
+	packet_set_ts(pkt_hdr, &timestamp);
 }
 
 /*
