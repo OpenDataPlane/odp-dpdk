@@ -1,4 +1,4 @@
-/* Copyright (c) 2014, Linaro Limited
+/* Copyright (c) 2014-2018, Linaro Limited
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -11,32 +11,30 @@
 #include <odp_packet_internal.h>
 
 #define retflag(pkt, x) do {                             \
-	odp_packet_hdr_t *pkt_hdr = odp_packet_hdr(pkt); \
+	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt); \
 	return pkt_hdr->p.x;                             \
 	} while (0)
 
 #define setflag(pkt, x, v) do {                          \
-	odp_packet_hdr_t *pkt_hdr = odp_packet_hdr(pkt); \
+	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt); \
 	pkt_hdr->p.x = (v) & 1;				 \
 	} while (0)
 
 int odp_packet_has_error(odp_packet_t pkt)
 {
-	odp_packet_hdr_t *pkt_hdr = odp_packet_hdr(pkt);
+	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
 
-	return pkt_hdr->p.error_flags.all != 0;
+	return pkt_hdr->p.flags.all.error != 0;
 }
 
 /* Get Input Flags */
 
 int odp_packet_has_l2_error(odp_packet_t pkt)
 {
-	odp_packet_hdr_t *pkt_hdr = odp_packet_hdr(pkt);
+	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
 	/* L2 parsing is always done by default and hence
 	no additional check is required */
-	return pkt_hdr->p.error_flags.frame_len
-		| pkt_hdr->p.error_flags.snap_len
-		| pkt_hdr->p.error_flags.l2_chksum;
+	return pkt_hdr->p.flags.snap_len_err;
 }
 
 int odp_packet_has_l3(odp_packet_t pkt)
@@ -46,9 +44,9 @@ int odp_packet_has_l3(odp_packet_t pkt)
 
 int odp_packet_has_l3_error(odp_packet_t pkt)
 {
-	odp_packet_hdr_t *pkt_hdr = odp_packet_hdr(pkt);
+	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
 
-	return pkt_hdr->p.error_flags.ip_err;
+	return pkt_hdr->p.flags.ip_err;
 }
 
 int odp_packet_has_l4(odp_packet_t pkt)
@@ -58,9 +56,9 @@ int odp_packet_has_l4(odp_packet_t pkt)
 
 int odp_packet_has_l4_error(odp_packet_t pkt)
 {
-	odp_packet_hdr_t *pkt_hdr = odp_packet_hdr(pkt);
+	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
 
-	return pkt_hdr->p.error_flags.tcp_err | pkt_hdr->p.error_flags.udp_err;
+	return pkt_hdr->p.flags.tcp_err | pkt_hdr->p.flags.udp_err;
 }
 
 int odp_packet_has_eth_bcast(odp_packet_t pkt)
@@ -150,14 +148,14 @@ odp_packet_color_t odp_packet_color(odp_packet_t pkt)
 
 void odp_packet_color_set(odp_packet_t pkt, odp_packet_color_t color)
 {
-	odp_packet_hdr_t *pkt_hdr = odp_packet_hdr(pkt);
+	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
 
 	pkt_hdr->p.input_flags.color = color;
 }
 
 odp_bool_t odp_packet_drop_eligible(odp_packet_t pkt)
 {
-	odp_packet_hdr_t *pkt_hdr = odp_packet_hdr(pkt);
+	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
 
 	return !pkt_hdr->p.input_flags.nodrop;
 }
@@ -169,14 +167,14 @@ void odp_packet_drop_eligible_set(odp_packet_t pkt, odp_bool_t drop)
 
 int8_t odp_packet_shaper_len_adjust(odp_packet_t pkt)
 {
-	retflag(pkt, output_flags.shaper_len_adj);
+	retflag(pkt, flags.shaper_len_adj);
 }
 
 void odp_packet_shaper_len_adjust_set(odp_packet_t pkt, int8_t adj)
 {
-	odp_packet_hdr_t *pkt_hdr = odp_packet_hdr(pkt);
+	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
 
-	pkt_hdr->p.output_flags.shaper_len_adj = adj;
+	pkt_hdr->p.flags.shaper_len_adj = adj;
 }
 
 /* Set Input Flags */
@@ -288,19 +286,14 @@ void odp_packet_has_icmp_set(odp_packet_t pkt, int val)
 
 void odp_packet_has_flow_hash_clr(odp_packet_t pkt)
 {
-	odp_packet_hdr_t *pkt_hdr = odp_packet_hdr(pkt);
+	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
 
 	pkt_hdr->p.input_flags.flow_hash = 0;
 }
 
 void odp_packet_has_ts_clr(odp_packet_t pkt)
 {
-	odp_packet_hdr_t *pkt_hdr = odp_packet_hdr(pkt);
+	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
 
 	pkt_hdr->p.input_flags.timestamp = 0;
 }
-
-/* Include non-inlined versions of API functions */
-#if ODP_ABI_COMPAT == 1
-#include <odp/api/plat/packet_flag_inlines_api.h>
-#endif

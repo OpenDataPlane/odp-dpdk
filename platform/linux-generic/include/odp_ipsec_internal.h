@@ -1,4 +1,4 @@
-/* Copyright (c) 2017, Linaro Limited
+/* Copyright (c) 2017-2018, Linaro Limited
  * All rights reserved.
  *
  * SPDX-License-Identifier:	BSD-3-Clause
@@ -92,7 +92,7 @@ int _odp_ipsec_status_send(odp_queue_t queue,
 #define ODP_CONFIG_IPSEC_SAS	8
 
 struct ipsec_sa_s {
-	odp_atomic_u32_t state ODP_ALIGNED_CACHE;
+	odp_atomic_u32_t ODP_ALIGNED_CACHE state;
 
 	uint32_t	ipsec_sa_idx;
 	odp_ipsec_sa_t	ipsec_sa_hdl;
@@ -122,6 +122,7 @@ struct ipsec_sa_s {
 
 	uint8_t		salt[IPSEC_MAX_SALT_LEN];
 	uint32_t	salt_length;
+	odp_ipsec_lookup_mode_t lookup_mode;
 
 	union {
 		unsigned flags;
@@ -144,7 +145,6 @@ struct ipsec_sa_s {
 
 	union {
 		struct {
-			odp_ipsec_lookup_mode_t lookup_mode;
 			odp_ipsec_ip_version_t lookup_ver;
 			union {
 				odp_u32be_t	lookup_dst_ipv4;
@@ -161,22 +161,17 @@ struct ipsec_sa_s {
 
 			union {
 			struct {
+				odp_ipsec_ipv4_param_t param;
 				odp_u32be_t	src_ip;
 				odp_u32be_t	dst_ip;
 
 				/* 32-bit from which low 16 are used */
 				odp_atomic_u32_t hdr_id;
-
-				uint8_t		ttl;
-				uint8_t		dscp;
-				uint8_t		df;
 			} tun_ipv4;
 			struct {
+				odp_ipsec_ipv6_param_t param;
 				uint8_t		src_ip[_ODP_IPV6ADDR_LEN];
 				uint8_t		dst_ip[_ODP_IPV6ADDR_LEN];
-				uint8_t		hlimit;
-				uint8_t		dscp;
-				uint32_t	flabel;
 			} tun_ipv6;
 			};
 		} out;
@@ -262,7 +257,7 @@ int _odp_ipsec_sa_replay_update(ipsec_sa_t *ipsec_sa, uint32_t seq,
  * @retval 0 if packet was processed and will be queue using IPsec inline
  *           processing
  */
-int _odp_ipsec_try_inline(odp_packet_t pkt);
+int _odp_ipsec_try_inline(odp_packet_t *pkt);
 
 /**
  * @}

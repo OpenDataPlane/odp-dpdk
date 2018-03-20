@@ -1,4 +1,4 @@
-/* Copyright (c) 2016, Linaro Limited
+/* Copyright (c) 2016-2018, Linaro Limited
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -93,12 +93,12 @@ struct cuckoo_table_key_value {
  *  into a bucket, and each bucket has at most HASH_BUCKET_ENTRIES
  *  elements.
  */
-struct cuckoo_table_bucket {
+struct ODP_ALIGNED_CACHE cuckoo_table_bucket {
 	struct cuckoo_table_signatures signatures[HASH_BUCKET_ENTRIES];
 	/* Includes dummy key index that always contains index 0 */
 	odp_buffer_t key_buf[HASH_BUCKET_ENTRIES + 1];
 	uint8_t flag[HASH_BUCKET_ENTRIES];
-} ODP_ALIGNED_CACHE;
+};
 
 /* More efficient access to a map of single ullong */
 #define ULLONG_FOR_EACH_1(IDX, MAP)	\
@@ -106,7 +106,7 @@ struct cuckoo_table_bucket {
 		 MAP = (MAP & (MAP - 1)))
 
 /** A hash table structure. */
-typedef struct {
+typedef struct ODP_ALIGNED_CACHE {
 	/**< for check */
 	uint32_t magicword;
 	/**< Name of the hash. */
@@ -126,7 +126,7 @@ typedef struct {
 	/** Table with buckets storing all the hash values and key indexes
 	  to the key table*/
 	struct cuckoo_table_bucket *buckets;
-} odph_cuckoo_table_impl ODP_ALIGNED_CACHE;
+} odph_cuckoo_table_impl;
 
 /**
  * Aligns input parameter to the next power of 2
@@ -184,12 +184,34 @@ odph_cuckoo_table_create(
 
 	odp_queue_t queue;
 	odp_queue_param_t qparam;
+	odp_queue_capability_t qcapa;
+	odp_pool_capability_t pcapa;
 
 	char pool_name[ODPH_TABLE_NAME_LEN + 3],
 		 queue_name[ODPH_TABLE_NAME_LEN + 3];
 	unsigned i;
 	uint32_t impl_size, kv_entry_size,
 			 bucket_num, bucket_size;
+
+	if (odp_queue_capability(&qcapa)) {
+		ODPH_DBG("queue capa failed\n");
+		return NULL;
+	}
+
+	if (qcapa.plain.max_size && qcapa.plain.max_size < capacity) {
+		ODPH_DBG("queue max_size too small\n");
+		return NULL;
+	}
+
+	if (odp_pool_capability(&pcapa)) {
+		ODPH_DBG("pool capa failed\n");
+		return NULL;
+	}
+
+	if (pcapa.buf.max_num && pcapa.buf.max_num < capacity) {
+		ODPH_DBG("pool max_num too small\n");
+		return NULL;
+	}
 
 	/* Check for valid parameters */
 	if (

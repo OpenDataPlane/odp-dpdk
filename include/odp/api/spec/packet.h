@@ -1,4 +1,4 @@
-/* Copyright (c) 2013, Linaro Limited
+/* Copyright (c) 2013-2018, Linaro Limited
  * All rights reserved.
  *
  * SPDX-License-Identifier: BSD-3-Clause
@@ -11,8 +11,8 @@
  * ODP packet descriptor
  */
 
-#ifndef ODP_API_PACKET_H_
-#define ODP_API_PACKET_H_
+#ifndef ODP_API_SPEC_PACKET_H_
+#define ODP_API_SPEC_PACKET_H_
 #include <odp/visibility_begin.h>
 
 #ifdef __cplusplus
@@ -70,6 +70,92 @@ extern "C" {
   * @def ODP_PACKET_RED
   * Packet is red
   */
+
+/**
+ * @typedef odp_proto_l2_type_t
+ * Layer 2 protocol type
+ */
+
+/**
+ * @def ODP_PROTO_L2_TYPE_NONE
+ * Layer 2 protocol type not defined
+ *
+ * @def ODP_PROTO_L2_TYPE_ETH
+ * Layer 2 protocol is Ethernet
+ */
+
+/**
+ * @typedef odp_proto_l3_type_t
+ * Layer 3 protocol type
+ */
+
+/**
+ * @def ODP_PROTO_L3_TYPE_NONE
+ * Layer 3 protocol type not defined
+ *
+ * @def ODP_PROTO_L3_TYPE_ARP
+ * Layer 3 protocol is ARP
+ *
+ * @def ODP_PROTO_L3_TYPE_RARP
+ * Layer 3 protocol is RARP
+ *
+ * @def ODP_PROTO_L3_TYPE_MPLS
+ * Layer 3 protocol is MPLS
+ *
+ * @def ODP_PROTO_L3_TYPE_IPV4
+ * Layer 3 protocol type is IPv4
+ *
+ * @def ODP_PROTO_L3_TYPE_IPV6
+ * Layer 3 protocol type is IPv6
+ */
+
+/**
+ * @def ODP_PROTO_L4_TYPE_NONE
+ * Layer 4 protocol type not defined
+ *
+ * @def ODP_PROTO_L4_TYPE_ICMPV4
+ * Layer 4 protocol type is ICMPv4
+ *
+ * @def ODP_PROTO_L4_TYPE_IGMP
+ * Layer 4 protocol type is IGMP
+ *
+ * @def ODP_PROTO_L4_TYPE_IPV4
+ * Layer 4 protocol type is IPv4
+ *
+ * @def ODP_PROTO_L4_TYPE_TCP
+ * Layer 4 protocol type is TCP
+ *
+ * @def ODP_PROTO_L4_TYPE_UDP
+ * Layer 4 protocol type is UDP
+ *
+ * @def ODP_PROTO_L4_TYPE_IPV6
+ * Layer 4 protocol type is IPv6
+ *
+ * @def ODP_PROTO_L4_TYPE_GRE
+ * Layer 4 protocol type is GRE
+ *
+ * @def ODP_PROTO_L4_TYPE_ESP
+ * Layer 4 protocol type is IPSEC ESP
+ *
+ * @def ODP_PROTO_L4_TYPE_AH
+ * Layer 4 protocol type is IPSEC AH
+ *
+ * @def ODP_PROTO_L4_TYPE_ICMPV6
+ * Layer 4 protocol type is ICMPv6
+ *
+ * @def ODP_PROTO_L4_TYPE_NO_NEXT
+ * Layer 4 protocol type is "No Next Header".
+ * Protocol / next header number is 59.
+ *
+ * @def ODP_PROTO_L4_TYPE_IPCOMP
+ * Layer 4 protocol type is IP Payload Compression Protocol
+ *
+ * @def ODP_PROTO_L4_TYPE_SCTP
+ * Layer 4 protocol type is SCTP
+ *
+ * @def ODP_PROTO_L4_TYPE_ROHC
+ * Layer 4 protocol type is ROHC
+ */
 
 /**
  * Protocol
@@ -315,43 +401,71 @@ uint32_t odp_packet_buf_len(odp_packet_t pkt);
 /**
  * Packet data pointer
  *
- * Returns the current packet data pointer. When a packet is received
- * from packet input, this points to the first byte of the received
- * packet. Packet level offsets are calculated relative to this position.
+ * Returns pointer to the first byte of packet data. When packet is segmented,
+ * only a portion of packet data follows the pointer. When unsure, use e.g.
+ * odp_packet_seg_len() to check the data length following the pointer. Packet
+ * level offsets are calculated relative to this position.
  *
- * User can adjust the data pointer with head_push/head_pull (does not modify
- * segmentation) and add_data/rem_data calls (may modify segmentation).
+ * When a packet is received from packet input, this points to the first byte
+ * of the received packet. Pool configuration parameters may be used to ensure
+ * that the first packet segment contains all/most of the data relevant to the
+ * application.
+ *
+ * User can adjust the data pointer with e.g. push_head/pull_head (does not
+ * modify segmentation) and extend_head/trunc_head (may modify segmentation)
+ * calls.
  *
  * @param pkt  Packet handle
  *
  * @return  Pointer to the packet data
  *
- * @see odp_packet_l2_ptr(), odp_packet_seg_len()
+ * @see odp_packet_seg_len(), odp_packet_push_head(), odp_packet_extend_head()
  */
 void *odp_packet_data(odp_packet_t pkt);
 
 /**
- * Packet segment data length
+ * Packet data length following the data pointer
  *
- * Returns number of data bytes following the current data pointer
- * (odp_packet_data()) location in the segment.
+ * Returns number of data bytes (in the segment) following the current data
+ * pointer position. When unsure, use this function to check how many bytes
+ * can be accessed linearly after data pointer (odp_packet_data()). This
+ * equals to odp_packet_len() for single segment packets.
  *
  * @param pkt  Packet handle
  *
- * @return  Segment data length in bytes (pointed by odp_packet_data())
+ * @return  Segment data length in bytes following odp_packet_data()
  *
  * @see odp_packet_data()
  */
 uint32_t odp_packet_seg_len(odp_packet_t pkt);
 
 /**
+ * Packet data pointer with segment length
+ *
+ * Returns both data pointer and number of data bytes (in the segment)
+ * following it. This is equivalent to calling odp_packet_data() and
+ * odp_packet_seg_len().
+ *
+ * @param      pkt      Packet handle
+ * @param[out] seg_len  Pointer to output segment length
+ *
+ * @return Pointer to the packet data
+ *
+ * @see odp_packet_data(), odp_packet_seg_len()
+ */
+void *odp_packet_data_seg_len(odp_packet_t pkt, uint32_t *seg_len);
+
+/**
  * Packet data length
  *
- * Returns sum of data lengths over all packet segments.
+ * Returns total data length over all packet segments. This equals the sum of
+ * segment level data lengths (odp_packet_seg_data_len()).
  *
  * @param pkt  Packet handle
  *
  * @return Packet data length
+ *
+ * @see odp_packet_seg_len(), odp_packet_data(), odp_packet_seg_data_len()
  */
 uint32_t odp_packet_len(odp_packet_t pkt);
 
@@ -1341,7 +1455,10 @@ int odp_packet_input_index(odp_packet_t pkt);
 /**
  * User context pointer
  *
- * Return previously stored user context pointer.
+ * Return previously stored user context pointer. If not otherwise documented,
+ * the pointer value is maintained over packet manipulating operations.
+ * Implementation initializes the pointer value to NULL during new packet
+ * creation (e.g. alloc and packet input) and reset.
  *
  * @param pkt  Packet handle
  *
@@ -1357,10 +1474,10 @@ void *odp_packet_user_ptr(odp_packet_t pkt);
  * value of type intptr_t. ODP may use the pointer for data prefetching, but
  * must ignore any invalid addresses.
  *
- * @param pkt  Packet handle
- * @param ctx  User context pointer
+ * @param pkt       Packet handle
+ * @param user_ptr  User context pointer
  */
-void odp_packet_user_ptr_set(odp_packet_t pkt, const void *ctx);
+void odp_packet_user_ptr_set(odp_packet_t pkt, const void *user_ptr);
 
 /**
  * User area address
@@ -1538,6 +1655,39 @@ uint32_t odp_packet_l4_offset(odp_packet_t pkt);
  * @retval <0 on failure
  */
 int odp_packet_l4_offset_set(odp_packet_t pkt, uint32_t offset);
+
+/**
+ * Layer 2 protocol type
+ *
+ * Returns layer 2 protocol type. Initial type value is ODP_PROTO_L2_TYPE_NONE.
+ *
+ * @param      pkt      Packet handle
+ *
+ * @return Layer 2 protocol type
+ */
+odp_proto_l2_type_t odp_packet_l2_type(odp_packet_t pkt);
+
+/**
+ * Layer 3 protocol type
+ *
+ * Returns layer 3 protocol type. Initial type value is ODP_PROTO_L3_TYPE_NONE.
+ *
+ * @param      pkt      Packet handle
+ *
+ * @return Layer 3 protocol type
+ */
+odp_proto_l3_type_t odp_packet_l3_type(odp_packet_t pkt);
+
+/**
+ * Layer 4 protocol type
+ *
+ * Returns layer 4 protocol type. Initial type value is ODP_PROTO_L4_TYPE_NONE.
+ *
+ * @param      pkt      Packet handle
+ *
+ * @return Layer 4 protocol type
+ */
+odp_proto_l4_type_t odp_packet_l4_type(odp_packet_t pkt);
 
 /**
  * Layer 3 checksum check status

@@ -1,4 +1,4 @@
-/* Copyright (c) 2015, Linaro Limited
+/* Copyright (c) 2015-2018, Linaro Limited
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -39,6 +39,7 @@
 #include <odp_posix_extensions.h>
 
 #include <odp_api.h>
+#include <odp/api/plat/packet_inlines.h>
 #include <odp_packet_internal.h>
 #include <odp_packet_io_internal.h>
 
@@ -204,7 +205,7 @@ static int _pcapif_reopen(pkt_pcap_t *pcap)
 }
 
 static int pcapif_recv_pkt(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
-			   odp_packet_t pkts[], int len)
+			   odp_packet_t pkts[], int num)
 {
 	int i;
 	struct pcap_pkthdr *hdr;
@@ -226,7 +227,7 @@ static int pcapif_recv_pkt(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 	    pktio_entry->s.config.pktin.bit.ts_ptp)
 		ts = &ts_val;
 
-	for (i = 0; i < len; ) {
+	for (i = 0; i < num; ) {
 		int ret;
 
 		ret = pcap_next_ex(pcap->rx, &hdr, &data);
@@ -247,9 +248,9 @@ static int pcapif_recv_pkt(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 		if (ts != NULL)
 			ts_val = odp_time_global();
 
-		pkt_hdr = odp_packet_hdr(pkt);
+		pkt_hdr = packet_hdr(pkt);
 
-		if (odp_packet_copy_from_mem(pkt, 0, hdr->caplen, data) != 0) {
+		if (_odp_packet_copy_from_mem(pkt, 0, hdr->caplen, data) != 0) {
 			ODP_ERR("failed to copy packet data\n");
 			break;
 		}
@@ -283,7 +284,7 @@ static int _pcapif_dump_pkt(pkt_pcap_t *pcap, odp_packet_t pkt)
 	hdr.len = hdr.caplen;
 	(void)gettimeofday(&hdr.ts, NULL);
 
-	if (odp_packet_copy_to_mem(pkt, 0, hdr.len, pcap->buf) != 0)
+	if (_odp_packet_copy_to_mem(pkt, 0, hdr.len, pcap->buf) != 0)
 		return -1;
 
 	pcap_dump(pcap->tx_dump, &hdr, pcap->buf);
@@ -293,7 +294,7 @@ static int _pcapif_dump_pkt(pkt_pcap_t *pcap, odp_packet_t pkt)
 }
 
 static int pcapif_send_pkt(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
-			   const odp_packet_t pkts[], int len)
+			   const odp_packet_t pkts[], int num)
 {
 	pkt_pcap_t *pcap = &pktio_entry->s.pkt_pcap;
 	int i;
@@ -305,7 +306,7 @@ static int pcapif_send_pkt(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 		return 0;
 	}
 
-	for (i = 0; i < len; ++i) {
+	for (i = 0; i < num; ++i) {
 		int pkt_len = odp_packet_len(pkts[i]);
 
 		if (pkt_len > PKTIO_PCAP_MTU) {

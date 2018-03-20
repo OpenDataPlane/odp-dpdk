@@ -1,4 +1,4 @@
-/* Copyright (c) 2013, Linaro Limited
+/* Copyright (c) 2013-2018, Linaro Limited
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -11,8 +11,8 @@
  * ODP time
  */
 
-#ifndef ODP_API_TIME_H_
-#define ODP_API_TIME_H_
+#ifndef ODP_API_SPEC_TIME_H_
+#define ODP_API_SPEC_TIME_H_
 #include <odp/visibility_begin.h>
 
 #ifdef __cplusplus

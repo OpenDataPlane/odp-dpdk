@@ -1,4 +1,4 @@
-/* Copyright (c) 2016, Linaro Limited
+/* Copyright (c) 2016-2018, Linaro Limited
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -7,6 +7,7 @@
 #include "config.h"
 
 #include <odp/api/sync.h>
-#if ODP_ABI_COMPAT == 1
+
+/* Include non-inlined versions of API functions */
+#define _ODP_INLINE
 #include <odp/api/plat/sync_inlines.h>
-#endif

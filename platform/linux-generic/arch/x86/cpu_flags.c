@@ -1,4 +1,4 @@
-/* Copyright (c) 2017, Linaro Limited
+/* Copyright (c) 2017-2018, Linaro Limited
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -39,7 +39,7 @@
 
 #include "config.h"
 
-#include <cpu_flags.h>
+#include "cpu_flags.h"
 #include <odp_debug_internal.h>
 #include <odp_arch_time_internal.h>
 #include <stdio.h>

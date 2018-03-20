@@ -1,4 +1,4 @@
-/* Copyright (c) 2013, Linaro Limited
+/* Copyright (c) 2013-2018, Linaro Limited
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -27,6 +27,8 @@
 #include <math.h>
 #include <inttypes.h>
 
+#include <odp/api/plat/pool_inline_types.h>
+
 /* for DPDK */
 #include <odp_packet_dpdk.h>
 
@@ -51,7 +53,7 @@ pool_table_t *pool_tbl;
 #include <odp/visibility_begin.h>
 
 /* Fill in pool header field offsets for inline functions */
-const _odp_pool_inline_offset_t _odp_pool_inline ODP_ALIGNED_CACHE = {
+const _odp_pool_inline_offset_t ODP_ALIGNED_CACHE _odp_pool_inline = {
 	.pool_hdl          = offsetof(pool_t, pool_hdl),
 	.uarea_size        = offsetof(pool_t, params.pkt.uarea_size)
 };
@@ -557,7 +559,6 @@ static odp_buffer_t buffer_alloc(pool_t *pool)
 	}
 
 	buf_hdr = mbuf_to_buf_hdr(mbuf);
-	buf_hdr->next = NULL;
 
 	return buf_from_buf_hdr(buf_hdr);
 }

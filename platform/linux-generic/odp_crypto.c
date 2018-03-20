@@ -1,4 +1,4 @@
-/* Copyright (c) 2014, Linaro Limited
+/* Copyright (c) 2014-2018, Linaro Limited
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -9,13 +9,11 @@
 #include <odp_posix_extensions.h>
 #include <odp/api/crypto.h>
 #include <odp_internal.h>
-#include <odp/api/atomic.h>
 #include <odp/api/spinlock.h>
 #include <odp/api/sync.h>
 #include <odp/api/debug.h>
 #include <odp/api/align.h>
 #include <odp/api/shared_memory.h>
-#include <odp_crypto_internal.h>
 #include <odp_debug_internal.h>
 #include <odp/api/hints.h>
 #include <odp/api/random.h>
@@ -27,7 +25,14 @@
 
 #include <openssl/rand.h>
 #include <openssl/hmac.h>
+#include <openssl/cmac.h>
 #include <openssl/evp.h>
+
+#if (OPENSSL_VERSION_NUMBER >= 0x10100000L) && !defined(OPENSSL_NO_POLY1305)
+#define _ODP_HAVE_CHACHA20_POLY1305 1
+#else
+#define _ODP_HAVE_CHACHA20_POLY1305 0
+#endif
 
 #define MAX_SESSIONS 32
 
@@ -37,9 +42,7 @@
  * Keep sorted: first by key length, then by IV length
  */
 static const odp_crypto_cipher_capability_t cipher_capa_null[] = {
-{.key_len = 0, .iv_len = 0},
-/* Special case for GMAC */
-{.key_len = 0, .iv_len = 12} };
+{.key_len = 0, .iv_len = 0} };
 
 static const odp_crypto_cipher_capability_t cipher_capa_trides_cbc[] = {
 {.key_len = 24, .iv_len = 8} };
@@ -58,6 +61,19 @@ static const odp_crypto_cipher_capability_t cipher_capa_aes_gcm[] = {
 {.key_len = 16, .iv_len = 12},
 {.key_len = 24, .iv_len = 12},
 {.key_len = 32, .iv_len = 12} };
+
+static const odp_crypto_cipher_capability_t cipher_capa_aes_ccm[] = {
+{.key_len = 16, .iv_len = 11},
+{.key_len = 16, .iv_len = 13},
+{.key_len = 24, .iv_len = 11},
+{.key_len = 24, .iv_len = 13},
+{.key_len = 32, .iv_len = 11},
+{.key_len = 32, .iv_len = 13} };
+
+#if _ODP_HAVE_CHACHA20_POLY1305
+static const odp_crypto_cipher_capability_t cipher_capa_chacha20_poly1305[] = {
+{.key_len = 32, .iv_len = 12} };
+#endif
 
 /*
  * Authentication algorithm capabilities
@@ -86,8 +102,72 @@ static const odp_crypto_auth_capability_t auth_capa_sha512_hmac[] = {
 static const odp_crypto_auth_capability_t auth_capa_aes_gcm[] = {
 {.digest_len = 16, .key_len = 0, .aad_len = {.min = 8, .max = 12, .inc = 4} } };
 
+static const odp_crypto_auth_capability_t auth_capa_aes_ccm[] = {
+{.digest_len = 8, .key_len = 0, .aad_len = {.min = 8, .max = 12, .inc = 4} } };
+
 static const odp_crypto_auth_capability_t auth_capa_aes_gmac[] = {
-{.digest_len = 16, .key_len = 16, .aad_len = {.min = 0, .max = 0, .inc = 0} } };
+{.digest_len = 16, .key_len = 16, .aad_len = {.min = 0, .max = 0, .inc = 0},
+	.iv_len = 12 } };
+
+static const odp_crypto_auth_capability_t auth_capa_aes_cmac[] = {
+{.digest_len = 12, .key_len = 16, .aad_len = {.min = 0, .max = 0, .inc = 0} },
+{.digest_len = 16, .key_len = 16, .aad_len = {.min = 0, .max = 0, .inc = 0} },
+{.digest_len = 12, .key_len = 24, .aad_len = {.min = 0, .max = 0, .inc = 0} },
+{.digest_len = 16, .key_len = 24, .aad_len = {.min = 0, .max = 0, .inc = 0} },
+{.digest_len = 12, .key_len = 32, .aad_len = {.min = 0, .max = 0, .inc = 0} },
+{.digest_len = 16, .key_len = 32, .aad_len = {.min = 0, .max = 0, .inc = 0} } };
+
+#if _ODP_HAVE_CHACHA20_POLY1305
+static const odp_crypto_auth_capability_t auth_capa_chacha20_poly1305[] = {
+{.digest_len = 16, .key_len = 0, .aad_len = {.min = 8, .max = 12, .inc = 4} } };
+#endif
+
+/** Forward declaration of session structure */
+typedef struct odp_crypto_generic_session_t odp_crypto_generic_session_t;
+
+/**
+ * Algorithm handler function prototype
+ */
+typedef
+odp_crypto_alg_err_t (*crypto_func_t)(odp_packet_t pkt,
+				      const odp_crypto_packet_op_param_t *param,
+				      odp_crypto_generic_session_t *session);
+typedef void (*crypto_init_func_t)(odp_crypto_generic_session_t *session);
+
+/**
+ * Per crypto session data structure
+ */
+struct odp_crypto_generic_session_t {
+	odp_crypto_generic_session_t *next;
+
+	/* Session creation parameters */
+	odp_crypto_session_param_t p;
+
+	odp_bool_t do_cipher_first;
+
+	struct {
+		/* Copy of session IV data */
+		uint8_t iv_data[EVP_MAX_IV_LENGTH];
+		uint8_t key_data[EVP_MAX_KEY_LENGTH];
+
+		const EVP_CIPHER *evp_cipher;
+		crypto_func_t func;
+		crypto_init_func_t init;
+	} cipher;
+
+	struct {
+		uint8_t  key[EVP_MAX_KEY_LENGTH];
+		uint8_t  iv_data[EVP_MAX_IV_LENGTH];
+		union {
+			const EVP_MD *evp_md;
+			const EVP_CIPHER *evp_cipher;
+		};
+		crypto_func_t func;
+		crypto_init_func_t init;
+	} auth;
+
+	unsigned idx;
+};
 
 typedef struct odp_crypto_global_s odp_crypto_global_t;
 
@@ -95,15 +175,41 @@ struct odp_crypto_global_s {
 	odp_spinlock_t                lock;
 	odp_crypto_generic_session_t *free;
 	odp_crypto_generic_session_t  sessions[MAX_SESSIONS];
+
+	/* These flags are cleared at alloc_session() */
+	uint8_t ctx_valid[ODP_THREAD_COUNT_MAX][MAX_SESSIONS];
+
 	odp_ticketlock_t              openssl_lock[0];
 };
 
 static odp_crypto_global_t *global;
 
+typedef struct crypto_local_t {
+	HMAC_CTX *hmac_ctx[MAX_SESSIONS];
+	CMAC_CTX *cmac_ctx[MAX_SESSIONS];
+	EVP_CIPHER_CTX *cipher_ctx[MAX_SESSIONS];
+	EVP_CIPHER_CTX *mac_cipher_ctx[MAX_SESSIONS];
+	uint8_t *ctx_valid;
+} crypto_local_t;
+
+static __thread crypto_local_t local;
+
+static inline void crypto_init(odp_crypto_generic_session_t *session)
+{
+	if (local.ctx_valid[session->idx])
+		return;
+
+	session->cipher.init(session);
+	session->auth.init(session);
+
+	local.ctx_valid[session->idx] = 1;
+}
+
 static
 odp_crypto_generic_session_t *alloc_session(void)
 {
 	odp_crypto_generic_session_t *session = NULL;
+	unsigned i;
 
 	odp_spinlock_lock(&global->lock);
 	session = global->free;
@@ -112,6 +218,11 @@ odp_crypto_generic_session_t *alloc_session(void)
 		session->next = NULL;
 	}
 	odp_spinlock_unlock(&global->lock);
+
+	session->idx = session - global->sessions;
+
+	for (i = 0; i < ODP_THREAD_COUNT_MAX; i++)
+		global->ctx_valid[i][session->idx] = 0;
 
 	return session;
 }
@@ -133,24 +244,57 @@ null_crypto_routine(odp_packet_t pkt ODP_UNUSED,
 	return ODP_CRYPTO_ALG_ERR_NONE;
 }
 
-static
-void packet_hmac_calculate(HMAC_CTX *ctx,
-			   odp_packet_t pkt,
-			   const odp_crypto_packet_op_param_t *param,
-			   odp_crypto_generic_session_t *session,
-			   uint8_t *hash)
+static void
+null_crypto_init_routine(odp_crypto_generic_session_t *session ODP_UNUSED)
 {
+	return;
+}
+
+/* Mimic new OpenSSL 1.1.y API */
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
+static HMAC_CTX *HMAC_CTX_new(void)
+{
+	HMAC_CTX *ctx = malloc(sizeof(*ctx));
+
+	HMAC_CTX_init(ctx);
+	return ctx;
+}
+
+static void HMAC_CTX_free(HMAC_CTX *ctx)
+{
+	HMAC_CTX_cleanup(ctx);
+	free(ctx);
+}
+#endif
+
+static void
+auth_hmac_init(odp_crypto_generic_session_t *session)
+{
+	HMAC_CTX *ctx = local.hmac_ctx[session->idx];
+
+	HMAC_Init_ex(ctx,
+		     session->auth.key,
+		     session->p.auth_key.length,
+		     session->auth.evp_md,
+		     NULL);
+}
+
+static
+void packet_hmac(odp_packet_t pkt,
+		 const odp_crypto_packet_op_param_t *param,
+		 odp_crypto_generic_session_t *session,
+		 uint8_t *hash)
+{
+	HMAC_CTX *ctx = local.hmac_ctx[session->idx];
 	uint32_t offset = param->auth_range.offset;
 	uint32_t len   = param->auth_range.length;
 
 	ODP_ASSERT(offset + len <= odp_packet_len(pkt));
 
-	HMAC_Init_ex(ctx,
-		     session->auth.key,
-		     session->auth.key_length,
-		     session->auth.evp_md,
-		     NULL);
+	/* Reinitialize HMAC calculation without resetting the key */
+	HMAC_Init_ex(ctx, NULL, 0, NULL, NULL);
 
+	/* Hash it */
 	while (len > 0) {
 		uint32_t seglen = 0; /* GCC */
 		void *mapaddr = odp_packet_offset(pkt, offset, &seglen, NULL);
@@ -164,40 +308,10 @@ void packet_hmac_calculate(HMAC_CTX *ctx,
 	HMAC_Final(ctx, hash, NULL);
 }
 
-#if OPENSSL_VERSION_NUMBER < 0x10100000L
 static
-void packet_hmac(odp_packet_t pkt,
-		 const odp_crypto_packet_op_param_t *param,
-		 odp_crypto_generic_session_t *session,
-		 uint8_t *hash)
-{
-	HMAC_CTX ctx;
-
-	/* Hash it */
-	HMAC_CTX_init(&ctx);
-	packet_hmac_calculate(&ctx, pkt, param, session, hash);
-	HMAC_CTX_cleanup(&ctx);
-}
-#else
-static
-void packet_hmac(odp_packet_t pkt,
-		 const odp_crypto_packet_op_param_t *param,
-		 odp_crypto_generic_session_t *session,
-		 uint8_t *hash)
-{
-	HMAC_CTX *ctx;
-
-	/* Hash it */
-	ctx = HMAC_CTX_new();
-	packet_hmac_calculate(ctx, pkt, param, session, hash);
-	HMAC_CTX_free(ctx);
-}
-#endif
-
-static
-odp_crypto_alg_err_t auth_gen(odp_packet_t pkt,
-			      const odp_crypto_packet_op_param_t *param,
-			      odp_crypto_generic_session_t *session)
+odp_crypto_alg_err_t auth_hmac_gen(odp_packet_t pkt,
+				   const odp_crypto_packet_op_param_t *param,
+				   odp_crypto_generic_session_t *session)
 {
 	uint8_t  hash[EVP_MAX_MD_SIZE];
 
@@ -214,9 +328,9 @@ odp_crypto_alg_err_t auth_gen(odp_packet_t pkt,
 }
 
 static
-odp_crypto_alg_err_t auth_check(odp_packet_t pkt,
-				const odp_crypto_packet_op_param_t *param,
-				odp_crypto_generic_session_t *session)
+odp_crypto_alg_err_t auth_hmac_check(odp_packet_t pkt,
+				     const odp_crypto_packet_op_param_t *param,
+				     odp_crypto_generic_session_t *session)
 {
 	uint32_t bytes = session->p.auth_digest_len;
 	uint8_t  hash_in[EVP_MAX_MD_SIZE];
@@ -231,6 +345,93 @@ odp_crypto_alg_err_t auth_check(odp_packet_t pkt,
 
 	/* Hash it */
 	packet_hmac(pkt, param, session, hash_out);
+
+	/* Verify match */
+	if (0 != memcmp(hash_in, hash_out, bytes))
+		return ODP_CRYPTO_ALG_ERR_ICV_CHECK;
+
+	/* Matched */
+	return ODP_CRYPTO_ALG_ERR_NONE;
+}
+
+static void
+auth_cmac_init(odp_crypto_generic_session_t *session)
+{
+	CMAC_CTX *ctx = local.cmac_ctx[session->idx];
+
+	CMAC_Init(ctx,
+		  session->auth.key,
+		  session->p.auth_key.length,
+		  session->auth.evp_cipher,
+		  NULL);
+}
+
+static
+void packet_cmac(odp_packet_t pkt,
+		 const odp_crypto_packet_op_param_t *param,
+		 odp_crypto_generic_session_t *session,
+		 uint8_t *hash)
+{
+	CMAC_CTX *ctx = local.cmac_ctx[session->idx];
+	uint32_t offset = param->auth_range.offset;
+	uint32_t len   = param->auth_range.length;
+	size_t outlen;
+
+	ODP_ASSERT(offset + len <= odp_packet_len(pkt));
+
+	/* Reinitialize CMAC calculation without resetting the key */
+	CMAC_Init(ctx, NULL, 0, NULL, NULL);
+
+	while (len > 0) {
+		uint32_t seglen = 0; /* GCC */
+		void *mapaddr = odp_packet_offset(pkt, offset, &seglen, NULL);
+		uint32_t maclen = len > seglen ? seglen : len;
+
+		CMAC_Update(ctx, mapaddr, maclen);
+		offset  += maclen;
+		len     -= maclen;
+	}
+
+	CMAC_Final(ctx, hash, &outlen);
+}
+
+static
+odp_crypto_alg_err_t auth_cmac_gen(odp_packet_t pkt,
+				   const odp_crypto_packet_op_param_t *param,
+				   odp_crypto_generic_session_t *session)
+{
+	uint8_t  hash[EVP_MAX_MD_SIZE];
+
+	/* Hash it */
+	packet_cmac(pkt, param, session, hash);
+
+	/* Copy to the output location */
+	odp_packet_copy_from_mem(pkt,
+				 param->hash_result_offset,
+				 session->p.auth_digest_len,
+				 hash);
+
+	return ODP_CRYPTO_ALG_ERR_NONE;
+}
+
+static
+odp_crypto_alg_err_t auth_cmac_check(odp_packet_t pkt,
+				     const odp_crypto_packet_op_param_t *param,
+				     odp_crypto_generic_session_t *session)
+{
+	uint32_t bytes = session->p.auth_digest_len;
+	uint8_t  hash_in[EVP_MAX_MD_SIZE];
+	uint8_t  hash_out[EVP_MAX_MD_SIZE];
+
+	/* Copy current value out and clear it before authentication */
+	odp_packet_copy_to_mem(pkt, param->hash_result_offset,
+			       bytes, hash_in);
+
+	_odp_packet_set_data(pkt, param->hash_result_offset,
+			     0, bytes);
+
+	/* Hash it */
+	packet_cmac(pkt, param, session, hash_out);
 
 	/* Verify match */
 	if (0 != memcmp(hash_in, hash_out, bytes))
@@ -383,35 +584,48 @@ int internal_decrypt(EVP_CIPHER_CTX *ctx,
 	return ret;
 }
 
+static void
+cipher_encrypt_init(odp_crypto_generic_session_t *session)
+{
+	EVP_CIPHER_CTX *ctx = local.cipher_ctx[session->idx];
+
+	EVP_EncryptInit_ex(ctx, session->cipher.evp_cipher, NULL,
+			   session->cipher.key_data, NULL);
+	EVP_CIPHER_CTX_set_padding(ctx, 0);
+}
+
 static
 odp_crypto_alg_err_t cipher_encrypt(odp_packet_t pkt,
 				    const odp_crypto_packet_op_param_t *param,
 				    odp_crypto_generic_session_t *session)
 {
-	EVP_CIPHER_CTX *ctx;
+	EVP_CIPHER_CTX *ctx = local.cipher_ctx[session->idx];
 	void *iv_ptr;
 	int ret;
 
-	if (param->override_iv_ptr)
-		iv_ptr = param->override_iv_ptr;
-	else if (session->p.iv.data)
+	if (param->cipher_iv_ptr)
+		iv_ptr = param->cipher_iv_ptr;
+	else if (session->p.cipher_iv.data)
 		iv_ptr = session->cipher.iv_data;
 	else
 		return ODP_CRYPTO_ALG_ERR_IV_INVALID;
 
-	/* Encrypt it */
-	ctx = EVP_CIPHER_CTX_new();
-	EVP_EncryptInit_ex(ctx, session->cipher.evp_cipher, NULL,
-			   session->cipher.key_data, NULL);
 	EVP_EncryptInit_ex(ctx, NULL, NULL, NULL, iv_ptr);
-	EVP_CIPHER_CTX_set_padding(ctx, 0);
 
 	ret = internal_encrypt(ctx, pkt, param);
 
-	EVP_CIPHER_CTX_free(ctx);
-
 	return ret <= 0 ? ODP_CRYPTO_ALG_ERR_DATA_SIZE :
 			  ODP_CRYPTO_ALG_ERR_NONE;
+}
+
+static void
+cipher_decrypt_init(odp_crypto_generic_session_t *session)
+{
+	EVP_CIPHER_CTX *ctx = local.cipher_ctx[session->idx];
+
+	EVP_DecryptInit_ex(ctx, session->cipher.evp_cipher, NULL,
+			   session->cipher.key_data, NULL);
+	EVP_CIPHER_CTX_set_padding(ctx, 0);
 }
 
 static
@@ -419,27 +633,20 @@ odp_crypto_alg_err_t cipher_decrypt(odp_packet_t pkt,
 				    const odp_crypto_packet_op_param_t *param,
 				    odp_crypto_generic_session_t *session)
 {
-	EVP_CIPHER_CTX *ctx;
+	EVP_CIPHER_CTX *ctx = local.cipher_ctx[session->idx];
 	void *iv_ptr;
 	int ret;
 
-	if (param->override_iv_ptr)
-		iv_ptr = param->override_iv_ptr;
-	else if (session->p.iv.data)
+	if (param->cipher_iv_ptr)
+		iv_ptr = param->cipher_iv_ptr;
+	else if (session->p.cipher_iv.data)
 		iv_ptr = session->cipher.iv_data;
 	else
 		return ODP_CRYPTO_ALG_ERR_IV_INVALID;
 
-	/* Decrypt it */
-	ctx = EVP_CIPHER_CTX_new();
-	EVP_DecryptInit_ex(ctx, session->cipher.evp_cipher, NULL,
-			   session->cipher.key_data, NULL);
 	EVP_DecryptInit_ex(ctx, NULL, NULL, NULL, iv_ptr);
-	EVP_CIPHER_CTX_set_padding(ctx, 0);
 
 	ret = internal_decrypt(ctx, pkt, param);
-
-	EVP_CIPHER_CTX_free(ctx);
 
 	return ret <= 0 ? ODP_CRYPTO_ALG_ERR_DATA_SIZE :
 			  ODP_CRYPTO_ALG_ERR_NONE;
@@ -454,8 +661,9 @@ static int process_cipher_param(odp_crypto_generic_session_t *session,
 		return -1;
 
 	/* Verify IV len is correct */
-	if (!((0 == session->p.iv.length) ||
-	      ((uint32_t)EVP_CIPHER_iv_length(cipher) == session->p.iv.length)))
+	if (!((0 == session->p.cipher_iv.length) ||
+	      ((uint32_t)EVP_CIPHER_iv_length(cipher) ==
+	       session->p.cipher_iv.length)))
 		return -1;
 
 	session->cipher.evp_cipher = cipher;
@@ -464,12 +672,27 @@ static int process_cipher_param(odp_crypto_generic_session_t *session,
 	       session->p.cipher_key.length);
 
 	/* Set function */
-	if (ODP_CRYPTO_OP_ENCODE == session->p.op)
+	if (ODP_CRYPTO_OP_ENCODE == session->p.op) {
 		session->cipher.func = cipher_encrypt;
-	else
+		session->cipher.init = cipher_encrypt_init;
+	} else {
 		session->cipher.func = cipher_decrypt;
+		session->cipher.init = cipher_decrypt_init;
+	}
 
 	return 0;
+}
+
+static void
+aes_gcm_encrypt_init(odp_crypto_generic_session_t *session)
+{
+	EVP_CIPHER_CTX *ctx = local.cipher_ctx[session->idx];
+
+	EVP_EncryptInit_ex(ctx, session->cipher.evp_cipher, NULL,
+			   session->cipher.key_data, NULL);
+	EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_IVLEN,
+			    session->p.cipher_iv.length, NULL);
+	EVP_CIPHER_CTX_set_padding(ctx, 0);
 }
 
 static
@@ -477,7 +700,7 @@ odp_crypto_alg_err_t aes_gcm_encrypt(odp_packet_t pkt,
 				     const odp_crypto_packet_op_param_t *param,
 				     odp_crypto_generic_session_t *session)
 {
-	EVP_CIPHER_CTX *ctx;
+	EVP_CIPHER_CTX *ctx = local.cipher_ctx[session->idx];
 	const uint8_t *aad_head = param->aad_ptr;
 	uint32_t aad_len = session->p.auth_aad_len;
 	void *iv_ptr;
@@ -485,21 +708,14 @@ odp_crypto_alg_err_t aes_gcm_encrypt(odp_packet_t pkt,
 	uint8_t block[EVP_MAX_MD_SIZE];
 	int ret;
 
-	if (param->override_iv_ptr)
-		iv_ptr = param->override_iv_ptr;
-	else if (session->p.iv.data)
+	if (param->cipher_iv_ptr)
+		iv_ptr = param->cipher_iv_ptr;
+	else if (session->p.cipher_iv.data)
 		iv_ptr = session->cipher.iv_data;
 	else
 		return ODP_CRYPTO_ALG_ERR_IV_INVALID;
 
-	/* Encrypt it */
-	ctx = EVP_CIPHER_CTX_new();
-	EVP_EncryptInit_ex(ctx, session->cipher.evp_cipher, NULL,
-			   session->cipher.key_data, NULL);
-	EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_IVLEN,
-			    session->p.iv.length, NULL);
 	EVP_EncryptInit_ex(ctx, NULL, NULL, NULL, iv_ptr);
-	EVP_CIPHER_CTX_set_padding(ctx, 0);
 
 	/* Authenticate header data (if any) without encrypting them */
 	if (aad_len > 0)
@@ -513,10 +729,20 @@ odp_crypto_alg_err_t aes_gcm_encrypt(odp_packet_t pkt,
 	odp_packet_copy_from_mem(pkt, param->hash_result_offset,
 				 session->p.auth_digest_len, block);
 
-	EVP_CIPHER_CTX_free(ctx);
-
 	return ret <= 0 ? ODP_CRYPTO_ALG_ERR_DATA_SIZE :
 			  ODP_CRYPTO_ALG_ERR_NONE;
+}
+
+static void
+aes_gcm_decrypt_init(odp_crypto_generic_session_t *session)
+{
+	EVP_CIPHER_CTX *ctx = local.cipher_ctx[session->idx];
+
+	EVP_DecryptInit_ex(ctx, session->cipher.evp_cipher, NULL,
+			   session->cipher.key_data, NULL);
+	EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_IVLEN,
+			    session->p.cipher_iv.length, NULL);
+	EVP_CIPHER_CTX_set_padding(ctx, 0);
 }
 
 static
@@ -524,7 +750,7 @@ odp_crypto_alg_err_t aes_gcm_decrypt(odp_packet_t pkt,
 				     const odp_crypto_packet_op_param_t *param,
 				     odp_crypto_generic_session_t *session)
 {
-	EVP_CIPHER_CTX *ctx;
+	EVP_CIPHER_CTX *ctx = local.cipher_ctx[session->idx];
 	const uint8_t *aad_head = param->aad_ptr;
 	uint32_t aad_len = session->p.auth_aad_len;
 	int dummy_len = 0;
@@ -532,21 +758,14 @@ odp_crypto_alg_err_t aes_gcm_decrypt(odp_packet_t pkt,
 	uint8_t block[EVP_MAX_MD_SIZE];
 	int ret;
 
-	if (param->override_iv_ptr)
-		iv_ptr = param->override_iv_ptr;
-	else if (session->p.iv.data)
+	if (param->cipher_iv_ptr)
+		iv_ptr = param->cipher_iv_ptr;
+	else if (session->p.cipher_iv.data)
 		iv_ptr = session->cipher.iv_data;
 	else
 		return ODP_CRYPTO_ALG_ERR_IV_INVALID;
 
-	/* Decrypt it */
-	ctx = EVP_CIPHER_CTX_new();
-	EVP_DecryptInit_ex(ctx, session->cipher.evp_cipher, NULL,
-			   session->cipher.key_data, NULL);
-	EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_IVLEN,
-			    session->p.iv.length, NULL);
 	EVP_DecryptInit_ex(ctx, NULL, NULL, NULL, iv_ptr);
-	EVP_CIPHER_CTX_set_padding(ctx, 0);
 
 	odp_packet_copy_to_mem(pkt, param->hash_result_offset,
 			       session->p.auth_digest_len, block);
@@ -559,8 +778,6 @@ odp_crypto_alg_err_t aes_gcm_decrypt(odp_packet_t pkt,
 				  aad_head, aad_len);
 
 	ret = internal_decrypt(ctx, pkt, param);
-
-	EVP_CIPHER_CTX_free(ctx);
 
 	return ret <= 0 ? ODP_CRYPTO_ALG_ERR_ICV_CHECK :
 			  ODP_CRYPTO_ALG_ERR_NONE;
@@ -580,12 +797,27 @@ static int process_aes_gcm_param(odp_crypto_generic_session_t *session,
 	session->cipher.evp_cipher = cipher;
 
 	/* Set function */
-	if (ODP_CRYPTO_OP_ENCODE == session->p.op)
+	if (ODP_CRYPTO_OP_ENCODE == session->p.op) {
 		session->cipher.func = aes_gcm_encrypt;
-	else
+		session->cipher.init = aes_gcm_encrypt_init;
+	} else {
 		session->cipher.func = aes_gcm_decrypt;
+		session->cipher.init = aes_gcm_decrypt_init;
+	}
 
 	return 0;
+}
+
+static void
+aes_gmac_gen_init(odp_crypto_generic_session_t *session)
+{
+	EVP_CIPHER_CTX *ctx = local.mac_cipher_ctx[session->idx];
+
+	EVP_EncryptInit_ex(ctx, session->auth.evp_cipher, NULL,
+			   session->auth.key, NULL);
+	EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_IVLEN,
+			    session->p.cipher_iv.length, NULL);
+	EVP_CIPHER_CTX_set_padding(ctx, 0);
 }
 
 static
@@ -593,26 +825,19 @@ odp_crypto_alg_err_t aes_gmac_gen(odp_packet_t pkt,
 				  const odp_crypto_packet_op_param_t *param,
 				  odp_crypto_generic_session_t *session)
 {
-	EVP_CIPHER_CTX *ctx;
+	EVP_CIPHER_CTX *ctx = local.mac_cipher_ctx[session->idx];
 	void *iv_ptr;
 	uint8_t block[EVP_MAX_MD_SIZE];
 	int ret;
 
-	if (param->override_iv_ptr)
-		iv_ptr = param->override_iv_ptr;
-	else if (session->p.iv.data)
-		iv_ptr = session->cipher.iv_data;
+	if (param->auth_iv_ptr)
+		iv_ptr = param->auth_iv_ptr;
+	else if (session->p.auth_iv.data)
+		iv_ptr = session->auth.iv_data;
 	else
 		return ODP_CRYPTO_ALG_ERR_IV_INVALID;
 
-	/* Encrypt it */
-	ctx = EVP_CIPHER_CTX_new();
-	EVP_EncryptInit_ex(ctx, session->auth.evp_cipher, NULL,
-			   session->auth.key, NULL);
-	EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_IVLEN,
-			    session->p.iv.length, NULL);
 	EVP_EncryptInit_ex(ctx, NULL, NULL, NULL, iv_ptr);
-	EVP_CIPHER_CTX_set_padding(ctx, 0);
 
 	ret = internal_aad(ctx, pkt, param);
 
@@ -621,10 +846,20 @@ odp_crypto_alg_err_t aes_gmac_gen(odp_packet_t pkt,
 	odp_packet_copy_from_mem(pkt, param->hash_result_offset,
 				 session->p.auth_digest_len, block);
 
-	EVP_CIPHER_CTX_free(ctx);
-
 	return ret <= 0 ? ODP_CRYPTO_ALG_ERR_DATA_SIZE :
 			  ODP_CRYPTO_ALG_ERR_NONE;
+}
+
+static void
+aes_gmac_check_init(odp_crypto_generic_session_t *session)
+{
+	EVP_CIPHER_CTX *ctx = local.mac_cipher_ctx[session->idx];
+
+	EVP_DecryptInit_ex(ctx, session->auth.evp_cipher, NULL,
+			   session->auth.key, NULL);
+	EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_IVLEN,
+			    session->p.cipher_iv.length, NULL);
+	EVP_CIPHER_CTX_set_padding(ctx, 0);
 }
 
 static
@@ -632,26 +867,19 @@ odp_crypto_alg_err_t aes_gmac_check(odp_packet_t pkt,
 				    const odp_crypto_packet_op_param_t *param,
 				    odp_crypto_generic_session_t *session)
 {
-	EVP_CIPHER_CTX *ctx;
+	EVP_CIPHER_CTX *ctx = local.mac_cipher_ctx[session->idx];
 	void *iv_ptr;
 	uint8_t block[EVP_MAX_MD_SIZE];
 	int ret;
 
-	if (param->override_iv_ptr)
-		iv_ptr = param->override_iv_ptr;
-	else if (session->p.iv.data)
-		iv_ptr = session->cipher.iv_data;
+	if (param->auth_iv_ptr)
+		iv_ptr = param->auth_iv_ptr;
+	else if (session->p.auth_iv.data)
+		iv_ptr = session->auth.iv_data;
 	else
 		return ODP_CRYPTO_ALG_ERR_IV_INVALID;
 
-	/* Decrypt it */
-	ctx = EVP_CIPHER_CTX_new();
-	EVP_DecryptInit_ex(ctx, session->auth.evp_cipher, NULL,
-			   session->auth.key, NULL);
-	EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_IVLEN,
-			    session->p.iv.length, NULL);
 	EVP_DecryptInit_ex(ctx, NULL, NULL, NULL, iv_ptr);
-	EVP_CIPHER_CTX_set_padding(ctx, 0);
 
 	odp_packet_copy_to_mem(pkt, param->hash_result_offset,
 			       session->p.auth_digest_len, block);
@@ -661,8 +889,6 @@ odp_crypto_alg_err_t aes_gmac_check(odp_packet_t pkt,
 			     0, session->p.auth_digest_len);
 
 	ret = internal_aad(ctx, pkt, param);
-
-	EVP_CIPHER_CTX_free(ctx);
 
 	return ret <= 0 ? ODP_CRYPTO_ALG_ERR_ICV_CHECK :
 			  ODP_CRYPTO_ALG_ERR_NONE;
@@ -682,23 +908,182 @@ static int process_aes_gmac_param(odp_crypto_generic_session_t *session,
 	session->auth.evp_cipher = cipher;
 
 	/* Set function */
-	if (ODP_CRYPTO_OP_ENCODE == session->p.op)
+	if (ODP_CRYPTO_OP_ENCODE == session->p.op) {
 		session->auth.func = aes_gmac_gen;
-	else
+		session->auth.init = aes_gmac_gen_init;
+	} else {
 		session->auth.func = aes_gmac_check;
+		session->auth.init = aes_gmac_check_init;
+	}
 
 	return 0;
 }
 
-static int process_auth_param(odp_crypto_generic_session_t *session,
-			      uint32_t key_length,
-			      const EVP_MD *evp_md)
+static void
+aes_ccm_encrypt_init(odp_crypto_generic_session_t *session)
+{
+	EVP_CIPHER_CTX *ctx = local.cipher_ctx[session->idx];
+
+	EVP_EncryptInit_ex(ctx, session->cipher.evp_cipher, NULL,
+			   NULL, NULL);
+	EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_CCM_SET_IVLEN,
+			    session->p.cipher_iv.length, NULL);
+	EVP_CIPHER_CTX_set_padding(ctx, 0);
+}
+
+static
+odp_crypto_alg_err_t aes_ccm_encrypt(odp_packet_t pkt,
+				     const odp_crypto_packet_op_param_t *param,
+				     odp_crypto_generic_session_t *session)
+{
+	EVP_CIPHER_CTX *ctx = local.cipher_ctx[session->idx];
+	const uint8_t *aad_head = param->aad_ptr;
+	uint32_t aad_len = session->p.auth_aad_len;
+	void *iv_ptr;
+	int dummy_len = 0;
+	int cipher_len;
+	uint32_t in_len = param->cipher_range.length;
+	uint8_t data[in_len];
+	uint8_t block[EVP_MAX_MD_SIZE];
+	int ret;
+
+	if (param->cipher_iv_ptr)
+		iv_ptr = param->cipher_iv_ptr;
+	else if (session->p.cipher_iv.data)
+		iv_ptr = session->cipher.iv_data;
+	else
+		return ODP_CRYPTO_ALG_ERR_IV_INVALID;
+
+	EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_CCM_SET_TAG,
+			    session->p.auth_digest_len, NULL);
+	EVP_EncryptInit_ex(ctx, NULL, NULL, session->cipher.key_data, iv_ptr);
+
+	/* Set len */
+	EVP_EncryptUpdate(ctx, NULL, &dummy_len, NULL, in_len);
+
+	/* Authenticate header data (if any) without encrypting them */
+	if (aad_len > 0)
+		EVP_EncryptUpdate(ctx, NULL, &dummy_len,
+				  aad_head, aad_len);
+
+	odp_packet_copy_to_mem(pkt, param->cipher_range.offset, in_len,
+			       data);
+
+	EVP_EncryptUpdate(ctx, data, &cipher_len, data, in_len);
+
+	ret = EVP_EncryptFinal_ex(ctx, data + cipher_len, &dummy_len);
+	cipher_len += dummy_len;
+
+	odp_packet_copy_from_mem(pkt, param->cipher_range.offset, in_len,
+				 data);
+
+	EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_CCM_GET_TAG,
+			    session->p.auth_digest_len, block);
+	odp_packet_copy_from_mem(pkt, param->hash_result_offset,
+				 session->p.auth_digest_len, block);
+
+	return ret <= 0 ? ODP_CRYPTO_ALG_ERR_DATA_SIZE :
+			  ODP_CRYPTO_ALG_ERR_NONE;
+}
+
+static void
+aes_ccm_decrypt_init(odp_crypto_generic_session_t *session)
+{
+	EVP_CIPHER_CTX *ctx = local.cipher_ctx[session->idx];
+
+	EVP_DecryptInit_ex(ctx, session->cipher.evp_cipher, NULL,
+			   session->cipher.key_data, NULL);
+	EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_IVLEN,
+			    session->p.cipher_iv.length, NULL);
+	EVP_CIPHER_CTX_set_padding(ctx, 0);
+}
+
+static
+odp_crypto_alg_err_t aes_ccm_decrypt(odp_packet_t pkt,
+				     const odp_crypto_packet_op_param_t *param,
+				     odp_crypto_generic_session_t *session)
+{
+	EVP_CIPHER_CTX *ctx = local.cipher_ctx[session->idx];
+	const uint8_t *aad_head = param->aad_ptr;
+	uint32_t aad_len = session->p.auth_aad_len;
+	void *iv_ptr;
+	int dummy_len = 0;
+	int cipher_len;
+	uint32_t in_len = param->cipher_range.length;
+	uint8_t data[in_len];
+	uint8_t block[EVP_MAX_MD_SIZE];
+	int ret;
+
+	if (param->cipher_iv_ptr)
+		iv_ptr = param->cipher_iv_ptr;
+	else if (session->p.cipher_iv.data)
+		iv_ptr = session->cipher.iv_data;
+	else
+		return ODP_CRYPTO_ALG_ERR_IV_INVALID;
+
+	odp_packet_copy_to_mem(pkt, param->hash_result_offset,
+			       session->p.auth_digest_len, block);
+	EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_CCM_SET_TAG,
+			    session->p.auth_digest_len, block);
+	EVP_DecryptInit_ex(ctx, NULL, NULL, session->cipher.key_data, iv_ptr);
+
+	/* Set len */
+	EVP_DecryptUpdate(ctx, NULL, &dummy_len, NULL, in_len);
+
+	/* Authenticate header data (if any) without encrypting them */
+	if (aad_len > 0)
+		EVP_DecryptUpdate(ctx, NULL, &dummy_len,
+				  aad_head, aad_len);
+
+	odp_packet_copy_to_mem(pkt, param->cipher_range.offset, in_len,
+			       data);
+
+	ret = EVP_DecryptUpdate(ctx, data, &cipher_len, data, in_len);
+
+	EVP_DecryptFinal_ex(ctx, data + cipher_len, &dummy_len);
+	cipher_len += dummy_len;
+
+	odp_packet_copy_from_mem(pkt, param->cipher_range.offset, in_len,
+				 data);
+
+	return ret <= 0 ? ODP_CRYPTO_ALG_ERR_ICV_CHECK :
+			  ODP_CRYPTO_ALG_ERR_NONE;
+}
+
+static int process_aes_ccm_param(odp_crypto_generic_session_t *session,
+				 const EVP_CIPHER *cipher)
+{
+	/* Verify Key len is valid */
+	if ((uint32_t)EVP_CIPHER_key_length(cipher) !=
+	    session->p.cipher_key.length)
+		return -1;
+
+	memcpy(session->cipher.key_data, session->p.cipher_key.data,
+	       session->p.cipher_key.length);
+
+	session->cipher.evp_cipher = cipher;
+
+	/* Set function */
+	if (ODP_CRYPTO_OP_ENCODE == session->p.op) {
+		session->cipher.func = aes_ccm_encrypt;
+		session->cipher.init = aes_ccm_encrypt_init;
+	} else {
+		session->cipher.func = aes_ccm_decrypt;
+		session->cipher.init = aes_ccm_decrypt_init;
+	}
+
+	return 0;
+}
+
+static int process_auth_hmac_param(odp_crypto_generic_session_t *session,
+				   const EVP_MD *evp_md)
 {
 	/* Set function */
 	if (ODP_CRYPTO_OP_ENCODE == session->p.op)
-		session->auth.func = auth_gen;
+		session->auth.func = auth_hmac_gen;
 	else
-		session->auth.func = auth_check;
+		session->auth.func = auth_hmac_check;
+	session->auth.init = auth_hmac_init;
 
 	session->auth.evp_md = evp_md;
 
@@ -707,9 +1092,37 @@ static int process_auth_param(odp_crypto_generic_session_t *session,
 		return -1;
 
 	/* Convert keys */
-	session->auth.key_length = key_length;
 	memcpy(session->auth.key, session->p.auth_key.data,
-	       session->auth.key_length);
+	       session->p.auth_key.length);
+
+	return 0;
+}
+
+static int process_auth_cmac_param(odp_crypto_generic_session_t *session,
+				   const EVP_CIPHER *cipher)
+{
+	/* Verify Key len is valid */
+	if ((uint32_t)EVP_CIPHER_key_length(cipher) !=
+	    session->p.auth_key.length)
+		return -1;
+
+	/* Set function */
+	if (ODP_CRYPTO_OP_ENCODE == session->p.op)
+		session->auth.func = auth_cmac_gen;
+	else
+		session->auth.func = auth_cmac_check;
+	session->auth.init = auth_cmac_init;
+
+	session->auth.evp_cipher = cipher;
+
+	/* Number of valid bytes */
+	if (session->p.auth_digest_len <
+	    (unsigned)EVP_CIPHER_block_size(cipher) / 2)
+		return -1;
+
+	/* Convert keys */
+	memcpy(session->auth.key, session->p.auth_key.data,
+	       session->p.auth_key.length);
 
 	return 0;
 }
@@ -730,6 +1143,10 @@ int odp_crypto_capability(odp_crypto_capability_t *capa)
 	capa->ciphers.bit.aes_cbc    = 1;
 	capa->ciphers.bit.aes_ctr    = 1;
 	capa->ciphers.bit.aes_gcm    = 1;
+	capa->ciphers.bit.aes_ccm    = 1;
+#if _ODP_HAVE_CHACHA20_POLY1305
+	capa->ciphers.bit.chacha20_poly1305 = 1;
+#endif
 
 	capa->auths.bit.null         = 1;
 	capa->auths.bit.md5_hmac     = 1;
@@ -737,7 +1154,12 @@ int odp_crypto_capability(odp_crypto_capability_t *capa)
 	capa->auths.bit.sha256_hmac  = 1;
 	capa->auths.bit.sha512_hmac  = 1;
 	capa->auths.bit.aes_gcm      = 1;
+	capa->auths.bit.aes_ccm      = 1;
 	capa->auths.bit.aes_gmac     = 1;
+	capa->auths.bit.aes_cmac     = 1;
+#if _ODP_HAVE_CHACHA20_POLY1305
+	capa->auths.bit.chacha20_poly1305 = 1;
+#endif
 
 #if ODP_DEPRECATED_API
 	capa->ciphers.bit.aes128_cbc = 1;
@@ -781,6 +1203,16 @@ int odp_crypto_cipher_capability(odp_cipher_alg_t cipher,
 		src = cipher_capa_aes_gcm;
 		num = sizeof(cipher_capa_aes_gcm) / size;
 		break;
+	case ODP_CIPHER_ALG_AES_CCM:
+		src = cipher_capa_aes_ccm;
+		num = sizeof(cipher_capa_aes_ccm) / size;
+		break;
+#if _ODP_HAVE_CHACHA20_POLY1305
+	case ODP_CIPHER_ALG_CHACHA20_POLY1305:
+		src = cipher_capa_chacha20_poly1305;
+		num = sizeof(cipher_capa_chacha20_poly1305) / size;
+		break;
+#endif
 	default:
 		return -1;
 	}
@@ -829,6 +1261,20 @@ int odp_crypto_auth_capability(odp_auth_alg_t auth,
 		src = auth_capa_aes_gmac;
 		num = sizeof(auth_capa_aes_gmac) / size;
 		break;
+	case ODP_AUTH_ALG_AES_CCM:
+		src = auth_capa_aes_ccm;
+		num = sizeof(auth_capa_aes_ccm) / size;
+		break;
+	case ODP_AUTH_ALG_AES_CMAC:
+		src = auth_capa_aes_cmac;
+		num = sizeof(auth_capa_aes_cmac) / size;
+		break;
+#if _ODP_HAVE_CHACHA20_POLY1305
+	case ODP_AUTH_ALG_CHACHA20_POLY1305:
+		src = auth_capa_chacha20_poly1305;
+		num = sizeof(auth_capa_chacha20_poly1305) / size;
+		break;
+#endif
 	default:
 		return -1;
 	}
@@ -860,16 +1306,26 @@ odp_crypto_session_create(odp_crypto_session_param_t *param,
 	/* Copy parameters */
 	session->p = *param;
 
-	if (session->p.iv.length > MAX_IV_LEN) {
+	if (session->p.cipher_iv.length > EVP_MAX_IV_LENGTH) {
 		ODP_DBG("Maximum IV length exceeded\n");
 		*status = ODP_CRYPTO_SES_CREATE_ERR_INV_CIPHER;
 		goto err;
 	}
 
+	if (session->p.auth_iv.length > EVP_MAX_IV_LENGTH) {
+		ODP_DBG("Maximum auth IV length exceeded\n");
+		*status = ODP_CRYPTO_SES_CREATE_ERR_INV_CIPHER;
+		goto err;
+	}
+
 	/* Copy IV data */
-	if (session->p.iv.data)
-		memcpy(session->cipher.iv_data, session->p.iv.data,
-		       session->p.iv.length);
+	if (session->p.cipher_iv.data)
+		memcpy(session->cipher.iv_data, session->p.cipher_iv.data,
+		       session->p.cipher_iv.length);
+
+	if (session->p.auth_iv.data)
+		memcpy(session->auth.iv_data, session->p.auth_iv.data,
+		       session->p.auth_iv.length);
 
 	/* Derive order */
 	if (ODP_CRYPTO_OP_ENCODE == param->op)
@@ -881,6 +1337,7 @@ odp_crypto_session_create(odp_crypto_session_param_t *param,
 	switch (param->cipher_alg) {
 	case ODP_CIPHER_ALG_NULL:
 		session->cipher.func = null_crypto_routine;
+		session->cipher.init = null_crypto_init_routine;
 		rc = 0;
 		break;
 	case ODP_CIPHER_ALG_3DES_CBC:
@@ -940,6 +1397,31 @@ odp_crypto_session_create(odp_crypto_session_param_t *param,
 		else
 			rc = -1;
 		break;
+	case ODP_CIPHER_ALG_AES_CCM:
+		/* AES-CCM requires to do both auth and
+		 * cipher at the same time */
+		if (param->auth_alg != ODP_AUTH_ALG_AES_CCM)
+			rc = -1;
+		else if (param->cipher_key.length == 16)
+			rc = process_aes_ccm_param(session, EVP_aes_128_ccm());
+		else if (param->cipher_key.length == 24)
+			rc = process_aes_ccm_param(session, EVP_aes_192_ccm());
+		else if (param->cipher_key.length == 32)
+			rc = process_aes_ccm_param(session, EVP_aes_256_ccm());
+		else
+			rc = -1;
+		break;
+#if _ODP_HAVE_CHACHA20_POLY1305
+	case ODP_CIPHER_ALG_CHACHA20_POLY1305:
+		/* ChaCha20_Poly1305 requires to do both auth and
+		 * cipher at the same time */
+		if (param->auth_alg != ODP_AUTH_ALG_CHACHA20_POLY1305)
+			rc = -1;
+		else
+			rc = process_aes_gcm_param(session,
+						   EVP_chacha20_poly1305());
+		break;
+#endif
 	default:
 		rc = -1;
 	}
@@ -956,6 +1438,7 @@ odp_crypto_session_create(odp_crypto_session_param_t *param,
 	switch (param->auth_alg) {
 	case ODP_AUTH_ALG_NULL:
 		session->auth.func = null_crypto_routine;
+		session->auth.init = null_crypto_init_routine;
 		rc = 0;
 		break;
 #if ODP_DEPRECATED_API
@@ -965,10 +1448,10 @@ odp_crypto_session_create(odp_crypto_session_param_t *param,
 #endif
 		/* Fallthrough */
 	case ODP_AUTH_ALG_MD5_HMAC:
-		rc = process_auth_param(session, 16, EVP_md5());
+		rc = process_auth_hmac_param(session, EVP_md5());
 		break;
 	case ODP_AUTH_ALG_SHA1_HMAC:
-		rc = process_auth_param(session, 20, EVP_sha1());
+		rc = process_auth_hmac_param(session, EVP_sha1());
 		break;
 #if ODP_DEPRECATED_API
 	case ODP_AUTH_ALG_SHA256_128:
@@ -977,10 +1460,10 @@ odp_crypto_session_create(odp_crypto_session_param_t *param,
 #endif
 		/* Fallthrough */
 	case ODP_AUTH_ALG_SHA256_HMAC:
-		rc = process_auth_param(session, 32, EVP_sha256());
+		rc = process_auth_hmac_param(session, EVP_sha256());
 		break;
 	case ODP_AUTH_ALG_SHA512_HMAC:
-		rc = process_auth_param(session, 64, EVP_sha512());
+		rc = process_auth_hmac_param(session, EVP_sha512());
 		break;
 #if ODP_DEPRECATED_API
 	case ODP_AUTH_ALG_AES128_GCM:
@@ -995,6 +1478,7 @@ odp_crypto_session_create(odp_crypto_session_param_t *param,
 		 * cipher at the same time */
 		if (param->cipher_alg == ODP_CIPHER_ALG_AES_GCM || aes_gcm) {
 			session->auth.func = null_crypto_routine;
+			session->auth.init = null_crypto_init_routine;
 			rc = 0;
 		} else {
 			rc = -1;
@@ -1010,6 +1494,43 @@ odp_crypto_session_create(odp_crypto_session_param_t *param,
 		else
 			rc = -1;
 		break;
+	case ODP_AUTH_ALG_AES_CCM:
+		/* AES-CCM requires to do both auth and
+		 * cipher at the same time */
+		if (param->cipher_alg == ODP_CIPHER_ALG_AES_CCM) {
+			session->auth.func = null_crypto_routine;
+			session->auth.init = null_crypto_init_routine;
+			rc = 0;
+		} else {
+			rc = -1;
+		}
+		break;
+	case ODP_AUTH_ALG_AES_CMAC:
+		if (param->auth_key.length == 16)
+			rc = process_auth_cmac_param(session,
+						     EVP_aes_128_cbc());
+		else if (param->auth_key.length == 24)
+			rc = process_auth_cmac_param(session,
+						     EVP_aes_192_cbc());
+		else if (param->auth_key.length == 32)
+			rc = process_auth_cmac_param(session,
+						     EVP_aes_256_cbc());
+		else
+			rc = -1;
+		break;
+#if _ODP_HAVE_CHACHA20_POLY1305
+	case ODP_AUTH_ALG_CHACHA20_POLY1305:
+		/* ChaCha20_Poly1305 requires to do both auth and
+		 * cipher at the same time */
+		if (param->cipher_alg == ODP_CIPHER_ALG_CHACHA20_POLY1305) {
+			session->auth.func = null_crypto_routine;
+			session->auth.init = null_crypto_init_routine;
+			rc = 0;
+		} else {
+			rc = -1;
+		}
+		break;
+#endif
 	default:
 		rc = -1;
 	}
@@ -1058,7 +1579,8 @@ odp_crypto_operation(odp_crypto_op_param_t *param,
 	int rc;
 
 	packet_param.session = param->session;
-	packet_param.override_iv_ptr = param->override_iv_ptr;
+	packet_param.cipher_iv_ptr = param->cipher_iv_ptr;
+	packet_param.auth_iv_ptr = param->auth_iv_ptr;
 	packet_param.hash_result_offset = param->hash_result_offset;
 	packet_param.aad_ptr = param->aad_ptr;
 	packet_param.cipher_range = param->cipher_range;
@@ -1174,6 +1696,52 @@ int odp_crypto_term_global(void)
 	return rc;
 }
 
+int _odp_crypto_init_local(void)
+{
+	unsigned i;
+	int id;
+
+	memset(&local, 0, sizeof(local));
+
+	for (i = 0; i < MAX_SESSIONS; i++) {
+		local.hmac_ctx[i] = HMAC_CTX_new();
+		local.cmac_ctx[i] = CMAC_CTX_new();
+		local.cipher_ctx[i] = EVP_CIPHER_CTX_new();
+		local.mac_cipher_ctx[i] = EVP_CIPHER_CTX_new();
+
+		if (local.hmac_ctx[i] == NULL ||
+		    local.cipher_ctx[i] == NULL ||
+		    local.mac_cipher_ctx[i] == NULL) {
+			_odp_crypto_term_local();
+			return -1;
+		}
+	}
+
+	id = odp_thread_id();
+	local.ctx_valid = global->ctx_valid[id];
+	/* No need to clear flags here, alloc_session did the job for us */
+
+	return 0;
+}
+
+int _odp_crypto_term_local(void)
+{
+	unsigned i;
+
+	for (i = 0; i < MAX_SESSIONS; i++) {
+		if (local.cmac_ctx[i] != NULL)
+			CMAC_CTX_free(local.cmac_ctx[i]);
+		if (local.hmac_ctx[i] != NULL)
+			HMAC_CTX_free(local.hmac_ctx[i]);
+		if (local.cipher_ctx[i] != NULL)
+			EVP_CIPHER_CTX_free(local.cipher_ctx[i]);
+		if (local.mac_cipher_ctx[i] != NULL)
+			EVP_CIPHER_CTX_free(local.mac_cipher_ctx[i]);
+	}
+
+	return 0;
+}
+
 odp_random_kind_t odp_random_max_kind(void)
 {
 	return ODP_RANDOM_CRYPTO;
@@ -1279,7 +1847,7 @@ odp_event_t odp_crypto_packet_to_event(odp_packet_t pkt)
 static
 odp_crypto_packet_result_t *get_op_result_from_packet(odp_packet_t pkt)
 {
-	odp_packet_hdr_t *hdr = odp_packet_hdr(pkt);
+	odp_packet_hdr_t *hdr = packet_hdr(pkt);
 
 	return &hdr->crypto_op_result;
 }
@@ -1343,6 +1911,8 @@ int odp_crypto_int(odp_packet_t pkt_in,
 		pkt_in = ODP_PACKET_INVALID;
 	}
 
+	crypto_init(session);
+
 	/* Invoke the functions */
 	if (session->do_cipher_first) {
 		rc_cipher = session->cipher.func(out_pkt, param, session);
@@ -1363,8 +1933,8 @@ int odp_crypto_int(odp_packet_t pkt_in,
 		(rc_cipher == ODP_CRYPTO_ALG_ERR_NONE) &&
 		(rc_auth == ODP_CRYPTO_ALG_ERR_NONE);
 
-	pkt_hdr = odp_packet_hdr(out_pkt);
-	pkt_hdr->p.error_flags.crypto_err = !op_result->ok;
+	pkt_hdr = packet_hdr(out_pkt);
+	pkt_hdr->p.flags.crypto_err = !op_result->ok;
 
 	/* Synchronous, simply return results */
 	*pkt_out = out_pkt;

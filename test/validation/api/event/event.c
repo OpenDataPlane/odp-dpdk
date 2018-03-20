@@ -1,4 +1,4 @@
-/* Copyright (c) 2017, Linaro Limited
+/* Copyright (c) 2017-2018, Linaro Limited
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -7,7 +7,6 @@
 #include "config.h"
 #include <odp_api.h>
 #include <odp_cunit_common.h>
-#include "event.h"
 
 #define NUM_EVENTS  100
 #define EVENT_SIZE  100
@@ -400,7 +399,7 @@ odp_suiteinfo_t event_suites[] = {
 	ODP_SUITE_INFO_NULL,
 };
 
-int event_main(int argc, char *argv[])
+int main(int argc, char *argv[])
 {
 	int ret;
 
