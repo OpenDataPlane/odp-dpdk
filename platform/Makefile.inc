@@ -1,10 +1,10 @@
 include $(top_srcdir)/Makefile.inc
 
 pkgconfigdir = $(libdir)/pkgconfig
-pkgconfig_DATA = libodp-dpdk.pc
+pkgconfig_DATA = libodp-linux.pc
 
 VPATH = $(srcdir) $(builddir)
-lib_LTLIBRARIES = $(LIB)/libodp-dpdk.la
+lib_LTLIBRARIES = $(LIB)/libodp-linux.la
 
 AM_LDFLAGS = -version-number '$(ODP_LIBSO_VERSION)'
 
