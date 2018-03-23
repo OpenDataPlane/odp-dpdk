@@ -121,7 +121,7 @@ noinst_HEADERS = \
 		  include/protocols/udp.h \
 		  Makefile.inc
 
-__LIB__libodp_dpdk_la_SOURCES = \
+__LIB__libodp_linux_la_SOURCES = \
 			   ../linux-generic/odp_atomic.c \
 			   ../linux-generic/odp_barrier.c \
 			   ../linux-generic/odp_bitmap.c \
@@ -173,7 +173,7 @@ __LIB__libodp_dpdk_la_SOURCES = \
 			   ../linux-generic/odp_weak.c
 
 if ODP_ABI_COMPAT
-__LIB__libodp_dpdk_la_SOURCES += \
+__LIB__libodp_linux_la_SOURCES += \
 			   ../linux-generic/odp_atomic_api.c \
 			   ../linux-generic/odp_byteorder.c \
 			   ../linux-generic/odp_packet_api.c \
@@ -186,7 +186,7 @@ __LIB__libodp_dpdk_la_SOURCES += \
 endif
 
 if ARCH_IS_ARM
-__LIB__libodp_dpdk_la_SOURCES += arch/default/odp_cpu_cycles.c \
+__LIB__libodp_linux_la_SOURCES += arch/default/odp_cpu_cycles.c \
 				 arch/default/odp_global_time.c \
 				 arch/default/odp_sysinfo_parse.c
 if !ODP_ABI_COMPAT
@@ -199,7 +199,7 @@ noinst_HEADERS += arch/arm/odp_atomic.h \
 		  arch/arm/odp_llsc.h
 endif
 if ARCH_IS_AARCH64
-__LIB__libodp_dpdk_la_SOURCES += arch/default/odp_cpu_cycles.c \
+__LIB__libodp_linux_la_SOURCES += arch/default/odp_cpu_cycles.c \
 				 arch/aarch64/odp_global_time.c \
 				 arch/default/odp_sysinfo_parse.c
 if !ODP_ABI_COMPAT
@@ -212,7 +212,7 @@ noinst_HEADERS += arch/aarch64/odp_atomic.h \
 		  arch/aarch64/odp_llsc.h
 endif
 if ARCH_IS_DEFAULT
-__LIB__libodp_dpdk_la_SOURCES += arch/default/odp_cpu_cycles.c \
+__LIB__libodp_linux_la_SOURCES += arch/default/odp_cpu_cycles.c \
 				 arch/default/odp_global_time.c \
 				 arch/default/odp_sysinfo_parse.c
 if !ODP_ABI_COMPAT
@@ -222,7 +222,7 @@ noinst_HEADERS += arch/default/odp_cpu.h \
 		  arch/default/odp_cpu_idling.h
 endif
 if ARCH_IS_MIPS64
-__LIB__libodp_dpdk_la_SOURCES += arch/mips64/odp_cpu_cycles.c \
+__LIB__libodp_linux_la_SOURCES += arch/mips64/odp_cpu_cycles.c \
 				 arch/default/odp_global_time.c \
 				 arch/mips64/odp_sysinfo_parse.c
 if !ODP_ABI_COMPAT
@@ -232,7 +232,7 @@ noinst_HEADERS += arch/default/odp_cpu.h \
 		  arch/default/odp_cpu_idling.h
 endif
 if ARCH_IS_POWERPC
-__LIB__libodp_dpdk_la_SOURCES += arch/default/odp_cpu_cycles.c \
+__LIB__libodp_linux_la_SOURCES += arch/default/odp_cpu_cycles.c \
 				 arch/default/odp_global_time.c \
 				 arch/powerpc/odp_sysinfo_parse.c
 if !ODP_ABI_COMPAT
@@ -242,7 +242,7 @@ noinst_HEADERS += arch/default/odp_cpu.h \
 		  arch/default/odp_cpu_idling.h
 endif
 if ARCH_IS_X86
-__LIB__libodp_dpdk_la_SOURCES += arch/x86/cpu_flags.c \
+__LIB__libodp_linux_la_SOURCES += arch/x86/cpu_flags.c \
 				 arch/x86/odp_cpu_cycles.c \
 				 arch/x86/odp_global_time.c \
 				 arch/x86/odp_sysinfo_parse.c
@@ -254,8 +254,8 @@ noinst_HEADERS += arch/default/odp_cpu.h \
 		  arch/default/odp_cpu_idling.h
 endif
 
-__LIB__libodp_dpdk_la_LIBADD = $(ATOMIC_LIBS)
-__LIB__libodp_dpdk_la_LIBADD += $(OPENSSL_LIBS)
-__LIB__libodp_dpdk_la_LIBADD += $(DPDK_LIBS_LIBODP)
-__LIB__libodp_dpdk_la_LIBADD += $(PTHREAD_LIBS)
-__LIB__libodp_dpdk_la_LIBADD += $(TIMER_LIBS)
+__LIB__libodp_linux_la_LIBADD = $(ATOMIC_LIBS)
+__LIB__libodp_linux_la_LIBADD += $(OPENSSL_LIBS)
+__LIB__libodp_linux_la_LIBADD += $(DPDK_LIBS_LIBODP)
+__LIB__libodp_linux_la_LIBADD += $(PTHREAD_LIBS)
+__LIB__libodp_linux_la_LIBADD += $(TIMER_LIBS)

@@ -59,6 +59,6 @@ __LIB__libodphelper_la_SOURCES += \
 				linux/thread.c
 endif
 
-__LIB__libodphelper_la_LIBADD = $(PTHREAD_LIBS) $(LIB)/libodp-dpdk.la
+__LIB__libodphelper_la_LIBADD = $(PTHREAD_LIBS) $(LIB)/libodp-linux.la
 
 lib_LTLIBRARIES = $(LIB)/libodphelper.la
