@@ -16,7 +16,7 @@ m4_include([platform/linux-dpdk/m4/odp_schedule.m4])
 ##########################################################################
 AC_ARG_WITH([dpdk-path],
 [AS_HELP_STRING([--with-dpdk-path=DIR], [path to dpdk build directory])],
-    [DPDK_PATH="$withval"],[])
+    [DPDK_PATH="$withval"],[DPDK_PATH=system])
 
 ##########################################################################
 # Check for DPDK availability
