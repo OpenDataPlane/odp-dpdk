@@ -54,8 +54,6 @@ env:
         - CONF=""
         - CONF="--disable-abi-compat"
         - CONF="--enable-deprecated"
-        - CONF="--enable-schedule-sp"
-        - CONF="--enable-schedule-iquery"
         - CONF="--disable-static-applications"
 
 compiler:
@@ -63,7 +61,61 @@ compiler:
         - clang-3.8
 
 before_install:
-#       Install cunit for the validation tests because distro version is too old and fails C99 compile
+
+        # Install cross toolchains, etc
+        # apt-get update may fail thanks to Ubuntu removing Packages/indices while not removing relevant parts of Release file
+        - if [ -n "$CROSS_ARCH" ] ;
+          then
+                  BUILD_GNU_TYPE=`dpkg-architecture -a"$CROSS_ARCH" -qDEB_BUILD_GNU_TYPE` ;
+                  CROSS_GNU_TYPE=`dpkg-architecture -a"$CROSS_ARCH" -qDEB_HOST_GNU_TYPE` ;
+                  CROSS_MULTIARCH=`dpkg-architecture -a"$CROSS_ARCH" -qDEB_HOST_MULTIARCH` ;
+                  CROSS="--host="$CROSS_GNU_TYPE" --build="$BUILD_GNU_TYPE"" ;
+                  sudo dpkg --add-architecture "$CROSS_ARCH" ;
+                  sudo -E apt-add-repository -y "deb http://ports.ubuntu.com trusty main" ;
+                  sudo -E apt-add-repository -y "deb http://ports.ubuntu.com trusty-updates main" ;
+                  sudo -E apt-get -y update || true ;
+                  PKGS="build-essential libc6-dev:$CROSS_ARCH libssl-dev:$CROSS_ARCH zlib1g-dev:$CROSS_ARCH libconfig-dev:$CROSS_ARCH libstdc++-4.8-dev:$CROSS_ARCH libpcap0.8-dev:$CROSS_ARCH" ;
+                  if [ "$CROSS_ARCH" = "i386" ] ;
+                  then
+                        PKGS="$PKGS g++-multilib" ;
+                  else
+                        PKGS="$PKGS g++-$CROSS_GNU_TYPE" ;
+                  fi ;
+                  if [ "$CROSS_ARCH" != "armhf" ] ;
+                  then
+                        PKGS="$PKGS libnuma-dev:$CROSS_ARCH" ;
+                  fi ;
+                  sudo -E apt-get -y --no-install-suggests --no-install-recommends --force-yes install $PKGS || exit 1 ;
+                  export PKG_CONFIG_PATH=/usr/lib/${CROSS_MULTIARCH}/pkgconfig:/usr/${CROSS_MULTIARCH}/lib/pkgconfig ;
+          fi
+        - if [ "${CC#clang}" != "${CC}" ] ;
+          then
+                if [ -n "$CROSS_ARCH" ] ;
+                then
+                        export CC="${CC} --target=$CROSS_GNU_TYPE" ;
+                        if [ "$CROSS_ARCH" = "i386" ] ;
+                        then
+                                DPDK_CFLAGS="-m32" ;
+                        else
+                                DPDK_CROSS="$CROSS_GNU_TYPE-" ;
+                                DPDK_CFLAGS="--target=$CROSS_GNU_TYPE" ;
+                        fi
+                fi ;
+                export CXX="${CC/clang/clang++}";
+          elif [ "$CROSS_ARCH" = "i386" ] ;
+          then
+                export CC="gcc -m32" ;
+                export CXX="g++ -m32" ;
+                DPDK_CFLAGS="-m32" ;
+          elif [ -n "$CROSS_ARCH" ] ;
+          then
+                export CC="$CROSS_GNU_TYPE"-gcc ;
+                export CXX="$CROSS_GNU_TYPE"-g++ ;
+                DPDK_CROSS="$CROSS_GNU_TYPE-" ;
+          fi
+        - if test ! -L /usr/lib/ccache/${CC%% *} ; then sudo ln -s -t /usr/lib/ccache/ `which ${CC%% *}` ; fi
+        - ccache -s
+        # Install cunit for the validation tests because distro version is too old and fails C99 compile
         - sudo apt-get remove libcunit1-dev libcunit1
         - export LD_LIBRARY_PATH="$HOME/cunit-install/$CROSS_ARCH/lib:$LD_LIBRARY_PATH"
         - |
@@ -86,8 +138,11 @@ before_install:
         - find $HOME/cunit-install
 
 install:
-        - sudo apt-get -qq update
-        - sudo apt-get install linux-headers-`uname -r`
+        - if [ -z "$CROSS_ARCH" ] ;
+          then
+                sudo apt-get -qq update ;
+                sudo apt-get install linux-headers-`uname -r` ;
+          fi
         - gem install asciidoctor
 
         # DPDK. Note that cache must be purged if dpdk version changes.
@@ -96,39 +151,95 @@ install:
           if [ "${CACHED_DPDK_VERS}" != "${DPDK_VERS}" ]; then
             rm -rf dpdk
           fi
-        - TARGET="x86_64-native-linuxapp-gcc"
-        - DPDK_MACHINE=snb
         - |
-          if [ -n "$TARGET" -a ! -f "dpdk/${TARGET}/lib/libdpdk.a" ]; then
-            git -c advice.detachedHead=false clone -q --depth=1 --single-branch --branch=v${DPDK_VERS} http://dpdk.org/git/dpdk dpdk
+          case "$CROSS_ARCH" in
+            "arm64")
+              DPDK_TARGET="arm64-armv8a-linuxapp-"
+              ;;
+            "armhf")
+              DPDK_TARGET="arm-armv7a-linuxapp-"
+              ;;
+            "i386")
+              DPDK_TARGET="i686-native-linuxapp-"
+              ;;
+            "")
+              DPDK_TARGET="x86_64-native-linuxapp-"
+              DPDK_MACHINE=snb
+              ;;
+          esac
+        - |
+          if [ -n "$DPDK_TARGET" ] ; then
+           if [ "${CC#clang}" != "${CC}" ] ; then
+            DPDKCC=clang ;
+           else
+            DPDKCC=gcc ;
+           fi
+           if [ -n "$DPDK_SHARED" ] ; then
+            TARGET="${DPDK_TARGET}$DPDKCC"-shared
+            LIBDPDKEXT=so
+            export LD_LIBRARY_PATH="`pwd`/${TARGET}:$LD_LIBRARY_PATH"
+            echo $LD_LIBRARY_PATH
+           else
+            TARGET="${DPDK_TARGET}$DPDKCC"
+            LIBDPDKEXT=a
+           fi
+           DPDK_TARGET="${DPDK_TARGET}gcc"
+           if [ ! -f "dpdk/${TARGET}/usr/local/lib/libdpdk.$LIBDPDKEXT" ]; then
+            git -c advice.detachedHead=false clone -q --depth=1 --single-branch --branch=${DPDK_VERS} http://dpdk.org/git/dpdk-stable dpdk
             pushd dpdk
             git log --oneline --decorate
-            echo $CC
-            make config T=${TARGET} O=${TARGET}
+            # AArch64 && ARMv7 fixup
+            sed -i -e 's/40900/40800/g' lib/librte_eal/common/include/arch/arm/rte_vect.h
+            sed -i -e 's/!(/!(defined(__arm__) \&\& defined(__clang__) || /g' lib/librte_eal/common/include/arch/arm/rte_byteorder.h
+            sed -i -e 's/__GNUC__/defined(__arm__) \&\& defined(__clang__) || __GNUC__/' lib/librte_eal/common/include/generic/rte_byteorder.h
+            sed -i -e 's,\$(CC),\0 $(EXTRA_CFLAGS),g' lib/librte_acl/Makefile
+            make config T=${DPDK_TARGET} O=${TARGET}
             pushd ${TARGET}
             sed -ri 's,(CONFIG_RTE_LIBRTE_PMD_PCAP=).*,\1y,' .config
             sed -ri 's,(CONFIG_RTE_LIBRTE_PMD_OPENSSL=).*,\1y,' .config
-            cat .config |grep RTE_MACHINE
+            # OCTEON TX driver includes ARM v8.1 instructions
+            sed -ri 's,(CONFIG_RTE_LIBRTE_OCTEONTX_PMD=).*,\1n,' .config
+            sed -ri 's,(CONFIG_RTE_LIBRTE_PMD_OCTEONTX_SSOVF=).*,\1n,' .config
+            sed -ri 's,(CONFIG_RTE_LIBRTE_OCTEONTX_MEMPOOL=).*,\1n,' .config
             if test -n "${DPDK_MACHINE}" ; then
               sed -ri 's,(CONFIG_RTE_MACHINE=).*,\1"'${DPDK_MACHINE}'",' .config
             fi
+            if test -n "${DPDK_SHARED}" ; then
+              sed -ri 's,(CONFIG_RTE_BUILD_SHARED_LIB=).*,\1y,' .config
+            fi
+            if test -n "$CROSS_ARCH" ; then
+              sed -ri -e 's,(CONFIG_RTE_EAL_IGB_UIO=).*,\1n,' .config
+              sed -ri -e 's,(CONFIG_RTE_KNI_KMOD=).*,\1n,' .config
+            fi
+            sed -ri -e 's,(CONFIG_RTE_TOOLCHAIN=).*,\1"'${DPDKCC}'",' .config
+            sed -ri -e '/CONFIG_RTE_TOOLCHAIN_.*/d' .config
+            echo CONFIG_RTE_TOOLCHAIN_${DPDKCC^^}=y >> .config
             popd
-            make install T=${TARGET} EXTRA_CFLAGS="-fPIC $DPDK_CFLAGS"
+            make build O=${TARGET} EXTRA_CFLAGS="-fPIC $DPDK_CFLAGS" CROSS="$DPDK_CROSS" CC="$CC" HOSTCC=gcc -j $(nproc)
             rm -r ./doc ./${TARGET}/app ./${TARGET}/build
             popd
-            EXTRA_CONF="$EXTRA_CONF --with-dpdk-path=`pwd`/dpdk/${TARGET}"
+           fi
+           EXTRA_CONF="$EXTRA_CONF --with-dpdk-path=`pwd`/dpdk/${TARGET}"
           fi
 
 script:
         - ./bootstrap
         - ./configure --prefix=$HOME/odp-install
-          --with-dpdk-path=`pwd`/dpdk/${TARGET}
           --enable-user-guides
           --enable-debug=full
           --enable-helper-linux
-          $CONF
+          $CROSS $EXTRA_CONF $CONF
         - make -j $(nproc)
-        - sudo LD_LIBRARY_PATH="/usr/local/lib:$LD_LIBRARY_PATH" make check
+        # Run all tests only for default configuration
+        - if [ -z "$CROSS_ARCH" ] ; then
+            if [ -n "$CONF" ] ; then
+              sudo LD_LIBRARY_PATH="$HOME/cunit-install/$CROSS_ARCH/lib:$LD_LIBRARY_PATH" ODP_SHM_DIR=/dev/shm/odp make check ;
+            else
+              sudo ODP_SCHEDULER=basic LD_LIBRARY_PATH="$HOME/cunit-install/$CROSS_ARCH/lib:$LD_LIBRARY_PATH" ODP_SHM_DIR=/dev/shm/odp make check ;
+              sudo ODP_SCHEDULER=sp LD_LIBRARY_PATH="$HOME/cunit-install/$CROSS_ARCH/lib:$LD_LIBRARY_PATH" ODP_SHM_DIR=/dev/shm/odp make check ;
+              sudo ODP_SCHEDULER=iquery LD_LIBRARY_PATH="$HOME/cunit-install/$CROSS_ARCH/lib:$LD_LIBRARY_PATH" ODP_SHM_DIR=/dev/shm/odp make check ;
+            fi
+          fi
         - make install
 
         # Wrapper-script.sh unmounts huge pages after make check
@@ -140,10 +251,18 @@ script:
         - pushd $HOME
         - echo "Dynamic link.."
         - ${CC} ${CFLAGS} ${OLDPWD}/example/hello/odp_hello.c -o odp_hello_inst_dynamic `PKG_CONFIG_PATH=${HOME}/odp-install/lib/pkgconfig:${PKG_CONFIG_PATH} pkg-config --cflags --libs libodp-linux`
-        - sudo ODP_PLATFORM_PARAMS="-n 2" LD_LIBRARY_PATH="${HOME}/odp-install/lib:$LD_LIBRARY_PATH" ./odp_hello_inst_dynamic
-        - echo "Static link.."
-        - ${CC} ${CFLAGS} ${OLDPWD}/example/hello/odp_hello.c -o odp_hello_inst_static `PKG_CONFIG_PATH=${HOME}/odp-install/lib/pkgconfig:${PKG_CONFIG_PATH} pkg-config --cflags --libs libodp-linux --static` -static
-        - sudo ODP_PLATFORM_PARAMS="-n 2" ./odp_hello_inst_static
+        - if [ -z "$CROSS_ARCH" ] ; then
+            sudo ODP_PLATFORM_PARAMS="-n 2" LD_LIBRARY_PATH="${HOME}/odp-install/lib:$LD_LIBRARY_PATH" ./odp_hello_inst_dynamic ;
+          fi
+        - |
+          # it is not possible to do static linking if we only have shared DPDK library. Compiler complains about missing -ldpdk
+          if [ -z "$TARGET" -o -z "$DPDK_SHARED" ] ; then
+            echo "Static link.."
+            ${CC} ${CFLAGS} ${OLDPWD}/example/hello/odp_hello.c -o odp_hello_inst_static `PKG_CONFIG_PATH=${HOME}/odp-install/lib/pkgconfig:${PKG_CONFIG_PATH} pkg-config --cflags --libs libodp-linux --static` -static || exit 1
+            if [ -z "$CROSS_ARCH" ] ; then
+              sudo ODP_PLATFORM_PARAMS="-n 2" ./odp_hello_inst_static;
+            fi
+          fi
 
 jobs:
         include:
@@ -208,6 +327,56 @@ jobs:
                           - ./configure --enable-helper-linux
                             --with-dpdk-path=`pwd`/dpdk/${TARGET}
                           - make -j $(nproc)
+                - stage: "build only"
+                  env: CROSS_ARCH="i386"
+                  compiler: gcc
+                  script:
+                          - ./bootstrap
+                          - ./configure --enable-helper-linux $CROSS $EXTRA_CONF
+                          - make -j $(nproc)
+                - stage: "build only"
+                  env: CROSS_ARCH="arm64"
+                  compiler: gcc
+                  script:
+                          - ./bootstrap
+                          - ./configure --enable-helper-linux $CROSS $EXTRA_CONF
+                          - make -j $(nproc)
+                - stage: test
+                  compiler: gcc
+                  env: CROSS_ARCH="arm64"
+                - stage: test
+                  compiler: clang-3.8
+                  env: CROSS_ARCH="arm64"
+                - stage: test
+                  compiler: gcc
+                  env: CROSS_ARCH="armhf" CFLAGS="-march=armv7-a -mfpu=neon"
+                - stage: test
+                  compiler: clang-3.8
+                  env: CROSS_ARCH="armhf" CFLAGS="-march=armv7-a"
+                - stage: test
+                  compiler: gcc
+                  env: CROSS_ARCH="i386"
+                - stage: test
+                  compiler: clang-3.8
+                  env: CROSS_ARCH="i386"
+                - stage: test
+                  compiler: gcc
+                  env: CROSS_ARCH="arm64" CONF="--disable-abi-compat"
+                - stage: test
+                  compiler: clang-3.8
+                  env: CROSS_ARCH="arm64" CONF="--disable-abi-compat"
+                - stage: test
+                  compiler: gcc
+                  env: CROSS_ARCH="armhf" CFLAGS="-march=armv7-a -mfpu=neon" CONF="--disable-abi-compat"
+                - stage: test
+                  compiler: clang-3.8
+                  env: CROSS_ARCH="armhf" CFLAGS="-march=armv7-a" CONF="--disable-abi-compat"
+                - stage: test
+                  compiler: gcc
+                  env: CROSS_ARCH="i386" CONF="--disable-abi-compat"
+                - stage: test
+                  compiler: clang-3.8
+                  env: CROSS_ARCH="i386" CONF="--disable-abi-compat"
                 - stage: test
                   canfail: yes
                   env: TEST=checkpatch
