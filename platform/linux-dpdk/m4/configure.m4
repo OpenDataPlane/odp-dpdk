@@ -10,7 +10,7 @@ AM_CONDITIONAL([PKTIO_DPDK], [false])
 ODP_PTHREAD
 ODP_TIMER
 ODP_OPENSSL
-m4_include([platform/linux-dpdk/m4/odp_schedule.m4])
+ODP_SCHEDULER
 
 ##########################################################################
 # Set DPDK install path
