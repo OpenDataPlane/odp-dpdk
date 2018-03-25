@@ -121,6 +121,10 @@ typedef struct {
 	/* Result for crypto packet op */
 	odp_crypto_packet_result_t crypto_op_result;
 
+	/* Temp storage for digest */
+#define PACKET_DIGEST_MAX 64
+	uint8_t crypto_digest_buf[PACKET_DIGEST_MAX];
+
 	/* Context for IPsec */
 	odp_ipsec_packet_result_t ipsec_ctx;
 
