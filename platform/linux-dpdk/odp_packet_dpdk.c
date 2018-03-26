@@ -900,23 +900,17 @@ static int send_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 	odp_pktout_config_opt_t *pktout_capa =
 		&pktio_entry->s.capa.config.pktout;
 	int pkts;
-	int i;
-	uint32_t mtu = pkt_dpdk->mtu;
-	uint16_t num_tx = 0;
 
-	for (i = 0; i < num; i++) {
-		struct rte_mbuf *mbuf = pkt_to_mbuf(pkt_table[i]);
+	if (chksum_insert_ena) {
+		int i;
 
-		if (odp_unlikely(mbuf->pkt_len > mtu))
-			break;
+		for (i = 0; i < num; i++) {
+			struct rte_mbuf *mbuf = pkt_to_mbuf(pkt_table[i]);
 
-		mbuf->ol_flags = 0;
-		if (chksum_insert_ena)
 			pkt_set_ol_tx(pktout_cfg, pktout_capa,
 				      packet_hdr(pkt_table[i]), mbuf,
 				      rte_pktmbuf_mtod(mbuf, char *));
-
-		num_tx++;
+		}
 	}
 
 	if (!pkt_dpdk->lockless_tx)
@@ -925,7 +919,7 @@ static int send_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wcast-qual"
 	pkts = rte_eth_tx_burst(pkt_dpdk->port_id, index,
-				(struct rte_mbuf **)pkt_table, num_tx);
+				(struct rte_mbuf **)pkt_table, num);
 #pragma GCC diagnostic pop
 
 	if (!pkt_dpdk->lockless_tx)
@@ -937,7 +931,7 @@ static int send_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 		if (odp_unlikely(rte_errno != 0))
 			return -1;
 
-		if (odp_unlikely(mbuf->pkt_len > mtu)) {
+		if (odp_unlikely(mbuf->pkt_len > pkt_dpdk->mtu)) {
 			__odp_errno = EMSGSIZE;
 			return -1;
 		}
