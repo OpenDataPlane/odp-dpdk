@@ -31,9 +31,9 @@
 #include <odp_debug_internal.h>
 #include <odp_classification_internal.h>
 #include <odp_packet_io_internal.h>
+#include <odp_libconfig_internal.h>
 #include <odp_packet_dpdk.h>
 #include <net/if.h>
-#include <math.h>
 
 /* DPDK poll mode drivers requiring minimum RX burst size DPDK_MIN_RX_BURST */
 #define IXGBE_DRV_NAME "net_ixgbe"
@@ -56,6 +56,64 @@ const pktio_if_ops_t * const pktio_if_ops[]  = {
 extern void *pktio_entry_ptr[ODP_CONFIG_PKTIO_ENTRIES];
 
 static uint32_t mtu_get_pkt_dpdk(pktio_entry_t *pktio_entry);
+
+static int lookup_opt(const char *path, const char *drv_name, int *val)
+{
+	const char *base = "pktio_dpdk";
+	char opt_path[256];
+	int ret = 0;
+
+	/* Default option */
+	snprintf(opt_path, sizeof(opt_path), "%s.%s", base, path);
+	ret += _odp_libconfig_lookup_int(opt_path, val);
+
+	/* Driver specific option overrides default option */
+	snprintf(opt_path, sizeof(opt_path), "%s.%s.%s", base, drv_name, path);
+	ret += _odp_libconfig_lookup_int(opt_path, val);
+
+	if (ret == 0)
+		ODP_ERR("Unable to find DPDK configuration option: %s\n", path);
+	return ret;
+}
+
+static int init_options(pktio_entry_t *pktio_entry,
+			const struct rte_eth_dev_info *dev_info)
+{
+	dpdk_opt_t *opt = &pktio_entry->s.pkt_dpdk.opt;
+
+	if (!lookup_opt("num_rx_desc", dev_info->driver_name,
+			&opt->num_rx_desc))
+		return -1;
+	if (opt->num_rx_desc < dev_info->rx_desc_lim.nb_min ||
+	    opt->num_rx_desc > dev_info->rx_desc_lim.nb_max ||
+	    opt->num_rx_desc % dev_info->rx_desc_lim.nb_align) {
+		ODP_ERR("Invalid number of RX descriptors\n");
+		return -1;
+	}
+
+	if (!lookup_opt("num_tx_desc", dev_info->driver_name,
+			&opt->num_tx_desc))
+		return -1;
+	if (opt->num_tx_desc < dev_info->tx_desc_lim.nb_min ||
+	    opt->num_tx_desc > dev_info->tx_desc_lim.nb_max ||
+	    opt->num_tx_desc % dev_info->tx_desc_lim.nb_align) {
+		ODP_ERR("Invalid number of TX descriptors\n");
+		return -1;
+	}
+
+	if (!lookup_opt("rx_drop_en", dev_info->driver_name,
+			&opt->rx_drop_en))
+		return -1;
+	opt->rx_drop_en = !!opt->rx_drop_en;
+
+	ODP_PRINT("DPDK interface (%s): %" PRIu16 "\n", dev_info->driver_name,
+		  pktio_entry->s.pkt_dpdk.port_id);
+	ODP_PRINT("  num_rx_desc: %d\n", opt->num_rx_desc);
+	ODP_PRINT("  num_tx_desc: %d\n", opt->num_tx_desc);
+	ODP_PRINT("  rx_drop_en: %d\n", opt->rx_drop_en);
+
+	return 0;
+}
 
 /* Test if s has only digits or not. Dpdk pktio uses only digits.*/
 static int _dpdk_netdev_is_valid(const char *s)
@@ -295,6 +353,12 @@ static int setup_pkt_dpdk(odp_pktio_t pktio ODP_UNUSED,
 		return -1;
 	}
 
+	/* Initialize runtime options */
+	if (init_options(pktio_entry, &dev_info)) {
+		ODP_ERR("Initializing runtime options failed\n");
+		return -1;
+	}
+
 	/* Drivers requiring minimum burst size. Supports also *_vf versions
 	 * of the drivers. */
 	if (!strncmp(dev_info.driver_name, IXGBE_DRV_NAME,
@@ -370,8 +434,6 @@ static int start_pkt_dpdk(pktio_entry_t *pktio_entry)
 	int socket_id =  sid < 0 ? 0 : sid;
 	uint16_t nbrxq, nbtxq;
 	pool_t *pool = pool_entry_from_hdl(pktio_entry->s.pool);
-	uint16_t nb_rxd = RTE_TEST_RX_DESC_DEFAULT;
-	uint16_t nb_txd = RTE_TEST_TX_DESC_DEFAULT;
 	struct rte_eth_rss_conf rss_conf;
 	uint16_t hw_ip_checksum = 0;
 	struct rte_eth_dev_info dev_info;
@@ -427,22 +489,15 @@ static int start_pkt_dpdk(pktio_entry_t *pktio_entry)
 		return -1;
 	}
 
-	if (nb_rxd + nb_txd > pool->params.pkt.num / 4) {
-		double downrate = (double)(pool->params.pkt.num / 4) /
-				  (double)(nb_rxd + nb_txd);
-		nb_rxd >>= (int)ceil(downrate);
-		nb_txd >>= (int)ceil(downrate);
-		ODP_DBG("downrate %f\n", downrate);
-		ODP_DBG("Descriptors scaled down. RX: %u TX: %u pool: %u\n",
-			nb_rxd, nb_txd, pool->params.pkt.num);
-	}
 	/* init RX queues */
 	rte_eth_dev_info_get(port_id, &dev_info);
 	rxconf = &dev_info.default_rxconf;
-	rxconf->rx_drop_en = 1;
+	rxconf->rx_drop_en = pkt_dpdk->opt.rx_drop_en;
 	for (i = 0; i < nbrxq; i++) {
-		ret = rte_eth_rx_queue_setup(port_id, i, nb_rxd, socket_id,
-					     rxconf, pool->rte_mempool);
+		ret = rte_eth_rx_queue_setup(port_id, i,
+					     pkt_dpdk->opt.num_rx_desc,
+					     socket_id, rxconf,
+					     pool->rte_mempool);
 		if (ret < 0) {
 			ODP_ERR("rxq:err=%d, port=%" PRIu16 "\n", ret, port_id);
 			return -1;
@@ -461,8 +516,9 @@ static int start_pkt_dpdk(pktio_entry_t *pktio_entry)
 	/* else - use the default tx queue settings*/
 
 	for (i = 0; i < nbtxq; i++) {
-		ret = rte_eth_tx_queue_setup(port_id, i, nb_txd, socket_id,
-					     txconf);
+		ret = rte_eth_tx_queue_setup(port_id, i,
+					     pkt_dpdk->opt.num_rx_desc,
+					     socket_id, txconf);
 		if (ret < 0) {
 			ODP_ERR("txq:err=%d, port=%" PRIu16 "\n", ret, port_id);
 			return -1;

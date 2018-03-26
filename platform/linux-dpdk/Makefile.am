@@ -3,6 +3,7 @@ include $(top_srcdir)/platform/@with_platform@/Makefile.inc
 
 AM_CPPFLAGS  =  $(ODP_INCLUDES)
 AM_CPPFLAGS +=  -I$(top_srcdir)/platform/$(with_platform)/include
+AM_CPPFLAGS +=  -I$(top_builddir)/platform/$(with_platform)/include
 AM_CPPFLAGS +=  -I$(top_srcdir)/platform/linux-generic/include
 AM_CPPFLAGS +=  -I$(top_srcdir)/platform/$(with_platform)/arch
 AM_CPPFLAGS +=  -I$(top_srcdir)/platform/$(with_platform)/arch/@ARCH_DIR@
@@ -10,6 +11,12 @@ AM_CPPFLAGS +=  -I$(top_srcdir)/platform/$(with_platform)/arch/default
 
 AM_CPPFLAGS +=  $(OPENSSL_CPPFLAGS)
 AM_CPPFLAGS +=  $(DPDK_CPPFLAGS)
+
+AM_CFLAGS +=  $(LIBCONFIG_CFLAGS)
+
+DISTCLEANFILES = include/odp_libconfig_config.h
+include/odp_libconfig_config.h: $(top_srcdir)/config/odp-$(with_platform).conf $(top_builddir)/config.status
+	cd $(top_builddir) && $(SHELL) ./config.status $(subdir)/$@
 
 if !ODP_ABI_COMPAT
 odpapiplatincludedir= $(includedir)/odp/api/plat
@@ -88,6 +95,7 @@ noinst_HEADERS = \
 		  ${top_srcdir}/platform/linux-generic/include/odp_forward_typedefs_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_ipsec_internal.h \
+		  ${top_srcdir}/platform/linux-generic/include/odp_libconfig_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_llqueue.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_macros_internal.h \
 		  include/odp_packet_dpdk.h \
@@ -121,6 +129,9 @@ noinst_HEADERS = \
 		  include/protocols/udp.h \
 		  Makefile.inc
 
+nodist_noinst_HEADERS = \
+		  include/odp_libconfig_config.h
+
 __LIB__libodp_linux_la_SOURCES = \
 			   ../linux-generic/odp_atomic.c \
 			   ../linux-generic/odp_barrier.c \
@@ -141,6 +152,7 @@ __LIB__libodp_linux_la_SOURCES = \
 			   ../linux-generic/odp_ipsec_events.c \
 			   ../linux-generic/odp_ipsec_sad.c \
 			   ../linux-generic/odp_name_table.c \
+			   odp_libconfig.c \
 			   odp_packet.c \
 			   odp_packet_dpdk.c \
 			   odp_packet_flags.c \
@@ -256,6 +268,7 @@ endif
 
 __LIB__libodp_linux_la_LIBADD = $(ATOMIC_LIBS)
 __LIB__libodp_linux_la_LIBADD += $(OPENSSL_LIBS)
+__LIB__libodp_linux_la_LIBADD += $(LIBCONFIG_LIBS)
 __LIB__libodp_linux_la_LIBADD += $(DPDK_LIBS_LIBODP)
 __LIB__libodp_linux_la_LIBADD += $(PTHREAD_LIBS)
 __LIB__libodp_linux_la_LIBADD += $(TIMER_LIBS)
