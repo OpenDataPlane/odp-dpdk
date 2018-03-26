@@ -31,6 +31,8 @@ extern "C" {
 #include <string.h>
 
 /* for DPDK */
+#include <rte_config.h>
+#include <rte_mbuf.h>
 #include <rte_mempool.h>
 
 /* Use ticketlock instead of spinlock */
@@ -74,6 +76,14 @@ static inline pool_t *pool_entry(uint32_t pool_idx)
 static inline pool_t *pool_entry_from_hdl(odp_pool_t pool_hdl)
 {
 	return &pool_tbl->pool[_odp_typeval(pool_hdl)];
+}
+
+static inline void buffer_free_multi(odp_buffer_hdr_t *buf_hdr[], int num)
+{
+	int i;
+
+	for (i = 0; i < num; i++)
+		rte_ctrlmbuf_free((struct rte_mbuf *)(uintptr_t)buf_hdr[i]);
 }
 
 #ifdef __cplusplus
