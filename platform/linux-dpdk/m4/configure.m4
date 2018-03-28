@@ -10,7 +10,7 @@ AM_CONDITIONAL([PKTIO_DPDK], [false])
 ODP_PTHREAD
 ODP_TIMER
 ODP_OPENSSL
-ODP_LIBCONFIG
+ODP_LIBCONFIG([linux-dpdk])
 ODP_SCHEDULER
 
 ##########################################################################
