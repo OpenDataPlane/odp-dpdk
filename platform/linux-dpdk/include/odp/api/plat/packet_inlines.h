@@ -31,6 +31,7 @@ extern "C" {
 #include <string.h>
 /* Required by rte_mbuf.h */
 #include <sys/types.h>
+#include <rte_config.h>
 #include <rte_mbuf.h>
 
 /** @cond _ODP_HIDE_FROM_DOXYGEN_ */

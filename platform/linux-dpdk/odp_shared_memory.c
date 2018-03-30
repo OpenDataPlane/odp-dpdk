@@ -19,6 +19,7 @@
 #include <unistd.h>
 #include <inttypes.h>
 
+#include <rte_config.h>
 #include <rte_lcore.h>
 #include <rte_memzone.h>
 
