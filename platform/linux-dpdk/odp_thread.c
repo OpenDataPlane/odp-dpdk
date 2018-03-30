@@ -21,6 +21,7 @@
 #include <odp_schedule_if.h>
 #include <odp/api/plat/thread_inlines.h>
 
+#include <rte_config.h>
 #include <rte_lcore.h>
 
 #include <string.h>
