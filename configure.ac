@@ -260,7 +260,9 @@ m4_include([./test/m4/configure.m4])
 ##########################################################################
 # Run platform specific checks and settings
 ##########################################################################
-AS_IF([test "${with_platform}" = "linux-dpdk"],
+AS_IF([test "${with_platform}" = "linux-generic"],
+      [m4_include([./platform/linux-generic/m4/configure.m4])],
+      [test "${with_platform}" = "linux-dpdk"],
       [m4_include([./platform/linux-dpdk/m4/configure.m4])],
       [AC_MSG_ERROR([UNSUPPORTED PLATFORM: ${with_platform}])])
 

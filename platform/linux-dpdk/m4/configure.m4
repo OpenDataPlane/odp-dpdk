@@ -6,17 +6,18 @@ ODP_ATOMIC
 # linux-generic PCAP support is not relevant as the code doesn't use
 # linux-generic pktio at all. And DPDK has its own PCAP support anyway
 AM_CONDITIONAL([HAVE_PCAP], [false])
+AM_CONDITIONAL([PKTIO_DPDK], [false])
 ODP_PTHREAD
 ODP_TIMER
 ODP_OPENSSL
-m4_include([platform/linux-dpdk/m4/odp_schedule.m4])
+ODP_SCHEDULER
 
 ##########################################################################
 # Set DPDK install path
 ##########################################################################
 AC_ARG_WITH([dpdk-path],
 [AS_HELP_STRING([--with-dpdk-path=DIR], [path to dpdk build directory])],
-    [DPDK_PATH="$withval"],[])
+    [DPDK_PATH="$withval"],[DPDK_PATH=system])
 
 ##########################################################################
 # Check for DPDK availability
@@ -37,7 +38,7 @@ AC_CONFIG_COMMANDS_PRE([dnl
 AM_CONDITIONAL([PLATFORM_IS_LINUX_DPDK],
 	       [test "${with_platform}" = "linux-dpdk"])
 AC_CONFIG_FILES([platform/linux-dpdk/Makefile
-		 platform/linux-dpdk/libodp-dpdk.pc
+		 platform/linux-dpdk/libodp-linux.pc
 		 platform/linux-dpdk/test/Makefile
 		 platform/linux-dpdk/test/validation/api/pktio/Makefile])
 ])

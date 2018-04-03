@@ -37,7 +37,11 @@ Prerequisites and considerations:
 
 Fetching the DPDK code:
 ----------------------
-Right now odp-dpdk only supports DPDK v17.08:
+Right now odp-dpdk supports DPDK v17.11 and v17.08:
+    git clone http://dpdk.org/git/dpdk-stable --branch 17.11 --depth 1 ./<dpdk-dir>
+
+or
+
     git clone http://dpdk.org/git/dpdk-stable --branch 17.08 --depth 1 ./<dpdk-dir>
 
 Compile DPDK:

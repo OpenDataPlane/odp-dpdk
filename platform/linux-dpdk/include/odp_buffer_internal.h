@@ -35,6 +35,7 @@ extern "C" {
 #include <stddef.h>
 
 /* DPDK */
+#include <rte_config.h>
 #include <rte_mbuf.h>
 
 ODP_STATIC_ASSERT(CONFIG_PACKET_SEG_LEN_MIN >= 256,

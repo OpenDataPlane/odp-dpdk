@@ -4,7 +4,7 @@ include $(top_srcdir)/Makefile.inc
 
 COMMON_DIR = $(top_builddir)/test/common
 
-LIBODP = $(LIB)/libodphelper.la $(LIB)/libodp-dpdk.la
+LIBODP = $(LIB)/libodphelper.la $(LIB)/libodp-linux.la
 
 LIBCUNIT_COMMON = $(COMMON_DIR)/libcunit_common.la
 LIBCPUMASK_COMMON = $(COMMON_DIR)/libcpumask_common.la
@@ -23,6 +23,8 @@ AM_CPPFLAGS = \
 
 # Do not link to DPDK twice in case of dynamic linking with ODP
 if STATIC_APPS
+LDADD += $(DPDK_LIBS_LT_STATIC)
+else
 LDADD += $(DPDK_LIBS_LT)
 endif
 

@@ -33,6 +33,7 @@ extern "C" {
 #include <protocols/eth.h>
 #include <odp_queue_if.h>
 
+#include <rte_config.h>
 #include <rte_acl_osdep.h>
 
 /** Minimum segment length expected by packet_parse_common() */
