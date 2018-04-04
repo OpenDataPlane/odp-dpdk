@@ -547,51 +547,54 @@ odp_pool_t odp_pool_lookup(const char *name)
 }
 
 
-static odp_buffer_t buffer_alloc(pool_t *pool)
+static inline int buffer_alloc_multi(pool_t *pool, odp_buffer_hdr_t *buf_hdr[],
+				     int num)
 {
-	odp_buffer_hdr_t *buf_hdr;
-	struct rte_mbuf *mbuf;
+	int i;
+	struct rte_mempool *mp = pool->rte_mempool;
 
-	if (odp_unlikely(pool->params.type != ODP_POOL_BUFFER &&
-			 pool->params.type != ODP_POOL_TIMEOUT)) {
-		rte_errno = EINVAL;
-		return ODP_BUFFER_INVALID;
+	ODP_ASSERT(pool->params.type == ODP_POOL_BUFFER ||
+		   pool->params.type == ODP_POOL_TIMEOUT);
+
+	for (i = 0; i < num; i++) {
+		struct rte_mbuf *mbuf;
+
+		mbuf = rte_ctrlmbuf_alloc(mp);
+		if (odp_unlikely(mbuf == NULL))
+			return i;
+
+		buf_hdr[i] = mbuf_to_buf_hdr(mbuf);
 	}
 
-	mbuf = rte_ctrlmbuf_alloc(pool->rte_mempool);
-	if (odp_unlikely(mbuf == NULL)) {
-		rte_errno = ENOMEM;
-		return ODP_BUFFER_INVALID;
-	}
-
-	buf_hdr = mbuf_to_buf_hdr(mbuf);
-
-	return buf_from_buf_hdr(buf_hdr);
+	return i;
 }
 
 odp_buffer_t odp_buffer_alloc(odp_pool_t pool_hdl)
 {
+	odp_buffer_t buf;
+	pool_t *pool;
+	int ret;
+
 	ODP_ASSERT(ODP_POOL_INVALID != pool_hdl);
 
-	pool_t *pool = pool_entry_from_hdl(pool_hdl);
+	pool = pool_entry_from_hdl(pool_hdl);
+	ret  = buffer_alloc_multi(pool, (odp_buffer_hdr_t **)&buf, 1);
 
-	return buffer_alloc(pool);
+	if (odp_likely(ret == 1))
+		return buf;
+
+	return ODP_BUFFER_INVALID;
 }
 
 int odp_buffer_alloc_multi(odp_pool_t pool_hdl, odp_buffer_t buf[], int num)
 {
-	int i;
+	pool_t *pool;
 
 	ODP_ASSERT(ODP_POOL_INVALID != pool_hdl);
 
-	pool_t *pool = pool_entry_from_hdl(pool_hdl);
+	pool = pool_entry_from_hdl(pool_hdl);
 
-	for (i = 0; i < num; i++) {
-		buf[i] = buffer_alloc(pool);
-		if (buf[i] == ODP_BUFFER_INVALID)
-			return rte_errno == ENOMEM ? i : -EINVAL;
-	}
-	return i;
+	return buffer_alloc_multi(pool, (odp_buffer_hdr_t **)buf, num);
 }
 
 void odp_buffer_free(odp_buffer_t buf)
