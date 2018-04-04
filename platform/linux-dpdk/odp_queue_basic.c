@@ -38,7 +38,7 @@
 #include <inttypes.h>
 
 #define MIN_QUEUE_SIZE 8
-#define MAX_QUEUE_SIZE CONFIG_QUEUE_SIZE
+#define MAX_QUEUE_SIZE (1 * 1024 * 1024)
 
 static int queue_init(queue_entry_t *queue, const char *name,
 		      const odp_queue_param_t *param);
@@ -64,11 +64,11 @@ static int queue_capa(odp_queue_capability_t *capa, int sched)
 	/* Reserve some queues for internal use */
 	capa->max_queues        = ODP_CONFIG_QUEUES - NUM_INTERNAL_QUEUES;
 	capa->plain.max_num     = capa->max_queues;
-	capa->plain.max_size    = MAX_QUEUE_SIZE - 1;
+	capa->plain.max_size    = queue_glb->config.max_queue_size - 1;
 	capa->plain.lockfree.max_num  = queue_glb->queue_lf_num;
 	capa->plain.lockfree.max_size = queue_glb->queue_lf_size;
 	capa->sched.max_num     = capa->max_queues;
-	capa->sched.max_size    = MAX_QUEUE_SIZE - 1;
+	capa->sched.max_size    = queue_glb->config.max_queue_size - 1;
 
 	if (sched) {
 		capa->max_ordered_locks = sched_fn->max_ordered_locks();
@@ -87,7 +87,7 @@ static int read_config_file(queue_global_t *queue_glb)
 
 	ODP_PRINT("Queue config:\n");
 
-	str = "queue_basic.default_queue_size";
+	str = "queue_basic.max_queue_size";
 	if (!_odp_libconfig_lookup_int(str, &val)) {
 		ODP_ERR("Config option '%s' not found.\n", str);
 		return -1;
@@ -96,6 +96,24 @@ static int read_config_file(queue_global_t *queue_glb)
 	val_u32 = val;
 
 	if (val_u32 > MAX_QUEUE_SIZE || val_u32 < MIN_QUEUE_SIZE ||
+	    !CHECK_IS_POWER2(val_u32)) {
+		ODP_ERR("Bad value %s = %u\n", str, val_u32);
+		return -1;
+	}
+
+	queue_glb->config.max_queue_size = val_u32;
+	ODP_PRINT("  %s: %u\n", str, val_u32);
+
+	str = "queue_basic.default_queue_size";
+	if (!_odp_libconfig_lookup_int(str, &val)) {
+		ODP_ERR("Config option '%s' not found.\n", str);
+		return -1;
+	}
+
+	val_u32 = val;
+
+	if (val_u32 > queue_glb->config.max_queue_size ||
+	    val_u32 < MIN_QUEUE_SIZE ||
 	    !CHECK_IS_POWER2(val_u32)) {
 		ODP_ERR("Bad value %s = %u\n", str, val_u32);
 		return -1;
@@ -117,7 +135,7 @@ static int queue_init_global(void)
 
 	ODP_DBG("Starts...\n");
 
-	shm = odp_shm_reserve("odp_queues",
+	shm = odp_shm_reserve("_odp_queue_gbl",
 			      sizeof(queue_global_t),
 			      sizeof(queue_entry_t), 0);
 
@@ -141,6 +159,10 @@ static int queue_init_global(void)
 		odp_shm_free(shm);
 		return -1;
 	}
+
+	queue_glb->queue_gbl_shm = shm;
+	queue_glb->queue_ring_shm = ODP_SHM_INVALID;
+	queue_glb->ring_data      = NULL;
 
 	lf_func = &queue_glb->queue_lf_func;
 	queue_glb->queue_lf_num  = queue_lf_init_global(&lf_size, lf_func);
@@ -171,7 +193,6 @@ static int queue_term_local(void)
 static int queue_term_global(void)
 {
 	int ret = 0;
-	int rc = 0;
 	queue_entry_t *queue;
 	int i;
 
@@ -180,20 +201,19 @@ static int queue_term_global(void)
 		LOCK(queue);
 		if (queue->s.status != QUEUE_STATUS_FREE) {
 			ODP_ERR("Not destroyed queue: %s\n", queue->s.name);
-			rc = -1;
+			ret = -1;
 		}
 		UNLOCK(queue);
 	}
 
 	queue_lf_term_global();
 
-	ret = odp_shm_free(odp_shm_lookup("odp_queues"));
-	if (ret < 0) {
-		ODP_ERR("shm free failed for odp_queues");
-		rc = -1;
+	if (odp_shm_free(queue_glb->queue_gbl_shm)) {
+		ODP_ERR("shm free failed");
+		ret = -1;
 	}
 
-	return rc;
+	return ret;
 }
 
 static int queue_capability(odp_queue_capability_t *capa)
@@ -245,7 +265,7 @@ static odp_queue_t queue_create(const char *name,
 	}
 
 	if (param->nonblocking == ODP_BLOCKING) {
-		if (param->size > MAX_QUEUE_SIZE)
+		if (param->size > queue_glb->config.max_queue_size)
 			return ODP_QUEUE_INVALID;
 	} else if (param->nonblocking == ODP_NONBLOCKING_LF) {
 		/* Only plain type lock-free queues supported */
@@ -629,7 +649,7 @@ static int queue_init(queue_entry_t *queue, const char *name,
 	/* Round up if not already a power of two */
 	queue_size = ROUNDUP_POWER2_U32(queue_size);
 
-	if (queue_size > MAX_QUEUE_SIZE) {
+	if (queue_size > queue_glb->config.max_queue_size) {
 		ODP_ERR("Too large queue size %u\n", queue_size);
 		return -1;
 	}
