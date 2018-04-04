@@ -26,6 +26,7 @@
 #include <odp_ring_internal.h>
 #include <odp_timer_internal.h>
 #include <odp_queue_internal.h>
+#include <odp_buffer_inlines.h>
 
 /* Number of priority levels  */
 #define NUM_PRIO 8
@@ -50,38 +51,14 @@ ODP_STATIC_ASSERT((ODP_SCHED_PRIO_NORMAL > 0) &&
 /* Size of poll weight table */
 #define WEIGHT_TBL_SIZE ((QUEUES_PER_PRIO - 1) * PREFER_RATIO)
 
-/* Packet input poll cmd queues */
-#define PKTIO_CMD_QUEUES  4
-
-/* Mask for wrapping command queues */
-#define PKTIO_CMD_QUEUE_MASK (PKTIO_CMD_QUEUES - 1)
-
-/* Maximum number of packet input queues per command */
-#define MAX_PKTIN 16
-
 /* Maximum number of packet IO interfaces */
 #define NUM_PKTIO ODP_CONFIG_PKTIO_ENTRIES
 
-/* Maximum number of pktio poll commands */
-#define NUM_PKTIO_CMD (MAX_PKTIN * NUM_PKTIO)
+/* Maximum pktin index. Needs to fit into 8 bits. */
+#define MAX_PKTIN_INDEX 255
 
 /* Not a valid index */
 #define NULL_INDEX ((uint32_t)-1)
-
-/* Not a valid poll command */
-#define PKTIO_CMD_INVALID NULL_INDEX
-
-/* Pktio command is free */
-#define PKTIO_CMD_FREE    PKTIO_CMD_INVALID
-
-/* Packet IO poll queue ring size. In worst case, all pktios have all pktins
- * enabled and one poll command is created per pktin queue. The ring size must
- * be larger than or equal to NUM_PKTIO_CMD / PKTIO_CMD_QUEUES, so that it can
- * hold all poll commands in the worst case. */
-#define PKTIO_RING_SIZE (NUM_PKTIO_CMD / PKTIO_CMD_QUEUES)
-
-/* Mask for wrapping around pktio poll command index */
-#define PKTIO_RING_MASK (PKTIO_RING_SIZE - 1)
 
 /* Priority queue ring size. In worst case, all event queues are scheduled
  * queues and have the same priority. The ring size must be larger than or
@@ -90,7 +67,7 @@ ODP_STATIC_ASSERT((ODP_SCHED_PRIO_NORMAL > 0) &&
 #define PRIO_QUEUE_RING_SIZE  (ODP_CONFIG_QUEUES / QUEUES_PER_PRIO)
 
 /* Mask for wrapping around priority queue index */
-#define PRIO_QUEUE_MASK  (PRIO_QUEUE_RING_SIZE - 1)
+#define RING_MASK  (PRIO_QUEUE_RING_SIZE - 1)
 
 /* Priority queue empty, not a valid queue index. */
 #define PRIO_QUEUE_EMPTY NULL_INDEX
@@ -102,15 +79,6 @@ ODP_STATIC_ASSERT(CHECK_IS_POWER2(ODP_CONFIG_QUEUES),
 /* Ring size must be power of two, so that MAX_QUEUE_IDX_MASK can be used. */
 ODP_STATIC_ASSERT(CHECK_IS_POWER2(PRIO_QUEUE_RING_SIZE),
 		  "Ring_size_is_not_power_of_two");
-
-/* Ring size must be power of two, so that PKTIO_RING_MASK can be used. */
-ODP_STATIC_ASSERT(CHECK_IS_POWER2(PKTIO_RING_SIZE),
-		  "pktio_ring_size_is_not_power_of_two");
-
-/* Number of commands queues must be power of two, so that PKTIO_CMD_QUEUE_MASK
- * can be used. */
-ODP_STATIC_ASSERT(CHECK_IS_POWER2(PKTIO_CMD_QUEUES),
-		  "pktio_cmd_queues_is_not_power_of_two");
 
 /* Mask of queues per priority */
 typedef uint8_t pri_mask_t;
@@ -146,14 +114,20 @@ ODP_STATIC_ASSERT(sizeof(lock_called_t) == sizeof(uint32_t),
 /* Scheduler local data */
 typedef struct {
 	int thr;
-	int num;
-	int index;
-	int pause;
+	uint16_t stash_num;
+	uint16_t stash_index;
+	uint16_t pause;
 	uint16_t round;
-	uint16_t pktin_polls;
-	uint32_t queue_index;
-	odp_queue_t queue;
-	odp_event_t ev_stash[MAX_DEQ];
+	uint32_t stash_qi;
+	odp_queue_t stash_queue;
+	odp_event_t stash_ev[MAX_DEQ];
+
+	uint32_t grp_epoch;
+	int num_grp;
+	uint8_t grp[NUM_SCHED_GRPS];
+	uint8_t weight_tbl[WEIGHT_TBL_SIZE];
+	uint8_t grp_weight[WEIGHT_TBL_SIZE];
+
 	struct {
 		/* Source queue index */
 		uint32_t src_queue;
@@ -164,12 +138,6 @@ typedef struct {
 		/** Storage for stashed enqueue operations */
 		ordered_stash_t stash[MAX_ORDERED_STASH];
 	} ordered;
-
-	uint32_t grp_epoch;
-	int num_grp;
-	uint8_t grp[NUM_SCHED_GRPS];
-	uint8_t weight_tbl[WEIGHT_TBL_SIZE];
-	uint8_t grp_weight[WEIGHT_TBL_SIZE];
 
 } sched_local_t;
 
@@ -182,24 +150,6 @@ typedef struct ODP_ALIGNED_CACHE {
 	uint32_t queue_index[PRIO_QUEUE_RING_SIZE];
 
 } prio_queue_t;
-
-/* Packet IO queue */
-typedef struct ODP_ALIGNED_CACHE {
-	/* Ring header */
-	ring_t ring;
-
-	/* Ring data: pktio poll command indexes */
-	uint32_t cmd_index[PKTIO_RING_SIZE];
-
-} pktio_queue_t;
-
-/* Packet IO poll command */
-typedef struct {
-	int pktio_index;
-	int num_pktin;
-	int pktin[MAX_PKTIN];
-	uint32_t cmd_index;
-} pktio_cmd_t;
 
 /* Order context of a queue */
 typedef struct ODP_ALIGNED_CACHE {
@@ -220,16 +170,6 @@ typedef struct {
 
 	prio_queue_t   prio_q[NUM_SCHED_GRPS][NUM_PRIO][QUEUES_PER_PRIO];
 
-	odp_spinlock_t poll_cmd_lock;
-	/* Number of commands in a command queue */
-	uint16_t       num_pktio_cmd[PKTIO_CMD_QUEUES];
-
-	/* Packet IO command queues */
-	pktio_queue_t  pktio_q[PKTIO_CMD_QUEUES];
-
-	/* Packet IO poll commands */
-	pktio_cmd_t    pktio_cmd[NUM_PKTIO_CMD];
-
 	odp_shm_t      shm;
 	uint32_t       pri_count[NUM_PRIO][QUEUES_PER_PRIO];
 
@@ -244,21 +184,33 @@ typedef struct {
 	} sched_grp[NUM_SCHED_GRPS];
 
 	struct {
-		int         grp;
-		int         prio;
-		int         queue_per_prio;
-		int         sync;
-		uint32_t    order_lock_count;
+		uint8_t grp;
+		uint8_t prio;
+		uint8_t queue_per_prio;
+		uint8_t sync;
+		uint8_t order_lock_count;
+		uint8_t poll_pktin;
+		uint8_t pktio_index;
+		uint8_t pktin_index;
 	} queue[ODP_CONFIG_QUEUES];
 
 	struct {
-		/* Number of active commands for a pktio interface */
-		int num_cmd;
+		int num_pktin;
 	} pktio[NUM_PKTIO];
+	odp_spinlock_t pktio_lock;
 
 	order_context_t order[ODP_CONFIG_QUEUES];
 
 } sched_global_t;
+
+/* Check that queue[] variables are large enough */
+ODP_STATIC_ASSERT(NUM_SCHED_GRPS  <= 256, "Group_does_not_fit_8_bits");
+ODP_STATIC_ASSERT(NUM_PRIO        <= 256, "Prio_does_not_fit_8_bits");
+ODP_STATIC_ASSERT(QUEUES_PER_PRIO <= 256,
+		  "Queues_per_prio_does_not_fit_8_bits");
+ODP_STATIC_ASSERT(CONFIG_QUEUE_MAX_ORD_LOCKS <= 256,
+		  "Ordered_lock_count_does_not_fit_8_bits");
+ODP_STATIC_ASSERT(NUM_PKTIO        <= 256, "Pktio_index_does_not_fit_8_bits");
 
 /* Global scheduler context */
 static sched_global_t *sched;
@@ -277,9 +229,9 @@ static void sched_local_init(void)
 
 	memset(&sched_local, 0, sizeof(sched_local_t));
 
-	sched_local.thr       = odp_thread_id();
-	sched_local.queue     = ODP_QUEUE_INVALID;
-	sched_local.queue_index = PRIO_QUEUE_EMPTY;
+	sched_local.thr         = odp_thread_id();
+	sched_local.stash_queue = ODP_QUEUE_INVALID;
+	sched_local.stash_qi    = PRIO_QUEUE_EMPTY;
 	sched_local.ordered.src_queue = NULL_INDEX;
 
 	id = sched_local.thr & (QUEUES_PER_PRIO - 1);
@@ -337,16 +289,9 @@ static int schedule_init_global(void)
 		}
 	}
 
-	odp_spinlock_init(&sched->poll_cmd_lock);
-	for (i = 0; i < PKTIO_CMD_QUEUES; i++) {
-		ring_init(&sched->pktio_q[i].ring);
-
-		for (j = 0; j < PKTIO_RING_SIZE; j++)
-			sched->pktio_q[i].cmd_index[j] = PKTIO_CMD_INVALID;
-	}
-
-	for (i = 0; i < NUM_PKTIO_CMD; i++)
-		sched->pktio_cmd[i].cmd_index = PKTIO_CMD_FREE;
+	odp_spinlock_init(&sched->pktio_lock);
+	for (i = 0; i < NUM_PKTIO; i++)
+		sched->pktio[i].num_pktin = 0;
 
 	odp_spinlock_init(&sched->grp_lock);
 	odp_atomic_init_u32(&sched->grp_epoch, 0);
@@ -384,14 +329,14 @@ static int schedule_term_global(void)
 				ring_t *ring = &sched->prio_q[grp][i][j].ring;
 				uint32_t qi;
 
-				while ((qi = ring_deq(ring, PRIO_QUEUE_MASK)) !=
+				while ((qi = ring_deq(ring, RING_MASK)) !=
 				       RING_EMPTY) {
 					odp_event_t events[1];
 					int num;
 
 					num = sched_cb_queue_deq_multi(qi,
 								       events,
-								       1);
+								       1, 1);
 
 					if (num < 0)
 						queue_destroy_finalize(qi);
@@ -420,7 +365,7 @@ static int schedule_init_local(void)
 
 static int schedule_term_local(void)
 {
-	if (sched_local.num) {
+	if (sched_local.stash_num) {
 		ODP_ERR("Locally pre-scheduled events exist.\n");
 		return -1;
 	}
@@ -519,6 +464,9 @@ static int schedule_init_queue(uint32_t queue_index,
 	sched->queue[queue_index].queue_per_prio = queue_per_prio(queue_index);
 	sched->queue[queue_index].sync = sched_param->sync;
 	sched->queue[queue_index].order_lock_count = sched_param->lock_count;
+	sched->queue[queue_index].poll_pktin  = 0;
+	sched->queue[queue_index].pktio_index = 0;
+	sched->queue[queue_index].pktin_index = 0;
 
 	odp_atomic_init_u64(&sched->order[queue_index].ctx, 0);
 	odp_atomic_init_u64(&sched->order[queue_index].next_ctx, 0);
@@ -554,101 +502,52 @@ static void schedule_destroy_queue(uint32_t queue_index)
 		ODP_ERR("queue reorder incomplete\n");
 }
 
-static int poll_cmd_queue_idx(int pktio_index, int pktin_idx)
+static int schedule_sched_queue(uint32_t queue_index)
 {
-	return PKTIO_CMD_QUEUE_MASK & (pktio_index ^ pktin_idx);
-}
+	int grp            = sched->queue[queue_index].grp;
+	int prio           = sched->queue[queue_index].prio;
+	int queue_per_prio = sched->queue[queue_index].queue_per_prio;
+	ring_t *ring       = &sched->prio_q[grp][prio][queue_per_prio].ring;
 
-static inline pktio_cmd_t *alloc_pktio_cmd(void)
-{
-	int i;
-	pktio_cmd_t *cmd = NULL;
-
-	odp_spinlock_lock(&sched->poll_cmd_lock);
-
-	/* Find next free command */
-	for (i = 0; i < NUM_PKTIO_CMD; i++) {
-		if (sched->pktio_cmd[i].cmd_index == PKTIO_CMD_FREE) {
-			cmd = &sched->pktio_cmd[i];
-			cmd->cmd_index = i;
-			break;
-		}
-	}
-
-	odp_spinlock_unlock(&sched->poll_cmd_lock);
-
-	return cmd;
-}
-
-static inline void free_pktio_cmd(pktio_cmd_t *cmd)
-{
-	odp_spinlock_lock(&sched->poll_cmd_lock);
-
-	cmd->cmd_index = PKTIO_CMD_FREE;
-
-	odp_spinlock_unlock(&sched->poll_cmd_lock);
+	ring_enq(ring, RING_MASK, queue_index);
+	return 0;
 }
 
 static void schedule_pktio_start(int pktio_index, int num_pktin,
-				 int pktin_idx[], odp_queue_t odpq[] ODP_UNUSED)
+				 int pktin_idx[], odp_queue_t queue[])
 {
-	int i, idx;
-	pktio_cmd_t *cmd;
+	int i;
+	uint32_t qi;
 
-	if (num_pktin > MAX_PKTIN)
-		ODP_ABORT("Too many input queues for scheduler\n");
+	sched->pktio[pktio_index].num_pktin = num_pktin;
 
-	sched->pktio[pktio_index].num_cmd = num_pktin;
-
-	/* Create a pktio poll command per queue */
 	for (i = 0; i < num_pktin; i++) {
+		qi = queue_to_index(queue[i]);
+		sched->queue[qi].poll_pktin  = 1;
+		sched->queue[qi].pktio_index = pktio_index;
+		sched->queue[qi].pktin_index = pktin_idx[i];
 
-		cmd = alloc_pktio_cmd();
+		ODP_ASSERT(pktin_idx[i] <= MAX_PKTIN_INDEX);
 
-		if (cmd == NULL)
-			ODP_ABORT("Scheduler out of pktio commands\n");
-
-		idx = poll_cmd_queue_idx(pktio_index, pktin_idx[i]);
-
-		odp_spinlock_lock(&sched->poll_cmd_lock);
-		sched->num_pktio_cmd[idx]++;
-		odp_spinlock_unlock(&sched->poll_cmd_lock);
-
-		cmd->pktio_index = pktio_index;
-		cmd->num_pktin   = 1;
-		cmd->pktin[0]    = pktin_idx[i];
-		ring_enq(&sched->pktio_q[idx].ring, PKTIO_RING_MASK,
-			 cmd->cmd_index);
+		/* Start polling */
+		sched_cb_queue_set_status(qi, QUEUE_STATUS_SCHED);
+		schedule_sched_queue(qi);
 	}
-}
-
-static int schedule_pktio_stop(int pktio_index, int first_pktin)
-{
-	int num;
-	int idx = poll_cmd_queue_idx(pktio_index, first_pktin);
-
-	odp_spinlock_lock(&sched->poll_cmd_lock);
-	sched->num_pktio_cmd[idx]--;
-	sched->pktio[pktio_index].num_cmd--;
-	num = sched->pktio[pktio_index].num_cmd;
-	odp_spinlock_unlock(&sched->poll_cmd_lock);
-
-	return num;
 }
 
 static void schedule_release_atomic(void)
 {
-	uint32_t qi = sched_local.queue_index;
+	uint32_t qi = sched_local.stash_qi;
 
-	if (qi != PRIO_QUEUE_EMPTY && sched_local.num  == 0) {
+	if (qi != PRIO_QUEUE_EMPTY && sched_local.stash_num  == 0) {
 		int grp = sched->queue[qi].grp;
 		int prio = sched->queue[qi].prio;
 		int queue_per_prio = sched->queue[qi].queue_per_prio;
 		ring_t *ring = &sched->prio_q[grp][prio][queue_per_prio].ring;
 
 		/* Release current atomic queue */
-		ring_enq(ring, PRIO_QUEUE_MASK, qi);
-		sched_local.queue_index = PRIO_QUEUE_EMPTY;
+		ring_enq(ring, RING_MASK, qi);
+		sched_local.stash_qi = PRIO_QUEUE_EMPTY;
 	}
 }
 
@@ -683,13 +582,23 @@ static inline void ordered_stash_release(void)
 	for (i = 0; i < sched_local.ordered.stash_num; i++) {
 		queue_entry_t *queue_entry;
 		odp_buffer_hdr_t **buf_hdr;
-		int num;
+		int num, num_enq;
 
 		queue_entry = sched_local.ordered.stash[i].queue_entry;
 		buf_hdr = sched_local.ordered.stash[i].buf_hdr;
 		num = sched_local.ordered.stash[i].num;
 
-		queue_fn->enq_multi(qentry_to_int(queue_entry), buf_hdr, num);
+		num_enq = queue_fn->enq_multi(qentry_to_int(queue_entry),
+					      buf_hdr, num);
+
+		/* Drop packets that were not enqueued */
+		if (odp_unlikely(num_enq < num)) {
+			if (odp_unlikely(num_enq < 0))
+				num_enq = 0;
+
+			ODP_DBG("Dropped %i packets\n", num - num_enq);
+			buffer_free_multi(&buf_hdr[num_enq], num - num_enq);
+		}
 	}
 	sched_local.ordered.stash_num = 0;
 }
@@ -726,7 +635,7 @@ static void schedule_release_ordered(void)
 
 	queue_index = sched_local.ordered.src_queue;
 
-	if (odp_unlikely((queue_index == NULL_INDEX) || sched_local.num))
+	if (odp_unlikely((queue_index == NULL_INDEX) || sched_local.stash_num))
 		return;
 
 	release_ordered();
@@ -740,14 +649,14 @@ static inline void schedule_release_context(void)
 		schedule_release_atomic();
 }
 
-static inline int copy_events(odp_event_t out_ev[], unsigned int max)
+static inline int copy_from_stash(odp_event_t out_ev[], unsigned int max)
 {
 	int i = 0;
 
-	while (sched_local.num && max) {
-		out_ev[i] = sched_local.ev_stash[sched_local.index];
-		sched_local.index++;
-		sched_local.num--;
+	while (sched_local.stash_num && max) {
+		out_ev[i] = sched_local.stash_ev[sched_local.stash_index];
+		sched_local.stash_index++;
+		sched_local.stash_num--;
 		max--;
 		i++;
 	}
@@ -797,6 +706,67 @@ static int schedule_ord_enq_multi(queue_t q_int, void *buf_hdr[],
 	return 1;
 }
 
+static inline int queue_is_pktin(uint32_t queue_index)
+{
+	return sched->queue[queue_index].poll_pktin;
+}
+
+static inline int poll_pktin(uint32_t qi, int stash)
+{
+	odp_buffer_hdr_t *b_hdr[MAX_DEQ];
+	int pktio_index, pktin_index, num, num_pktin, i;
+	int ret;
+	queue_t qint;
+
+	pktio_index = sched->queue[qi].pktio_index;
+	pktin_index = sched->queue[qi].pktin_index;
+
+	num = sched_cb_pktin_poll(pktio_index, pktin_index, b_hdr, MAX_DEQ);
+
+	if (num == 0)
+		return 0;
+
+	/* Pktio stopped or closed. Call stop_finalize when we have stopped
+	 * polling all pktin queues of the pktio. */
+	if (odp_unlikely(num < 0)) {
+		odp_spinlock_lock(&sched->pktio_lock);
+		sched->pktio[pktio_index].num_pktin--;
+		num_pktin = sched->pktio[pktio_index].num_pktin;
+		odp_spinlock_unlock(&sched->pktio_lock);
+
+		sched_cb_queue_set_status(qi, QUEUE_STATUS_NOTSCHED);
+
+		if (num_pktin == 0)
+			sched_cb_pktio_stop_finalize(pktio_index);
+
+		return num;
+	}
+
+	if (stash) {
+		for (i = 0; i < num; i++)
+			sched_local.stash_ev[i] = event_from_buf_hdr(b_hdr[i]);
+
+		return num;
+	}
+
+	qint = queue_index_to_qint(qi);
+
+	ret = queue_fn->enq_multi(qint, b_hdr, num);
+
+	/* Drop packets that were not enqueued */
+	if (odp_unlikely(ret < num)) {
+		int num_enq = ret;
+
+		if (odp_unlikely(ret < 0))
+			num_enq = 0;
+
+		ODP_DBG("Dropped %i packets\n", num - num_enq);
+		buffer_free_multi(&b_hdr[num_enq], num - num_enq);
+	}
+
+	return ret;
+}
+
 static inline int do_schedule_grp(odp_queue_t *out_queue, odp_event_t out_ev[],
 				  unsigned int max_num, int grp, int first)
 {
@@ -820,6 +790,7 @@ static inline int do_schedule_grp(odp_queue_t *out_queue, odp_event_t out_ev[],
 			int ordered;
 			odp_queue_t handle;
 			ring_t *ring;
+			int pktin;
 
 			if (id >= QUEUES_PER_PRIO)
 				id = 0;
@@ -834,7 +805,7 @@ static inline int do_schedule_grp(odp_queue_t *out_queue, odp_event_t out_ev[],
 
 			/* Get queue index from the priority queue */
 			ring = &sched->prio_q[grp][prio][id].ring;
-			qi   = ring_deq(ring, PRIO_QUEUE_MASK);
+			qi   = ring_deq(ring, RING_MASK);
 
 			/* Priority queue empty */
 			if (qi == RING_EMPTY) {
@@ -857,8 +828,10 @@ static inline int do_schedule_grp(odp_queue_t *out_queue, odp_event_t out_ev[],
 			if (ordered && max_num < MAX_DEQ)
 				max_deq = max_num;
 
-			num = sched_cb_queue_deq_multi(qi, sched_local.ev_stash,
-						       max_deq);
+			pktin = queue_is_pktin(qi);
+
+			num = sched_cb_queue_deq_multi(qi, sched_local.stash_ev,
+						       max_deq, !pktin);
 
 			if (num < 0) {
 				/* Destroyed queue. Continue scheduling the same
@@ -868,16 +841,33 @@ static inline int do_schedule_grp(odp_queue_t *out_queue, odp_event_t out_ev[],
 			}
 
 			if (num == 0) {
-				/* Remove empty queue from scheduling. Continue
-				 * scheduling the same priority queue. */
-				continue;
-			}
+				/* Poll packet input. Continue scheduling queue
+				 * connected to a packet input. Move to the next
+				 * priority to avoid starvation of other
+				 * priorities. Stop scheduling queue when pktio
+				 * has been stopped. */
+				if (pktin) {
+					int stash = !ordered;
+					int num_pkt = poll_pktin(qi, stash);
 
-			handle            = queue_from_index(qi);
-			sched_local.num   = num;
-			sched_local.index = 0;
-			sched_local.queue = handle;
-			ret = copy_events(out_ev, max_num);
+					if (odp_unlikely(num_pkt < 0))
+						continue;
+
+					if (num_pkt == 0 || !stash) {
+						ring_enq(ring, RING_MASK, qi);
+						break;
+					}
+
+					/* Process packets from an atomic or
+					 * parallel queue right away. */
+					num = num_pkt;
+				} else {
+					/* Remove empty queue from scheduling.
+					 * Continue scheduling the same priority
+					 * queue. */
+					continue;
+				}
+			}
 
 			if (ordered) {
 				uint64_t ctx;
@@ -890,15 +880,21 @@ static inline int do_schedule_grp(odp_queue_t *out_queue, odp_event_t out_ev[],
 				sched_local.ordered.src_queue = qi;
 
 				/* Continue scheduling ordered queues */
-				ring_enq(ring, PRIO_QUEUE_MASK, qi);
+				ring_enq(ring, RING_MASK, qi);
 
 			} else if (queue_is_atomic(qi)) {
 				/* Hold queue during atomic access */
-				sched_local.queue_index = qi;
+				sched_local.stash_qi = qi;
 			} else {
 				/* Continue scheduling the queue */
-				ring_enq(ring, PRIO_QUEUE_MASK, qi);
+				ring_enq(ring, RING_MASK, qi);
 			}
+
+			handle = queue_from_index(qi);
+			sched_local.stash_num   = num;
+			sched_local.stash_index = 0;
+			sched_local.stash_queue = handle;
+			ret = copy_from_stash(out_ev, max_num);
 
 			/* Output the source queue handle */
 			if (out_queue)
@@ -919,15 +915,15 @@ static inline int do_schedule(odp_queue_t *out_queue, odp_event_t out_ev[],
 {
 	int i, num_grp;
 	int ret;
-	int id, first, grp_id;
+	int first, grp_id;
 	uint16_t round;
 	uint32_t epoch;
 
-	if (sched_local.num) {
-		ret = copy_events(out_ev, max_num);
+	if (sched_local.stash_num) {
+		ret = copy_from_stash(out_ev, max_num);
 
 		if (out_queue)
-			*out_queue = sched_local.queue;
+			*out_queue = sched_local.stash_queue;
 
 		return ret;
 	}
@@ -972,66 +968,11 @@ static inline int do_schedule(odp_queue_t *out_queue, odp_event_t out_ev[],
 			grp_id = 0;
 	}
 
-	/*
-	 * Poll packet input when there are no events
-	 *   * Each thread starts the search for a poll command from its
-	 *     preferred command queue. If the queue is empty, it moves to other
-	 *     queues.
-	 *   * Most of the times, the search stops on the first command found to
-	 *     optimize multi-threaded performance. A small portion of polls
-	 *     have to do full iteration to avoid packet input starvation when
-	 *     there are less threads than command queues.
-	 */
-	id = sched_local.thr & PKTIO_CMD_QUEUE_MASK;
-
-	for (i = 0; i < PKTIO_CMD_QUEUES; i++, id = ((id + 1) &
-	     PKTIO_CMD_QUEUE_MASK)) {
-		ring_t *ring;
-		uint32_t cmd_index;
-		pktio_cmd_t *cmd;
-
-		if (odp_unlikely(sched->num_pktio_cmd[id] == 0))
-			continue;
-
-		ring      = &sched->pktio_q[id].ring;
-		cmd_index = ring_deq(ring, PKTIO_RING_MASK);
-
-		if (odp_unlikely(cmd_index == RING_EMPTY))
-			continue;
-
-		cmd = &sched->pktio_cmd[cmd_index];
-
-		/* Poll packet input */
-		if (odp_unlikely(sched_cb_pktin_poll(cmd->pktio_index,
-						     cmd->num_pktin,
-						     cmd->pktin))){
-			/* Pktio stopped or closed. Remove poll command and call
-			 * stop_finalize when all commands of the pktio has
-			 * been removed. */
-			if (schedule_pktio_stop(cmd->pktio_index,
-						cmd->pktin[0]) == 0)
-				sched_cb_pktio_stop_finalize(cmd->pktio_index);
-
-			free_pktio_cmd(cmd);
-		} else {
-			/* Continue scheduling the pktio */
-			ring_enq(ring, PKTIO_RING_MASK, cmd_index);
-
-			/* Do not iterate through all pktin poll command queues
-			 * every time. */
-			if (odp_likely(sched_local.pktin_polls & 0xf))
-				break;
-		}
-	}
-
-	sched_local.pktin_polls++;
 	return 0;
 }
 
-
-static int schedule_loop(odp_queue_t *out_queue, uint64_t wait,
-			 odp_event_t out_ev[],
-			 unsigned int max_num)
+static inline int schedule_loop(odp_queue_t *out_queue, uint64_t wait,
+				odp_event_t out_ev[], unsigned int max_num)
 {
 	odp_time_t next, wtime;
 	int first = 1;
@@ -1385,17 +1326,6 @@ static int schedule_thr_rem(odp_schedule_group_t group, int thr)
 /* This function is a no-op */
 static void schedule_prefetch(int num ODP_UNUSED)
 {
-}
-
-static int schedule_sched_queue(uint32_t queue_index)
-{
-	int grp            = sched->queue[queue_index].grp;
-	int prio           = sched->queue[queue_index].prio;
-	int queue_per_prio = sched->queue[queue_index].queue_per_prio;
-	ring_t *ring       = &sched->prio_q[grp][prio][queue_per_prio].ring;
-
-	ring_enq(ring, PRIO_QUEUE_MASK, queue_index);
-	return 0;
 }
 
 static int schedule_num_grps(void)

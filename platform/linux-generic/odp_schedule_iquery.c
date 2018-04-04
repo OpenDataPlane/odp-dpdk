@@ -291,7 +291,7 @@ static int schedule_term_global(void)
 		odp_event_t events[1];
 
 		if (sched->availables[i])
-			count = sched_cb_queue_deq_multi(i, events, 1);
+			count = sched_cb_queue_deq_multi(i, events, 1, 1);
 
 		if (count < 0)
 			sched_cb_queue_destroy_finalize(i);
@@ -674,9 +674,9 @@ static inline void pktio_poll_input(void)
 		cmd = &sched->pktio_poll.commands[index];
 
 		/* Poll packet input */
-		if (odp_unlikely(sched_cb_pktin_poll(cmd->pktio,
-						     cmd->count,
-						     cmd->pktin))) {
+		if (odp_unlikely(sched_cb_pktin_poll_old(cmd->pktio,
+							 cmd->count,
+							 cmd->pktin))) {
 			/* Pktio stopped or closed. Remove poll
 			 * command and call stop_finalize when all
 			 * commands of the pktio has been removed.
@@ -1136,13 +1136,22 @@ static inline void ordered_stash_release(void)
 	for (i = 0; i < thread_local.ordered.stash_num; i++) {
 		queue_entry_t *queue_entry;
 		odp_buffer_hdr_t **buf_hdr;
-		int num;
+		int num, num_enq;
 
 		queue_entry = thread_local.ordered.stash[i].queue_entry;
 		buf_hdr = thread_local.ordered.stash[i].buf_hdr;
 		num = thread_local.ordered.stash[i].num;
 
-		queue_fn->enq_multi(qentry_to_int(queue_entry), buf_hdr, num);
+		num_enq = queue_fn->enq_multi(qentry_to_int(queue_entry),
+					      buf_hdr, num);
+
+		if (odp_unlikely(num_enq < num)) {
+			if (odp_unlikely(num_enq < 0))
+				num_enq = 0;
+
+			ODP_DBG("Dropped %i packets\n", num - num_enq);
+			buffer_free_multi(&buf_hdr[num_enq], num - num_enq);
+		}
 	}
 	thread_local.ordered.stash_num = 0;
 }
@@ -1527,7 +1536,7 @@ static inline int consume_queue(int prio, unsigned int queue_index)
 		max = 1;
 
 	count = sched_cb_queue_deq_multi(
-		queue_index, cache->stash, max);
+		queue_index, cache->stash, max, 1);
 
 	if (count < 0) {
 		DO_SCHED_UNLOCK();

@@ -16,15 +16,15 @@ SUBDIRS = \
 	  include \
 	  $(PLATFORM_DIR) \
 	  helper \
+	  test \
+	  $(PLATFORM_TEST_DIR) \
 	  helper/test \
 	  doc \
-	  example . \
-	  test \
-	  $(PLATFORM_TEST_DIR)
+	  example
 
 @DX_RULES@
 
-EXTRA_DIST = bootstrap CHANGELOG config/README
+EXTRA_DIST = bootstrap CHANGELOG config/README config/odp-$(with_platform).conf
 
 distcheck-hook:
 	if test -n "$(DX_CLEANFILES)" ; \
