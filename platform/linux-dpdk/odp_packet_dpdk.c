@@ -33,7 +33,10 @@
 #include <odp_packet_io_internal.h>
 #include <odp_libconfig_internal.h>
 #include <odp_packet_dpdk.h>
+#include <odp/api/plat/packet_inlines.h>
 #include <net/if.h>
+
+#include <protocols/udp.h>
 
 /* DPDK poll mode drivers requiring minimum RX burst size DPDK_MIN_RX_BURST */
 #define IXGBE_DRV_NAME "net_ixgbe"
@@ -590,6 +593,7 @@ static void _odp_pktio_send_completion(pktio_entry_t *pktio_entry)
 #define IP4_CSUM_RESULT(m) (m->ol_flags & PKT_RX_IP_CKSUM_MASK)
 #define L4_CSUM_RESULT(m) (m->ol_flags & PKT_RX_L4_CKSUM_MASK)
 #define HAS_L4_PROTO(m, proto) ((m->packet_type & RTE_PTYPE_L4_MASK) == proto)
+#define UDP4_CSUM(_p) (((_odp_udphdr_t *)_odp_packet_l4_ptr(_p, NULL))->chksum)
 
 #define PKTIN_CSUM_BITS 0x1C
 
@@ -622,6 +626,13 @@ static inline int pkt_set_ol_rx(odp_pktin_config_opt_t *pktin_cfg,
 		if (packet_csum_result == PKT_RX_L4_CKSUM_GOOD) {
 			pkt_hdr->p.input_flags.l4_chksum_done = 1;
 		} else if (packet_csum_result != PKT_RX_L4_CKSUM_UNKNOWN) {
+			if (pkt_hdr->p.input_flags.ipv4 &&
+			    pkt_hdr->p.input_flags.udp &&
+			    !UDP4_CSUM(packet_handle(pkt_hdr))) {
+				pkt_hdr->p.input_flags.l4_chksum_done = 1;
+				return 0;
+			}
+
 			if (pktin_cfg->bit.drop_udp_err)
 				return -1;
 
