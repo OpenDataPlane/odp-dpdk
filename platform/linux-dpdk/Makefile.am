@@ -152,7 +152,7 @@ __LIB__libodp_linux_la_SOURCES = \
 			   ../linux-generic/odp_ipsec_events.c \
 			   ../linux-generic/odp_ipsec_sad.c \
 			   ../linux-generic/odp_name_table.c \
-			   odp_libconfig.c \
+			   ../linux-generic/odp_libconfig.c \
 			   odp_packet.c \
 			   odp_packet_dpdk.c \
 			   odp_packet_flags.c \
