@@ -257,6 +257,7 @@ uint32_t odp_packet_buf_len(odp_packet_t pkt)
 void *odp_packet_tail(odp_packet_t pkt)
 {
 	struct rte_mbuf *mb = &(packet_hdr(pkt)->buf_hdr.mb);
+
 	mb = rte_pktmbuf_lastseg(mb);
 	return (void *)(rte_pktmbuf_mtod(mb, char *) + mb->data_len);
 }
@@ -264,6 +265,7 @@ void *odp_packet_tail(odp_packet_t pkt)
 void *odp_packet_push_head(odp_packet_t pkt, uint32_t len)
 {
 	struct rte_mbuf *mb = &(packet_hdr(pkt)->buf_hdr.mb);
+
 	return (void *)rte_pktmbuf_prepend(mb, len);
 }
 
@@ -348,6 +350,7 @@ int odp_packet_extend_head(odp_packet_t *pkt, uint32_t len, void **data_ptr,
 void *odp_packet_pull_head(odp_packet_t pkt, uint32_t len)
 {
 	struct rte_mbuf *mb = &(packet_hdr(pkt)->buf_hdr.mb);
+
 	return (void *)rte_pktmbuf_adj(mb, len);
 }
 

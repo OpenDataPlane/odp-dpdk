@@ -4,7 +4,6 @@
  * SPDX-License-Identifier:     BSD-3-Clause
  */
 
-
 /**
  * @file
  *
@@ -41,7 +40,6 @@ extern "C" {
 /* Extra error checks */
 /* #define POOL_ERROR_CHECK */
 
-
 #ifdef POOL_USE_TICKETLOCK
 #include <odp/api/ticketlock.h>
 #else
@@ -52,7 +50,7 @@ typedef struct ODP_ALIGNED_CACHE {
 #ifdef POOL_USE_TICKETLOCK
 	odp_ticketlock_t ODP_ALIGNED_CACHE lock;
 #else
-	odp_spinlock_t ODP_ALIGNED_CACHE lock ;
+	odp_spinlock_t ODP_ALIGNED_CACHE lock;
 #endif
 	char			name[ODP_POOL_NAME_LEN];
 	odp_pool_param_t	params;

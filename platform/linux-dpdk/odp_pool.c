@@ -171,8 +171,8 @@ odp_dpdk_mbuf_pool_ctor(struct rte_mempool *mp,
 
 	if (mp->private_data_size < sizeof(struct mbuf_pool_ctor_arg)) {
 		ODP_ERR("(%s) private_data_size %d < %d",
-			mp->name, (int) mp->private_data_size,
-			(int) sizeof(struct mbuf_pool_ctor_arg));
+			mp->name, (int)mp->private_data_size,
+			(int)sizeof(struct mbuf_pool_ctor_arg));
 		return;
 	}
 	mbp_priv = rte_mempool_get_priv(mp);
@@ -340,7 +340,7 @@ odp_pool_t odp_pool_create(const char *name, odp_pool_param_t *params)
 		pool_name[ODP_POOL_NAME_LEN - 1] = 0;
 	}
 
-	/* Find an unused buffer pool slot and initalize it as requested */
+	/* Find an unused buffer pool slot and initialize it as requested */
 	for (i = 0; i < ODP_CONFIG_POOLS; i++) {
 		uint32_t num;
 		struct rte_mempool *mp;
@@ -439,7 +439,6 @@ odp_pool_t odp_pool_create(const char *name, odp_pool_param_t *params)
 				params->type);
 			UNLOCK(&pool->lock);
 			return ODP_POOL_INVALID;
-			break;
 		}
 
 		mb_ctor_arg.seg_buf_offset =
@@ -463,7 +462,7 @@ odp_pool_t odp_pool_create(const char *name, odp_pool_param_t *params)
 				break;
 			}
 		if (odp_unlikely(cache_size > RTE_MEMPOOL_CACHE_MAX_SIZE ||
-				 (uint32_t) cache_size * 1.5 > num)) {
+				 (uint32_t)cache_size * 1.5 > num)) {
 			ODP_ERR("cache_size calc failure: %d\n", cache_size);
 			cache_size = 0;
 		}
@@ -521,7 +520,6 @@ odp_pool_t odp_pool_create(const char *name, odp_pool_param_t *params)
 	return pool_hdl;
 }
 
-
 odp_pool_t odp_pool_lookup(const char *name)
 {
 	struct rte_mempool *mp = NULL;
@@ -545,7 +543,6 @@ odp_pool_t odp_pool_lookup(const char *name)
 	}
 	return pool_hdl;
 }
-
 
 static inline int buffer_alloc_multi(pool_t *pool, odp_buffer_hdr_t *buf_hdr[],
 				     int num)
@@ -672,4 +669,3 @@ uint64_t odp_pool_to_u64(odp_pool_t hdl)
 {
 	return _odp_pri(hdl);
 }
-
