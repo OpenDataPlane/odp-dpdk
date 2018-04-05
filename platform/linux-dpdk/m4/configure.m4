@@ -1,4 +1,4 @@
-IMPLEMENTATION_NAME="odp-dpdk"
+ODP_IMPLEMENTATION_NAME="odp-dpdk"
 
 ODP_VISIBILITY
 ODP_ATOMIC
@@ -10,6 +10,7 @@ AM_CONDITIONAL([PKTIO_DPDK], [false])
 ODP_PTHREAD
 ODP_TIMER
 ODP_OPENSSL
+ODP_LIBCONFIG([linux-dpdk])
 ODP_SCHEDULER
 
 ##########################################################################

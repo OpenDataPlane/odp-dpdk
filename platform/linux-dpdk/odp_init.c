@@ -14,6 +14,7 @@
 #include <unistd.h>
 #include <odp_internal.h>
 #include <odp_schedule_if.h>
+#include <odp_libconfig_internal.h>
 #include <odp_shm_internal.h>
 #include <string.h>
 #include <stdio.h>
@@ -25,12 +26,12 @@
 #include <sys/types.h>
 #include <pwd.h>
 
-#define MEMPOOL_OPS(hdl) extern void mp_hdlr_init_##hdl(void);
-MEMPOOL_OPS(ops_mp_mc)
-MEMPOOL_OPS(ops_sp_sc)
-MEMPOOL_OPS(ops_mp_sc)
-MEMPOOL_OPS(ops_sp_mc)
-MEMPOOL_OPS(ops_stack)
+#define MEMPOOL_OPS(hdl) extern void mp_hdlr_init_##hdl(void)
+MEMPOOL_OPS(ops_mp_mc);
+MEMPOOL_OPS(ops_sp_sc);
+MEMPOOL_OPS(ops_mp_sc);
+MEMPOOL_OPS(ops_sp_mc);
+MEMPOOL_OPS(ops_stack);
 
 #ifndef RTE_BUILD_SHARED_LIB
 /*
@@ -39,7 +40,8 @@ MEMPOOL_OPS(ops_stack)
  * constructors of mempool handlers are linked as well. Otherwise the linker
  * would omit them. It's not an issue with dynamic linking. */
 void refer_constructors(void);
-void refer_constructors(void) {
+void refer_constructors(void)
+{
 	mp_hdlr_init_ops_mp_mc();
 	mp_hdlr_init_ops_sp_sc();
 	mp_hdlr_init_ops_mp_sc();
@@ -64,7 +66,6 @@ static void print_dpdk_env_help(void)
 	ODP_ERR("Note: -c argument substitutes automatically from odp coremask\n");
 	rte_eal_init(dpdk_argc, dpdk_argv);
 }
-
 
 static int odp_init_dpdk(const char *cmdline)
 {
@@ -115,9 +116,8 @@ static int odp_init_dpdk(const char *cmdline)
 	cmdlen = sprintf(full_cmdline, "odpdpdk -c %s %s", mask_str, cmdline);
 
 	for (i = 0, dpdk_argc = 1; i < cmdlen; ++i) {
-		if (isspace(full_cmdline[i])) {
+		if (isspace(full_cmdline[i]))
 			++dpdk_argc;
-		}
 	}
 	dpdk_argv = malloc(dpdk_argc * sizeof(char *));
 
@@ -158,10 +158,11 @@ int odp_init_global(odp_instance_t *instance,
 		    const odp_init_t *params,
 		    const odp_platform_init_t *platform_params)
 {
+	enum init_stage stage = NO_INIT;
+
 	memset(&odp_global_data, 0, sizeof(struct odp_global_data_s));
 	odp_global_data.main_pid = getpid();
 
-	enum init_stage stage = NO_INIT;
 	odp_global_data.log_fn = odp_override_log;
 	odp_global_data.abort_fn = odp_override_abort;
 
@@ -171,6 +172,12 @@ int odp_init_global(odp_instance_t *instance,
 		if (params->abort_fn != NULL)
 			odp_global_data.abort_fn = params->abort_fn;
 	}
+
+	if (_odp_libconfig_init_global()) {
+		ODP_ERR("ODP runtime config init failed.\n");
+		goto init_failed;
+	}
+	stage = LIBCONFIG_INIT;
 
 	if (odp_cpumask_init_global(params)) {
 		ODP_ERR("ODP cpumask init failed.\n");
@@ -421,6 +428,13 @@ int _odp_term_global(enum init_stage stage)
 	case CPUMASK_INIT:
 		if (odp_cpumask_term_global()) {
 			ODP_ERR("ODP cpumask term failed.\n");
+			rc = -1;
+		}
+		/* Fall through */
+
+	case LIBCONFIG_INIT:
+		if (_odp_libconfig_term_global()) {
+			ODP_ERR("ODP runtime config term failed.\n");
 			rc = -1;
 		}
 		/* Fall through */

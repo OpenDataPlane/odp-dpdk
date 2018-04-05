@@ -47,7 +47,4 @@
 #include <rte_jhash.h>
 #include <rte_hash_crc.h>
 
-#define RTE_TEST_RX_DESC_DEFAULT 128
-#define RTE_TEST_TX_DESC_DEFAULT 512
-
 #endif

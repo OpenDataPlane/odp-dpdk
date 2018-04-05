@@ -23,6 +23,7 @@ addons:
                         - gcc
                         - clang-3.8
                         - automake autoconf libtool libssl-dev graphviz mscgen
+                        - libconfig-dev
                         - codespell
                         - libpcap-dev
                         - libnuma-dev
@@ -55,6 +56,9 @@ env:
         - CONF="--disable-abi-compat"
         - CONF="--enable-deprecated"
         - CONF="--disable-static-applications"
+        - CONF="--disable-host-optimization"
+        - CONF="--disable-host-optimization --disable-abi-compat"
+        - DPDK_SHARED="y" CONF="--disable-static-applications"
 
 compiler:
         - gcc
@@ -216,10 +220,11 @@ install:
             echo CONFIG_RTE_TOOLCHAIN_${DPDKCC^^}=y >> .config
             popd
             make build O=${TARGET} EXTRA_CFLAGS="-fPIC $DPDK_CFLAGS" CROSS="$DPDK_CROSS" CC="$CC" HOSTCC=gcc -j $(nproc)
+            make install O=${TARGET} DESTDIR=${TARGET}
             rm -r ./doc ./${TARGET}/app ./${TARGET}/build
             popd
            fi
-           EXTRA_CONF="$EXTRA_CONF --with-dpdk-path=`pwd`/dpdk/${TARGET}"
+           EXTRA_CONF="$EXTRA_CONF --with-dpdk-path=`pwd`/dpdk/${TARGET}/usr/local"
           fi
 
 script:
@@ -233,7 +238,7 @@ script:
         # Run all tests only for default configuration
         - if [ -z "$CROSS_ARCH" ] ; then
             if [ -n "$CONF" ] ; then
-              sudo LD_LIBRARY_PATH="$HOME/cunit-install/$CROSS_ARCH/lib:$LD_LIBRARY_PATH" ODP_SHM_DIR=/dev/shm/odp make check ;
+              sudo ODP_CONFIG_FILE="`pwd`/config/odp-linux-dpdk.conf" LD_LIBRARY_PATH="$HOME/cunit-install/$CROSS_ARCH/lib:$LD_LIBRARY_PATH" ODP_SHM_DIR=/dev/shm/odp make check ;
             else
               sudo ODP_SCHEDULER=basic LD_LIBRARY_PATH="$HOME/cunit-install/$CROSS_ARCH/lib:$LD_LIBRARY_PATH" ODP_SHM_DIR=/dev/shm/odp make check ;
               sudo ODP_SCHEDULER=sp LD_LIBRARY_PATH="$HOME/cunit-install/$CROSS_ARCH/lib:$LD_LIBRARY_PATH" ODP_SHM_DIR=/dev/shm/odp make check ;
@@ -263,6 +268,8 @@ script:
               sudo ODP_PLATFORM_PARAMS="-n 2" ./odp_hello_inst_static;
             fi
           fi
+        - popd
+        - ccache -s
 
 jobs:
         include:
@@ -270,17 +277,19 @@ jobs:
                   env: TEST=coverage
                   compiler: gcc
                   script:
-                          - sudo -H pip install coverage
+                          - sudo pip install coverage
                           - ./bootstrap
                           - ./configure --prefix=$HOME/odp-install
                             --enable-user-guides
-                            --with-dpdk-path=`pwd`/dpdk/${TARGET}
+                            --with-dpdk-path=`pwd`/dpdk/${TARGET}/usr/local
                               CFLAGS="-O0 -coverage"
                               CXXFLAGS="-O0 -coverage" LDFLAGS="--coverage"
                             --enable-debug=full
                             --enable-helper-linux
                           - CCACHE_DISABLE=1 make -j $(nproc)
-                          - sudo CCACHE_DISABLE=1 LD_LIBRARY_PATH="/usr/local/lib:$LD_LIBRARY_PATH" PATH=${PATH//:\.\/node_modules\/\.bin/} make check
+                          - sudo CCACHE_DISABLE=1 ODP_SCHEDULER=basic LD_LIBRARY_PATH="$HOME/cunit-install/$CROSS_ARCH/lib:$LD_LIBRARY_PATH" make check
+                          - sudo CCACHE_DISABLE=1 ODP_SCHEDULER=sp LD_LIBRARY_PATH="$HOME/cunit-install/$CROSS_ARCH/lib:$LD_LIBRARY_PATH" make check
+                          - sudo CCACHE_DISABLE=1 ODP_SCHEDULER=iquery LD_LIBRARY_PATH="$HOME/cunit-install/$CROSS_ARCH/lib:$LD_LIBRARY_PATH" make check
                           - find . -type f -iname '*.[ch]' -not -path ".git/*" -execdir gcov {} \; ; bash <(curl -s https://codecov.io/bash) -X coveragepy
                 - stage: "build only"
                   env: TEST=doxygen
@@ -300,8 +309,7 @@ jobs:
                         - export PATH=$HOME/doxygen-install/bin:$PATH
                   script:
                           - ./bootstrap
-                          - ./configure
-                            --with-dpdk-path=`pwd`/dpdk/${TARGET}
+                          - ./configure $EXTRA_CONF
                           # doxygen does not trap on warnings, check for them here.
                           - make doxygen-doc 2>&1 |tee doxygen.log
                           - |
@@ -316,16 +324,14 @@ jobs:
                   compiler: gcc
                   script:
                           - ./bootstrap
-                          - ./configure --enable-helper-linux
-                            --with-dpdk-path=`pwd`/dpdk/${TARGET}
+                          - ./configure --enable-helper-linux $EXTRA_CONF
                           - make -j $(nproc)
                 - stage: "build only"
                   env: CONF=""
                   compiler: clang-3.8
                   script:
                           - ./bootstrap
-                          - ./configure --enable-helper-linux
-                            --with-dpdk-path=`pwd`/dpdk/${TARGET}
+                          - ./configure --enable-helper-linux $EXTRA_CONF
                           - make -j $(nproc)
                 - stage: "build only"
                   env: CROSS_ARCH="i386"
