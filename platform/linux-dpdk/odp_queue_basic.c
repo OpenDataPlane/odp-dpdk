@@ -8,7 +8,6 @@
 
 #include <odp/api/queue.h>
 #include <odp_queue_internal.h>
-#include <odp_queue_lf.h>
 #include <odp_queue_if.h>
 #include <odp/api/std_types.h>
 #include <odp/api/align.h>
@@ -40,15 +39,7 @@
 static int queue_init(queue_entry_t *queue, const char *name,
 		      const odp_queue_param_t *param);
 
-typedef struct queue_global_t {
-	queue_entry_t   queue[ODP_CONFIG_QUEUES];
-	uint32_t        queue_lf_num;
-	uint32_t        queue_lf_size;
-	queue_lf_func_t queue_lf_func;
-
-} queue_global_t;
-
-static queue_global_t *queue_glb;
+queue_global_t *queue_glb;
 
 static inline queue_entry_t *get_qentry(uint32_t queue_id)
 {
@@ -62,14 +53,37 @@ static inline queue_entry_t *handle_to_qentry(odp_queue_t handle)
 	return get_qentry(queue_id);
 }
 
+static int queue_capa(odp_queue_capability_t *capa, int sched)
+{
+	memset(capa, 0, sizeof(odp_queue_capability_t));
+
+	/* Reserve some queues for internal use */
+	capa->max_queues        = ODP_CONFIG_QUEUES - NUM_INTERNAL_QUEUES;
+	capa->plain.max_num     = capa->max_queues;
+	capa->plain.max_size    = CONFIG_QUEUE_SIZE - 1;
+	capa->plain.lockfree.max_num  = queue_glb->queue_lf_num;
+	capa->plain.lockfree.max_size = queue_glb->queue_lf_size;
+	capa->sched.max_num     = capa->max_queues;
+	capa->sched.max_size    = CONFIG_QUEUE_SIZE - 1;
+
+	if (sched) {
+		capa->max_ordered_locks = sched_fn->max_ordered_locks();
+		capa->max_sched_groups  = sched_fn->num_grps();
+		capa->sched_prios       = odp_schedule_num_prio();
+	}
+
+	return 0;
+}
+
 static int queue_init_global(void)
 {
 	uint32_t i;
 	odp_shm_t shm;
 	uint32_t lf_size = 0;
 	queue_lf_func_t *lf_func;
+	odp_queue_capability_t capa;
 
-	ODP_DBG("Queue init ... ");
+	ODP_DBG("Starts...\n");
 
 	shm = odp_shm_reserve("odp_queues",
 			      sizeof(queue_global_t),
@@ -95,13 +109,14 @@ static int queue_init_global(void)
 	queue_glb->queue_lf_num  = queue_lf_init_global(&lf_size, lf_func);
 	queue_glb->queue_lf_size = lf_size;
 
-	ODP_DBG("done\n");
-	ODP_DBG("Queue init global\n");
-	ODP_DBG("  struct queue_entry_s size %zu\n",
-		sizeof(struct queue_entry_s));
-	ODP_DBG("  queue_entry_t size        %zu\n",
-		sizeof(queue_entry_t));
-	ODP_DBG("\n");
+	queue_capa(&capa, 0);
+
+	ODP_DBG("... done.\n");
+	ODP_DBG("  queue_entry_t size %u\n", sizeof(queue_entry_t));
+	ODP_DBG("  max num queues     %u\n", capa.max_queues);
+	ODP_DBG("  max queue size     %u\n", capa.plain.max_size);
+	ODP_DBG("  max num lockfree   %u\n", capa.plain.lockfree.max_num);
+	ODP_DBG("  max lockfree size  %u\n\n", capa.plain.lockfree.max_size);
 
 	return 0;
 }
@@ -146,21 +161,7 @@ static int queue_term_global(void)
 
 static int queue_capability(odp_queue_capability_t *capa)
 {
-	memset(capa, 0, sizeof(odp_queue_capability_t));
-
-	/* Reserve some queues for internal use */
-	capa->max_queues        = ODP_CONFIG_QUEUES - NUM_INTERNAL_QUEUES;
-	capa->max_ordered_locks = sched_fn->max_ordered_locks();
-	capa->max_sched_groups  = sched_fn->num_grps();
-	capa->sched_prios       = odp_schedule_num_prio();
-	capa->plain.max_num     = capa->max_queues;
-	capa->plain.max_size    = CONFIG_QUEUE_SIZE - 1;
-	capa->plain.lockfree.max_num  = queue_glb->queue_lf_num;
-	capa->plain.lockfree.max_size = queue_glb->queue_lf_size;
-	capa->sched.max_num     = capa->max_queues;
-	capa->sched.max_size    = CONFIG_QUEUE_SIZE - 1;
-
-	return 0;
+	return queue_capa(capa, 1);
 }
 
 static odp_queue_type_t queue_type(odp_queue_t handle)
@@ -291,6 +292,17 @@ void sched_cb_queue_destroy_finalize(uint32_t queue_index)
 		queue->s.status = QUEUE_STATUS_FREE;
 		sched_fn->destroy_queue(queue_index);
 	}
+	UNLOCK(queue);
+}
+
+void sched_cb_queue_set_status(uint32_t queue_index, int status)
+{
+	queue_entry_t *queue = get_qentry(queue_index);
+
+	LOCK(queue);
+
+	queue->s.status = status;
+
 	UNLOCK(queue);
 }
 
@@ -465,7 +477,7 @@ static int queue_enq(odp_queue_t handle, odp_event_t ev)
 }
 
 static inline int deq_multi(queue_entry_t *queue, odp_buffer_hdr_t *buf_hdr[],
-			    int num)
+			    int num, int update_status)
 {
 	int status_sync = sched_fn->status_sync;
 	int num_deq;
@@ -483,7 +495,7 @@ static inline int deq_multi(queue_entry_t *queue, odp_buffer_hdr_t *buf_hdr[],
 
 	if (num_deq == 0) {
 		/* Already empty queue */
-		if (queue->s.status == QUEUE_STATUS_SCHED) {
+		if (update_status && queue->s.status == QUEUE_STATUS_SCHED) {
 			queue->s.status = QUEUE_STATUS_NOTSCHED;
 
 			if (status_sync)
@@ -508,7 +520,7 @@ static int queue_int_deq_multi(queue_t q_int, odp_buffer_hdr_t *buf_hdr[],
 {
 	queue_entry_t *queue = qentry_from_int(q_int);
 
-	return deq_multi(queue, buf_hdr, num);
+	return deq_multi(queue, buf_hdr, num, 0);
 }
 
 static odp_buffer_hdr_t *queue_int_deq(queue_t q_int)
@@ -517,7 +529,7 @@ static odp_buffer_hdr_t *queue_int_deq(queue_t q_int)
 	odp_buffer_hdr_t *buf_hdr = NULL;
 	int ret;
 
-	ret = deq_multi(queue, &buf_hdr, 1);
+	ret = deq_multi(queue, &buf_hdr, 1, 0);
 
 	if (ret == 1)
 		return buf_hdr;
@@ -627,11 +639,12 @@ static int queue_info(odp_queue_t handle, odp_queue_info_t *info)
 	return 0;
 }
 
-int sched_cb_queue_deq_multi(uint32_t queue_index, odp_event_t ev[], int num)
+int sched_cb_queue_deq_multi(uint32_t queue_index, odp_event_t ev[], int num,
+			     int update_status)
 {
 	queue_entry_t *qe = get_qentry(queue_index);
 
-	return deq_multi(qe, (odp_buffer_hdr_t **)ev, num);
+	return deq_multi(qe, (odp_buffer_hdr_t **)ev, num, update_status);
 }
 
 int sched_cb_queue_empty(uint32_t queue_index)

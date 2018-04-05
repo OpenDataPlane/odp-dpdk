@@ -4,7 +4,6 @@
  * SPDX-License-Identifier:     BSD-3-Clause
  */
 
-
 /**
  * @file
  *
@@ -31,6 +30,8 @@ extern "C" {
 #include <string.h>
 
 /* for DPDK */
+#include <rte_config.h>
+#include <rte_mbuf.h>
 #include <rte_mempool.h>
 
 /* Use ticketlock instead of spinlock */
@@ -38,7 +39,6 @@ extern "C" {
 
 /* Extra error checks */
 /* #define POOL_ERROR_CHECK */
-
 
 #ifdef POOL_USE_TICKETLOCK
 #include <odp/api/ticketlock.h>
@@ -50,7 +50,7 @@ typedef struct ODP_ALIGNED_CACHE {
 #ifdef POOL_USE_TICKETLOCK
 	odp_ticketlock_t ODP_ALIGNED_CACHE lock;
 #else
-	odp_spinlock_t ODP_ALIGNED_CACHE lock ;
+	odp_spinlock_t ODP_ALIGNED_CACHE lock;
 #endif
 	char			name[ODP_POOL_NAME_LEN];
 	odp_pool_param_t	params;
@@ -74,6 +74,14 @@ static inline pool_t *pool_entry(uint32_t pool_idx)
 static inline pool_t *pool_entry_from_hdl(odp_pool_t pool_hdl)
 {
 	return &pool_tbl->pool[_odp_typeval(pool_hdl)];
+}
+
+static inline void buffer_free_multi(odp_buffer_hdr_t *buf_hdr[], int num)
+{
+	int i;
+
+	for (i = 0; i < num; i++)
+		rte_ctrlmbuf_free((struct rte_mbuf *)(uintptr_t)buf_hdr[i]);
 }
 
 #ifdef __cplusplus

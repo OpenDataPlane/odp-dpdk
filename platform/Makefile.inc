@@ -3,6 +3,9 @@ include $(top_srcdir)/Makefile.inc
 pkgconfigdir = $(libdir)/pkgconfig
 pkgconfig_DATA = libodp-linux.pc
 
+configdir = $(sysconfdir)/odp
+config_DATA = $(top_srcdir)/config/odp-$(with_platform).conf
+
 VPATH = $(srcdir) $(builddir)
 lib_LTLIBRARIES = $(LIB)/libodp-linux.la
 
@@ -14,7 +17,7 @@ else
 AM_LDFLAGS += -export-symbols-regex '^(_deprecated_)?_?odp_'
 endif
 
-AM_CFLAGS = "-DGIT_HASH=$(VERSION)"
+AM_CFLAGS = "-DODP_VERSION_BUILD=$(VERSION)"
 AM_CFLAGS += $(VISIBILITY_CFLAGS)
 
 AM_CFLAGS += @PTHREAD_CFLAGS@

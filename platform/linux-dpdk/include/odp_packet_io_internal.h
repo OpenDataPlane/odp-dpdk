@@ -4,7 +4,6 @@
  * SPDX-License-Identifier:     BSD-3-Clause
  */
 
-
 /**
  * @file
  *
@@ -50,6 +49,13 @@ typedef struct {
 	uint8_t idx;			/**< index of "loop" device */
 } pkt_loop_t;
 
+/** DPDK runtime configuration options */
+typedef struct {
+	int num_rx_desc;
+	int num_tx_desc;
+	int rx_drop_en;
+} dpdk_opt_t;
+
 /** Packet socket using dpdk mmaped rings for both Rx and Tx */
 typedef struct {
 	uint16_t port_id;		  /**< DPDK port identifier */
@@ -63,6 +69,7 @@ typedef struct {
 	odp_ticketlock_t tx_lock[PKTIO_MAX_QUEUES];  /**< TX queue locks */
 	uint8_t vdev_sysc_promisc;	/**< promiscuous mode defined with
 					    system call */
+	dpdk_opt_t opt;
 } pkt_dpdk_t;
 
 struct pktio_entry {

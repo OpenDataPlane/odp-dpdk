@@ -373,9 +373,9 @@ int odp_time_init_global(void)
 		global.use_hw = 1;
 		global.hw_start = rte_get_timer_cycles();
 		if (global.hw_start == 0)
-				return -1;
-			else
-				return 0;
+			return -1;
+		else
+			return 0;
 	}
 
 	global.handler.time_cur     = time_cur;

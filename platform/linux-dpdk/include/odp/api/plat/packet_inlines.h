@@ -193,7 +193,8 @@ static inline uint32_t _odp_packet_flow_hash(odp_packet_t pkt)
 	return _odp_pkt_get(pkt, uint32_t, rss);
 }
 
-static inline void _odp_packet_flow_hash_set(odp_packet_t pkt, uint32_t flow_hash)
+static inline void _odp_packet_flow_hash_set(odp_packet_t pkt,
+					     uint32_t flow_hash)
 {
 	uint32_t *rss = &_odp_pkt_get(pkt, uint32_t, rss);
 	uint64_t *ol_flags = &_odp_pkt_get(pkt, uint64_t, ol_flags);
@@ -243,7 +244,8 @@ static inline odp_packet_seg_t _odp_packet_next_seg(odp_packet_t pkt,
 		return (odp_packet_seg_t)(uintptr_t)mb->next;
 }
 
-static inline void _odp_packet_prefetch(odp_packet_t pkt, uint32_t offset, uint32_t len)
+static inline void _odp_packet_prefetch(odp_packet_t pkt, uint32_t offset,
+					uint32_t len)
 {
 	const char *addr = (char *)_odp_packet_data(pkt) + offset;
 	size_t ofs;

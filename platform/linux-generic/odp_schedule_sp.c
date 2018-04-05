@@ -524,8 +524,9 @@ static int schedule_multi(odp_queue_t *from, uint64_t wait,
 		cmd = sched_cmd();
 
 		if (cmd && cmd->s.type == CMD_PKTIO) {
-			if (sched_cb_pktin_poll(cmd->s.index, cmd->s.num_pktin,
-						cmd->s.pktin_idx)) {
+			if (sched_cb_pktin_poll_old(cmd->s.index,
+						    cmd->s.num_pktin,
+						    cmd->s.pktin_idx)) {
 				/* Pktio stopped or closed. */
 				sched_cb_pktio_stop_finalize(cmd->s.index);
 			} else {
@@ -559,7 +560,7 @@ static int schedule_multi(odp_queue_t *from, uint64_t wait,
 		}
 
 		qi  = cmd->s.index;
-		num = sched_cb_queue_deq_multi(qi, events, 1);
+		num = sched_cb_queue_deq_multi(qi, events, 1, 1);
 
 		if (num > 0) {
 			sched_local.cmd = cmd;

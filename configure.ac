@@ -5,7 +5,7 @@ AC_PREREQ([2.5])
 m4_define([odpapi_generation_version], [1])
 m4_define([odpapi_major_version], [18])
 m4_define([odpapi_minor_version], [0])
-m4_define([odpapi_point_version], [0])
+m4_define([odpapi_point_version], [1])
 m4_define([odpapi_version],
     [odpapi_generation_version.odpapi_major_version.odpapi_minor_version.odpapi_point_version])
 AC_INIT([OpenDataPlane],[odpapi_version],[lng-odp@lists.linaro.org])
@@ -28,18 +28,17 @@ AM_SILENT_RULES([yes])
 ##########################################################################
 # Set platform library version
 #
-# Follow version rules described here:
-# https://www.gnu.org/software/libtool/manual/html_node/Updating-version-info.html
-# Version is Current:Revision:Age
-# 1. if there are only source changes, use C:R+1:A
-# 2. if interfaces were added use C+1:0:A+1
-# 3. if interfaces were removed, then use C+1:0:0
+# ODP does not promise backwards compatibility between releases, so we
+# just enforce major:minor:release as version number.
 ##########################################################################
 
-ODP_LIBSO_VERSION=118:0:0
+m4_define([odpso_version],
+    [odpapi_generation_version[]odpapi_major_version:odpapi_minor_version:odpapi_point_version])
+
+ODP_LIBSO_VERSION=odpso_version
 AC_SUBST(ODP_LIBSO_VERSION)
 
-ODPHELPER_LIBSO_VERSION=114:0:2
+ODPHELPER_LIBSO_VERSION=odpso_version
 AC_SUBST(ODPHELPER_LIBSO_VERSION)
 
 # Checks for programs.
@@ -232,6 +231,18 @@ AC_ARG_WITH([platform],
     ])
 
 AC_SUBST([with_platform])
+##########################################################################
+# Run platform specific checks and settings
+##########################################################################
+AS_IF([test "${with_platform}" = "linux-generic"],
+      [m4_include([./platform/linux-generic/m4/configure.m4])],
+      [test "${with_platform}" = "linux-dpdk"],
+      [m4_include([./platform/linux-dpdk/m4/configure.m4])],
+      [AC_MSG_ERROR([UNSUPPORTED PLATFORM: ${with_platform}])])
+
+AC_DEFINE_UNQUOTED([ODP_IMPLEMENTATION_NAME], ["$ODP_IMPLEMENTATION_NAME"],
+		   [Define to the name of the implementation])
+
 
 ##########################################################################
 # Build examples/tests dynamically
@@ -256,18 +267,6 @@ m4_include([./doc/m4/configure.m4])
 m4_include([./example/m4/configure.m4])
 m4_include([./helper/m4/configure.m4])
 m4_include([./test/m4/configure.m4])
-
-##########################################################################
-# Run platform specific checks and settings
-##########################################################################
-AS_IF([test "${with_platform}" = "linux-generic"],
-      [m4_include([./platform/linux-generic/m4/configure.m4])],
-      [test "${with_platform}" = "linux-dpdk"],
-      [m4_include([./platform/linux-dpdk/m4/configure.m4])],
-      [AC_MSG_ERROR([UNSUPPORTED PLATFORM: ${with_platform}])])
-
-AC_DEFINE_UNQUOTED([IMPLEMENTATION_NAME], ["$IMPLEMENTATION_NAME"],
-		   [Define to the name of the implementation])
 
 ##########################################################################
 # Set the install directory for test binaries/scripts
@@ -387,7 +386,7 @@ AC_MSG_RESULT([
 	ODP Library version:	${ODP_LIBSO_VERSION}
 	Helper Library version:	${ODPHELPER_LIBSO_VERSION}
 
-	implementation_name:	${IMPLEMENTATION_NAME}
+	implementation_name:	${ODP_IMPLEMENTATION_NAME}
 	host:			${host}
 	ARCH_DIR		${ARCH_DIR}
 	ARCH_ABI		${ARCH_ABI}

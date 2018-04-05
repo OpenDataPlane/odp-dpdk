@@ -89,10 +89,10 @@ path with the --with-dpdk-path option.
 
 The following step depends on whether ODP shared libraries are to be built.
 SHARED libraries (requires building DPDK with -fPIC, see above):
-    ./configure --with-dpdk-path=<dpdk-dir>/x86_64-native-linuxapp-gcc
+    ./configure --with-dpdk-path=<dpdk-dir>/install
 
 STATIC libraries (better performance):
-    ./configure --with-dpdk-path=<dpdk-dir>/x86_64-native-linuxapp-gcc --disable-shared
+    ./configure --with-dpdk-path=<dpdk-dir>/install --disable-shared
 
     make
 
