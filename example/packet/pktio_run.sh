@@ -11,8 +11,11 @@ PCAP_OUT="pcapout.pcap"
 PCAP_IN_SIZE=`stat -c %s ${PCAP_IN}`
 echo "using PCAP in=${PCAP_IN}:out=${PCAP_OUT} size %${PCAP_IN_SIZE}"
 
+export ODP_PLATFORM_PARAMS="--no-pci \
+--vdev net_pcap0,rx_pcap=${PCAP_IN},tx_pcap=${PCAP_OUT}"
+
 # burst mode
-./odp_pktio${EXEEXT} -ipcap:in=${PCAP_IN}:out=${PCAP_OUT} -t 5 -m 0
+./odp_pktio${EXEEXT} -i 0 -t 5 -m 0
 STATUS=$?
 PCAP_OUT_SIZE=`stat -c %s ${PCAP_OUT}`
 rm -f ${PCAP_OUT}
@@ -24,7 +27,7 @@ fi
 echo "Pass -m 0: status ${STATUS}, in:${PCAP_IN_SIZE} out:${PCAP_OUT_SIZE}"
 
 # queue mode
-./odp_pktio${EXEEXT} -ipcap:in=${PCAP_IN}:out=${PCAP_OUT} -t 5 -m 1
+./odp_pktio${EXEEXT} -i 0 -t 5 -m 1
 STATUS=$?
 PCAP_OUT_SIZE=`stat -c %s ${PCAP_OUT}`
 rm -f ${PCAP_OUT}
@@ -36,7 +39,7 @@ fi
 echo "Pass -m 1: status ${STATUS}, in:${PCAP_IN_SIZE} out:${PCAP_OUT_SIZE}"
 
 # sched/queue mode
-./odp_pktio${EXEEXT} -ipcap:in=${PCAP_IN}:out=${PCAP_OUT} -t 5 -m 2
+./odp_pktio${EXEEXT} -i 0 -t 5 -m 2
 STATUS=$?
 PCAP_OUT_SIZE=`stat -c %s ${PCAP_OUT}`
 rm -f ${PCAP_OUT}
@@ -48,7 +51,7 @@ fi
 echo "Pass -m 2: status ${STATUS}, in:${PCAP_IN_SIZE} out:${PCAP_OUT_SIZE}"
 
 # cpu number option test 1
-./odp_pktio${EXEEXT} -ipcap:in=${PCAP_IN}:out=${PCAP_OUT} -t 5 -m 0 -c 1
+./odp_pktio${EXEEXT} -i 0 -t 5 -m 0 -c 1
 STATUS=$?
 PCAP_OUT_SIZE=`stat -c %s ${PCAP_OUT}`
 rm -f ${PCAP_OUT}

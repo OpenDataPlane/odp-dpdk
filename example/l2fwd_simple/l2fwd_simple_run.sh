@@ -9,7 +9,11 @@
 PCAP_IN=`find . ${TEST_DIR} $(dirname $0) -name udp64.pcap -print -quit`
 echo "using PCAP_IN = ${PCAP_IN}"
 
-./odp_l2fwd_simple${EXEEXT} pcap:in=${PCAP_IN} pcap:out=pcapout.pcap \
+export ODP_PLATFORM_PARAMS="--no-pci \
+--vdev net_pcap0,rx_pcap=${PCAP_IN},tx_pcap=pcapout.pcap \
+--vdev net_pcap1,rx_pcap=${PCAP_IN},tx_pcap=pcapout.pcap"
+
+./odp_l2fwd_simple${EXEEXT} 0 1 \
 	02:00:00:00:00:01 02:00:00:00:00:02 &
 
 sleep 1

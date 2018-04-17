@@ -21,6 +21,13 @@ AS_CASE([$cur_driver],
     [rte_pmd_openssl], [AS_VAR_APPEND([DPDK_LIBS], [" -lcrypto"])])
 done
 AS_VAR_APPEND([DPDK_PMDS], [--no-whole-archive])
+have_pmd_pcap=no
+if [[ -f "$1"/librte_pmd_pcap.a ]]; then
+    have_pmd_pcap=yes
+fi
+AC_CONFIG_COMMANDS_PRE([dnl
+AM_CONDITIONAL([HAVE_PMD_PCAP], [test x$have_pmd_pcap = xyes])
+])
 ])
 
 # _ODP_DPDK_SET_LIBS

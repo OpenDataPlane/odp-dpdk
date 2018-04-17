@@ -55,14 +55,22 @@ run_sched_pktio()
 	fi
 
 	# 1 worker
-	odp_sched_pktio${EXEEXT} -i $IF1,$IF2 -c 1 -s &
+	export ODP_PLATFORM_PARAMS="-m 512 --file-prefix="sched" \
+--proc-type auto --no-pci --vdev net_pcap1,iface=$IF1 \
+--vdev net_pcap2,iface=$IF2"
+
+	odp_sched_pktio${EXEEXT} -i 0,1 -c 1 -s &
 
 	TEST_PID=$!
 
 	sleep 1
 
 	# Run generator with one worker
-	(odp_generator${EXEEXT} --interval $FLOOD_MODE -I $IF0 \
+	export ODP_PLATFORM_PARAMS="-m 512 --file-prefix="gen" \
+--proc-type auto --no-pci \
+--vdev net_pcap0,iface=$IF0"
+
+	(odp_generator${EXEEXT} --interval $FLOOD_MODE -I 0 \
 			--srcip 192.168.0.1 --dstip 192.168.0.2 \
 			-m u -w 1 2>&1 > /dev/null) \
 			2>&1 > /dev/null &

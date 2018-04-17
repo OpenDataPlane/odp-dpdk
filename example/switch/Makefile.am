@@ -5,8 +5,8 @@ bin_PROGRAMS = odp_switch
 odp_switch_SOURCES = odp_switch.c
 
 if test_example
-if HAVE_PCAP
+if HAVE_PMD_PCAP
 TESTS = switch_run.sh
 endif
 endif
-EXTRA_DIST = switch_run.sh udp64.pcap
+EXTRA_DIST = switch_run.sh udp64.pcap empty.pcap

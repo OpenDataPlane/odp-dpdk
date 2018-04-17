@@ -18,7 +18,7 @@ TESTSCRIPTS = odp_l2fwd_run.sh \
 	      odp_sched_pktio_run.sh \
 	      odp_scheduling_run.sh
 
-if HAVE_PCAP
+if HAVE_PMD_PCAP
 TESTSCRIPTS += odp_pktio_ordered_run.sh
 endif
 
