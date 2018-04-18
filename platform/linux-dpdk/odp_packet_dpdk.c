@@ -382,8 +382,9 @@ static int setup_pkt_dpdk(odp_pktio_t pktio ODP_UNUSED,
 	return 0;
 }
 
-static int close_pkt_dpdk(pktio_entry_t *pktio_entry ODP_UNUSED)
+static int close_pkt_dpdk(pktio_entry_t *pktio_entry)
 {
+	rte_eth_dev_stop(pktio_entry->s.pkt_dpdk.port_id);
 	return 0;
 }
 
@@ -437,6 +438,10 @@ static int start_pkt_dpdk(pktio_entry_t *pktio_entry)
 	struct rte_eth_rxconf *rxconf = NULL;
 	struct rte_eth_txconf *txconf = NULL;
 	uint32_t txq_flags = 0;
+
+	if (pktio_entry->s.state == PKTIO_STATE_STOPPED ||
+	    pktio_entry->s.state == PKTIO_STATE_STOP_PENDING)
+		rte_eth_dev_stop(pkt_dpdk->port_id);
 
 	/* DPDK doesn't support nb_rx_q/nb_tx_q being 0 */
 	if (!pktio_entry->s.num_in_queue)
@@ -545,7 +550,14 @@ static int start_pkt_dpdk(pktio_entry_t *pktio_entry)
 
 static int stop_pkt_dpdk(pktio_entry_t *pktio_entry)
 {
-	rte_eth_dev_stop(pktio_entry->s.pkt_dpdk.port_id);
+	unsigned int i;
+	uint16_t port_id = pktio_entry->s.pkt_dpdk.port_id;
+
+	for (i = 0; i < pktio_entry->s.num_in_queue; i++)
+		rte_eth_dev_rx_queue_stop(port_id, i);
+	for (i = 0; i < pktio_entry->s.num_out_queue; i++)
+		rte_eth_dev_tx_queue_stop(port_id, i);
+
 	return 0;
 }
 
