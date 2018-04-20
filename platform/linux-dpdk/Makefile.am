@@ -181,7 +181,7 @@ __LIB__libodp_linux_la_SOURCES = \
 			   odp_thread.c \
 			   ../linux-generic/odp_thrmask.c \
 			   odp_time.c \
-			   ../linux-generic/odp_timer.c \
+			   odp_timer.c \
 			   ../linux-generic/odp_timer_wheel.c \
 			   ../linux-generic/odp_traffic_mngr.c \
 			   ../linux-generic/odp_version.c \

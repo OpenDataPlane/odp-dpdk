@@ -25,6 +25,7 @@
 #include <odp/api/sync.h>
 #include <odp/api/traffic_mngr.h>
 #include <odp_libconfig_internal.h>
+#include <odp_timer_internal.h>
 
 #define NUM_INTERNAL_QUEUES 64
 
@@ -609,6 +610,36 @@ static odp_event_t queue_deq(odp_queue_t handle)
 	queue_entry_t *queue = handle_to_qentry(handle);
 
 	return (odp_event_t)queue->s.dequeue(qentry_to_int(queue));
+}
+
+static int timer_queue_deq_multi(queue_t q_int, odp_buffer_hdr_t *buf_hdr[],
+				 int num)
+{
+	timer_run();
+
+	return queue_int_deq_multi(q_int, buf_hdr, num);
+}
+
+static odp_buffer_hdr_t *timer_queue_deq(queue_t q_int)
+{
+	timer_run();
+
+	return queue_int_deq(q_int);
+}
+
+/* Enable timer polling on dequeue call */
+void queue_enable_timer_poll(odp_queue_t queue);
+
+void queue_enable_timer_poll(odp_queue_t handle)
+{
+	queue_entry_t *queue = handle_to_qentry(handle);
+
+	LOCK(queue);
+
+	queue->s.dequeue       = timer_queue_deq;
+	queue->s.dequeue_multi = timer_queue_deq_multi;
+
+	UNLOCK(queue);
 }
 
 static int queue_init(queue_entry_t *queue, const char *name,
