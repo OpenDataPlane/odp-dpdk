@@ -75,6 +75,8 @@ static const char *cipher_alg_name(odp_cipher_alg_t cipher)
 		return "ODP_CIPHER_ALG_3DES_CBC";
 	case ODP_CIPHER_ALG_AES_CBC:
 		return "ODP_CIPHER_ALG_AES_CBC";
+	case ODP_CIPHER_ALG_AES_CTR:
+		return "ODP_CIPHER_ALG_AES_CTR";
 	case ODP_CIPHER_ALG_AES_GCM:
 		return "ODP_CIPHER_ALG_AES_GCM";
 	case ODP_CIPHER_ALG_AES_CCM:
@@ -196,7 +198,7 @@ static int alg_packet_op(odp_packet_t pkt,
 	op_params.hash_result_offset = plaintext_len;
 
 	rc = odp_crypto_op(&pkt, &out_pkt, &op_params, 1);
-	if (rc < 0) {
+	if (rc <= 0) {
 		CU_FAIL("Failed odp_crypto_packet_op()");
 		return rc;
 	}
@@ -257,7 +259,7 @@ static int alg_packet_op_enq(odp_packet_t pkt,
 	op_params.hash_result_offset = plaintext_len;
 
 	rc = odp_crypto_op_enq(&pkt, &pkt, &op_params, 1);
-	if (rc < 0) {
+	if (rc <= 0) {
 		CU_FAIL("Failed odp_crypto_op_enq()");
 		return rc;
 	}
