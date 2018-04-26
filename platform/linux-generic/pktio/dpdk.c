@@ -27,6 +27,7 @@
 #include <odp_libconfig_internal.h>
 
 #include <protocols/eth.h>
+#include <protocols/udp.h>
 
 #include <rte_config.h>
 #include <rte_malloc.h>
@@ -47,6 +48,13 @@
 #include <rte_tcp.h>
 #include <rte_string_fns.h>
 #include <rte_version.h>
+
+/* NUMA is not supported on all platforms */
+#ifdef RTE_EAL_NUMA_AWARE_HUGEPAGES
+#include <numa.h>
+#else
+#define numa_num_configured_nodes() 1
+#endif
 
 #if RTE_VERSION < RTE_VERSION_NUM(17, 5, 0, 0)
 #define rte_log_set_global_level rte_set_log_level
@@ -94,22 +102,16 @@ void refer_constructors(void)
 }
 #endif
 
-static int lookup_opt(const char *path, const char *drv_name, int *val)
+static int lookup_opt(const char *opt_name, const char *drv_name, int *val)
 {
 	const char *base = "pktio_dpdk";
-	char opt_path[256];
-	int ret = 0;
+	int ret;
 
-	/* Default option */
-	snprintf(opt_path, sizeof(opt_path), "%s.%s", base, path);
-	ret += _odp_libconfig_lookup_int(opt_path, val);
-
-	/* Driver specific option overrides default option */
-	snprintf(opt_path, sizeof(opt_path), "%s.%s.%s", base, drv_name, path);
-	ret += _odp_libconfig_lookup_int(opt_path, val);
-
+	ret = _odp_libconfig_lookup_ext_int(base, drv_name, opt_name, val);
 	if (ret == 0)
-		ODP_ERR("Unable to find DPDK configuration option: %s\n", path);
+		ODP_ERR("Unable to find DPDK configuration option: %s\n",
+			opt_name);
+
 	return ret;
 }
 
@@ -419,6 +421,7 @@ MEMPOOL_REGISTER_OPS(ops_stack);
 #define IP4_CSUM_RESULT(m) (m->ol_flags & PKT_RX_IP_CKSUM_MASK)
 #define L4_CSUM_RESULT(m) (m->ol_flags & PKT_RX_L4_CKSUM_MASK)
 #define HAS_L4_PROTO(m, proto) ((m->packet_type & RTE_PTYPE_L4_MASK) == proto)
+#define UDP4_CSUM(_p) (((_odp_udphdr_t *)_odp_packet_l4_ptr(_p, NULL))->chksum)
 
 #define PKTIN_CSUM_BITS 0x1C
 
@@ -451,6 +454,12 @@ static inline int pkt_set_ol_rx(odp_pktin_config_opt_t *pktin_cfg,
 		if (packet_csum_result == PKT_RX_L4_CKSUM_GOOD) {
 			pkt_hdr->p.input_flags.l4_chksum_done = 1;
 		} else if (packet_csum_result != PKT_RX_L4_CKSUM_UNKNOWN) {
+			if (pkt_hdr->p.input_flags.ipv4 &&
+			    pkt_hdr->p.input_flags.udp &&
+			    !UDP4_CSUM(packet_handle(pkt_hdr))) {
+				pkt_hdr->p.input_flags.l4_chksum_done = 1;
+				return 0;
+			}
 			if (pktin_cfg->bit.drop_udp_err)
 				return -1;
 
@@ -648,11 +657,7 @@ static inline void pkt_set_ol_tx(odp_pktout_config_opt_t *pktout_cfg,
 	if (!ipv4_chksum_pkt && !udp_chksum_pkt && !tcp_chksum_pkt)
 		return;
 
-	if (pkt_p->l4_offset == ODP_PACKET_OFFSET_INVALID)
-		return;
-
 	mbuf->l2_len = pkt_p->l3_offset - pkt_p->l2_offset;
-	mbuf->l3_len = pkt_p->l4_offset - pkt_p->l3_offset;
 
 	if (l3_proto_v4)
 		mbuf->ol_flags = PKT_TX_IPV4;
@@ -663,7 +668,13 @@ static inline void pkt_set_ol_tx(odp_pktout_config_opt_t *pktout_cfg,
 		mbuf->ol_flags |=  PKT_TX_IP_CKSUM;
 
 		((struct ipv4_hdr *)l3_hdr)->hdr_checksum = 0;
+		mbuf->l3_len = _ODP_IPV4HDR_IHL(*(uint8_t *)l3_hdr) * 4;
 	}
+
+	if (pkt_p->l4_offset == ODP_PACKET_OFFSET_INVALID)
+		return;
+
+	mbuf->l3_len = pkt_p->l4_offset - pkt_p->l3_offset;
 
 	l4_hdr = (void *)(mbuf_data + pkt_p->l4_offset);
 
@@ -1082,6 +1093,7 @@ static int dpdk_pktio_init(void)
 	int32_t masklen;
 	int mem_str_len;
 	int cmd_len;
+	int numa_nodes;
 	cpu_set_t original_cpuset;
 	struct rte_config *cfg;
 
@@ -1116,21 +1128,29 @@ static int dpdk_pktio_init(void)
 		return -1;
 	}
 
-	mem_str_len = snprintf(NULL, 0, "%d", DPDK_MEMORY_MB);
+	mem_str_len = snprintf(NULL, 0, "%d,", DPDK_MEMORY_MB);
+	numa_nodes = numa_num_configured_nodes();
+
+	char mem_str[mem_str_len * numa_nodes];
+
+	for (i = 0; i < numa_nodes; i++)
+		sprintf(&mem_str[i * mem_str_len], "%d,", DPDK_MEMORY_MB);
+	mem_str[mem_str_len * numa_nodes - 1] = '\0';
 
 	cmdline = getenv("ODP_PKTIO_DPDK_PARAMS");
 	if (cmdline == NULL)
 		cmdline = "";
 
 	/* masklen includes the terminating null as well */
-	cmd_len = strlen("odpdpdk -c -m ") + masklen + mem_str_len +
-			strlen(cmdline) + strlen("  ");
+	cmd_len = strlen("odpdpdk -c --socket-mem ") + masklen +
+			 strlen(mem_str) + strlen(cmdline) + strlen("  ");
 
 	char full_cmd[cmd_len];
 
 	/* first argument is facility log, simply bind it to odpdpdk for now.*/
-	cmd_len = snprintf(full_cmd, cmd_len, "odpdpdk -c %s -m %d %s",
-			   mask_str, DPDK_MEMORY_MB, cmdline);
+	cmd_len = snprintf(full_cmd, cmd_len,
+			   "odpdpdk -c %s --socket-mem %s %s", mask_str,
+			   mem_str, cmdline);
 
 	for (i = 0, dpdk_argc = 1; i < cmd_len; ++i) {
 		if (isspace(full_cmd[i]))

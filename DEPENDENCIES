@@ -21,8 +21,6 @@ Prerequisites for building the OpenDataPlane (ODP) API
 
    Libraries currently required to link: openssl, libatomic, libconfig
 
-   Required tools: xxd
-
 3.1 OpenSSL native compile
 
    For native compilation, simply load the necessary libraries using the appropriate
@@ -174,7 +172,7 @@ Prerequisites for building the OpenDataPlane (ODP) API
 
 3.4.1 Building DPDK and ODP with DPDK pktio support
 
-   DPDK packet I/O has been tested to work with DPDK v17.08.
+   DPDK packet I/O has been tested to work with DPDK v17.11.
 
    Follow steps in ./scripts/build-pktio-dpdk
 

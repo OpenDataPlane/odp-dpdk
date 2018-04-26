@@ -204,8 +204,16 @@ int ipsec_check(odp_bool_t ah,
 		if (!capa.auths.bit.sha256_hmac)
 			return ODP_TEST_INACTIVE;
 		break;
+	case ODP_AUTH_ALG_SHA384_HMAC:
+		if (!capa.auths.bit.sha384_hmac)
+			return ODP_TEST_INACTIVE;
+		break;
 	case ODP_AUTH_ALG_SHA512_HMAC:
 		if (!capa.auths.bit.sha512_hmac)
+			return ODP_TEST_INACTIVE;
+		break;
+	case ODP_AUTH_ALG_AES_XCBC_MAC:
+		if (!capa.auths.bit.aes_xcbc_mac)
 			return ODP_TEST_INACTIVE;
 		break;
 	case ODP_AUTH_ALG_AES_GCM:
@@ -930,8 +938,10 @@ int ipsec_config(odp_instance_t ODP_UNUSED inst)
 	odp_ipsec_config_init(&ipsec_config);
 	ipsec_config.inbound_mode = suite_context.inbound_op_mode;
 	ipsec_config.outbound_mode = suite_context.outbound_op_mode;
+	ipsec_config.outbound.all_chksum = ~0;
 	ipsec_config.inbound.default_queue = suite_context.queue;
 	ipsec_config.inbound.parse_level = ODP_PROTO_LAYER_ALL;
+	ipsec_config.inbound.chksums.all_chksum = ~0;
 
 	if (ODP_IPSEC_OK != odp_ipsec_config(&ipsec_config))
 		return -1;
