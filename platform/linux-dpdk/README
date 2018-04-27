@@ -173,16 +173,15 @@ To restore the NIC's back to kernel use something like this:
 5. Running ODP apps
 =================================================
 
-ODP-DPDK applications need to be run as root. You also need to supply the DPDK
-command line parameters either as a null-terminated array of char's to
-odp_global_init()'s platform_params parameter:
+ODP-DPDK applications need to be run as root. You may also need to
+supply DPDK command line parameters either as a null-terminated array of
+char's to odp_global_init()'s platform_params parameter:
 
-	odp_global_init([params], "-n 4");
+	odp_global_init([params], "--no-huge");
 
 Or, if it's NULL the platform tries to read the ODP_PLATFORM_PARAMS environment
 variable.
 
-You need to pass at least "-n [1..4]" to specify the number of memory channels.
 The coremask (-c) is calculated by ODP-DPDK based on the process affinity at
 startup. You can influence that with 'taskset'. DPDK init changes the affinity
 of the calling thread, so after it returns the original affinity is restored.
@@ -194,7 +193,7 @@ like proper DPDK threads.
 
 Exaple how to run an ODP-DPDK L2 forwarding application:
 
-    sudo ODP_PLATFORM_PARAMS="-n 4" ./odp_l2fwd -i 0,1 -c 2
+    sudo ./odp_l2fwd -i 0,1 -c 2
 
 	-i 0,1 - interface numbers
 	-c 2   - number of worker cpus
@@ -227,7 +226,7 @@ CONFIG_RTE_LIBRTE_PMD_PCAP=y
     mount -t hugetlbfs none /mnt/huge
 
 Finally give l2fwd fake devices:
-    ./l2fwd -c '0xf' -n 4 --vdev "eth_pcap0,iface=veth2-1" --vdev="eth_pcap1,iface=veth2-3" -- -p 3
+    ./l2fwd -c '0xf' --vdev "eth_pcap0,iface=veth2-1" --vdev="eth_pcap1,iface=veth2-3" -- -p 3
 
 7. Upgrading ODP-DPDK to newer ODP API level
 =================================================
@@ -287,5 +286,5 @@ AESNI_MULTI_BUFFER_LIB_PATH=/path-to/Intel-multi-buffer-crypto/ \
 when building odp-dpdk application, add the multi-buffer crypto library path to make file.
 Before running the application, export ODP_PLATFORM_PARAMS with corresponding
 crypto vdev's.
-ex: ODP_PLATFORM_PARAMS="-n 4 --vdev cryptodev_aesni_mb_pmd,max_nb_sessions=32 \
+ex: ODP_PLATFORM_PARAMS="--vdev cryptodev_aesni_mb_pmd,max_nb_sessions=32 \
     --vdev cryptodev_null_pmd,max_nb_sessions=32"

@@ -50,23 +50,6 @@ void refer_constructors(void)
 }
 #endif
 
-static void print_dpdk_env_help(void)
-{
-	char prgname[] = "odpdpdk";
-	char help_str[] = "--help";
-	char *dpdk_argv[] = {prgname, help_str};
-	int dpdk_argc = 2;
-
-	ODP_ERR("Neither (char *)platform_params were provided to "
-		"odp_init_global(),\n");
-	ODP_ERR("nor ODP_PLATFORM_PARAMS environment variable were "
-		"specified.\n");
-	ODP_ERR("A string of DPDK command line arguments should be provided");
-	ODP_ERR("Example: export ODP_PLATFORM_PARAMS=\"-n 4 --no-huge\"\n");
-	ODP_ERR("Note: -c argument substitutes automatically from odp coremask\n");
-	rte_eal_init(dpdk_argc, dpdk_argv);
-}
-
 static int odp_init_dpdk(const char *cmdline)
 {
 	char **dpdk_argv;
@@ -80,10 +63,8 @@ static int odp_init_dpdk(const char *cmdline)
 
 	if (cmdline == NULL) {
 		cmdline = getenv("ODP_PLATFORM_PARAMS");
-		if (cmdline == NULL) {
-			print_dpdk_env_help();
-			return -1;
-		}
+		if (cmdline == NULL)
+			cmdline = "";
 	}
 
 	CPU_ZERO(&original_cpuset);
