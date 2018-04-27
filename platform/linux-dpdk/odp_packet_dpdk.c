@@ -32,11 +32,16 @@
 #include <odp_classification_internal.h>
 #include <odp_packet_io_internal.h>
 #include <odp_libconfig_internal.h>
-#include <odp_packet_dpdk.h>
 #include <odp/api/plat/packet_inlines.h>
 #include <net/if.h>
 
 #include <protocols/udp.h>
+
+#include <rte_config.h>
+#include <rte_ethdev.h>
+#include <rte_ip_frag.h>
+#include <rte_udp.h>
+#include <rte_tcp.h>
 
 /* DPDK poll mode drivers requiring minimum RX burst size DPDK_MIN_RX_BURST */
 #define IXGBE_DRV_NAME "net_ixgbe"

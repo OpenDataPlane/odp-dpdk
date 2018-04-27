@@ -7,7 +7,6 @@
 #include "config.h"
 
 #include <odp_posix_extensions.h>
-#include <odp_packet_dpdk.h>
 #include <odp/api/init.h>
 #include <odp_debug_internal.h>
 #include <odp/api/debug.h>
@@ -25,6 +24,11 @@
 #include <errno.h>
 #include <sys/types.h>
 #include <pwd.h>
+#include <ctype.h>
+
+#include <rte_config.h>
+#include <rte_eal.h>
+#include <rte_string_fns.h>
 
 #define MEMPOOL_OPS(hdl) extern void mp_hdlr_init_##hdl(void)
 MEMPOOL_OPS(ops_mp_mc);

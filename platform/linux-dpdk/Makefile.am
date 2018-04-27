@@ -98,7 +98,6 @@ noinst_HEADERS = \
 		  ${top_srcdir}/platform/linux-generic/include/odp_libconfig_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_llqueue.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_macros_internal.h \
-		  include/odp_packet_dpdk.h \
 		  include/odp_packet_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_name_table_internal.h \
 		  include/odp_packet_io_internal.h \

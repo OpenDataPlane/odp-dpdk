@@ -29,8 +29,7 @@
 
 #include <odp/api/plat/pool_inline_types.h>
 
-/* for DPDK */
-#include <odp_packet_dpdk.h>
+#include <rte_config.h>
 #include <rte_version.h>
 
 #ifdef POOL_USE_TICKETLOCK
