@@ -164,6 +164,7 @@ __LIB__libodp_linux_la_SOURCES = \
 			   odp_queue_basic.c \
 			   odp_queue_if.c \
 			   ../linux-generic/odp_queue_lf.c \
+			   ../linux-generic/odp_random.c \
 			   ../linux-generic/odp_rwlock.c \
 			   ../linux-generic/odp_rwlock_recursive.c \
 			   ../linux-generic/odp_schedule_basic.c \
