@@ -4,13 +4,6 @@ All rights reserved.
 SPDX-License-Identifier:        BSD-3-Clause
 
 
-ERRATA:
-- DPDK 16.07 and earlier supports pool names with RTE_MEMZONE_NAMESIZE
-  characters (including terminating NULL), which is 6 characters less than
-  ODP_POOL_NAME_LEN. Names reaching into this interval might collide if the
-  first 25 characters are not unique.
-
-
 1. Rationale
 =================================================
 
@@ -270,8 +263,8 @@ http://dpdk.org/doc/guides/cryptodevs/index.html.
 To build odp-dpdk with dpdk virtual crypto devices, we need to build supporting
 intel multi-buffer library prior to dpdk build.
 
-get the Intel multi-buffer crypto from,
-https://downloadcenter.intel.com/download/22972
+Get the Intel multi-buffer crypto library from,
+https://github.com/intel/intel-ipsec-mb
 and follow the README from the repo on how to build the library.
 
 building dpdk:
