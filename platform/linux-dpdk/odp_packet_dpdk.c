@@ -33,7 +33,10 @@
 #include <odp_packet_io_internal.h>
 #include <odp_libconfig_internal.h>
 #include <odp_packet_dpdk.h>
+#include <odp/api/plat/packet_inlines.h>
 #include <net/if.h>
+
+#include <protocols/udp.h>
 
 /* DPDK poll mode drivers requiring minimum RX burst size DPDK_MIN_RX_BURST */
 #define IXGBE_DRV_NAME "net_ixgbe"
@@ -57,22 +60,16 @@ extern void *pktio_entry_ptr[ODP_CONFIG_PKTIO_ENTRIES];
 
 static uint32_t mtu_get_pkt_dpdk(pktio_entry_t *pktio_entry);
 
-static int lookup_opt(const char *path, const char *drv_name, int *val)
+static int lookup_opt(const char *opt_name, const char *drv_name, int *val)
 {
 	const char *base = "pktio_dpdk";
-	char opt_path[256];
-	int ret = 0;
+	int ret;
 
-	/* Default option */
-	snprintf(opt_path, sizeof(opt_path), "%s.%s", base, path);
-	ret += _odp_libconfig_lookup_int(opt_path, val);
-
-	/* Driver specific option overrides default option */
-	snprintf(opt_path, sizeof(opt_path), "%s.%s.%s", base, drv_name, path);
-	ret += _odp_libconfig_lookup_int(opt_path, val);
-
+	ret = _odp_libconfig_lookup_ext_int(base, drv_name, opt_name, val);
 	if (ret == 0)
-		ODP_ERR("Unable to find DPDK configuration option: %s\n", path);
+		ODP_ERR("Unable to find DPDK configuration option: %s\n",
+			opt_name);
+
 	return ret;
 }
 
@@ -385,8 +382,9 @@ static int setup_pkt_dpdk(odp_pktio_t pktio ODP_UNUSED,
 	return 0;
 }
 
-static int close_pkt_dpdk(pktio_entry_t *pktio_entry ODP_UNUSED)
+static int close_pkt_dpdk(pktio_entry_t *pktio_entry)
 {
+	rte_eth_dev_stop(pktio_entry->s.pkt_dpdk.port_id);
 	return 0;
 }
 
@@ -440,6 +438,10 @@ static int start_pkt_dpdk(pktio_entry_t *pktio_entry)
 	struct rte_eth_rxconf *rxconf = NULL;
 	struct rte_eth_txconf *txconf = NULL;
 	uint32_t txq_flags = 0;
+
+	if (pktio_entry->s.state == PKTIO_STATE_STOPPED ||
+	    pktio_entry->s.state == PKTIO_STATE_STOP_PENDING)
+		rte_eth_dev_stop(pkt_dpdk->port_id);
 
 	/* DPDK doesn't support nb_rx_q/nb_tx_q being 0 */
 	if (!pktio_entry->s.num_in_queue)
@@ -548,7 +550,14 @@ static int start_pkt_dpdk(pktio_entry_t *pktio_entry)
 
 static int stop_pkt_dpdk(pktio_entry_t *pktio_entry)
 {
-	rte_eth_dev_stop(pktio_entry->s.pkt_dpdk.port_id);
+	unsigned int i;
+	uint16_t port_id = pktio_entry->s.pkt_dpdk.port_id;
+
+	for (i = 0; i < pktio_entry->s.num_in_queue; i++)
+		rte_eth_dev_rx_queue_stop(port_id, i);
+	for (i = 0; i < pktio_entry->s.num_out_queue; i++)
+		rte_eth_dev_tx_queue_stop(port_id, i);
+
 	return 0;
 }
 
@@ -590,6 +599,7 @@ static void _odp_pktio_send_completion(pktio_entry_t *pktio_entry)
 #define IP4_CSUM_RESULT(m) (m->ol_flags & PKT_RX_IP_CKSUM_MASK)
 #define L4_CSUM_RESULT(m) (m->ol_flags & PKT_RX_L4_CKSUM_MASK)
 #define HAS_L4_PROTO(m, proto) ((m->packet_type & RTE_PTYPE_L4_MASK) == proto)
+#define UDP4_CSUM(_p) (((_odp_udphdr_t *)_odp_packet_l4_ptr(_p, NULL))->chksum)
 
 #define PKTIN_CSUM_BITS 0x1C
 
@@ -622,6 +632,13 @@ static inline int pkt_set_ol_rx(odp_pktin_config_opt_t *pktin_cfg,
 		if (packet_csum_result == PKT_RX_L4_CKSUM_GOOD) {
 			pkt_hdr->p.input_flags.l4_chksum_done = 1;
 		} else if (packet_csum_result != PKT_RX_L4_CKSUM_UNKNOWN) {
+			if (pkt_hdr->p.input_flags.ipv4 &&
+			    pkt_hdr->p.input_flags.udp &&
+			    !UDP4_CSUM(packet_handle(pkt_hdr))) {
+				pkt_hdr->p.input_flags.l4_chksum_done = 1;
+				return 0;
+			}
+
 			if (pktin_cfg->bit.drop_udp_err)
 				return -1;
 
@@ -860,11 +877,7 @@ static inline void pkt_set_ol_tx(odp_pktout_config_opt_t *pktout_cfg,
 	if (!ipv4_chksum_pkt && !udp_chksum_pkt && !tcp_chksum_pkt)
 		return;
 
-	if (pkt_p->l4_offset == ODP_PACKET_OFFSET_INVALID)
-		return;
-
 	mbuf->l2_len = pkt_p->l3_offset - pkt_p->l2_offset;
-	mbuf->l3_len = pkt_p->l4_offset - pkt_p->l3_offset;
 
 	if (l3_proto_v4)
 		mbuf->ol_flags = PKT_TX_IPV4;
@@ -875,7 +888,13 @@ static inline void pkt_set_ol_tx(odp_pktout_config_opt_t *pktout_cfg,
 		mbuf->ol_flags |=  PKT_TX_IP_CKSUM;
 
 		((struct ipv4_hdr *)l3_hdr)->hdr_checksum = 0;
+		mbuf->l3_len = _ODP_IPV4HDR_IHL(*(uint8_t *)l3_hdr) * 4;
 	}
+
+	if (pkt_p->l4_offset == ODP_PACKET_OFFSET_INVALID)
+		return;
+
+	mbuf->l3_len = pkt_p->l4_offset - pkt_p->l3_offset;
 
 	l4_hdr = (void *)(mbuf_data + pkt_p->l4_offset);
 

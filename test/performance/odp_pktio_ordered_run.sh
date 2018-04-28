@@ -11,7 +11,7 @@ TEST_DIR="${TEST_DIR:-$(dirname $0)}"
 DURATION=5
 LOG=odp_pktio_ordered.log
 LOOPS=100000000
-PASS_PPS=5000
+PASS_PPS=350
 PCAP_IN=`find . ${TEST_SRC_DIR} $(dirname $0) -name udp64.pcap -print -quit`
 PCAP_OUT=/dev/null
 
@@ -28,11 +28,14 @@ else
 	STDBUF=
 fi
 
-$STDBUF ${TEST_DIR}/odp_pktio_ordered${EXEEXT} \
-	-i pcap:in=${PCAP_IN}:loops=$LOOPS,pcap:out=${PCAP_OUT} \
-	-t $DURATION | tee $LOG
+export ODP_PLATFORM_PARAMS="--no-pci \
+--vdev net_pcap0,rx_pcap=${PCAP_IN},tx_pcap=${PCAP_OUT} \
+--vdev net_pcap1,rx_pcap=${PCAP_IN},tx_pcap=${PCAP_OUT}"
 
-ret=${PIPESTATUS[0]}
+$STDBUF ${TEST_DIR}/odp_pktio_ordered${EXEEXT} \
+	-i 0,1 \
+	-t $DURATION | tee $LOG
+ret=$?
 
 if [ $ret -ne 0 ]; then
 	echo "FAIL: no odp_pktio_ordered${EXEEXT}"

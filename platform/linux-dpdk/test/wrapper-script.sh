@@ -1,6 +1,6 @@
 #!/bin/bash
 
-export ODP_PLATFORM_PARAMS=${ODP_PLATFORM_PARAMS:--n 4 --vdev "crypto_openssl" --vdev crypto_null}
+export ODP_PLATFORM_PARAMS=${ODP_PLATFORM_PARAMS:--n 4 --vdev="crypto_openssl" --vdev="crypto_null"}
 # where to mount huge pages
 export HUGEPAGEDIR=${HUGEPAGEDIR:-/mnt/huge}
 # exit codes expected by automake for skipped tests
@@ -52,21 +52,14 @@ if [ "$(id -u)" != "0" ]; then
 fi
 
 echo "Mounting hugetlbfs"
-export SIZE=1G
-export SIZE_KB=1048576
-export RESERVE=1
+export SIZE=2MB
+export SIZE_KB=2048
+export RESERVE=512
 mount_and_reserve
 res=$?
 if [ $res -ne 0 ]; then
-	export SIZE=2MB
-	export SIZE_KB=2048
-	export RESERVE=1024
-	mount_and_reserve
-	res=$?
-	if [ $res -ne 0 ]; then
-		echo "ERROR: can't mount hugepages with any size"
-		exit $res
-	fi
+	echo "ERROR: can't mount hugepages"
+	exit $res
 fi
 echo "running $1!"
 $1
