@@ -67,8 +67,12 @@ run_l2fwd()
 		exit 1
 	fi
 
+	export ODP_PLATFORM_PARAMS="-m 512 --file-prefix="gen" \
+--proc-type auto --no-pci \
+--vdev net_pcap0,iface=$IF0"
+
 	# Run generator with one worker
-	(odp_generator${EXEEXT} --interval $FLOOD_MODE -I $IF0 \
+	(odp_generator${EXEEXT} --interval $FLOOD_MODE -I 0 \
 			--srcip 192.168.0.1 --dstip 192.168.0.2 \
 			-m u -w 1 2>&1 > /dev/null) \
 			2>&1 > /dev/null &
@@ -84,8 +88,12 @@ run_l2fwd()
 	fi
 	LOG=odp_l2fwd_tmp.log
 
+	export ODP_PLATFORM_PARAMS="-m 512 --file-prefix="l2fwd" \
+--proc-type auto --no-pci --vdev net_pcap1,iface=$IF1 \
+--vdev net_pcap2,iface=$IF2"
+
 	# Max 2 workers
-	$STDBUF odp_l2fwd${EXEEXT} -i $IF1,$IF2 -m 0 -t 30 -c 2 | tee $LOG
+	$STDBUF odp_l2fwd${EXEEXT} -i 0,1 -m 0 -t 30 -c 2 | tee $LOG
 	ret=$?
 
 	kill ${GEN_PID}

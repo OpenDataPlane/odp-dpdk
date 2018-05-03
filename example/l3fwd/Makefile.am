@@ -11,9 +11,9 @@ odp_l3fwd_SOURCES = \
 
 
 if test_example
-if HAVE_PCAP
+if HAVE_PMD_PCAP
 TESTS = odp_l3fwd_run.sh
 endif
 endif
 
-EXTRA_DIST = odp_l3fwd_run.sh udp64.pcap
+EXTRA_DIST = odp_l3fwd_run.sh udp64.pcap empty.pcap

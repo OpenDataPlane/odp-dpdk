@@ -42,7 +42,7 @@
 #include <odp/api/spinlock.h>
 #include <odp_internal.h>
 #include <odp_debug_internal.h>
-#include <_fdserver_internal.h>
+#include <odp_fdserver_internal.h>
 #include <sys/prctl.h>
 #include <signal.h>
 
@@ -69,6 +69,14 @@
 #ifndef MAP_ANONYMOUS
 #define MAP_ANONYMOUS MAP_ANON
 #endif
+
+#define FD_ODP_DEBUG_PRINT 0
+
+#define FD_ODP_DBG(fmt, ...) \
+	do { \
+		if (FD_ODP_DEBUG_PRINT == 1) \
+			ODP_DBG(fmt, ##__VA_ARGS__);\
+	} while (0)
 
 /* when accessing the client functions, clients should be mutexed: */
 static odp_spinlock_t *client_lock;
@@ -257,7 +265,9 @@ static int get_socket(void)
 	remote.sun_family = AF_UNIX;
 	strcpy(remote.sun_path, sockpath);
 	len = strlen(remote.sun_path) + sizeof(remote.sun_family);
-	if (connect(s_sock, (struct sockaddr *)&remote, len) == -1) {
+	while (connect(s_sock, (struct sockaddr *)&remote, len) == -1) {
+		if (errno == EINTR)
+			continue;
 		ODP_ERR("cannot connect to server: %s\n", strerror(errno));
 		close(s_sock);
 		return -1;
@@ -280,8 +290,8 @@ int _odp_fdserver_register_fd(fd_server_context_e context, uint64_t key,
 
 	odp_spinlock_lock(client_lock);
 
-	ODP_DBG("FD client register: pid=%d key=%" PRIu64 ", fd=%d\n",
-		getpid(), key, fd_to_send);
+	FD_ODP_DBG("FD client register: pid=%d key=%" PRIu64 ", fd=%d\n",
+		   getpid(), key, fd_to_send);
 
 	s_sock = get_socket();
 	if (s_sock < 0) {
@@ -326,8 +336,8 @@ int _odp_fdserver_deregister_fd(fd_server_context_e context, uint64_t key)
 
 	odp_spinlock_lock(client_lock);
 
-	ODP_DBG("FD client deregister: pid=%d key=%" PRIu64 "\n",
-		getpid(), key);
+	FD_ODP_DBG("FD client deregister: pid=%d key=%" PRIu64 "\n",
+		   getpid(), key);
 
 	s_sock = get_socket();
 	if (s_sock < 0) {
@@ -413,7 +423,7 @@ static int stop_server(void)
 
 	odp_spinlock_lock(client_lock);
 
-	ODP_DBG("FD sending server stop request\n");
+	FD_ODP_DBG("FD sending server stop request\n");
 
 	s_sock = get_socket();
 	if (s_sock < 0) {
@@ -464,8 +474,8 @@ static int handle_request(int client_sock)
 			fd_table[fd_table_nb_entries].context = context;
 			fd_table[fd_table_nb_entries].key     = key;
 			fd_table[fd_table_nb_entries++].fd    = fd;
-			ODP_DBG("storing {ctx=%d, key=%" PRIu64 "}->fd=%d\n",
-				context, key, fd);
+			FD_ODP_DBG("storing {ctx=%d, key=%" PRIu64 "}->fd=%d\n",
+				   context, key, fd);
 		} else {
 			ODP_ERR("FD table full\n");
 			send_fdserver_msg(client_sock, FD_REGISTER_NACK,
@@ -517,9 +527,9 @@ static int handle_request(int client_sock)
 		for (i = 0; i < fd_table_nb_entries; i++) {
 			if ((fd_table[i].context == context) &&
 			    (fd_table[i].key == key)) {
-				ODP_DBG("drop {ctx=%d,"
-					" key=%" PRIu64 "}->fd=%d\n",
-					context, key, fd_table[i].fd);
+				FD_ODP_DBG("drop {ctx=%d,"
+					   " key=%" PRIu64 "}->fd=%d\n",
+					   context, key, fd_table[i].fd);
 				close(fd_table[i].fd);
 				fd_table[i] = fd_table[--fd_table_nb_entries];
 				send_fdserver_msg(client_sock,
@@ -535,7 +545,7 @@ static int handle_request(int client_sock)
 		break;
 
 	case FD_SERVERSTOP_REQ:
-		ODP_DBG("Stoping FD server\n");
+		FD_ODP_DBG("Stoping FD server\n");
 		return 1;
 
 	default:
@@ -559,8 +569,11 @@ static void wait_requests(int sock)
 		addr_sz = sizeof(remote);
 		c_socket = accept(sock, (struct sockaddr *)&remote, &addr_sz);
 		if (c_socket == -1) {
-				ODP_ERR("wait_requests: %s\n", strerror(errno));
-				return;
+			if (errno == EINTR)
+				continue;
+
+			ODP_ERR("wait_requests: %s\n", strerror(errno));
+			return;
 		}
 
 		if (handle_request(c_socket))
@@ -636,12 +649,46 @@ int _odp_fdserver_init_global(void)
 	}
 
 	if (server_pid == 0) { /*child */
+		sigset_t sigset;
+		struct sigaction action;
+
+		sigfillset(&sigset);
+		/* undefined if these are ignored, as per POSIX */
+		sigdelset(&sigset, SIGFPE);
+		sigdelset(&sigset, SIGILL);
+		sigdelset(&sigset, SIGSEGV);
+		/* can not be masked */
+		sigdelset(&sigset, SIGKILL);
+		sigdelset(&sigset, SIGSTOP);
+		/* these we want to handle */
+		sigdelset(&sigset, SIGTERM);
+		if (sigprocmask(SIG_SETMASK, &sigset, NULL) == -1) {
+			ODP_ERR("Could not set signal mask");
+			exit(1);
+		}
+
+		/* set default handlers for those signals we can handle */
+		memset(&action, 0, sizeof(action));
+		action.sa_handler = SIG_DFL;
+		sigemptyset(&action.sa_mask);
+		action.sa_flags = 0;
+		sigaction(SIGFPE, &action, NULL);
+		sigaction(SIGILL, &action, NULL);
+		sigaction(SIGSEGV, &action, NULL);
+		sigaction(SIGTERM, &action, NULL);
+
 		/* TODO: pin the server on appropriate service cpu mask */
 		/* when (if) we can agree on the usage of service mask  */
 
 		/* request to be killed if parent dies, hence avoiding  */
 		/* orphans being "adopted" by the init process...	*/
 		prctl(PR_SET_PDEATHSIG, SIGTERM);
+
+		res = setsid();
+		if (res == -1) {
+			ODP_ERR("Could not setsid()");
+			exit(1);
+		}
 
 		/* allocate the space for the file descriptor<->key table: */
 		fd_table = malloc(FDSERVER_MAX_ENTRIES * sizeof(fdentry_t));

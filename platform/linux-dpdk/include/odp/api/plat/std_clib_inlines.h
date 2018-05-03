@@ -12,6 +12,8 @@ extern "C" {
 #endif
 
 #include <string.h>
+
+#include <rte_config.h>
 #include <rte_memcpy.h>
 
 _ODP_INLINE void *odp_memcpy(void *dst, const void *src, size_t num)

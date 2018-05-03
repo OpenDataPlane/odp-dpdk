@@ -11,9 +11,11 @@
 #include <odp/api/hints.h>
 #include <odp_debug_internal.h>
 #include <odp_arch_time_internal.h>
-#include <rte_cycles.h>
 #include <string.h>
 #include <inttypes.h>
+
+#include <rte_config.h>
+#include <rte_cycles.h>
 
 typedef uint64_t (*time_to_ns_fn) (odp_time_t time);
 typedef odp_time_t (*time_cur_fn)(void);

@@ -10,16 +10,22 @@ NUM_RX_PORT=3
 RETVAL=0
 
 PCAP_IN=`find . ${TEST_DIR} $(dirname $0) -name udp64.pcap -print -quit`
+PCAP_EMPTY="empty.pcap"
 
 echo "Switch test using PCAP_IN = ${PCAP_IN}"
 
 RX_PORTS=""
+RX_VDEVS=""
 for i in `seq 1 $NUM_RX_PORT`;
 do
-	RX_PORTS="${RX_PORTS},pcap:out=pcapout${i}.pcap"
+	RX_PORTS="${RX_PORTS},${i}"
+	RX_VDEVS="${RX_VDEVS} --vdev net_pcap${i},rx_pcap=${PCAP_EMPTY},tx_pcap=pcapout${i}.pcap"
 done
 
-./odp_switch${EXEEXT} -i pcap:in=${PCAP_IN}${RX_PORTS} -t 1
+export ODP_PLATFORM_PARAMS="--no-pci \
+--vdev net_pcap0,rx_pcap=${PCAP_IN},tx_pcap=/dev/null ${RX_VDEVS}"
+
+./odp_switch${EXEEXT} -i 0${RX_PORTS} -t 1
 STATUS=$?
 if [ "$STATUS" -ne 0 ]; then
   echo "Error: status was: $STATUS, expected 0"

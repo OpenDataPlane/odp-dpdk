@@ -6,7 +6,8 @@
 # SPDX-License-Identifier:     BSD-3-Clause
 #
 
-if [ -n "${ODP_PLATFORM}" -a "x${ODP_PLATFORM}" != "xlinux-generic" ]
+if [ -n "${ODP_PLATFORM}" -a "x${ODP_PLATFORM}" != "xlinux-generic" ] &&
+   [ -n "${ODP_PLATFORM}" -a "x${ODP_PLATFORM}" != "xlinux-dpdk" ]
 then
 	echo "null pktio might be unsupported on this platform, skipping"
 	exit 77

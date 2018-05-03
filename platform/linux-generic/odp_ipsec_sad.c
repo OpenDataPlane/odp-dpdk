@@ -220,6 +220,8 @@ uint32_t _odp_ipsec_cipher_iv_len(odp_cipher_alg_t cipher)
 #endif
 	case ODP_CIPHER_ALG_AES_GCM:
 		return 12;
+	case ODP_CIPHER_ALG_AES_CCM:
+		return 11;
 	case ODP_CIPHER_ALG_CHACHA20_POLY1305:
 		return 12;
 	default:
@@ -244,13 +246,19 @@ uint32_t _odp_ipsec_auth_digest_len(odp_auth_alg_t auth)
 #endif
 	case ODP_AUTH_ALG_SHA256_HMAC:
 		return 16;
+	case ODP_AUTH_ALG_SHA384_HMAC:
+		return 24;
 	case ODP_AUTH_ALG_SHA512_HMAC:
 		return 32;
+	case ODP_AUTH_ALG_AES_XCBC_MAC:
+		return 12;
 #if ODP_DEPRECATED_API
 	case ODP_AUTH_ALG_AES128_GCM:
 #endif
 	case ODP_AUTH_ALG_AES_GCM:
 	case ODP_AUTH_ALG_AES_GMAC:
+		return 16;
+	case ODP_AUTH_ALG_AES_CCM:
 		return 16;
 	case ODP_AUTH_ALG_CHACHA20_POLY1305:
 		return 16;
@@ -411,6 +419,7 @@ odp_ipsec_sa_t odp_ipsec_sa_create(const odp_ipsec_sa_param_t *param)
 	case ODP_CIPHER_ALG_AES128_GCM:
 #endif
 	case ODP_CIPHER_ALG_AES_GCM:
+	case ODP_CIPHER_ALG_AES_CCM:
 		ipsec_sa->use_counter_iv = 1;
 		ipsec_sa->esp_iv_len = 8;
 		ipsec_sa->esp_block_len = 16;

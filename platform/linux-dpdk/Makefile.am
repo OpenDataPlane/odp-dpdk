@@ -98,7 +98,6 @@ noinst_HEADERS = \
 		  ${top_srcdir}/platform/linux-generic/include/odp_libconfig_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_llqueue.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_macros_internal.h \
-		  include/odp_packet_dpdk.h \
 		  include/odp_packet_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_name_table_internal.h \
 		  include/odp_packet_io_internal.h \
@@ -152,7 +151,7 @@ __LIB__libodp_linux_la_SOURCES = \
 			   ../linux-generic/odp_ipsec_events.c \
 			   ../linux-generic/odp_ipsec_sad.c \
 			   ../linux-generic/odp_name_table.c \
-			   odp_libconfig.c \
+			   ../linux-generic/odp_libconfig.c \
 			   odp_packet.c \
 			   odp_packet_dpdk.c \
 			   odp_packet_flags.c \

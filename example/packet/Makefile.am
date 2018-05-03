@@ -5,7 +5,7 @@ bin_PROGRAMS = odp_pktio
 odp_pktio_SOURCES = odp_pktio.c
 
 if test_example
-if HAVE_PCAP
+if HAVE_PMD_PCAP
 TESTS = pktio_run.sh
 endif
 endif
