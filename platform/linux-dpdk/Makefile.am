@@ -93,6 +93,7 @@ noinst_HEADERS = \
 		  ${top_srcdir}/platform/linux-generic/include/odp_classification_datamodel.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_classification_inlines.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_classification_internal.h \
+		  include/odp_eventdev_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_forward_typedefs_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_ipsec_internal.h \
@@ -163,12 +164,14 @@ __LIB__libodp_linux_la_SOURCES = \
 			   ../linux-generic/odp_pkt_queue.c \
 			   odp_pool.c \
 			   odp_queue_basic.c \
+			   odp_queue_eventdev.c \
 			   odp_queue_if.c \
 			   ../linux-generic/odp_queue_lf.c \
 			   ../linux-generic/odp_random.c \
 			   ../linux-generic/odp_rwlock.c \
 			   ../linux-generic/odp_rwlock_recursive.c \
 			   ../linux-generic/odp_schedule_basic.c \
+			   odp_schedule_eventdev.c \
 			   odp_schedule_if.c \
 			   ../linux-generic/odp_schedule_sp.c \
 			   ../linux-generic/odp_schedule_iquery.c \

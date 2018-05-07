@@ -16,6 +16,9 @@
 extern const queue_api_t queue_basic_api;
 extern const queue_fn_t queue_basic_fn;
 
+extern const queue_api_t queue_eventdev_api;
+extern const queue_fn_t queue_eventdev_fn;
+
 const queue_api_t *queue_api;
 const queue_fn_t *queue_fn;
 
@@ -121,6 +124,9 @@ int _odp_queue_init_global(void)
 	    !strcmp(sched, "iquery")) {
 		queue_fn = &queue_basic_fn;
 		queue_api = &queue_basic_api;
+	} else if (!strcmp(sched, "eventdev")) {
+		queue_fn = &queue_eventdev_fn;
+		queue_api = &queue_eventdev_api;
 	} else {
 		ODP_ABORT("Unknown scheduler specified via ODP_SCHEDULER\n");
 		return -1;

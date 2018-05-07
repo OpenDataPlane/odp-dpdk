@@ -34,6 +34,7 @@
 #include <odp_libconfig_internal.h>
 #include <odp/api/plat/packet_inlines.h>
 #include <net/if.h>
+#include <odp_eventdev_internal.h>
 
 #include <protocols/udp.h>
 
@@ -216,6 +217,11 @@ static int term_pkt_dpdk(void)
 {
 	uint16_t port_id;
 
+	/* Eventdev takes care of closing devices */
+	if (eventdev_gbl &&
+	    eventdev_gbl->rx_adapter.status != RX_ADAPTER_INIT)
+		return 0;
+
 	RTE_ETH_FOREACH_DEV(port_id) {
 		rte_eth_dev_close(port_id);
 	}
@@ -389,7 +395,12 @@ static int setup_pkt_dpdk(odp_pktio_t pktio ODP_UNUSED,
 
 static int close_pkt_dpdk(pktio_entry_t *pktio_entry)
 {
-	rte_eth_dev_stop(pktio_entry->s.pkt_dpdk.port_id);
+	if (eventdev_gbl &&
+	    eventdev_gbl->rx_adapter.status != RX_ADAPTER_INIT)
+		rx_adapter_port_stop(pktio_entry->s.pkt_dpdk.port_id);
+	else
+		rte_eth_dev_stop(pktio_entry->s.pkt_dpdk.port_id);
+
 	return 0;
 }
 
