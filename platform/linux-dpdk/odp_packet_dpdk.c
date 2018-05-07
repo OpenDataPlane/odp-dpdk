@@ -36,6 +36,7 @@
 #include <odp/api/time.h>
 #include <odp/api/plat/time_inlines.h>
 #include <odp_packet_dpdk.h>
+#include <odp_eventdev_internal.h>
 
 #include <net/if.h>
 #include <protocols/udp.h>
@@ -102,6 +103,13 @@ const pktio_if_ops_t * const pktio_if_ops[]  = {
 extern void *pktio_entry_ptr[ODP_CONFIG_PKTIO_ENTRIES];
 
 static uint32_t mtu_get_pkt_dpdk(pktio_entry_t *pktio_entry);
+
+uint16_t dpdk_pktio_port_id(pktio_entry_t *pktio_entry)
+{
+	const pkt_dpdk_t *pkt_dpdk = pkt_priv(pktio_entry);
+
+	return pkt_dpdk->port_id;
+}
 
 static int lookup_opt(const char *opt_name, const char *drv_name, int *val)
 {
@@ -355,6 +363,11 @@ static int term_pkt_dpdk(void)
 {
 	uint16_t port_id;
 
+	/* Eventdev takes care of closing devices */
+	if (eventdev_gbl &&
+	    eventdev_gbl->rx_adapter.status != RX_ADAPTER_INIT)
+		return 0;
+
 	RTE_ETH_FOREACH_DEV(port_id) {
 		rte_eth_dev_close(port_id);
 	}
@@ -521,7 +534,14 @@ static int setup_pkt_dpdk(odp_pktio_t pktio ODP_UNUSED,
 
 static int close_pkt_dpdk(pktio_entry_t *pktio_entry)
 {
-	rte_eth_dev_stop(pkt_priv(pktio_entry)->port_id);
+	pkt_dpdk_t * const pkt_dpdk = pkt_priv(pktio_entry);
+
+	if (eventdev_gbl &&
+	    eventdev_gbl->rx_adapter.status != RX_ADAPTER_INIT)
+		rx_adapter_port_stop(pkt_dpdk->port_id);
+	else
+		rte_eth_dev_stop(pkt_dpdk->port_id);
+
 	return 0;
 }
 

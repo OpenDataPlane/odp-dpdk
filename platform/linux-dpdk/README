@@ -1,4 +1,5 @@
 Copyright (c) 2018-2019, Linaro Limited
+Copyright (c) 2019, Nokia
 All rights reserved.
 
 SPDX-License-Identifier:        BSD-3-Clause
@@ -56,6 +57,9 @@ Enable pcap pmd to use ODP-DPDK without DPDK supported NIC's:
 
 Enable openssl crypto pmd to use openssl with odp-dpdk:
     sed -ri 's,(CONFIG_RTE_LIBRTE_PMD_OPENSSL=).*,\1y,' .config
+
+Optionally, add more queues to eventdev:
+    sed -ri 's,(CONFIG_RTE_EVENT_MAX_QUEUES_PER_DEV=).*,\1255,' .config
 
 Now return to parent directory and build DPDK:
     cd ..
@@ -288,3 +292,27 @@ Before running the application, export ODP_PLATFORM_PARAMS with corresponding
 crypto vdev's.
 ex: ODP_PLATFORM_PARAMS="--vdev cryptodev_aesni_mb_pmd,max_nb_sessions=32 \
     --vdev cryptodev_null_pmd,max_nb_sessions=32"
+
+9. Using eventdev scheduling and queues (experimental)
+======================================================
+
+ODP-DPDK includes experimental implementations of ODP scheduler, queues, and
+scheduled pktio using DPDK event device library. The initial implementation
+has been validated using only the standard software eventdev poll mode driver
+with DPDK v18.11. Due to some pending eventdev bugs the implementation is not
+yet tested in the ODP CI.
+
+To use eventdev one must set ODP_SCHEDULER environment variable to "eventdev"
+and provide the necessary platform parameters to DPDK.
+
+Refer to DPDK event device driver documentation for platform defails:
+https://doc.dpdk.org/guides/eventdevs/index.html
+
+In case of the standard software eventdev implementation one must enable a DPDK
+service core, which will perform scheduling and receive packets for the
+scheduled pktio input queues. The DPDK service cores and the ODP application
+cores should not overlap.
+
+Exaple how to run odp_scheduling test application using eventdev:
+    sudo ODP_SCHEDULER="eventdev" ODP_PLATFORM_PARAMS="--vdev event_sw0 -s 0x4" \
+    ./odp_scheduling -c 1

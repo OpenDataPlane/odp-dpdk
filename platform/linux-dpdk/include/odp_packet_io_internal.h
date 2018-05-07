@@ -185,6 +185,8 @@ static inline void pktio_cls_enabled_set(pktio_entry_t *entry, int ena)
 	entry->s.cls_enabled = ena;
 }
 
+uint16_t dpdk_pktio_port_id(pktio_entry_t *entry);
+
 int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int num);
 
 extern const pktio_if_ops_t loopback_pktio_ops;
