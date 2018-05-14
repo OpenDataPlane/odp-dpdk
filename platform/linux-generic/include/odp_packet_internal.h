@@ -21,7 +21,6 @@ extern "C" {
 #include <odp/api/debug.h>
 #include <odp_buffer_internal.h>
 #include <odp_pool_internal.h>
-#include <odp_buffer_inlines.h>
 #include <odp/api/packet.h>
 #include <odp/api/plat/packet_inline_types.h>
 #include <odp/api/packet_io.h>
@@ -96,6 +95,9 @@ typedef struct {
 	 * Members below are not initialized by packet_init()
 	 */
 
+	/* Type of extra data */
+	uint8_t extra_type;
+
 	/* Flow hash value */
 	uint32_t flow_hash;
 
@@ -108,16 +110,14 @@ typedef struct {
 	/* Result for crypto packet op */
 	odp_crypto_packet_result_t crypto_op_result;
 
-#ifdef ODP_PKTIO_DPDK
-	/* Type of extra data */
-	uint8_t extra_type;
-	/* Extra space for packet descriptors. E.g. DPDK mbuf  */
-	uint8_t ODP_ALIGNED_CACHE extra[PKT_EXTRA_LEN];
-#endif
-
 	/* Context for IPsec */
 	odp_ipsec_packet_result_t ipsec_ctx;
 
+#ifdef ODP_PKTIO_DPDK
+	/* Extra space for packet descriptors. E.g. DPDK mbuf. Keep as the last
+	 * member before data. */
+	uint8_t ODP_ALIGNED_CACHE extra[PKT_EXTRA_LEN];
+#endif
 	/* Packet data storage */
 	uint8_t data[0];
 } odp_packet_hdr_t;
