@@ -11,6 +11,7 @@ ODP_PTHREAD
 ODP_TIMER
 ODP_OPENSSL
 ODP_LIBCONFIG([linux-dpdk])
+m4_include([platform/linux-dpdk/m4/odp_pcapng.m4])
 ODP_SCHEDULER
 
 ##########################################################################

@@ -22,6 +22,9 @@
 #include <odp/api/plat/packet_inlines.h>
 #include <odp_packet_internal.h>
 
+/* Inlined API functions */
+#include <odp/api/plat/event_inlines.h>
+
 #include <rte_config.h>
 #include <rte_crypto.h>
 #include <rte_cryptodev.h>
