@@ -22,8 +22,10 @@ if !ODP_ABI_COMPAT
 odpapiplatincludedir= $(includedir)/odp/api/plat
 odpapiplatinclude_HEADERS = \
 		  include/odp/api/plat/atomic_inlines.h \
+		  include/odp/api/plat/buffer_inline_types.h \
 		  include/odp/api/plat/byteorder_inlines.h \
 		  include/odp/api/plat/byteorder_inlines_api.h \
+		  include/odp/api/plat/event_inlines.h \
 		  include/odp/api/plat/packet_flag_inlines.h \
 		  include/odp/api/plat/packet_flag_inlines_api.h \
 		  include/odp/api/plat/packet_inline_types.h \
@@ -82,7 +84,6 @@ noinst_HEADERS = \
 		  arch/odp_arch_time_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_align_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_atomic_internal.h \
-		  include/odp_buffer_inlines.h \
 		  include/odp_buffer_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_bitmap_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_bitset.h \
@@ -106,6 +107,7 @@ noinst_HEADERS = \
 		  ${top_srcdir}/platform/linux-generic/include/odp_packet_io_ring_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_packet_socket.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_packet_null.h \
+		  ${top_srcdir}/platform/linux-generic/include/odp_pcapng.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_pkt_queue_internal.h \
 		  include/odp_pool_internal.h \
 		  include/odp_posix_extensions.h \
@@ -175,6 +177,7 @@ __LIB__libodp_linux_la_SOURCES = \
 			   ../linux-generic/odp_spinlock.c \
 			   ../linux-generic/odp_spinlock_recursive.c \
 			   ../linux-generic/odp_system_info.c \
+			   ../linux-generic/odp_pcapng.c \
 			   odp_thread.c \
 			   ../linux-generic/odp_thrmask.c \
 			   odp_time.c \
@@ -188,6 +191,7 @@ if ODP_ABI_COMPAT
 __LIB__libodp_linux_la_SOURCES += \
 			   ../linux-generic/odp_atomic_api.c \
 			   ../linux-generic/odp_byteorder.c \
+			   ../linux-generic/odp_event_api.c \
 			   ../linux-generic/odp_packet_api.c \
 			   ../linux-generic/odp_packet_flags_api.c \
 			   ../linux-generic/odp_pktio_api.c \

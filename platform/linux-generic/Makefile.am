@@ -24,8 +24,10 @@ if !ODP_ABI_COMPAT
 odpapiplatincludedir= $(includedir)/odp/api/plat
 odpapiplatinclude_HEADERS = \
 		  include/odp/api/plat/atomic_inlines.h \
+		  include/odp/api/plat/buffer_inline_types.h \
 		  include/odp/api/plat/byteorder_inlines.h \
 		  include/odp/api/plat/byteorder_inlines_api.h \
+		  include/odp/api/plat/event_inlines.h \
 		  include/odp/api/plat/packet_flag_inlines.h \
 		  include/odp/api/plat/packet_flag_inlines_api.h \
 		  include/odp/api/plat/packet_inline_types.h \
@@ -86,7 +88,6 @@ noinst_HEADERS = \
 		  include/odp_atomic_internal.h \
 		  include/odp_bitmap_internal.h \
 		  include/odp_bitset.h \
-		  include/odp_buffer_inlines.h \
 		  include/odp_buffer_internal.h \
 		  include/odp_classification_datamodel.h \
 		  include/odp_classification_inlines.h \
@@ -114,6 +115,7 @@ noinst_HEADERS = \
 		  include/odp_packet_null.h \
 		  include/odp_packet_socket.h \
 		  include/odp_packet_tap.h \
+		  include/odp_pcapng.h \
 		  include/odp_pkt_queue_internal.h \
 		  include/odp_pool_internal.h \
 		  include/odp_posix_extensions.h \
@@ -189,6 +191,7 @@ __LIB__libodp_linux_la_SOURCES = \
 			   odp_spinlock.c \
 			   odp_spinlock_recursive.c \
 			   odp_system_info.c \
+			   odp_pcapng.c \
 			   odp_thread.c \
 			   odp_thrmask.c \
 			   odp_time.c \
@@ -214,6 +217,7 @@ if ODP_ABI_COMPAT
 __LIB__libodp_linux_la_SOURCES += \
 			   odp_atomic_api.c \
 			   odp_byteorder.c \
+			   odp_event_api.c \
 			   odp_packet_api.c \
 			   odp_packet_flags_api.c \
 			   odp_pktio_api.c \

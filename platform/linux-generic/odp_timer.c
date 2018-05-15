@@ -38,7 +38,6 @@
 #include <odp/api/atomic.h>
 #include <odp_atomic_internal.h>
 #include <odp/api/buffer.h>
-#include <odp_buffer_inlines.h>
 #include <odp/api/cpu.h>
 #include <odp/api/pool.h>
 #include <odp_pool_internal.h>
@@ -56,6 +55,9 @@
 #include <odp/api/timer.h>
 #include <odp_arch_time_internal.h>
 #include <odp_timer_internal.h>
+
+/* Inlined API functions */
+#include <odp/api/plat/event_inlines.h>
 
 #define TMO_UNUSED   ((uint64_t)0xFFFFFFFFFFFFFFFF)
 /* TMO_INACTIVE is or-ed with the expiration tick to indicate an expired timer.
@@ -76,7 +78,7 @@ static _odp_atomic_flag_t locks[NUM_LOCKS]; /* Multiple locks per cache line! */
 #endif
 
 /* Max timer resolution in nanoseconds */
-static uint64_t highest_res_ns;
+static uint64_t highest_res_ns = 500;
 static uint64_t min_res_ns = INT64_MAX;
 
 /******************************************************************************
@@ -1077,13 +1079,10 @@ int odp_timer_capability(odp_timer_clk_src_t clk_src,
 	return ret;
 }
 
-odp_timer_pool_t
-odp_timer_pool_create(const char *name,
-		      const odp_timer_pool_param_t *param)
+odp_timer_pool_t odp_timer_pool_create(const char *name,
+				       const odp_timer_pool_param_t *param)
 {
-	/* Verify that buffer pool can be used for timeouts */
-	/* Verify that we have a valid (non-zero) timer resolution */
-	if (param->res_ns == 0) {
+	if (param->res_ns < highest_res_ns) {
 		__odp_errno = EINVAL;
 		return ODP_TIMER_POOL_INVALID;
 	}

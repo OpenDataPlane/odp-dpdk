@@ -14,6 +14,7 @@
 #include <odp_api.h>
 #include <odp/helper/odph_api.h>
 
+#define DEBUG_PRINT       0
 #define MAX_WORKERS       64
 #define MAX_PKTIOS        32
 #define MAX_PKTIO_NAME    31
@@ -23,8 +24,18 @@
 #define MIN_PKT_SEG_LEN   64
 #define BURST_SIZE        32
 #define CHECK_PERIOD      10000
-#define MAX_PKTIO_INDEXES 256
 #define TEST_PASSED_LIMIT 5000
+#define TIMEOUT_OFFSET_NS 1000000
+
+typedef struct test_options_t {
+	long int timeout_us;
+	int num_worker;
+	int num_pktio;
+	int num_pktio_queue;
+	uint8_t collect_stat;
+	char pktio_name[MAX_PKTIOS][MAX_PKTIO_NAME + 1];
+
+} test_options_t;
 
 typedef struct {
 	int  worker_id;
@@ -36,15 +47,19 @@ typedef struct ODP_ALIGNED_CACHE {
 	uint64_t tx_pkt;
 } worker_stat_t;
 
+typedef struct queue_context_t {
+	odp_pktout_queue_t dst_pktout;
+	uint8_t dst_pktio;
+	uint8_t dst_queue;
+	uint8_t src_pktio;
+	uint8_t src_queue;
+} queue_context_t;
+
 typedef struct {
 	volatile int  stop_workers;
 	odp_barrier_t worker_start;
 
-	struct {
-		int num_worker;
-		int num_pktio;
-		uint8_t collect_stat;
-	} opt;
+	test_options_t opt;
 
 	int max_workers;
 	odp_cpumask_t cpumask;
@@ -56,24 +71,26 @@ typedef struct {
 	uint32_t   pkt_len;
 	uint32_t   pkt_num;
 
-	unsigned int num_input_queues;
-	unsigned int num_output_queues;
-
 	struct {
-		char name[MAX_PKTIO_NAME + 1];
 		odp_pktio_t pktio;
 		int pktio_index;
 		int started;
 		odph_ethaddr_t my_addr;
 		odp_queue_t input_queue[MAX_PKTIO_QUEUES];
 		odp_pktout_queue_t pktout[MAX_PKTIO_QUEUES];
+		queue_context_t queue_context[MAX_PKTIO_QUEUES];
 
 	} pktio[MAX_PKTIOS];
 
-	worker_arg_t worker_arg[MAX_WORKERS];
+	struct {
+		odp_timer_pool_t timer_pool;
+		odp_pool_t       timeout_pool;
+		uint64_t         timeout_tick;
+		odp_timer_t      timer[MAX_PKTIOS][MAX_PKTIO_QUEUES];
 
-	/* Maps pktio input index to pktio[] index for output */
-	uint8_t pktio_map[MAX_PKTIO_INDEXES];
+	} timer;
+
+	worker_arg_t worker_arg[MAX_WORKERS];
 
 	worker_stat_t worker_stat[MAX_WORKERS];
 	uint64_t rx_pkt_sum;
@@ -110,8 +127,10 @@ static inline void fill_eth_addr(odp_packet_t pkt[], int num,
 static int worker_thread(void *arg)
 {
 	odp_event_t ev[BURST_SIZE];
-	int num, sent, drop, in, out;
+	int num, sent, drop, out;
 	odp_pktout_queue_t pktout;
+	odp_queue_t queue;
+	queue_context_t *queue_context;
 	worker_arg_t *worker_arg = arg;
 	test_global_t *test_global = worker_arg->test_global_ptr;
 	int worker_id = worker_arg->worker_id;
@@ -125,7 +144,7 @@ static int worker_thread(void *arg)
 	while (1) {
 		odp_packet_t pkt[BURST_SIZE];
 
-		num = odp_schedule_multi(NULL, ODP_SCHED_NO_WAIT,
+		num = odp_schedule_multi(&queue, ODP_SCHED_NO_WAIT,
 					 ev, BURST_SIZE);
 
 		polls++;
@@ -139,11 +158,135 @@ static int worker_thread(void *arg)
 		if (num <= 0)
 			continue;
 
+		queue_context = odp_queue_context(queue);
+
+		if (DEBUG_PRINT)
+			printf("worker %i: [%i/%i] -> [%i/%i], %i packets\n",
+			       worker_id,
+			       queue_context->src_pktio,
+			       queue_context->src_queue,
+			       queue_context->dst_pktio,
+			       queue_context->dst_queue, num);
+
 		odp_packet_from_event_multi(pkt, ev, num);
 
-		in     = odp_packet_input_index(pkt[0]);
-		out    = test_global->pktio_map[in];
-		pktout = test_global->pktio[out].pktout[worker_id];
+		pktout = queue_context->dst_pktout;
+		out    = queue_context->dst_pktio;
+
+		fill_eth_addr(pkt, num, test_global, out);
+
+		sent = odp_pktout_send(pktout, pkt, num);
+
+		if (odp_unlikely(sent < 0))
+			sent = 0;
+
+		drop = num - sent;
+
+		if (odp_unlikely(drop))
+			odp_packet_free_multi(&pkt[sent], drop);
+
+		if (odp_unlikely(test_global->opt.collect_stat)) {
+			test_global->worker_stat[worker_id].rx_pkt += num;
+			test_global->worker_stat[worker_id].tx_pkt += sent;
+		}
+	}
+
+	printf("Worker %i stopped\n", worker_id);
+
+	return 0;
+}
+
+static int worker_thread_timers(void *arg)
+{
+	odp_event_t ev[BURST_SIZE];
+	int num, sent, drop, out, tmos, i, src_pktio, src_queue;
+	odp_pktout_queue_t pktout;
+	odp_queue_t queue;
+	queue_context_t *queue_context;
+	odp_timer_t timer;
+	odp_timer_set_t ret;
+	worker_arg_t *worker_arg = arg;
+	test_global_t *test_global = worker_arg->test_global_ptr;
+	int worker_id = worker_arg->worker_id;
+	uint32_t polls = 0;
+	uint64_t tick = test_global->timer.timeout_tick;
+
+	printf("Worker (timers) %i started\n", worker_id);
+
+	/* Wait for other workers to start */
+	odp_barrier_wait(&test_global->worker_start);
+
+	while (1) {
+		odp_packet_t pkt[BURST_SIZE];
+
+		num = odp_schedule_multi(&queue, ODP_SCHED_NO_WAIT,
+					 ev, BURST_SIZE);
+
+		polls++;
+
+		if (polls == CHECK_PERIOD) {
+			polls = 0;
+			if (test_global->stop_workers)
+				break;
+		}
+
+		if (num <= 0)
+			continue;
+
+		tmos = 0;
+		queue_context = odp_queue_context(queue);
+		src_pktio = queue_context->src_pktio;
+		src_queue = queue_context->src_queue;
+		timer = test_global->timer.timer[src_pktio][src_queue];
+
+		for (i = 0; i < num; i++) {
+			if (odp_unlikely(odp_event_type(ev[i]) ==
+					 ODP_EVENT_TIMEOUT)) {
+				tmos++;
+				ret = odp_timer_set_rel(timer, tick, &ev[i]);
+
+				if (odp_unlikely(ret != ODP_TIMER_SUCCESS)) {
+					/* Should never happen */
+					printf("Expired timer reset failed\n");
+					odp_event_free(ev[i]);
+				}
+
+				if (odp_unlikely(tmos > 1)) {
+					/* Should never happen */
+					printf("Too many timeouts\n");
+				}
+			} else {
+				pkt[i - tmos] = odp_packet_from_event(ev[i]);
+			}
+		}
+
+		if (tmos == 0) {
+			/* Reset timer with existing timeout event */
+			ret = odp_timer_set_rel(timer, tick, NULL);
+
+			if (odp_unlikely(ret != ODP_TIMER_SUCCESS &&
+					 ret != ODP_TIMER_TOOEARLY)) {
+				/* Should never happen. Reset should either
+				 * succeed or be too close to timer expiration
+				 * in which case timeout event will be received
+				 * soon. */
+				printf("Timer reset failed %i\n", ret);
+			}
+		}
+
+		num = num - tmos;
+
+		if (DEBUG_PRINT)
+			printf("worker %i: [%i/%i] -> [%i/%i], %i packets "
+			       "%i timeouts\n",
+			       worker_id,
+			       queue_context->src_pktio,
+			       queue_context->src_queue,
+			       queue_context->dst_pktio,
+			       queue_context->dst_queue, num, tmos);
+
+		pktout = queue_context->dst_pktout;
+		out    = queue_context->dst_pktio;
 
 		fill_eth_addr(pkt, num, test_global, out);
 
@@ -189,29 +332,36 @@ static void print_usage(const char *progname)
 	       "Usage: %s [options]\n"
 	       "\n"
 	       "OPTIONS:\n"
-	       "  -i, --interface <name>  Packet IO interfaces (comma-separated, no spaces)\n"
-	       "  -c, --count <number>    Worker thread count. Default: 1\n"
-	       "  -s, --stat              Collect statistics.\n"
-	       "  -h, --help              Display help and exit.\n\n",
+	       "  -i, --interface <name>   Packet IO interfaces (comma-separated, no spaces)\n"
+	       "  -c, --num_cpu <number>   Worker thread count. Default: 1\n"
+	       "  -q, --num_queue <number> Number of pktio queues. Default: Worker thread count\n"
+	       "  -t, --timeout <number>   Flow inactivity timeout (in usec) per packet. Default: 0 (don't use timers)\n"
+	       "  -s, --stat               Collect statistics.\n"
+	       "  -h, --help               Display help and exit.\n\n",
 	       NO_PATH(progname));
 }
 
-static int parse_options(int argc, char *argv[], test_global_t *test_global)
+static int parse_options(int argc, char *argv[], test_options_t *test_options)
 {
 	int i, opt, long_index;
 	char *name, *str;
 	int len, str_len;
 	const struct option longopts[] = {
 		{"interface", required_argument, NULL, 'i'},
-		{"count",     required_argument, NULL, 'c'},
+		{"num_cpu",   required_argument, NULL, 'c'},
+		{"num_queue", required_argument, NULL, 'q'},
+		{"timeout",   required_argument, NULL, 't'},
 		{"stat",      no_argument,       NULL, 's'},
 		{"help",      no_argument,       NULL, 'h'},
 		{NULL, 0, NULL, 0}
 	};
-	const char *shortopts =  "+i:c:sh";
+	const char *shortopts =  "+i:c:q:t:sh";
 	int ret = 0;
 
-	test_global->opt.num_worker = 1;
+	memset(test_options, 0, sizeof(test_options_t));
+
+	test_options->num_worker = 1;
+	test_options->num_pktio_queue = 0;
 
 	/* let helper collect its own arguments (e.g. --odph_proc) */
 	odph_parse_options(argc, argv, shortopts, longopts);
@@ -245,20 +395,26 @@ static int parse_options(int argc, char *argv[], test_global_t *test_global)
 					break;
 				}
 
-				name = test_global->pktio[i].name;
+				name = test_options->pktio_name[i];
 				memcpy(name, str, len);
 				str += len + 1;
 				i++;
 			}
 
-			test_global->opt.num_pktio = i;
+			test_options->num_pktio = i;
 
 			break;
 		case 'c':
-			test_global->opt.num_worker = atoi(optarg);
+			test_options->num_worker = atoi(optarg);
+			break;
+		case 'q':
+			test_options->num_pktio_queue = atoi(optarg);
+			break;
+		case 't':
+			test_options->timeout_us = atol(optarg);
 			break;
 		case 's':
-			test_global->opt.collect_stat = 1;
+			test_options->collect_stat = 1;
 			break;
 		case 'h':
 			print_usage(argv[0]);
@@ -269,6 +425,9 @@ static int parse_options(int argc, char *argv[], test_global_t *test_global)
 			break;
 		}
 	}
+
+	if (test_options->num_pktio_queue == 0)
+		test_options->num_pktio_queue = test_options->num_worker;
 
 	return ret;
 }
@@ -300,12 +459,6 @@ static int config_setup(test_global_t *test_global)
 		return -1;
 	}
 
-	if (MAX_PKTIO_INDEXES <= odp_pktio_max_index()) {
-		printf("Error: Larger pktio_map[] table needed: %u\n",
-		       odp_pktio_max_index());
-		return -1;
-	}
-
 	if (odp_pool_capability(&pool_capa)) {
 		printf("Error: Pool capability failed.\n");
 		return -1;
@@ -322,12 +475,6 @@ static int config_setup(test_global_t *test_global)
 
 	test_global->pkt_len = pkt_len;
 	test_global->pkt_num = pkt_num;
-
-	if (test_global->num_input_queues == 0)
-		test_global->num_input_queues = test_global->opt.num_worker;
-
-	if (test_global->num_output_queues == 0)
-		test_global->num_output_queues = test_global->opt.num_worker;
 
 	return 0;
 }
@@ -358,14 +505,14 @@ static void print_config(test_global_t *test_global)
 	       "  interface names:      ", test_global->opt.num_pktio);
 
 	for (i = 0; i < test_global->opt.num_pktio; i++)
-		printf(" %s", test_global->pktio[i].name);
+		printf(" %s", test_global->opt.pktio_name[i]);
 
 	printf("\n"
-	       "  num input queues:      %i\n"
-	       "  num output queues:     %i\n",
-	       test_global->num_input_queues, test_global->num_output_queues);
+	       "  queues per interface:  %i\n",
+	       test_global->opt.num_pktio_queue);
 
 	printf("  collect statistics:    %u\n", test_global->opt.collect_stat);
+	printf("  timeout usec:          %li\n", test_global->opt.timeout_us);
 
 	printf("\n");
 }
@@ -417,13 +564,13 @@ static int open_pktios(test_global_t *test_global)
 	odp_pktin_queue_param_t pktin_param;
 	odp_pktout_queue_param_t pktout_param;
 	odp_schedule_sync_t sched_sync;
-	unsigned int num_input, num_output;
+	unsigned int num_queue;
 	char *name;
 	int i, num_pktio, ret;
+	unsigned int j;
 
-	num_pktio  = test_global->opt.num_pktio;
-	num_input  = test_global->num_input_queues;
-	num_output = test_global->num_output_queues;
+	num_pktio = test_global->opt.num_pktio;
+	num_queue = test_global->opt.num_pktio_queue;
 
 	odp_pool_param_init(&pool_param);
 	pool_param.pkt.seg_len = MIN_PKT_SEG_LEN;
@@ -451,7 +598,7 @@ static int open_pktios(test_global_t *test_global)
 
 	/* Open and configure interfaces */
 	for (i = 0; i < num_pktio; i++) {
-		name  = test_global->pktio[i].name;
+		name  = test_global->opt.pktio_name[i];
 		pktio = odp_pktio_open(name, pool, &pktio_param);
 
 		if (pktio == ODP_PKTIO_INVALID) {
@@ -477,15 +624,15 @@ static int open_pktios(test_global_t *test_global)
 			return -1;
 		}
 
-		if (num_input > pktio_capa.max_input_queues) {
+		if (num_queue > pktio_capa.max_input_queues) {
 			printf("Error (%s): Too many input queues: %u\n",
-			       name, num_input);
+			       name, num_queue);
 			return -1;
 		}
 
-		if (num_output > pktio_capa.max_output_queues) {
+		if (num_queue > pktio_capa.max_output_queues) {
 			printf("Error (%s): Too many output queues: %u\n",
-			       name, num_output);
+			       name, num_queue);
 			return -1;
 		}
 
@@ -500,12 +647,12 @@ static int open_pktios(test_global_t *test_global)
 		pktin_param.queue_param.sched.sync  = sched_sync;
 		pktin_param.queue_param.sched.group = ODP_SCHED_GROUP_ALL;
 
-		if (num_input > 1) {
+		if (num_queue > 1) {
 			pktin_param.hash_enable = 1;
 			pktin_param.hash_proto.proto.ipv4_udp = 1;
 		}
 
-		pktin_param.num_queues = num_input;
+		pktin_param.num_queues = num_queue;
 
 		if (odp_pktin_queue_config(pktio, &pktin_param)) {
 			printf("Error (%s): Pktin config failed.\n", name);
@@ -514,13 +661,28 @@ static int open_pktios(test_global_t *test_global)
 
 		if (odp_pktin_event_queue(pktio,
 					  test_global->pktio[i].input_queue,
-					  num_input) != (int)num_input) {
+					  num_queue) != (int)num_queue) {
 			printf("Error (%s): Input queue query failed.\n", name);
 			return -1;
 		}
 
+		for (j = 0; j < num_queue; j++) {
+			odp_queue_t queue;
+			void *ctx;
+			uint32_t len = sizeof(queue_context_t);
+
+			queue = test_global->pktio[i].input_queue[j];
+			ctx = &test_global->pktio[i].queue_context[j];
+
+			if (odp_queue_context_set(queue, ctx, len)) {
+				printf("Error (%s): Queue ctx set failed.\n",
+				       name);
+				return -1;
+			}
+		}
+
 		odp_pktout_queue_param_init(&pktout_param);
-		pktout_param.num_queues  = num_output;
+		pktout_param.num_queues  = num_queue;
 		pktout_param.op_mode     = ODP_PKTIO_OP_MT_UNSAFE;
 
 		if (odp_pktout_queue_config(pktio, &pktout_param)) {
@@ -530,7 +692,7 @@ static int open_pktios(test_global_t *test_global)
 
 		if (odp_pktout_queue(pktio,
 				     test_global->pktio[i].pktout,
-				     num_output) != (int)num_output) {
+				     num_queue) != (int)num_queue) {
 			printf("Error (%s): Output queue query failed.\n",
 			       name);
 			return -1;
@@ -543,20 +705,30 @@ static int open_pktios(test_global_t *test_global)
 static void link_pktios(test_global_t *test_global)
 {
 	int i, num_pktio, input, output;
+	int num_queue;
+	odp_pktout_queue_t pktout;
+	queue_context_t *ctx;
 
 	num_pktio = test_global->opt.num_pktio;
+	num_queue = test_global->opt.num_pktio_queue;
 
 	printf("Forwarding table (pktio indexes)\n");
 
 	/* If single interface loopback, otherwise forward to the next
 	 * interface. */
-	for (i = 0; i < num_pktio; i++) {
-		input  = test_global->pktio[i].pktio_index;
-		output = (i + 1) % num_pktio;
-		test_global->pktio_map[input] = output;
-		printf("  input %i, output %i\n",
-		       input,
-		       test_global->pktio[output].pktio_index);
+	for (input = 0; input < num_pktio; input++) {
+		output = (input + 1) % num_pktio;
+		printf("  input %i, output %i\n", input, output);
+
+		for (i = 0; i < num_queue; i++) {
+			ctx = &test_global->pktio[input].queue_context[i];
+			pktout = test_global->pktio[output].pktout[i];
+			ctx->dst_pktout = pktout;
+			ctx->dst_pktio  = output;
+			ctx->dst_queue  = i;
+			ctx->src_pktio  = input;
+			ctx->src_queue  = i;
+		}
 	}
 
 	printf("\n");
@@ -569,7 +741,7 @@ static int start_pktios(test_global_t *test_global)
 	for (i = 0; i < test_global->opt.num_pktio; i++) {
 		if (odp_pktio_start(test_global->pktio[i].pktio)) {
 			printf("Error (%s): Pktio start failed.\n",
-			       test_global->pktio[i].name);
+			       test_global->opt.pktio_name[i]);
 
 			return -1;
 		}
@@ -594,7 +766,7 @@ static int stop_pktios(test_global_t *test_global)
 
 		if (odp_pktio_stop(pktio)) {
 			printf("Error (%s): Pktio stop failed.\n",
-			       test_global->pktio[i].name);
+			       test_global->opt.pktio_name[i]);
 			ret = -1;
 		}
 	}
@@ -632,7 +804,7 @@ static int close_pktios(test_global_t *test_global)
 
 		if (odp_pktio_close(pktio)) {
 			printf("Error (%s): Pktio close failed.\n",
-			       test_global->pktio[i].name);
+			       test_global->opt.pktio_name[i]);
 			ret = -1;
 		}
 	}
@@ -650,6 +822,178 @@ static int close_pktios(test_global_t *test_global)
 	return ret;
 }
 
+static int create_timers(test_global_t *test_global)
+{
+	int num_timer, num_pktio, num_queue, i, j;
+	odp_pool_t pool;
+	odp_pool_param_t pool_param;
+	odp_timer_pool_t timer_pool;
+	odp_timer_pool_param_t timer_param;
+	odp_timer_capability_t timer_capa;
+	odp_timer_t timer;
+	odp_queue_t queue;
+	uint64_t res_ns, tick;
+	uint64_t timeout_ns = 1000 * test_global->opt.timeout_us;
+
+	num_pktio = test_global->opt.num_pktio;
+	num_queue = test_global->opt.num_pktio_queue;
+	num_timer = num_pktio * num_queue;
+
+	/* Always init globals for destroy calls */
+	test_global->timer.timer_pool = ODP_TIMER_POOL_INVALID;
+	test_global->timer.timeout_pool = ODP_POOL_INVALID;
+
+	for (i = 0; i < num_pktio; i++)
+		for (j = 0; j < num_queue; j++)
+			test_global->timer.timer[i][j] = ODP_TIMER_INVALID;
+
+	/* Timers not used */
+	if (test_global->opt.timeout_us == 0)
+		return 0;
+
+	if (odp_timer_capability(ODP_CLOCK_CPU, &timer_capa)) {
+		printf("Timer capa failed\n");
+		return -1;
+	}
+
+	res_ns = timeout_ns / 10;
+
+	if (timer_capa.highest_res_ns > res_ns) {
+		printf("Timeout too short. Min timeout %" PRIu64 " usec\n",
+		       timer_capa.highest_res_ns / 100);
+		return -1;
+	}
+
+	memset(&timer_param, 0, sizeof(odp_timer_pool_param_t));
+
+	timer_param.res_ns     = res_ns;
+	timer_param.min_tmo    = timeout_ns;
+	timer_param.max_tmo    = timeout_ns;
+	timer_param.num_timers = num_timer;
+	timer_param.clk_src    = ODP_CLOCK_CPU;
+
+	timer_pool = odp_timer_pool_create("sched_pktio_timer", &timer_param);
+
+	if (timer_pool == ODP_TIMER_POOL_INVALID) {
+		printf("Timer pool create failed\n");
+		return -1;
+	}
+
+	test_global->timer.timer_pool = timer_pool;
+	tick = odp_timer_ns_to_tick(timer_pool, timeout_ns);
+	test_global->timer.timeout_tick = tick;
+
+	odp_timer_pool_start();
+
+	for (i = 0; i < num_pktio; i++) {
+		for (j = 0; j < num_queue; j++) {
+			queue = test_global->pktio[i].input_queue[j];
+			timer = odp_timer_alloc(timer_pool, queue, NULL);
+
+			if (timer == ODP_TIMER_INVALID) {
+				printf("Timer alloc failed.\n");
+				return -1;
+			}
+
+			test_global->timer.timer[i][j] = timer;
+		}
+	}
+
+	odp_pool_param_init(&pool_param);
+	pool_param.type    = ODP_POOL_TIMEOUT;
+	pool_param.tmo.num = num_timer;
+
+	pool = odp_pool_create("timeout pool", &pool_param);
+
+	if (pool == ODP_POOL_INVALID) {
+		printf("Timeout pool create failed.\n");
+		return -1;
+	}
+
+	test_global->timer.timeout_pool = pool;
+
+	return 0;
+}
+
+static int start_timers(test_global_t *test_global)
+{
+	int i, j;
+	odp_event_t event;
+	odp_timeout_t timeout;
+	odp_timer_t timer;
+	odp_timer_set_t ret;
+	uint64_t timeout_tick = test_global->timer.timeout_tick;
+	int num_pktio = test_global->opt.num_pktio;
+	int num_queue = test_global->opt.num_pktio_queue;
+	odp_pool_t pool = test_global->timer.timeout_pool;
+
+	/* Timers not used */
+	if (test_global->opt.timeout_us == 0)
+		return 0;
+
+	/* Delay the first timeout so that workers have time to startup */
+	timeout_tick += odp_timer_ns_to_tick(test_global->timer.timer_pool,
+					     TIMEOUT_OFFSET_NS);
+
+	for (i = 0; i < num_pktio; i++) {
+		for (j = 0; j < num_queue; j++) {
+			timer = test_global->timer.timer[i][j];
+
+			timeout = odp_timeout_alloc(pool);
+			if (timeout == ODP_TIMEOUT_INVALID) {
+				printf("Timeout alloc failed\n");
+				return -1;
+			}
+
+			event = odp_timeout_to_event(timeout);
+
+			ret = odp_timer_set_rel(timer, timeout_tick, &event);
+
+			if (ret != ODP_TIMER_SUCCESS) {
+				printf("Timer set failed\n");
+				return -1;
+			}
+		}
+	}
+
+	return 0;
+}
+
+static void destroy_timers(test_global_t *test_global)
+{
+	int i, j;
+	odp_event_t event;
+	odp_timer_t timer;
+	int num_pktio = test_global->opt.num_pktio;
+	int num_queue = test_global->opt.num_pktio_queue;
+	odp_timer_pool_t timer_pool = test_global->timer.timer_pool;
+	odp_pool_t pool = test_global->timer.timeout_pool;
+
+	if (timer_pool == ODP_TIMER_POOL_INVALID)
+		return;
+
+	for (i = 0; i < num_pktio; i++) {
+		for (j = 0; j < num_queue; j++) {
+			timer = test_global->timer.timer[i][j];
+
+			if (timer == ODP_TIMER_INVALID)
+				break;
+
+			event = odp_timer_free(timer);
+
+			if (event != ODP_EVENT_INVALID)
+				odp_event_free(event);
+		}
+	}
+
+	if (pool != ODP_POOL_INVALID) {
+		if (odp_pool_destroy(pool))
+			printf("Timeout pool destroy failed\n");
+	}
+
+	odp_timer_pool_destroy(timer_pool);
+}
+
 static void start_workers(odph_odpthread_t thread[],
 			  test_global_t *test_global)
 {
@@ -659,7 +1003,12 @@ static void start_workers(odph_odpthread_t thread[],
 	int num = test_global->opt.num_worker;
 
 	memset(&param, 0, sizeof(odph_odpthread_params_t));
-	param.start    = worker_thread;
+
+	if (test_global->opt.timeout_us)
+		param.start = worker_thread_timers;
+	else
+		param.start = worker_thread;
+
 	param.thr_type = ODP_THREAD_WORKER;
 	param.instance = test_global->instance;
 
@@ -691,17 +1040,24 @@ int main(int argc, char *argv[])
 	odp_shm_t shm;
 	odp_time_t t1, t2;
 	odph_odpthread_t thread[MAX_WORKERS];
+	test_options_t test_options;
 	int ret = 0;
 
 	signal(SIGINT, sig_handler);
+
+	if (parse_options(argc, argv, &test_options))
+		return -1;
 
 	/* List features not to be used (may optimize performance) */
 	odp_init_param_init(&init);
 	init.not_used.feat.cls    = 1;
 	init.not_used.feat.crypto = 1;
 	init.not_used.feat.ipsec  = 1;
-	init.not_used.feat.timer  = 1;
 	init.not_used.feat.tm     = 1;
+	init.not_used.feat.timer  = 1;
+
+	if (test_options.timeout_us)
+		init.not_used.feat.timer = 0;
 
 	/* Init ODP before calling anything else */
 	if (odp_init_global(&instance, &init, NULL)) {
@@ -730,8 +1086,7 @@ int main(int argc, char *argv[])
 	test_global->instance = instance;
 	test_global->pool     = ODP_POOL_INVALID;
 
-	if (parse_options(argc, argv, test_global))
-		goto quit;
+	memcpy(&test_global->opt, &test_options, sizeof(test_options_t));
 
 	odp_sys_info_print();
 
@@ -744,6 +1099,12 @@ int main(int argc, char *argv[])
 		goto quit;
 
 	link_pktios(test_global);
+
+	if (create_timers(test_global))
+		goto quit;
+
+	if (start_timers(test_global))
+		goto quit;
 
 	odp_barrier_init(&test_global->worker_start,
 			 test_global->opt.num_worker + 1);
@@ -769,6 +1130,7 @@ quit:
 	stop_pktios(test_global);
 	empty_queues();
 	close_pktios(test_global);
+	destroy_timers(test_global);
 
 	if (test_global->opt.collect_stat) {
 		print_stat(test_global, odp_time_diff_ns(t2, t1));
