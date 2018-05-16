@@ -60,10 +60,6 @@ static int odp_init_dpdk(const char *cmdline)
 	int dpdk_argc;
 	char *full_cmdline;
 	int i, cmdlen;
-	odp_cpumask_t mask;
-	char mask_str[ODP_CPUMASK_STR_SIZE];
-	int32_t masklen;
-	cpu_set_t original_cpuset;
 
 	if (cmdline == NULL) {
 		cmdline = getenv("ODP_PLATFORM_PARAMS");
@@ -71,40 +67,17 @@ static int odp_init_dpdk(const char *cmdline)
 			cmdline = "";
 	}
 
-	CPU_ZERO(&original_cpuset);
-	i = pthread_getaffinity_np(pthread_self(),
-				   sizeof(original_cpuset), &original_cpuset);
-	if (i != 0) {
-		ODP_ERR("Failed to read thread affinity: %d\n", i);
-		return -1;
-	}
-
-	odp_cpumask_zero(&mask);
-	for (i = 0; i < CPU_SETSIZE; i++) {
-		if (CPU_ISSET(i, &original_cpuset)) {
-			odp_cpumask_set(&mask, i);
-			break;
-		}
-	}
-	masklen = odp_cpumask_to_str(&mask, mask_str, ODP_CPUMASK_STR_SIZE);
-
-	if (masklen < 0) {
-		ODP_ERR("CPU mask error: d\n", masklen);
-		return -1;
-	}
-
-	/* masklen includes the terminating null as well */
-	full_cmdline = calloc(1, strlen("odpdpdk -c ") + masklen +
-			      strlen(" ") + strlen(cmdline));
+	full_cmdline = calloc(1, strlen("odpdpdk ") +  strlen(cmdline) + 1);
 
 	/* first argument is facility log, simply bind it to odpdpdk for now.*/
-	cmdlen = sprintf(full_cmdline, "odpdpdk -c %s %s", mask_str, cmdline);
+	cmdlen = sprintf(full_cmdline, "odpdpdk %s", cmdline);
 
 	for (i = 0, dpdk_argc = 1; i < cmdlen; ++i) {
 		if (isspace(full_cmdline[i]))
 			++dpdk_argc;
 	}
-	dpdk_argv = malloc(dpdk_argc * sizeof(char *));
+	/* Extra byte fixes obscure bug in rte_strsplit */
+	dpdk_argv = malloc((dpdk_argc + 1) * sizeof(char *));
 
 	dpdk_argc = rte_strsplit(full_cmdline, strlen(full_cmdline), dpdk_argv,
 				 dpdk_argc, ' ');
@@ -123,11 +96,6 @@ static int odp_init_dpdk(const char *cmdline)
 		ODP_DBG("Passed: %d Consumed %d\n", dpdk_argc, i + 1);
 	}
 	ODP_DBG("rte_eal_init OK\n");
-
-	i = pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t),
-				   &original_cpuset);
-	if (i)
-		ODP_ERR("Failed to reset thread affinity: %d\n", i);
 
 	return 0;
 }
