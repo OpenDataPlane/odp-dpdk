@@ -32,6 +32,7 @@ if [ `stat -c %s pcapout.pcap` -ne `stat -c %s  ${PCAP_IN}` ]; then
 fi
 
 rm -f pcapout.pcap
+unset ODP_PLATFORM_PARAMS
 
 ./odp_l2fwd_simple${EXEEXT} null:0 null:1 \
 	02:00:00:00:00:01 02:00:00:00:00:02 &
