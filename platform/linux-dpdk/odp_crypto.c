@@ -35,6 +35,7 @@
 /* default number supported by DPDK crypto */
 #define MAX_SESSIONS 2048
 #define NB_MBUF  8192
+#define NB_DESC_PER_QUEUE_PAIR  4096
 #define MAX_IV_LENGTH 16
 #define AES_CCM_AAD_OFFSET 18
 #define IV_OFFSET	(sizeof(struct rte_crypto_op) + \
@@ -380,7 +381,7 @@ int odp_crypto_init_global(void)
 			return -1;
 		}
 
-		qp_conf.nb_descriptors = NB_MBUF;
+		qp_conf.nb_descriptors = NB_DESC_PER_QUEUE_PAIR;
 
 		for (queue_pair = 0; queue_pair < nb_queue_pairs;
 							queue_pair++) {
