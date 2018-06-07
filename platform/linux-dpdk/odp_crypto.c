@@ -35,10 +35,15 @@
 /* default number supported by DPDK crypto */
 #define MAX_SESSIONS 2048
 #define NB_MBUF  8192
+#define NB_DESC_PER_QUEUE_PAIR  4096
 #define MAX_IV_LENGTH 16
 #define AES_CCM_AAD_OFFSET 18
 #define IV_OFFSET	(sizeof(struct rte_crypto_op) + \
 			 sizeof(struct rte_crypto_sym_op))
+
+/* Max number of rte_cryptodev_dequeue_burst() retries (1 usec wait between
+ * retries). */
+#define MAX_DEQ_RETRIES 100000
 
 typedef struct crypto_session_entry_s {
 	struct crypto_session_entry_s *next;
@@ -380,7 +385,7 @@ int odp_crypto_init_global(void)
 			return -1;
 		}
 
-		qp_conf.nb_descriptors = NB_MBUF;
+		qp_conf.nb_descriptors = NB_DESC_PER_QUEUE_PAIR;
 
 		for (queue_pair = 0; queue_pair < nb_queue_pairs;
 							queue_pair++) {
@@ -542,15 +547,13 @@ int odp_crypto_capability(odp_crypto_capability_t *capability)
 		struct rte_cryptodev_info dev_info;
 
 		rte_cryptodev_info_get(cdev_id, &dev_info);
+		capability_process(&dev_info, &capability->ciphers,
+				   &capability->auths);
 		if ((dev_info.feature_flags &
-		     RTE_CRYPTODEV_FF_HW_ACCELERATED))
-			capability_process(&dev_info,
-					   &capability->hw_ciphers,
-					   &capability->hw_auths);
-		else
-			capability_process(&dev_info,
-					   &capability->ciphers,
-					   &capability->auths);
+		     RTE_CRYPTODEV_FF_HW_ACCELERATED)) {
+			capability->hw_ciphers = capability->ciphers;
+			capability->hw_auths = capability->auths;
+		}
 
 		/* Read from the device with the lowest max_nb_sessions */
 		if (capability->max_sessions > dev_info.sym.max_nb_sessions)
@@ -1721,6 +1724,7 @@ int odp_crypto_int(odp_packet_t pkt_in,
 
 	if (rc_cipher == ODP_CRYPTO_ALG_ERR_NONE &&
 	    rc_auth == ODP_CRYPTO_ALG_ERR_NONE) {
+		int retry_count = 0;
 		int queue_pair = odp_cpu_id();
 		int rc;
 
@@ -1735,8 +1739,18 @@ int odp_crypto_int(odp_packet_t pkt_in,
 			goto err_op_free;
 		}
 
-		rc = rte_cryptodev_dequeue_burst(session->cdev_id,
-						 queue_pair, &op, 1);
+		/* There may be a delay until the crypto operation is
+		 * completed. */
+		while (1) {
+			rc = rte_cryptodev_dequeue_burst(session->cdev_id,
+							 queue_pair, &op, 1);
+			if (rc == 0 && retry_count < MAX_DEQ_RETRIES) {
+				odp_time_wait_ns(ODP_TIME_USEC_IN_NS);
+				retry_count++;
+				continue;
+			}
+			break;
+		}
 		if (rc == 0) {
 			ODP_ERR("Failed to dequeue packet");
 			goto err_op_free;
