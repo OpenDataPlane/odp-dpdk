@@ -41,6 +41,10 @@
 #define IV_OFFSET	(sizeof(struct rte_crypto_op) + \
 			 sizeof(struct rte_crypto_sym_op))
 
+/* Max number of rte_cryptodev_dequeue_burst() retries (1 usec wait between
+ * retries). */
+#define MAX_DEQ_RETRIES 100000
+
 typedef struct crypto_session_entry_s {
 	struct crypto_session_entry_s *next;
 
@@ -1720,6 +1724,7 @@ int odp_crypto_int(odp_packet_t pkt_in,
 
 	if (rc_cipher == ODP_CRYPTO_ALG_ERR_NONE &&
 	    rc_auth == ODP_CRYPTO_ALG_ERR_NONE) {
+		int retry_count = 0;
 		int queue_pair = odp_cpu_id();
 		int rc;
 
@@ -1734,8 +1739,18 @@ int odp_crypto_int(odp_packet_t pkt_in,
 			goto err_op_free;
 		}
 
-		rc = rte_cryptodev_dequeue_burst(session->cdev_id,
-						 queue_pair, &op, 1);
+		/* There may be a delay until the crypto operation is
+		 * completed. */
+		while (1) {
+			rc = rte_cryptodev_dequeue_burst(session->cdev_id,
+							 queue_pair, &op, 1);
+			if (rc == 0 && retry_count < MAX_DEQ_RETRIES) {
+				odp_time_wait_ns(ODP_TIME_USEC_IN_NS);
+				retry_count++;
+				continue;
+			}
+			break;
+		}
 		if (rc == 0) {
 			ODP_ERR("Failed to dequeue packet");
 			goto err_op_free;
