@@ -543,15 +543,13 @@ int odp_crypto_capability(odp_crypto_capability_t *capability)
 		struct rte_cryptodev_info dev_info;
 
 		rte_cryptodev_info_get(cdev_id, &dev_info);
+		capability_process(&dev_info, &capability->ciphers,
+				   &capability->auths);
 		if ((dev_info.feature_flags &
-		     RTE_CRYPTODEV_FF_HW_ACCELERATED))
-			capability_process(&dev_info,
-					   &capability->hw_ciphers,
-					   &capability->hw_auths);
-		else
-			capability_process(&dev_info,
-					   &capability->ciphers,
-					   &capability->auths);
+		     RTE_CRYPTODEV_FF_HW_ACCELERATED)) {
+			capability->hw_ciphers = capability->ciphers;
+			capability->hw_auths = capability->auths;
+		}
 
 		/* Read from the device with the lowest max_nb_sessions */
 		if (capability->max_sessions > dev_info.sym.max_nb_sessions)
