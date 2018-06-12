@@ -25,9 +25,6 @@
  * - Remove "struct timer_pool_s"
  */
 
-/* TODO: Add this to queue interface. Sets a queue to poll timer on dequeue */
-void queue_enable_timer_poll(odp_queue_t queue);
-
 /* Timer states */
 #define NOT_TICKING 0
 #define EXPIRED     1
@@ -315,6 +312,21 @@ uint64_t odp_timer_pool_to_u64(odp_timer_pool_t tp)
 	return (uint64_t)(uintptr_t)tp;
 }
 
+static int timer_queue_deq_multi(queue_t q_int, odp_buffer_hdr_t *buf_hdr[],
+				 int num)
+{
+	timer_run();
+
+	return queue_fn->deq_multi(q_int, buf_hdr, num);
+}
+
+static odp_buffer_hdr_t *timer_queue_deq(queue_t q_int)
+{
+	timer_run();
+
+	return queue_fn->deq(q_int);
+}
+
 odp_timer_t odp_timer_alloc(odp_timer_pool_t tp,
 			    odp_queue_t queue,
 			    void *user_ptr)
@@ -348,8 +360,13 @@ odp_timer_t odp_timer_alloc(odp_timer_pool_t tp,
 
 	/* Enable timer polling from dequeue operation. Scheduler polls timer
 	 * by default. */
-	if (odp_queue_type(queue) == ODP_QUEUE_TYPE_PLAIN)
-		queue_enable_timer_poll(queue);
+	if (odp_queue_type(queue) == ODP_QUEUE_TYPE_PLAIN) {
+		queue_t q_int = queue_fn->from_ext(queue);
+
+		queue_fn->set_enq_deq_fn(q_int, NULL, NULL,
+					 timer_queue_deq,
+					 timer_queue_deq_multi);
+	}
 
 	odp_ticketlock_lock(&timer_pool->lock);
 
