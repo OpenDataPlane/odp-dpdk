@@ -1705,23 +1705,11 @@ static void crypto_fill_sym_param(crypto_session_entry_t *session,
 		*rc_auth = ODP_CRYPTO_ALG_ERR_IV_INVALID;
 	}
 
-	/* For SNOW3G algorithms, offset/length must be in bits */
-	if (cipher_xform->cipher.algo == RTE_CRYPTO_CIPHER_SNOW3G_UEA2) {
-		op->sym->cipher.data.offset = param->cipher_range.offset << 3;
-		op->sym->cipher.data.length = param->cipher_range.length << 3;
-	} else {
-		op->sym->cipher.data.offset = param->cipher_range.offset;
-		op->sym->cipher.data.length = param->cipher_range.length;
-	}
+	op->sym->cipher.data.offset = param->cipher_range.offset;
+	op->sym->cipher.data.length = param->cipher_range.length;
 
-	/* For SNOW3G algorithms, offset/length must be in bits */
-	if (auth_xform->auth.algo == RTE_CRYPTO_AUTH_SNOW3G_UIA2) {
-		op->sym->auth.data.offset = param->auth_range.offset << 3;
-		op->sym->auth.data.length = param->auth_range.length << 3;
-	} else {
-		op->sym->auth.data.offset = param->auth_range.offset;
-		op->sym->auth.data.length = param->auth_range.length;
-	}
+	op->sym->auth.data.offset = param->auth_range.offset;
+	op->sym->auth.data.length = param->auth_range.length;
 }
 
 static
