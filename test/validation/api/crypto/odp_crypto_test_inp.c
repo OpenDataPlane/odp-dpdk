@@ -453,18 +453,55 @@ static void alg_test(odp_crypto_op_t op,
 		}
 
 		CU_ASSERT(ok);
+		if (!ok) {
+			fprintf(stderr, "Failed iteration %s\n",
+					iteration == NORMAL_TEST ? "NORMAL" :
+					iteration == REPEAT_TEST ? "REPEAT" :
+					iteration == WRONG_DIGEST_TEST ? "WRONG DIGEST" :
+					"Unknown");
+		}
 
 		if (op == ODP_CRYPTO_OP_ENCODE) {
 			CU_ASSERT(!packet_cmp_mem(pkt, 0,
 						  ref->ciphertext,
 						  reflength));
+			if (packet_cmp_mem(pkt, 0,
+					   ref->ciphertext,
+					   reflength)) {
+				fprintf(stderr, "Failed cmp %s\n",
+					iteration == NORMAL_TEST ? "NORMAL" :
+					iteration == REPEAT_TEST ? "REPEAT" :
+					iteration == WRONG_DIGEST_TEST ? "WRONG DIGEST" :
+					"Unknown");
+				odp_packet_print_data(pkt, 0, reflength);
+			}
 			CU_ASSERT(!packet_cmp_mem(pkt, reflength,
 						  ref->digest,
 						  ref->digest_length));
+			if (packet_cmp_mem(pkt, reflength,
+					   ref->digest,
+					   ref->digest_length)) {
+				fprintf(stderr, "Failed digest cmp %s\n",
+					iteration == NORMAL_TEST ? "NORMAL" :
+					iteration == REPEAT_TEST ? "REPEAT" :
+					iteration == WRONG_DIGEST_TEST ? "WRONG DIGEST" :
+					"Unknown");
+				odp_packet_print_data(pkt, reflength, ref->digest_length);
+			}
 		} else {
 			CU_ASSERT(!packet_cmp_mem(pkt, 0,
 						  ref->plaintext,
 						  reflength));
+			if (packet_cmp_mem(pkt, 0,
+					   ref->plaintext,
+					   reflength)) {
+				fprintf(stderr, "Failed cmp %s\n",
+					iteration == NORMAL_TEST ? "NORMAL" :
+					iteration == REPEAT_TEST ? "REPEAT" :
+					iteration == WRONG_DIGEST_TEST ? "WRONG DIGEST" :
+					"Unknown");
+				odp_packet_print_data(pkt, 0, reflength);
+			}
 		}
 	}
 
@@ -647,6 +684,7 @@ static void check_alg(odp_crypto_op_t op,
 			continue;
 		}
 
+		fprintf(stderr, "Running iter %zd\n", idx);
 		alg_test(op, cipher_alg, auth_alg, &ref[idx], ovr_iv, bit_mode);
 
 		cipher_tested[cipher_idx] = true;
