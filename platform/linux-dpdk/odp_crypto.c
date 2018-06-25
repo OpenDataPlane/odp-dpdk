@@ -53,6 +53,7 @@ typedef struct crypto_session_entry_s {
 	struct rte_cryptodev_sym_session *rte_session;
 	struct rte_crypto_sym_xform cipher_xform;
 	struct rte_crypto_sym_xform auth_xform;
+	uint16_t cdev_nb_qpairs;
 	uint8_t cdev_id;
 	uint8_t cipher_iv_data[MAX_IV_LENGTH];
 	uint8_t auth_iv_data[MAX_IV_LENGTH];
@@ -62,6 +63,7 @@ typedef struct crypto_global_s {
 	odp_spinlock_t                lock;
 	uint8_t enabled_crypto_devs;
 	uint8_t enabled_crypto_dev_ids[RTE_CRYPTO_MAX_DEVS];
+	uint16_t enabled_crypto_dev_nb_qpairs[RTE_CRYPTO_MAX_DEVS];
 	crypto_session_entry_t *free;
 	crypto_session_entry_t sessions[MAX_SESSIONS];
 	int is_crypto_dev_initialized;
@@ -452,9 +454,11 @@ int odp_crypto_init_global(void)
 			return -1;
 		}
 
-		global->enabled_crypto_devs++;
-		global->enabled_crypto_dev_ids[global->enabled_crypto_devs - 1] =
+		global->enabled_crypto_dev_ids[global->enabled_crypto_devs] =
 			cdev_id;
+		global->enabled_crypto_dev_nb_qpairs[global->enabled_crypto_devs] =
+			nb_queue_pairs;
+		global->enabled_crypto_devs++;
 	}
 
 	/* create crypto op pool */
@@ -1398,6 +1402,7 @@ int odp_crypto_session_create(odp_crypto_session_param_t *param,
 
 	session->rte_session  = rte_session;
 	session->cdev_id = cdev_id;
+	session->cdev_nb_qpairs = global->enabled_crypto_dev_nb_qpairs[cdev_id];
 	session->cipher_xform = cipher_xform;
 	session->auth_xform = auth_xform;
 	if (param->cipher_iv.data)
@@ -1791,7 +1796,7 @@ int odp_crypto_int(odp_packet_t pkt_in,
 	if (rc_cipher == ODP_CRYPTO_ALG_ERR_NONE &&
 	    rc_auth == ODP_CRYPTO_ALG_ERR_NONE) {
 		int retry_count = 0;
-		int queue_pair = odp_cpu_id();
+		int queue_pair = odp_cpu_id() % session->cdev_nb_qpairs;
 		int rc;
 
 		/* Set crypto operation data parameters */
