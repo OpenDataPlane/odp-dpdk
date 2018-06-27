@@ -785,7 +785,11 @@ int odp_crypto_cipher_capability(odp_cipher_alg_t cipher,
 	if (cipher == ODP_CIPHER_ALG_NULL) {
 		if (num_copy >= 1)
 			memset(dst, 0, sizeof(odp_crypto_cipher_capability_t));
-		return 1;
+		if (num_copy >= 2) {
+			memset(&dst[1], 0, sizeof(odp_crypto_cipher_capability_t));
+			dst[1].bit_mode = true;
+		}
+		return 2;
 	}
 
 	if (cipher_is_aead(cipher))
@@ -1011,7 +1015,11 @@ int odp_crypto_auth_capability(odp_auth_alg_t auth,
 	if (auth == ODP_AUTH_ALG_NULL) {
 		if (num_copy >= 1)
 			memset(dst, 0, sizeof(odp_crypto_auth_capability_t));
-		return 1;
+		if (num_copy >= 2) {
+			memset(&dst[1], 0, sizeof(odp_crypto_auth_capability_t));
+			dst[1].bit_mode = true;
+		}
+		return 2;
 	}
 
 	if (auth_is_aead(auth))
