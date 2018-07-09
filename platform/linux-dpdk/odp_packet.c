@@ -1315,7 +1315,8 @@ error:
  * Parser helper function for IPv4
  */
 static inline uint8_t parse_ipv4(packet_parser_t *prs, const uint8_t **parseptr,
-				 uint32_t *offset, uint32_t frame_len)
+				 uint32_t *offset, uint32_t frame_len,
+				 odp_proto_chksums_t chksums)
 {
 	const _odp_ipv4hdr_t *ipv4 = (const _odp_ipv4hdr_t *)*parseptr;
 	uint32_t dstaddr = _odp_be_to_cpu_32(ipv4->dst_addr);
@@ -1329,6 +1330,15 @@ static inline uint8_t parse_ipv4(packet_parser_t *prs, const uint8_t **parseptr,
 			 (l3_len > frame_len - *offset))) {
 		prs->flags.ip_err = 1;
 		return 0;
+	}
+
+	if (chksums.chksum.ipv4) {
+		prs->input_flags.l3_chksum_done = 1;
+		if (odp_chksum_ones_comp16(ipv4, ihl * 4) != 0xffff) {
+			prs->flags.ip_err = 1;
+			prs->flags.l3_chksum_err = 1;
+			return 0;
+		}
 	}
 
 	*offset   += ihl * 4;
@@ -1461,7 +1471,8 @@ static inline
 int packet_parse_common_l3_l4(packet_parser_t *prs, const uint8_t *parseptr,
 			      uint32_t offset,
 			      uint32_t frame_len, uint32_t seg_len,
-			      int layer, uint16_t ethtype)
+			      int layer, uint16_t ethtype,
+			      odp_proto_chksums_t chksums)
 {
 	uint8_t  ip_proto;
 
@@ -1477,7 +1488,8 @@ int packet_parse_common_l3_l4(packet_parser_t *prs, const uint8_t *parseptr,
 	switch (ethtype) {
 	case _ODP_ETHTYPE_IPV4:
 		prs->input_flags.ipv4 = 1;
-		ip_proto = parse_ipv4(prs, &parseptr, &offset, frame_len);
+		ip_proto = parse_ipv4(prs, &parseptr, &offset, frame_len,
+				      chksums);
 		prs->l4_offset = offset;
 		break;
 
@@ -1565,7 +1577,7 @@ int packet_parse_common_l3_l4(packet_parser_t *prs, const uint8_t *parseptr,
  */
 int packet_parse_common(packet_parser_t *prs, const uint8_t *ptr,
 			uint32_t frame_len, uint32_t seg_len,
-			int layer)
+			int layer, odp_proto_chksums_t chksums)
 {
 	uint32_t offset;
 	uint16_t ethtype;
@@ -1583,7 +1595,7 @@ int packet_parse_common(packet_parser_t *prs, const uint8_t *ptr,
 	ethtype = parse_eth(prs, &parseptr, &offset, frame_len);
 
 	return packet_parse_common_l3_l4(prs, parseptr, offset, frame_len,
-					 seg_len, layer, ethtype);
+					 seg_len, layer, ethtype, chksums);
 }
 
 static inline int packet_ipv4_chksum(odp_packet_t pkt,
@@ -1742,13 +1754,15 @@ int _odp_packet_udp_chksum_insert(odp_packet_t pkt)
  * Simple packet parser
  */
 int packet_parse_layer(odp_packet_hdr_t *pkt_hdr,
-		       odp_proto_layer_t layer)
+		       odp_proto_layer_t layer,
+		       odp_proto_chksums_t chksums)
 {
 	uint32_t seg_len = odp_packet_seg_len((odp_packet_t)pkt_hdr);
 	uint32_t len = packet_len(pkt_hdr);
 	void *base = odp_packet_data((odp_packet_t)pkt_hdr);
 
-	return packet_parse_common(&pkt_hdr->p, base, len, seg_len, layer);
+	return packet_parse_common(&pkt_hdr->p, base, len, seg_len, layer,
+				   chksums);
 }
 
 int odp_packet_parse(odp_packet_t pkt, uint32_t offset,
@@ -1775,7 +1789,7 @@ int odp_packet_parse(odp_packet_t pkt, uint32_t offset,
 
 	if (proto == ODP_PROTO_ETH) {
 		ret = packet_parse_common(&pkt_hdr->p, data, len, seg_len,
-					  layer);
+					  layer, param->chksums);
 
 		if (ret)
 			return -1;
@@ -1786,7 +1800,8 @@ int odp_packet_parse(odp_packet_t pkt, uint32_t offset,
 			ethtype = _ODP_ETHTYPE_IPV6;
 
 		ret = packet_parse_common_l3_l4(&pkt_hdr->p, data, offset,
-						len, seg_len, layer, ethtype);
+						len, seg_len, layer, ethtype,
+						param->chksums);
 
 		if (ret)
 			return -1;
