@@ -10,7 +10,7 @@
 #include <odp/api/align.h>
 #include <odp/api/queue.h>
 #include <odp/api/debug.h>
-#include <odp_internal.h>
+#include <odp_init_internal.h>
 #include <odp_debug_internal.h>
 #include <odp_packet_internal.h>
 #include <odp/api/packet_io.h>
@@ -998,7 +998,8 @@ int cls_classify_packet(pktio_entry_t *entry, const uint8_t *base,
 		packet_set_len(pkt_hdr, pkt_len);
 
 		packet_parse_common(&pkt_hdr->p, base, pkt_len, seg_len,
-				    ODP_PROTO_LAYER_ALL);
+				    ODP_PROTO_LAYER_ALL,
+				    entry->s.in_chksums);
 	}
 	cos = cls_select_cos(entry, base, pkt_hdr);
 
@@ -1132,7 +1133,7 @@ cos_t *match_qos_l2_cos(pmr_l2_cos_t *l2_cos, const uint8_t *pkt_addr,
 	    packet_hdr_has_eth(hdr)) {
 		eth = (const _odp_ethhdr_t *)(pkt_addr + hdr->p.l2_offset);
 		vlan = (const _odp_vlanhdr_t *)(eth + 1);
-		qos = _odp_be_to_cpu_16(vlan->tci);
+		qos = odp_be_to_cpu_16(vlan->tci);
 		qos = ((qos >> 13) & 0x07);
 		cos = l2_cos->cos[qos];
 	}

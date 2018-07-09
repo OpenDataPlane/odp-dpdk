@@ -26,7 +26,6 @@ extern "C" {
 #include <odp_timer_wheel_internal.h>
 #include <odp_pkt_queue_internal.h>
 #include <odp_sorted_list_internal.h>
-#include <odp_internal.h>
 #include <odp_debug_internal.h>
 #include <odp_buffer_internal.h>
 #include <odp_queue_if.h>
@@ -283,7 +282,7 @@ struct tm_queue_obj_s {
 	uint8_t tm_idx;
 	uint8_t delayed_cnt;
 	uint8_t blocked_cnt;
-	queue_t tm_qentry;
+	void *tm_qentry;
 };
 
 struct tm_node_obj_s {

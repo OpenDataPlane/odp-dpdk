@@ -2545,9 +2545,20 @@ static int test_shaper_bw(const char *shaper_name,
 			ret_code = 0;
 		}
 
-		CU_ASSERT((min_rcv_gap <= avg_rcv_gap) &&
-			  (avg_rcv_gap <= max_rcv_gap));
-		CU_ASSERT(rcv_stats.std_dev_gap <= expected_rcv_gap_us);
+		if ((avg_rcv_gap < min_rcv_gap) ||
+		    (avg_rcv_gap > max_rcv_gap)) {
+			LOG_ERR("agv_rcv_gap=%" PRIu32 " acceptable "
+			"rcv_gap range=%" PRIu32 "..%" PRIu32 "\n",
+			avg_rcv_gap, min_rcv_gap, max_rcv_gap);
+			ret_code = -1;
+		}
+
+		if (rcv_stats.std_dev_gap > expected_rcv_gap_us) {
+			LOG_ERR("std_dev_gap=%" PRIu32 " >  "
+				"expected_rcv_gap_us=%" PRIu64 "\n",
+			rcv_stats.std_dev_gap, expected_rcv_gap_us);
+			ret_code = -1;
+		}
 	}
 
 	/* Disable the shaper, so as to get the pkts out quicker. */
@@ -2891,16 +2902,21 @@ static int set_queue_thresholds(odp_tm_queue_t             tm_queue,
 				odp_tm_threshold_params_t *threshold_params)
 {
 	odp_tm_threshold_t threshold_profile;
+	int ret;
 
 	/* First see if a threshold profile already exists with this name, in
 	 * which case we use that profile, else create a new one. */
 	threshold_profile = odp_tm_thresholds_lookup(threshold_name);
 	if (threshold_profile != ODP_TM_INVALID) {
-		odp_tm_thresholds_params_update(threshold_profile,
-						threshold_params);
+		ret = odp_tm_thresholds_params_update(threshold_profile,
+						      threshold_params);
+		if (ret)
+			return ret;
 	} else {
 		threshold_profile = odp_tm_threshold_create(threshold_name,
 							    threshold_params);
+		if (threshold_profile == ODP_TM_INVALID)
+			return -1;
 		threshold_profiles[num_threshold_profiles] = threshold_profile;
 		num_threshold_profiles++;
 	}
@@ -3054,6 +3070,7 @@ static int test_byte_wred(const char      *wred_name,
 	odp_tm_queue_t            tm_queue;
 	pkt_info_t                pkt_info;
 	uint32_t                  num_fill_pkts, num_test_pkts, pkts_sent;
+	int ret;
 
 	/* Pick the tm_queue and set the tm_queue's wred profile to drop the
 	 * given percentage of traffic, then send 100 pkts and see how many
@@ -3115,13 +3132,13 @@ static int test_byte_wred(const char      *wred_name,
 	flush_leftover_pkts(odp_tm_systems[0], rcv_pktin);
 	CU_ASSERT(odp_tm_is_idle(odp_tm_systems[0]));
 
-	if ((wred_pkt_cnts->min_cnt <= pkts_sent) &&
-	    (pkts_sent <= wred_pkt_cnts->max_cnt))
-		return 0;
-
-	CU_ASSERT((wred_pkt_cnts->min_cnt <= pkts_sent) &&
-		  (pkts_sent <= wred_pkt_cnts->max_cnt));
-	return 0;
+	ret = !((wred_pkt_cnts->min_cnt <= pkts_sent) &&
+	      (pkts_sent <= wred_pkt_cnts->max_cnt));
+	if (ret)
+		LOG_DBG("min %" PRIu32 " pkts %" PRIu32" max %" PRIu32 "\n",
+			wred_pkt_cnts->min_cnt, pkts_sent,
+			wred_pkt_cnts->max_cnt);
+	return odp_cunit_ret(ret);
 }
 
 static int test_pkt_wred(const char      *wred_name,
@@ -3138,6 +3155,7 @@ static int test_pkt_wred(const char      *wred_name,
 	odp_tm_queue_t            tm_queue;
 	pkt_info_t                pkt_info;
 	uint32_t                  num_fill_pkts, num_test_pkts, pkts_sent;
+	int ret;
 
 	/* Pick the tm_queue and set the tm_queue's wred profile to drop the
 	 * given percentage of traffic, then send 100 pkts and see how many
@@ -3154,8 +3172,10 @@ static int test_pkt_wred(const char      *wred_name,
 	odp_tm_threshold_params_init(&threshold_params);
 	threshold_params.max_pkts        = 1000;
 	threshold_params.enable_max_pkts = true;
-	if (set_queue_thresholds(tm_queue, threshold_name,
-				 &threshold_params) != 0) {
+
+	ret = set_queue_thresholds(tm_queue, threshold_name,
+				   &threshold_params);
+	if (ret) {
 		LOG_ERR("set_queue_thresholds failed\n");
 		return -1;
 	}
@@ -3185,8 +3205,12 @@ static int test_pkt_wred(const char      *wred_name,
 
 	/* Disable the shaper, so as to get the pkts out quicker. */
 	set_shaper(node_name, shaper_name, 0, 0);
-	num_rcv_pkts = receive_pkts(odp_tm_systems[0], rcv_pktin,
-				    num_fill_pkts + pkts_sent, 64 * 1000);
+	ret = receive_pkts(odp_tm_systems[0], rcv_pktin,
+			   num_fill_pkts + pkts_sent, 64 * 1000);
+	if (ret < 0)
+		return -1;
+
+	num_rcv_pkts = ret;
 
 	/* Search the EXPECTED_PKT_RCVD table to find a matching entry */
 	wred_pkt_cnts = search_expected_pkt_rcv_tbl(TM_PERCENT(99.9),
@@ -3197,12 +3221,15 @@ static int test_pkt_wred(const char      *wred_name,
 	flush_leftover_pkts(odp_tm_systems[0], rcv_pktin);
 	CU_ASSERT(odp_tm_is_idle(odp_tm_systems[0]));
 
-	if ((wred_pkt_cnts->min_cnt <= pkts_sent) &&
-	    (pkts_sent <= wred_pkt_cnts->max_cnt))
-		return 0;
+	if ((pkts_sent < wred_pkt_cnts->min_cnt) ||
+	    (pkts_sent > wred_pkt_cnts->max_cnt)) {
+		LOG_ERR("min_cnt %d <= pkts_sent %d <= max_cnt %d\n",
+			wred_pkt_cnts->min_cnt,
+			pkts_sent,
+			wred_pkt_cnts->max_cnt);
+		return -1;
+	}
 
-	CU_ASSERT((wred_pkt_cnts->min_cnt <= pkts_sent) &&
-		  (pkts_sent <= wred_pkt_cnts->max_cnt));
 	return 0;
 }
 
@@ -3821,11 +3848,26 @@ static void traffic_mngr_test_tm_create(void)
 
 static void traffic_mngr_test_shaper(void)
 {
-	CU_ASSERT(test_shaper_bw("bw1",   "node_1_1_1", 0, 1   * MBPS) == 0);
-	CU_ASSERT(test_shaper_bw("bw4",   "node_1_1_1", 1, 4   * MBPS) == 0);
-	CU_ASSERT(test_shaper_bw("bw10",  "node_1_1_1", 2, 10  * MBPS) == 0);
-	CU_ASSERT(test_shaper_bw("bw40",  "node_1_1_1", 3, 40  * MBPS) == 0);
-	CU_ASSERT(test_shaper_bw("bw100", "node_1_1_2", 0, 100 * MBPS) == 0);
+	CU_ASSERT(!odp_cunit_ret(test_shaper_bw("bw1",
+						"node_1_1_1",
+						0,
+						MBPS * 1)));
+	CU_ASSERT(!odp_cunit_ret(test_shaper_bw("bw4",
+						"node_1_1_1",
+						1,
+						4   * MBPS)));
+	CU_ASSERT(!odp_cunit_ret(test_shaper_bw("bw10",
+						"node_1_1_1",
+						2,
+						10  * MBPS)));
+	CU_ASSERT(!odp_cunit_ret(test_shaper_bw("bw40",
+						"node_1_1_1",
+						3,
+						40  * MBPS)));
+	CU_ASSERT(!odp_cunit_ret(test_shaper_bw("bw100",
+						"node_1_1_2",
+						0,
+						100 * MBPS)));
 }
 
 static void traffic_mngr_test_scheduler(void)
@@ -3888,9 +3930,11 @@ static void traffic_mngr_test_pkt_wred(void)
 		return;
 	}
 
-	CU_ASSERT(test_pkt_wred("pkt_wred_40G", "pkt_bw_40G",
-				"pkt_thresh_40G", "node_1_3_2", 1,
-				ODP_PACKET_GREEN, TM_PERCENT(30), false) == 0);
+	rc = test_pkt_wred("pkt_wred_40G", "pkt_bw_40G",
+			   "pkt_thresh_40G", "node_1_3_2", 1,
+			   ODP_PACKET_GREEN, TM_PERCENT(30), false);
+	if (odp_cunit_ret(rc) != 0)
+		CU_FAIL("40G test failed\n");
 
 	if (!tm_capabilities.tm_queue_dual_slope_supported) {
 		LOG_DBG("since tm_capabilities indicates no dual slope "
@@ -3901,14 +3945,20 @@ static void traffic_mngr_test_pkt_wred(void)
 	rc = test_pkt_wred("pkt_wred_30G", "pkt_bw_30G",
 			   "pkt_thresh_30G", "node_1_3_2", 1,
 			   ODP_PACKET_GREEN, TM_PERCENT(30), true);
-	CU_ASSERT(rc == 0);
+	if (odp_cunit_ret(rc) != 0)
+		CU_FAIL("30G test failed\n");
 
-	CU_ASSERT(test_pkt_wred("pkt_wred_50Y", "pkt_bw_50Y",
-				"pkt_thresh_50Y", "node_1_3_2", 2,
-				ODP_PACKET_YELLOW, TM_PERCENT(50), true) == 0);
-	CU_ASSERT(test_pkt_wred("pkt_wred_70R", "pkt_bw_70R",
-				"pkt_thresh_70R", "node_1_3_2", 3,
-				ODP_PACKET_RED,    TM_PERCENT(70), true) == 0);
+	rc = test_pkt_wred("pkt_wred_50Y", "pkt_bw_50Y",
+			   "pkt_thresh_50Y", "node_1_3_2", 2,
+			   ODP_PACKET_YELLOW, TM_PERCENT(50), true);
+	if (odp_cunit_ret(rc) != 0)
+		CU_FAIL("50Y test failed\n");
+
+	rc = test_pkt_wred("pkt_wred_70R", "pkt_bw_70R",
+			   "pkt_thresh_70R", "node_1_3_2", 3,
+			   ODP_PACKET_RED,    TM_PERCENT(70), true);
+	if (odp_cunit_ret(rc) != 0)
+		CU_FAIL("70Y test failed\n");
 }
 
 static void traffic_mngr_test_query(void)

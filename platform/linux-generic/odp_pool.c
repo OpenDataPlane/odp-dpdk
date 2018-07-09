@@ -11,9 +11,10 @@
 #include <odp/api/align.h>
 #include <odp/api/ticketlock.h>
 #include <odp/api/system_info.h>
+#include <odp/api/plat/thread_inlines.h>
 
 #include <odp_pool_internal.h>
-#include <odp_internal.h>
+#include <odp_init_internal.h>
 #include <odp_packet_internal.h>
 #include <odp_config_internal.h>
 #include <odp_debug_internal.h>
@@ -25,8 +26,8 @@
 
 #include <odp/api/plat/pool_inline_types.h>
 #include <odp/api/plat/ticketlock_inlines.h>
-#define LOCK(a)      _odp_ticketlock_lock(a)
-#define UNLOCK(a)    _odp_ticketlock_unlock(a)
+#define LOCK(a)      odp_ticketlock_lock(a)
+#define UNLOCK(a)    odp_ticketlock_unlock(a)
 #define LOCK_INIT(a) odp_ticketlock_init(a)
 
 #define CACHE_BURST    32

@@ -26,18 +26,16 @@ extern "C" {
 #include <odp_align_internal.h>
 #include <odp_debug_internal.h>
 #include <odp_packet_io_ring_internal.h>
+#include <odp_packet_io_stats_common.h>
 #include <odp_queue_if.h>
 
 #include <odp_config_internal.h>
 #include <odp/api/hints.h>
+#include <string.h>
 #include <net/if.h>
+#include <linux/if_ether.h>
 
 #define PKTIO_MAX_QUEUES 64
-#include <odp_packet_socket.h>
-#include <odp_packet_netmap.h>
-#include <odp_packet_tap.h>
-#include <odp_packet_null.h>
-#include <odp_packet_dpdk.h>
 
 #define PKTIO_NAME_LEN 256
 
@@ -53,64 +51,13 @@ extern "C" {
 /* Forward declaration */
 struct pktio_if_ops;
 
-typedef struct {
-	odp_queue_t loopq;		/**< loopback queue for "loop" device */
-	odp_bool_t promisc;		/**< promiscuous mode state */
-	uint8_t idx;			/**< index of "loop" device */
-} pkt_loop_t;
-
-#ifdef HAVE_PCAP
-typedef struct {
-	char *fname_rx;		/**< name of pcap file for rx */
-	char *fname_tx;		/**< name of pcap file for tx */
-	void *rx;		/**< rx pcap handle */
-	void *tx;		/**< tx pcap handle */
-	void *tx_dump;		/**< tx pcap dumper handle */
-	odp_pool_t pool;	/**< rx pool */
-	unsigned char *buf;	/**< per-pktio temp buffer */
-	int loops;		/**< number of times to loop rx pcap */
-	int loop_cnt;		/**< number of loops completed */
-	odp_bool_t promisc;	/**< promiscuous mode state */
-} pkt_pcap_t;
+#if defined(ODP_NETMAP)
+#define PKTIO_PRIVATE_SIZE 74752
+#elif defined(ODP_PKTIO_DPDK)
+#define PKTIO_PRIVATE_SIZE 5632
+#else
+#define PKTIO_PRIVATE_SIZE 384
 #endif
-
-typedef	struct {
-	/* TX */
-	struct  {
-		_ring_t	*send; /**< ODP ring for IPC msg packets
-					    indexes transmitted to shared
-					    memory */
-		_ring_t	*free; /**< ODP ring for IPC msg packets
-					    indexes already processed by remote
-					    process */
-	} tx;
-	/* RX */
-	struct {
-		_ring_t	*recv; /**< ODP ring for IPC msg packets
-					    indexes received from shared
-					     memory (from remote process) */
-		_ring_t	*free; /**< odp ring for ipc msg packets
-					    indexes already processed by
-					    current process */
-		_ring_t	*cache; /**< local cache to keep packet order right */
-	} rx; /* slave */
-	void		*pool_base;		/**< Remote pool base addr */
-	void		*pool_mdata_base;	/**< Remote pool mdata base addr */
-	uint64_t	pkt_size;		/**< Packet size in remote pool */
-	odp_pool_t	pool;			/**< Pool of main process */
-	enum {
-		PKTIO_TYPE_IPC_MASTER = 0, /**< Master is the process which
-						creates shm */
-		PKTIO_TYPE_IPC_SLAVE	   /**< Slave is the process which
-						connects to shm */
-	} type; /**< define if it's master or slave process */
-	odp_atomic_u32_t ready; /**< 1 - pktio is ready and can recv/send
-				     packet, 0 - not yet ready */
-	void *pinfo;
-	odp_shm_t pinfo_shm;
-	odp_shm_t remote_pool_shm; /**< shm of remote pool get with
-					_ipc_map_remote_pool() */
-} _ipc_pktio_t;
 
 struct pktio_entry {
 	const struct pktio_if_ops *ops; /**< Implementation specific methods */
@@ -120,20 +67,7 @@ struct pktio_entry {
 	uint8_t cls_enabled;            /**< classifier enabled */
 	uint8_t chksum_insert_ena;      /**< pktout checksum offload enabled */
 	odp_pktio_t handle;		/**< pktio handle */
-	union {
-		pkt_loop_t pkt_loop;            /**< Using loopback for IO */
-		pkt_sock_t pkt_sock;		/**< using socket API for IO */
-		pkt_sock_mmap_t pkt_sock_mmap;	/**< using socket mmap
-						 *   API for IO */
-		pkt_netmap_t pkt_nm;		/**< using netmap API for IO */
-		pkt_dpdk_t pkt_dpdk;		/**< using DPDK for IO */
-#ifdef HAVE_PCAP
-		pkt_pcap_t pkt_pcap;		/**< Using pcap for IO */
-#endif
-		pkt_tap_t pkt_tap;		/**< using TAP for IO */
-		_ipc_pktio_t ipc;		/**< IPC pktio data */
-		pkt_null_t pkt_null;		/**< using null for IO */
-	};
+	unsigned char ODP_ALIGNED_CACHE pkt_priv[PKTIO_PRIVATE_SIZE];
 	enum {
 		/* Not allocated */
 		PKTIO_STATE_FREE = 0,
@@ -155,11 +89,8 @@ struct pktio_entry {
 	odp_pktio_config_t config;	/**< Device configuration */
 	classifier_t cls;		/**< classifier linked with this pktio*/
 	odp_pktio_stats_t stats;	/**< statistic counters for pktio */
-	enum {
-		STATS_SYSFS = 0,
-		STATS_ETHTOOL,
-		STATS_UNSUPPORTED
-	} stats_type;
+	odp_proto_chksums_t in_chksums; /**< Checksums validation settings */
+	pktio_stats_type_t stats_type;
 	char name[PKTIO_NAME_LEN];	/**< name of pktio provided to
 					   pktio_open() */
 
@@ -174,7 +105,7 @@ struct pktio_entry {
 
 	struct {
 		odp_queue_t        queue;
-		queue_t            queue_int;
+		void              *queue_int;
 		odp_pktin_queue_t  pktin;
 	} in_queue[PKTIO_MAX_QUEUES];
 
@@ -259,7 +190,7 @@ static inline pktio_entry_t *get_pktio_entry(odp_pktio_t pktio)
 		return NULL;
 	}
 
-	idx = _odp_pktio_index(pktio);
+	idx = odp_pktio_index(pktio);
 
 	return pktio_entry_ptr[idx];
 }
@@ -286,13 +217,6 @@ extern const pktio_if_ops_t tap_pktio_ops;
 extern const pktio_if_ops_t null_pktio_ops;
 extern const pktio_if_ops_t ipc_pktio_ops;
 extern const pktio_if_ops_t * const pktio_if_ops[];
-
-int sysfs_stats(pktio_entry_t *pktio_entry,
-		odp_pktio_stats_t *stats);
-int sock_stats_fd(pktio_entry_t *pktio_entry,
-		  odp_pktio_stats_t *stats,
-		  int fd);
-int sock_stats_reset_fd(pktio_entry_t *pktio_entry, int fd);
 
 /**
  * Try interrupt-driven receive

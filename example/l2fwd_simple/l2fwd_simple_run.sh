@@ -14,11 +14,7 @@ export ODP_PLATFORM_PARAMS="--no-pci \
 --vdev net_pcap1,rx_pcap=${PCAP_IN},tx_pcap=pcapout.pcap"
 
 ./odp_l2fwd_simple${EXEEXT} 0 1 \
-	02:00:00:00:00:01 02:00:00:00:00:02 &
-
-sleep 1
-kill -s SIGINT $!
-wait $!
+	02:00:00:00:00:01 02:00:00:00:00:02 -t 2
 STATUS=$?
 
 if [ "$STATUS" -ne 0 ]; then
@@ -35,15 +31,11 @@ rm -f pcapout.pcap
 unset ODP_PLATFORM_PARAMS
 
 ./odp_l2fwd_simple${EXEEXT} null:0 null:1 \
-	02:00:00:00:00:01 02:00:00:00:00:02 &
-
-sleep 1
-kill -s SIGINT $!
-wait $!
+	02:00:00:00:00:01 02:00:00:00:00:02 -t 2
 STATUS=$?
 
-if [ "$STATUS" -ne 255 ]; then
-  echo "Error: status was: $STATUS, expected 255"
+if [ "$STATUS" -ne 0 ]; then
+  echo "Error: status was: $STATUS, expected 0"
   exit 1
 fi
 

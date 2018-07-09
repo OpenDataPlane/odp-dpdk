@@ -9,7 +9,9 @@
 #include <string.h>
 #include <odp/api/ticketlock.h>
 #include <odp/api/thread.h>
+#include <odp/api/plat/thread_inlines.h>
 #include <odp/api/time.h>
+#include <odp/api/plat/time_inlines.h>
 #include <odp/api/schedule.h>
 #include <odp/api/shared_memory.h>
 #include <odp_schedule_if.h>
@@ -413,7 +415,7 @@ static int sched_queue(uint32_t qi)
 	return 0;
 }
 
-static int ord_enq_multi(queue_t q_int, void *buf_hdr[], int num,
+static int ord_enq_multi(void *q_int, void *buf_hdr[], int num,
 			 int *ret)
 {
 	(void)q_int;

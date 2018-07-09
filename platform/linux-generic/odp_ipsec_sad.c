@@ -11,8 +11,12 @@
 #include <odp/api/random.h>
 #include <odp/api/shared_memory.h>
 
+#include <odp_init_internal.h>
 #include <odp_debug_internal.h>
 #include <odp_ipsec_internal.h>
+
+#include <odp/api/plat/atomic_inlines.h>
+#include <odp/api/plat/cpu_inlines.h>
 
 #include <string.h>
 
