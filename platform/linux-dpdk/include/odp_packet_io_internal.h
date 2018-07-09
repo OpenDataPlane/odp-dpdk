@@ -31,7 +31,6 @@ extern "C" {
 
 #define PKTIO_MAX_QUEUES 64
 #include <linux/if_ether.h>
-#include <odp_packet_null.h>
 
 #define PKTIO_NAME_LEN 256
 
@@ -82,7 +81,6 @@ struct pktio_entry {
 	union {
 		pkt_loop_t pkt_loop;	/**< Using loopback for IO */
 		pkt_dpdk_t pkt_dpdk;	/**< using DPDK API for IO */
-		pkt_null_t pkt_null;	/**< using null for IO */
 	};
 	enum {
 		/* Not allocated */
