@@ -452,7 +452,7 @@ static odp_queue_t queue_lookup(const char *name)
 	return ODP_QUEUE_INVALID;
 }
 
-static inline int enq_multi(queue_t q_int, odp_buffer_hdr_t *buf_hdr[],
+static inline int enq_multi(void *q_int, odp_buffer_hdr_t *buf_hdr[],
 			    int num)
 {
 	int sched = 0;
@@ -494,13 +494,13 @@ static inline int enq_multi(queue_t q_int, odp_buffer_hdr_t *buf_hdr[],
 	return num_enq;
 }
 
-static int queue_int_enq_multi(queue_t q_int, odp_buffer_hdr_t *buf_hdr[],
+static int queue_int_enq_multi(void *q_int, odp_buffer_hdr_t *buf_hdr[],
 			       int num)
 {
 	return enq_multi(q_int, buf_hdr, num);
 }
 
-static int queue_int_enq(queue_t q_int, odp_buffer_hdr_t *buf_hdr)
+static int queue_int_enq(void *q_int, odp_buffer_hdr_t *buf_hdr)
 {
 	int ret;
 
@@ -573,7 +573,7 @@ static inline int deq_multi(queue_entry_t *queue, odp_buffer_hdr_t *buf_hdr[],
 	return num_deq;
 }
 
-static int queue_int_deq_multi(queue_t q_int, odp_buffer_hdr_t *buf_hdr[],
+static int queue_int_deq_multi(void *q_int, odp_buffer_hdr_t *buf_hdr[],
 			       int num)
 {
 	queue_entry_t *queue = qentry_from_int(q_int);
@@ -581,7 +581,7 @@ static int queue_int_deq_multi(queue_t q_int, odp_buffer_hdr_t *buf_hdr[],
 	return deq_multi(queue, buf_hdr, num, 0);
 }
 
-static odp_buffer_hdr_t *queue_int_deq(queue_t q_int)
+static odp_buffer_hdr_t *queue_int_deq(void *q_int)
 {
 	queue_entry_t *queue = qentry_from_int(q_int);
 	odp_buffer_hdr_t *buf_hdr = NULL;
@@ -613,7 +613,7 @@ static odp_event_t queue_deq(odp_queue_t handle)
 	return (odp_event_t)queue->s.dequeue(qentry_to_int(queue));
 }
 
-static int timer_queue_deq_multi(queue_t q_int, odp_buffer_hdr_t *buf_hdr[],
+static int timer_queue_deq_multi(void *q_int, odp_buffer_hdr_t *buf_hdr[],
 				 int num)
 {
 	timer_run();
@@ -621,7 +621,7 @@ static int timer_queue_deq_multi(queue_t q_int, odp_buffer_hdr_t *buf_hdr[],
 	return queue_int_deq_multi(q_int, buf_hdr, num);
 }
 
-static odp_buffer_hdr_t *timer_queue_deq(queue_t q_int)
+static odp_buffer_hdr_t *timer_queue_deq(void *q_int)
 {
 	timer_run();
 
@@ -782,12 +782,12 @@ static uint64_t queue_to_u64(odp_queue_t hdl)
 	return _odp_pri(hdl);
 }
 
-static odp_pktout_queue_t queue_get_pktout(queue_t q_int)
+static odp_pktout_queue_t queue_get_pktout(void *q_int)
 {
 	return qentry_from_int(q_int)->s.pktout;
 }
 
-static void queue_set_pktout(queue_t q_int, odp_pktio_t pktio, int index)
+static void queue_set_pktout(void *q_int, odp_pktio_t pktio, int index)
 {
 	queue_entry_t *qentry = qentry_from_int(q_int);
 
@@ -795,12 +795,12 @@ static void queue_set_pktout(queue_t q_int, odp_pktio_t pktio, int index)
 	qentry->s.pktout.index = index;
 }
 
-static odp_pktin_queue_t queue_get_pktin(queue_t q_int)
+static odp_pktin_queue_t queue_get_pktin(void *q_int)
 {
 	return qentry_from_int(q_int)->s.pktin;
 }
 
-static void queue_set_pktin(queue_t q_int, odp_pktio_t pktio, int index)
+static void queue_set_pktin(void *q_int, odp_pktio_t pktio, int index)
 {
 	queue_entry_t *qentry = qentry_from_int(q_int);
 
@@ -808,7 +808,7 @@ static void queue_set_pktin(queue_t q_int, odp_pktio_t pktio, int index)
 	qentry->s.pktin.index = index;
 }
 
-static void queue_set_enq_deq_func(queue_t q_int,
+static void queue_set_enq_deq_func(void *q_int,
 				   queue_enq_fn_t enq,
 				   queue_enq_multi_fn_t enq_multi,
 				   queue_deq_fn_t deq,
@@ -829,12 +829,12 @@ static void queue_set_enq_deq_func(queue_t q_int,
 		qentry->s.dequeue_multi = deq_multi;
 }
 
-static queue_t queue_from_ext(odp_queue_t handle)
+static void *queue_from_ext(odp_queue_t handle)
 {
 	return qentry_to_int(handle_to_qentry(handle));
 }
 
-static odp_queue_t queue_to_ext(queue_t q_int)
+static odp_queue_t queue_to_ext(void *q_int)
 {
 	return qentry_from_int(q_int)->s.handle;
 }
