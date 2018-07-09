@@ -105,6 +105,7 @@ struct pktio_entry {
 	odp_pktio_config_t config;	/**< Device configuration */
 	classifier_t cls;		/**< classifier linked with this pktio*/
 	odp_pktio_stats_t stats;	/**< statistic counters for pktio */
+	odp_proto_chksums_t in_chksums; /**< Checksums validation settings */
 	char name[PKTIO_NAME_LEN];	/**< name of pktio provided to
 					   pktio_open() */
 	odp_pool_t pool;
