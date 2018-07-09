@@ -167,7 +167,6 @@ __LIB__libodp_linux_la_SOURCES = \
 			   odp_queue_basic.c \
 			   odp_queue_if.c \
 			   ../linux-generic/odp_queue_lf.c \
-			   ../linux-generic/odp_random.c \
 			   ../linux-generic/odp_rwlock.c \
 			   ../linux-generic/odp_rwlock_recursive.c \
 			   ../linux-generic/odp_schedule_basic.c \
@@ -188,6 +187,14 @@ __LIB__libodp_linux_la_SOURCES = \
 			   ../linux-generic/odp_traffic_mngr.c \
 			   ../linux-generic/odp_version.c \
 			   ../linux-generic/odp_weak.c
+
+if WITH_OPENSSL
+__LIB__libodp_linux_la_SOURCES += \
+			   ../linux-generic/odp_random_openssl.c
+else
+__LIB__libodp_linux_la_SOURCES += \
+			   ../linux-generic/odp_random_null.c
+endif
 
 if ODP_ABI_COMPAT
 __LIB__libodp_linux_la_SOURCES += \
