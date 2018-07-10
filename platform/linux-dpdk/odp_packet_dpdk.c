@@ -33,8 +33,9 @@
 #include <odp_packet_io_internal.h>
 #include <odp_libconfig_internal.h>
 #include <odp/api/plat/packet_inlines.h>
-#include <net/if.h>
+#include <odp_packet_dpdk.h>
 
+#include <net/if.h>
 #include <protocols/udp.h>
 
 #include <rte_config.h>
@@ -603,7 +604,6 @@ static void _odp_pktio_send_completion(pktio_entry_t *pktio_entry)
 
 #define IP4_CSUM_RESULT(m) (m->ol_flags & PKT_RX_IP_CKSUM_MASK)
 #define L4_CSUM_RESULT(m) (m->ol_flags & PKT_RX_L4_CKSUM_MASK)
-#define HAS_L4_PROTO(m, proto) ((m->packet_type & RTE_PTYPE_L4_MASK) == proto)
 #define UDP4_CSUM(_p) (((_odp_udphdr_t *)_odp_packet_l4_ptr(_p, NULL))->chksum)
 
 #define PKTIN_CSUM_BITS 0x1C
@@ -615,7 +615,7 @@ static inline int pkt_set_ol_rx(odp_pktin_config_opt_t *pktin_cfg,
 	uint64_t packet_csum_result;
 
 	if (pktin_cfg->bit.ipv4_chksum &&
-	    RTE_ETH_IS_IPV4_HDR(mbuf->packet_type)) {
+	    pkt_hdr->p.input_flags.ipv4) {
 		packet_csum_result = IP4_CSUM_RESULT(mbuf);
 
 		if (packet_csum_result == PKT_RX_IP_CKSUM_GOOD) {
@@ -631,7 +631,7 @@ static inline int pkt_set_ol_rx(odp_pktin_config_opt_t *pktin_cfg,
 	}
 
 	if (pktin_cfg->bit.udp_chksum &&
-	    HAS_L4_PROTO(mbuf, RTE_PTYPE_L4_UDP)) {
+	    pkt_hdr->p.input_flags.udp) {
 		packet_csum_result = L4_CSUM_RESULT(mbuf);
 
 		if (packet_csum_result == PKT_RX_L4_CKSUM_GOOD) {
@@ -652,7 +652,7 @@ static inline int pkt_set_ol_rx(odp_pktin_config_opt_t *pktin_cfg,
 			pkt_hdr->p.flags.l4_chksum_err = 1;
 		}
 	} else if (pktin_cfg->bit.tcp_chksum &&
-		   HAS_L4_PROTO(mbuf, RTE_PTYPE_L4_TCP)) {
+		   pkt_hdr->p.input_flags.tcp) {
 		packet_csum_result = L4_CSUM_RESULT(mbuf);
 
 		if (packet_csum_result == PKT_RX_L4_CKSUM_GOOD) {
@@ -717,13 +717,14 @@ static int recv_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 
 	for (i = 0; i < nb_rx; ++i) {
 		odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt_table[i]);
+		struct rte_mbuf *mbuf = pkt_to_mbuf(pkt_table[i]);
 
 		packet_init(pkt_hdr);
 		pkt_hdr->input = input;
 
 		if (!pktio_cls_enabled(pktio_entry) &&
 		    parse_layer != ODP_PROTO_LAYER_NONE)
-			packet_parse_layer(pkt_hdr, parse_layer);
+			dpdk_packet_parse_layer(pkt_hdr, mbuf, parse_layer);
 		packet_set_ts(pkt_hdr, ts);
 	}
 
@@ -743,39 +744,45 @@ static int recv_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 
 		for (i = 0; i < nb_rx; i++) {
 			odp_packet_t new_pkt;
+			odp_packet_t pkt = pkt_table[i];
 			odp_pool_t new_pool;
-			uint8_t *pkt_addr;
+			uint8_t *data;
 			odp_packet_hdr_t parsed_hdr;
+			odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
+			struct rte_mbuf *mbuf = pkt_to_mbuf(pkt);
+			uint32_t pkt_len = odp_packet_len(pkt);
 			int ret;
-			odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt_table[i]);
 
-			pkt_addr = odp_packet_data(pkt_table[i]);
-			ret = cls_classify_packet(pktio_entry, pkt_addr,
-						  odp_packet_len(pkt_table[i]),
-						  odp_packet_len(pkt_table[i]),
-						  &new_pool, &parsed_hdr, true);
+			data = odp_packet_data(pkt);
+			packet_parse_reset(&parsed_hdr);
+			packet_set_len(&parsed_hdr, pkt_len);
+			dpdk_packet_parse_common(&parsed_hdr.p, data,
+						 pkt_len, pkt_len, mbuf,
+						 ODP_PROTO_LAYER_ALL);
+			ret = cls_classify_packet(pktio_entry, data,
+						  pkt_len, pkt_len, &new_pool,
+						  &parsed_hdr, false);
 			if (ret) {
 				failed++;
-				odp_packet_free(pkt_table[i]);
+				odp_packet_free(pkt);
 				continue;
 			}
-			if (new_pool != odp_packet_pool(pkt_table[i])) {
-				new_pkt = odp_packet_copy(pkt_table[i],
-							  new_pool);
+			if (new_pool != odp_packet_pool(pkt)) {
+				new_pkt = odp_packet_copy(pkt, new_pool);
 
-				odp_packet_free(pkt_table[i]);
+				odp_packet_free(pkt);
 				if (new_pkt == ODP_PACKET_INVALID) {
 					failed++;
 					continue;
 				}
 				pkt_table[i] = new_pkt;
+				pkt = new_pkt;
 			}
 			packet_set_ts(pkt_hdr, ts);
-			pktio_entry->s.stats.in_octets +=
-					odp_packet_len(pkt_table[i]);
+			pktio_entry->s.stats.in_octets += odp_packet_len(pkt);
 			copy_packet_cls_metadata(&parsed_hdr, pkt_hdr);
 			if (success != i)
-				pkt_table[success] = pkt_table[i];
+				pkt_table[success] = pkt;
 			++success;
 		}
 		pktio_entry->s.stats.in_errors += failed;
