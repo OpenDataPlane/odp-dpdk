@@ -33,6 +33,8 @@
 #include <odp_packet_io_internal.h>
 #include <odp_libconfig_internal.h>
 #include <odp/api/plat/packet_inlines.h>
+#include <odp/api/time.h>
+#include <odp/api/plat/time_inlines.h>
 #include <odp_packet_dpdk.h>
 
 #include <net/if.h>
