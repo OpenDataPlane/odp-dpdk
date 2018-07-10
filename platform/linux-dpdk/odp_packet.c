@@ -932,7 +932,7 @@ int _odp_packet_set_data(odp_packet_t pkt, uint32_t offset,
 		return -1;
 
 	while (len > 0) {
-		mapaddr = _odp_packet_offset(pkt, offset, &seglen, NULL);
+		mapaddr = odp_packet_offset(pkt, offset, &seglen, NULL);
 		setlen = len > seglen ? seglen : len;
 		if (odp_unlikely(setlen == 0))
 			return -1;
@@ -957,7 +957,7 @@ int _odp_packet_cmp_data(odp_packet_t pkt, uint32_t offset,
 	ODP_ASSERT(offset + len <= packet_len(pkt_hdr));
 
 	while (len > 0) {
-		mapaddr = _odp_packet_offset(pkt, offset, &seglen, NULL);
+		mapaddr = odp_packet_offset(pkt, offset, &seglen, NULL);
 		cmplen = len > seglen ? seglen : len;
 		ret = memcmp(mapaddr, ptr, cmplen);
 		if (ret != 0)
@@ -1076,7 +1076,7 @@ void odp_packet_print_data(odp_packet_t pkt, uint32_t offset,
 		else
 			copy_len = byte_len;
 
-		_odp_packet_copy_to_mem(pkt, offset, copy_len, data);
+		odp_packet_copy_to_mem(pkt, offset, copy_len, data);
 
 		len += snprintf(&str[len], n - len, " ");
 
@@ -1216,8 +1216,8 @@ static uint32_t packet_sum16_32(odp_packet_hdr_t *pkt_hdr,
 
 	while (len > 0) {
 		uint32_t seglen = 0; /* GCC */
-		void *mapaddr = _odp_packet_offset(packet_handle(pkt_hdr),
-						   offset, &seglen, NULL);
+		void *mapaddr = odp_packet_offset(packet_handle(pkt_hdr),
+						  offset, &seglen, NULL);
 
 		if (seglen > len)
 			seglen = len;
@@ -1913,7 +1913,7 @@ int odp_packet_parse(odp_packet_t pkt, uint32_t offset,
 	if (proto == ODP_PROTO_NONE || layer == ODP_PROTO_LAYER_NONE)
 		return -1;
 
-	data = _odp_packet_offset(pkt, offset, &seg_len, NULL);
+	data = odp_packet_offset(pkt, offset, &seg_len, NULL);
 
 	if (data == NULL)
 		return -1;
