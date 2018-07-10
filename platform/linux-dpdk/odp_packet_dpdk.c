@@ -602,81 +602,13 @@ static void _odp_pktio_send_completion(pktio_entry_t *pktio_entry)
 	}
 }
 
-#define IP4_CSUM_RESULT(m) (m->ol_flags & PKT_RX_IP_CKSUM_MASK)
-#define L4_CSUM_RESULT(m) (m->ol_flags & PKT_RX_L4_CKSUM_MASK)
-#define UDP4_CSUM(_p) (((_odp_udphdr_t *)_odp_packet_l4_ptr(_p, NULL))->chksum)
-
-#define PKTIN_CSUM_BITS 0x1C
-
-static inline int pkt_set_ol_rx(odp_pktin_config_opt_t *pktin_cfg,
-				odp_packet_hdr_t *pkt_hdr,
-				struct rte_mbuf *mbuf)
-{
-	uint64_t packet_csum_result;
-
-	if (pktin_cfg->bit.ipv4_chksum &&
-	    pkt_hdr->p.input_flags.ipv4) {
-		packet_csum_result = IP4_CSUM_RESULT(mbuf);
-
-		if (packet_csum_result == PKT_RX_IP_CKSUM_GOOD) {
-			pkt_hdr->p.input_flags.l3_chksum_done = 1;
-		} else if (packet_csum_result != PKT_RX_IP_CKSUM_UNKNOWN) {
-			if (pktin_cfg->bit.drop_ipv4_err)
-				return -1;
-
-			pkt_hdr->p.input_flags.l3_chksum_done = 1;
-			pkt_hdr->p.flags.ip_err = 1;
-			pkt_hdr->p.flags.l3_chksum_err = 1;
-		}
-	}
-
-	if (pktin_cfg->bit.udp_chksum &&
-	    pkt_hdr->p.input_flags.udp) {
-		packet_csum_result = L4_CSUM_RESULT(mbuf);
-
-		if (packet_csum_result == PKT_RX_L4_CKSUM_GOOD) {
-			pkt_hdr->p.input_flags.l4_chksum_done = 1;
-		} else if (packet_csum_result != PKT_RX_L4_CKSUM_UNKNOWN) {
-			if (pkt_hdr->p.input_flags.ipv4 &&
-			    pkt_hdr->p.input_flags.udp &&
-			    !UDP4_CSUM(packet_handle(pkt_hdr))) {
-				pkt_hdr->p.input_flags.l4_chksum_done = 1;
-				return 0;
-			}
-
-			if (pktin_cfg->bit.drop_udp_err)
-				return -1;
-
-			pkt_hdr->p.input_flags.l4_chksum_done = 1;
-			pkt_hdr->p.flags.udp_err = 1;
-			pkt_hdr->p.flags.l4_chksum_err = 1;
-		}
-	} else if (pktin_cfg->bit.tcp_chksum &&
-		   pkt_hdr->p.input_flags.tcp) {
-		packet_csum_result = L4_CSUM_RESULT(mbuf);
-
-		if (packet_csum_result == PKT_RX_L4_CKSUM_GOOD) {
-			pkt_hdr->p.input_flags.l4_chksum_done = 1;
-		} else if (packet_csum_result != PKT_RX_L4_CKSUM_UNKNOWN) {
-			if (pktin_cfg->bit.drop_tcp_err)
-				return -1;
-
-			pkt_hdr->p.input_flags.l4_chksum_done = 1;
-			pkt_hdr->p.flags.tcp_err = 1;
-			pkt_hdr->p.flags.l4_chksum_err = 1;
-		}
-	}
-
-	return 0;
-}
-
 static int recv_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 			 odp_packet_t pkt_table[], int num)
 {
 	uint16_t nb_rx, i;
 	odp_packet_t *saved_pkt_table;
 	pkt_dpdk_t * const pkt_dpdk = &pktio_entry->s.pkt_dpdk;
-	odp_pktin_config_opt_t *pktin_cfg = &pktio_entry->s.config.pktin;
+	odp_pktin_config_opt_t pktin_cfg = pktio_entry->s.config.pktin;
 	odp_proto_layer_t parse_layer = pktio_entry->s.config.parser.layer;
 	odp_pktio_t input = pktio_entry->s.handle;
 	uint8_t min = pkt_dpdk->min_rx_burst;
@@ -723,8 +655,13 @@ static int recv_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 		pkt_hdr->input = input;
 
 		if (!pktio_cls_enabled(pktio_entry) &&
-		    parse_layer != ODP_PROTO_LAYER_NONE)
-			dpdk_packet_parse_layer(pkt_hdr, mbuf, parse_layer);
+		    parse_layer != ODP_PROTO_LAYER_NONE) {
+			if (dpdk_packet_parse_layer(pkt_hdr, mbuf, parse_layer,
+						    pktin_cfg)) {
+				odp_packet_free(pkt_table[i]);
+				continue;
+			}
+		}
 		packet_set_ts(pkt_hdr, ts);
 	}
 
@@ -751,18 +688,20 @@ static int recv_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 			odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
 			struct rte_mbuf *mbuf = pkt_to_mbuf(pkt);
 			uint32_t pkt_len = odp_packet_len(pkt);
-			int ret;
 
 			data = odp_packet_data(pkt);
 			packet_parse_reset(&parsed_hdr);
 			packet_set_len(&parsed_hdr, pkt_len);
-			dpdk_packet_parse_common(&parsed_hdr.p, data,
-						 pkt_len, pkt_len, mbuf,
-						 ODP_PROTO_LAYER_ALL);
-			ret = cls_classify_packet(pktio_entry, data,
-						  pkt_len, pkt_len, &new_pool,
-						  &parsed_hdr, false);
-			if (ret) {
+			if (dpdk_packet_parse_common(&parsed_hdr.p, data,
+						     pkt_len, pkt_len, mbuf,
+						     ODP_PROTO_LAYER_ALL,
+						     pktin_cfg)) {
+				odp_packet_free(pkt);
+				continue;
+			}
+			if (cls_classify_packet(pktio_entry, data,
+						pkt_len, pkt_len, &new_pool,
+						&parsed_hdr, false)) {
 				failed++;
 				odp_packet_free(pkt);
 				continue;
@@ -790,25 +729,6 @@ static int recv_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 		nb_rx = success;
 	}
 
-	if (pktin_cfg->all_bits & PKTIN_CSUM_BITS) {
-		int j;
-		odp_packet_t pkt;
-
-		for (i = 0, j = 0; i < nb_rx; i++) {
-			pkt = pkt_table[i];
-
-			if (pkt_set_ol_rx(pktin_cfg, packet_hdr(pkt),
-					  pkt_to_mbuf(pkt))) {
-				rte_pktmbuf_free(pkt_to_mbuf(pkt));
-				continue;
-			}
-			if (i != j)
-				pkt_table[j] = pkt;
-			j++;
-		}
-
-		nb_rx = j;
-	}
 	return nb_rx;
 }
 
