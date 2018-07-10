@@ -70,6 +70,8 @@ typedef struct {
 	dpdk_opt_t opt;
 } pkt_dpdk_t;
 
+#define PKTIO_PRIVATE_SIZE 384
+
 struct pktio_entry {
 	const struct pktio_if_ops *ops; /**< Implementation specific methods */
 	/* These two locks together lock the whole pktio device */
@@ -81,6 +83,7 @@ struct pktio_entry {
 	union {
 		pkt_loop_t pkt_loop;	/**< Using loopback for IO */
 		pkt_dpdk_t pkt_dpdk;	/**< using DPDK API for IO */
+		unsigned char ODP_ALIGNED_CACHE pkt_priv[PKTIO_PRIVATE_SIZE];
 	};
 	enum {
 		/* Not allocated */
