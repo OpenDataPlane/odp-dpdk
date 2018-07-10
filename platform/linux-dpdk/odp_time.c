@@ -4,40 +4,29 @@
  * SPDX-License-Identifier:     BSD-3-Clause
  */
 
+#include "config.h"
+
 #include <odp_posix_extensions.h>
 
 #include <time.h>
+#include <string.h>
+#include <inttypes.h>
+
 #include <odp/api/time.h>
 #include <odp/api/hints.h>
 #include <odp_debug_internal.h>
 #include <odp_init_internal.h>
-#include <odp_arch_time_internal.h>
-#include <string.h>
-#include <inttypes.h>
+#include <odp/api/plat/time_inlines.h>
 
 #include <rte_config.h>
 #include <rte_cycles.h>
 
-typedef uint64_t (*time_to_ns_fn) (odp_time_t time);
-typedef odp_time_t (*time_cur_fn)(void);
-typedef odp_time_t (*time_from_ns_fn) (uint64_t ns);
-typedef uint64_t (*time_res_fn)(void);
+ODP_STATIC_ASSERT(_ODP_TIMESPEC_SIZE >= (sizeof(struct timespec)),
+		  "_ODP_TIMESPEC_SIZE too small");
 
-typedef struct time_handler_ {
-	time_cur_fn    time_cur;
-	time_res_fn     time_res;
-} time_handler_t;
+#include <odp/visibility_begin.h>
 
-typedef struct time_global_t {
-	struct timespec spec_start;
-	int             use_hw;
-	uint64_t        hw_start;
-	uint64_t        hw_freq_hz;
-	/* DPDK specific */
-	time_handler_t  handler;
-} time_global_t;
-
-static time_global_t global;
+_odp_time_global_t _odp_time_glob;
 
 /*
  * Posix timespec based functions
@@ -62,20 +51,25 @@ static inline uint64_t time_spec_diff_nsec(struct timespec *t2,
 	return nsec;
 }
 
-static inline odp_time_t time_spec_cur(void)
+odp_time_t _odp_timespec_cur(void)
 {
 	int ret;
 	odp_time_t time;
 	struct timespec sys_time;
+	struct timespec *start_time;
+
+	start_time = (struct timespec *)(uintptr_t)&_odp_time_glob.timespec;
 
 	ret = clock_gettime(CLOCK_MONOTONIC_RAW, &sys_time);
 	if (odp_unlikely(ret != 0))
 		ODP_ABORT("clock_gettime failed\n");
 
-	time.nsec = time_spec_diff_nsec(&sys_time, &global.spec_start);
+	time.nsec = time_spec_diff_nsec(&sys_time, start_time);
 
 	return time;
 }
+
+#include <odp/visibility_end.h>
 
 static inline uint64_t time_spec_res(void)
 {
@@ -107,24 +101,15 @@ static inline odp_time_t time_spec_from_ns(uint64_t ns)
  * HW time counter based functions
  */
 
-static inline odp_time_t time_hw_cur(void)
-{
-	odp_time_t time;
-
-	time.count = cpu_global_time() - global.hw_start;
-
-	return time;
-}
-
 static inline uint64_t time_hw_res(void)
 {
-	return global.hw_freq_hz;
+	return _odp_time_glob.hw_freq_hz;
 }
 
 static inline uint64_t time_hw_to_ns(odp_time_t time)
 {
 	uint64_t nsec;
-	uint64_t freq_hz = global.hw_freq_hz;
+	uint64_t freq_hz = _odp_time_glob.hw_freq_hz;
 	uint64_t count = time.count;
 	uint64_t sec = 0;
 
@@ -142,7 +127,7 @@ static inline odp_time_t time_hw_from_ns(uint64_t ns)
 {
 	odp_time_t time;
 	uint64_t count;
-	uint64_t freq_hz = global.hw_freq_hz;
+	uint64_t freq_hz = _odp_time_glob.hw_freq_hz;
 	uint64_t sec = 0;
 
 	if (ns >= ODP_TIME_SEC_IN_NS) {
@@ -162,17 +147,9 @@ static inline odp_time_t time_hw_from_ns(uint64_t ns)
  * Common functions
  */
 
-static inline odp_time_t time_cur(void)
-{
-	if (global.use_hw)
-		return time_hw_cur();
-
-	return time_spec_cur();
-}
-
 static inline uint64_t time_res(void)
 {
-	if (global.use_hw)
+	if (_odp_time_glob.use_hw)
 		return time_hw_res();
 
 	return time_spec_res();
@@ -200,7 +177,7 @@ static inline odp_time_t time_sum(odp_time_t t1, odp_time_t t2)
 
 static inline uint64_t time_to_ns(odp_time_t time)
 {
-	if (global.use_hw)
+	if (_odp_time_glob.use_hw)
 		return time_hw_to_ns(time);
 
 	return time_spec_to_ns(time);
@@ -208,10 +185,19 @@ static inline uint64_t time_to_ns(odp_time_t time)
 
 static inline odp_time_t time_from_ns(uint64_t ns)
 {
-	if (global.use_hw)
+	if (_odp_time_glob.use_hw)
 		return time_hw_from_ns(ns);
 
 	return time_spec_from_ns(ns);
+}
+
+static inline odp_time_t time_cur_dpdk(void)
+{
+	odp_time_t time;
+
+	time.u64 = rte_get_timer_cycles() - _odp_time_glob.hw_start;
+
+	return time;
 }
 
 static inline uint64_t time_res_dpdk(void)
@@ -219,37 +205,13 @@ static inline uint64_t time_res_dpdk(void)
 	return rte_get_timer_hz();
 }
 
-static inline odp_time_t time_cur_dpdk(void)
-{
-	odp_time_t time;
-
-	time.u64 = rte_get_timer_cycles() - global.hw_start;
-
-	return time;
-}
-
-static inline odp_time_t time_local(void)
-{
-	return global.handler.time_cur();
-}
-
 static inline void time_wait_until(odp_time_t time)
 {
 	odp_time_t cur;
 
 	do {
-		cur = time_local();
+		cur = _odp_time_cur();
 	} while (time_cmp(time, cur) > 0);
-}
-
-odp_time_t odp_time_local(void)
-{
-	return time_local();
-}
-
-odp_time_t odp_time_global(void)
-{
-	return time_local();
 }
 
 odp_time_t odp_time_diff(odp_time_t t2, odp_time_t t1)
@@ -297,17 +259,17 @@ odp_time_t odp_time_sum(odp_time_t t1, odp_time_t t2)
 
 uint64_t odp_time_local_res(void)
 {
-	return global.handler.time_res();
+	return _odp_time_glob.handler.time_res();
 }
 
 uint64_t odp_time_global_res(void)
 {
-	return global.handler.time_res();
+	return _odp_time_glob.handler.time_res();
 }
 
 void odp_time_wait_ns(uint64_t ns)
 {
-	odp_time_t cur = time_local();
+	odp_time_t cur = _odp_time_cur();
 	odp_time_t wait = time_from_ns(ns);
 	odp_time_t end_time = time_sum(cur, wait);
 
@@ -365,43 +327,46 @@ static inline odp_bool_t is_dpdk_timer_cycles_support(void)
 
 int odp_time_init_global(void)
 {
+	struct timespec *timespec;
 	int ret = 0;
+	_odp_time_global_t *global = &_odp_time_glob;
 
-	memset(&global, 0, sizeof(time_global_t));
+	memset(global, 0, sizeof(_odp_time_global_t));
 
 	if (is_dpdk_timer_cycles_support()) {
-		global.handler.time_cur     = time_cur_dpdk;
-		global.handler.time_res     = time_res_dpdk;
-		global.hw_freq_hz  = time_res_dpdk();
-		global.use_hw = 1;
-		global.hw_start = rte_get_timer_cycles();
-		if (global.hw_start == 0)
+		_odp_time_glob.handler.time_cur = time_cur_dpdk;
+		_odp_time_glob.handler.time_res = time_res_dpdk;
+		_odp_time_glob.hw_freq_hz = time_res_dpdk();
+		_odp_time_glob.use_hw = 1;
+		_odp_time_glob.hw_start = rte_get_timer_cycles();
+		if (_odp_time_glob.hw_start == 0)
 			return -1;
 		else
 			return 0;
 	}
 
-	global.handler.time_cur     = time_cur;
-	global.handler.time_res     = time_res;
+	_odp_time_glob.handler.time_cur = _odp_time_cur_gen;
+	_odp_time_glob.handler.time_res = time_res;
 
-	if (cpu_has_global_time()) {
-		global.use_hw = 1;
-		global.hw_freq_hz  = cpu_global_time_freq();
+	if (_odp_cpu_has_global_time()) {
+		global->use_hw = 1;
+		global->hw_freq_hz  = _odp_cpu_global_time_freq();
 
-		if (global.hw_freq_hz == 0)
+		if (global->hw_freq_hz == 0)
 			return -1;
 
 		printf("HW time counter freq: %" PRIu64 " hz\n\n",
-		       global.hw_freq_hz);
+		       global->hw_freq_hz);
 
-		global.hw_start = cpu_global_time();
+		global->hw_start = _odp_cpu_global_time();
 		return 0;
 	}
 
-	global.spec_start.tv_sec  = 0;
-	global.spec_start.tv_nsec = 0;
+	timespec = (struct timespec *)(uintptr_t)global->timespec;
+	timespec->tv_sec  = 0;
+	timespec->tv_nsec = 0;
 
-	ret = clock_gettime(CLOCK_MONOTONIC_RAW, &global.spec_start);
+	ret = clock_gettime(CLOCK_MONOTONIC_RAW, timespec);
 
 	return ret;
 }
