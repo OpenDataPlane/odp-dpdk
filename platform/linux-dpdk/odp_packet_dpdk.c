@@ -25,7 +25,6 @@
 
 #include <odp/api/cpu.h>
 #include <odp/api/hints.h>
-#include <odp/api/thread.h>
 
 #include <odp/api/system_info.h>
 #include <odp_debug_internal.h>
