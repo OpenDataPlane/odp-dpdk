@@ -191,7 +191,7 @@ __LIB__libodp_linux_la_SOURCES += \
 			   ../linux-generic/odp_packet_flags_api.c \
 			   ../linux-generic/odp_pktio_api.c \
 			   odp_std_clib.c \
-			   ../linux-generic/odp_sync.c \
+			   ../linux-generic/odp_sync_api.c \
 			   ../linux-generic/odp_thread_api.c \
 			   ../linux-generic/odp_ticketlock_api.c
 endif
