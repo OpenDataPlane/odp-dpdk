@@ -10,7 +10,6 @@
 #include <odp/api/crypto.h>
 #include <odp_internal.h>
 #include <odp/api/spinlock.h>
-#include <odp/api/sync.h>
 #include <odp/api/debug.h>
 #include <odp/api/align.h>
 #include <odp/api/shared_memory.h>
