@@ -88,7 +88,8 @@ noinst_HEADERS = \
 		  ${top_srcdir}/platform/linux-generic/include/odp_classification_inlines.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_classification_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_forward_typedefs_internal.h \
-		  ${top_srcdir}/platform/linux-generic/include/odp_internal.h \
+		  ${top_srcdir}/platform/linux-generic/include/odp_global_data.h \
+		  ${top_srcdir}/platform/linux-generic/include/odp_init_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_ipsec_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_libconfig_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_llqueue.h \
@@ -112,6 +113,7 @@ noinst_HEADERS = \
 		  include/odp_ring_st_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_schedule_if.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_sorted_list_internal.h \
+		  ${top_srcdir}/platform/linux-generic/include/odp_sysinfo_internal.h \
 		  include/odp_shm_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_timer_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_timer_wheel_internal.h \

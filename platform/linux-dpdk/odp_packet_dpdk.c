@@ -28,6 +28,7 @@
 
 #include <odp/api/system_info.h>
 #include <odp_debug_internal.h>
+#include <odp_errno_define.h>
 #include <odp_classification_internal.h>
 #include <odp_packet_io_internal.h>
 #include <odp_libconfig_internal.h>
