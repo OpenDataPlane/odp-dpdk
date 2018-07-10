@@ -145,7 +145,9 @@ __LIB__libodp_linux_la_SOURCES = \
 			   odp_crypto.c \
 			   odp_errno.c \
 			   ../linux-generic/odp_event.c \
-			   ../linux-generic/odp_hash.c \
+			   ../linux-generic/odp_hash_crc32.c \
+			   ../linux-generic/odp_hash_crc32c.c \
+			   ../linux-generic/odp_hash_crc_gen.c \
 			   odp_init.c \
 			   ../linux-generic/odp_impl.c \
 			   ../linux-generic/odp_ipsec.c \
