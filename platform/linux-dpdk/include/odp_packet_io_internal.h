@@ -39,32 +39,8 @@ extern "C" {
 
 /* Forward declaration */
 struct pktio_if_ops;
-struct pkt_dpdk_t;
 
-/** DPDK runtime configuration options */
-typedef struct {
-	int num_rx_desc;
-	int num_tx_desc;
-	int rx_drop_en;
-} dpdk_opt_t;
-
-/** Packet socket using dpdk mmaped rings for both Rx and Tx */
-typedef struct {
-	uint16_t port_id;		  /**< DPDK port identifier */
-	uint16_t mtu;			  /**< maximum transmission unit */
-	uint8_t lockless_rx;		  /**< no locking for rx */
-	uint8_t lockless_tx;		  /**< no locking for tx */
-	uint8_t min_rx_burst;		  /**< minimum RX burst size */
-	odp_pktin_hash_proto_t hash;	  /**< Packet input hash protocol */
-	char ifname[32];
-	odp_ticketlock_t rx_lock[PKTIO_MAX_QUEUES];  /**< RX queue locks */
-	odp_ticketlock_t tx_lock[PKTIO_MAX_QUEUES];  /**< TX queue locks */
-	uint8_t vdev_sysc_promisc;	/**< promiscuous mode defined with
-					    system call */
-	dpdk_opt_t opt;
-} pkt_dpdk_t;
-
-#define PKTIO_PRIVATE_SIZE 384
+#define PKTIO_PRIVATE_SIZE 1280
 
 struct pktio_entry {
 	const struct pktio_if_ops *ops; /**< Implementation specific methods */
@@ -75,7 +51,6 @@ struct pktio_entry {
 	uint8_t chksum_insert_ena;      /**< pktout checksum offload enabled */
 	odp_pktio_t handle;		/**< pktio handle */
 	union {
-		pkt_dpdk_t pkt_dpdk;	/**< using DPDK API for IO */
 		unsigned char ODP_ALIGNED_CACHE pkt_priv[PKTIO_PRIVATE_SIZE];
 	};
 	enum {
