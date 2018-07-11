@@ -52,8 +52,8 @@ static inline ring_spsc_t ring_spsc_create(const char *name, uint32_t size)
 	/* Ring name must be unique */
 	ring_spsc_name_to_mz_name(name, ring_name);
 
-	rte_ring =  rte_ring_create(ring_name, size, rte_socket_id(),
-				    RING_F_SP_ENQ | RING_F_SC_DEQ);
+	rte_ring = rte_ring_create(ring_name, size, rte_socket_id(),
+				   RING_F_SP_ENQ | RING_F_SC_DEQ);
 	if (rte_ring == NULL) {
 		ODP_ERR("Creating DPDK ring failed: %s\n",
 			rte_strerror(rte_errno));

@@ -292,7 +292,8 @@ static odp_queue_t queue_create(const char *name,
 				return ODP_QUEUE_INVALID;
 			}
 
-			if (param->nonblocking == ODP_NONBLOCKING_LF) {
+			if (!queue->s.spsc &&
+			    param->nonblocking == ODP_NONBLOCKING_LF) {
 				queue_lf_func_t *lf_func;
 
 				lf_func = &queue_glb->queue_lf_func;
@@ -366,6 +367,7 @@ void sched_cb_queue_set_status(uint32_t queue_index, int status)
 
 static int queue_destroy(odp_queue_t handle)
 {
+	int empty;
 	queue_entry_t *queue;
 	queue = qentry_from_handle(handle);
 
@@ -383,12 +385,21 @@ static int queue_destroy(odp_queue_t handle)
 		ODP_ERR("queue \"%s\" already destroyed\n", queue->s.name);
 		return -1;
 	}
-	if (ring_st_is_empty(queue->s.ring_st) == 0) {
+
+	if (queue->s.spsc)
+		empty = ring_spsc_is_empty(queue->s.ring_spsc);
+	else
+		empty = ring_st_is_empty(queue->s.ring_st);
+
+	if (!empty) {
 		UNLOCK(queue);
 		ODP_ERR("queue \"%s\" not empty\n", queue->s.name);
 		return -1;
 	}
-	ring_st_free(queue->s.ring_st);
+	if (queue->s.spsc)
+		ring_spsc_free(queue->s.ring_st);
+	else
+		ring_st_free(queue->s.ring_st);
 
 	switch (queue->s.status) {
 	case QUEUE_STATUS_READY:
@@ -406,7 +417,7 @@ static int queue_destroy(odp_queue_t handle)
 		ODP_ABORT("Unexpected queue status\n");
 	}
 
-	if (queue->s.param.nonblocking == ODP_NONBLOCKING_LF)
+	if (queue->s.queue_lf)
 		queue_lf_destroy(queue->s.queue_lf);
 
 	UNLOCK(queue);
@@ -639,6 +650,7 @@ static int queue_init(queue_entry_t *queue, const char *name,
 		      const odp_queue_param_t *param)
 {
 	uint32_t queue_size;
+	int spsc;
 
 	if (name == NULL) {
 		queue->s.name[0] = 0;
@@ -654,11 +666,6 @@ static int queue_init(queue_entry_t *queue, const char *name,
 		queue->s.param.deq_mode = ODP_QUEUE_OP_DISABLED;
 
 	queue->s.type = queue->s.param.type;
-
-	queue->s.enqueue = queue_int_enq;
-	queue->s.dequeue = queue_int_deq;
-	queue->s.enqueue_multi = queue_int_enq_multi;
-	queue->s.dequeue_multi = queue_int_deq_multi;
 
 	queue->s.pktin = PKTIN_INVALID;
 	queue->s.pktout = PKTOUT_INVALID;
@@ -677,9 +684,27 @@ static int queue_init(queue_entry_t *queue, const char *name,
 		return -1;
 	}
 
-	queue->s.ring_st = ring_st_create(queue->s.name, queue_size);
-	if (queue->s.ring_st == NULL)
-		return -1;
+	/* Single-producer / single-consumer plain queue has simple and
+	 * lock-free implementation */
+	spsc = (param->type == ODP_QUEUE_TYPE_PLAIN) &&
+	       (param->enq_mode == ODP_QUEUE_OP_MT_UNSAFE) &&
+	       (param->deq_mode == ODP_QUEUE_OP_MT_UNSAFE);
+
+	queue->s.spsc = spsc;
+	queue->s.queue_lf = NULL;
+
+	if (spsc) {
+		queue_spsc_init(queue, queue_size);
+	} else {
+		queue->s.enqueue = queue_int_enq;
+		queue->s.dequeue = queue_int_deq;
+		queue->s.enqueue_multi = queue_int_enq_multi;
+		queue->s.dequeue_multi = queue_int_deq_multi;
+
+		queue->s.ring_st = ring_st_create(queue->s.name, queue_size);
+		if (queue->s.ring_st == NULL)
+			return -1;
+	}
 
 	return 0;
 }
