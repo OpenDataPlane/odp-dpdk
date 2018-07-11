@@ -41,12 +41,6 @@ extern "C" {
 struct pktio_if_ops;
 struct pkt_dpdk_t;
 
-typedef struct {
-	odp_queue_t loopq;		/**< loopback queue for "loop" device */
-	odp_bool_t promisc;		/**< promiscuous mode state */
-	uint8_t idx;			/**< index of "loop" device */
-} pkt_loop_t;
-
 /** DPDK runtime configuration options */
 typedef struct {
 	int num_rx_desc;
@@ -81,7 +75,6 @@ struct pktio_entry {
 	uint8_t chksum_insert_ena;      /**< pktout checksum offload enabled */
 	odp_pktio_t handle;		/**< pktio handle */
 	union {
-		pkt_loop_t pkt_loop;	/**< Using loopback for IO */
 		pkt_dpdk_t pkt_dpdk;	/**< using DPDK API for IO */
 		unsigned char ODP_ALIGNED_CACHE pkt_priv[PKTIO_PRIVATE_SIZE];
 	};
