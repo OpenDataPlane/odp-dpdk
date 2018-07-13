@@ -221,6 +221,9 @@ static int auth_alg_odp_to_rte(odp_auth_alg_t auth_alg,
 	case ODP_AUTH_ALG_SHA1_HMAC:
 		auth_xform->auth.algo = RTE_CRYPTO_AUTH_SHA1_HMAC;
 		break;
+	case ODP_AUTH_ALG_SHA384_HMAC:
+		auth_xform->auth.algo = RTE_CRYPTO_AUTH_SHA384_HMAC;
+		break;
 	case ODP_AUTH_ALG_SHA512_HMAC:
 		auth_xform->auth.algo = RTE_CRYPTO_AUTH_SHA512_HMAC;
 		break;
@@ -497,6 +500,8 @@ static void capability_process(struct rte_cryptodev_info *dev_info,
 			}
 			if (cap_auth_algo == RTE_CRYPTO_AUTH_SHA1_HMAC)
 				auths->bit.sha1_hmac = 1;
+			if (cap_auth_algo == RTE_CRYPTO_AUTH_SHA384_HMAC)
+				auths->bit.sha384_hmac = 1;
 			if (cap_auth_algo == RTE_CRYPTO_AUTH_SHA512_HMAC)
 				auths->bit.sha512_hmac = 1;
 			if (cap_auth_algo == RTE_CRYPTO_AUTH_AES_GMAC)
