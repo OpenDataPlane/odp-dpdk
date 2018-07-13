@@ -93,6 +93,30 @@ static inline int is_valid_size(uint16_t length,
 	return -1;
 }
 
+static int cipher_is_bit_mode(odp_cipher_alg_t cipher_alg)
+{
+	switch (cipher_alg) {
+	case ODP_CIPHER_ALG_KASUMI_F8:
+	case ODP_CIPHER_ALG_SNOW3G_UEA2:
+	case ODP_CIPHER_ALG_ZUC_EEA3:
+		return 1;
+	default:
+		return 0;
+	}
+}
+
+static int auth_is_bit_mode(odp_auth_alg_t auth_alg)
+{
+	switch (auth_alg) {
+	case ODP_AUTH_ALG_KASUMI_F9:
+	case ODP_AUTH_ALG_SNOW3G_UIA2:
+	case ODP_AUTH_ALG_ZUC_EIA3:
+		return 1;
+	default:
+		return 0;
+	}
+}
+
 static int cipher_is_aead(odp_cipher_alg_t cipher_alg)
 {
 	switch (cipher_alg) {
@@ -187,6 +211,15 @@ static int cipher_alg_odp_to_rte(odp_cipher_alg_t cipher_alg,
 	case ODP_CIPHER_ALG_AES_CTR:
 		cipher_xform->cipher.algo = RTE_CRYPTO_CIPHER_AES_CTR;
 		break;
+	case ODP_CIPHER_ALG_KASUMI_F8:
+		cipher_xform->cipher.algo = RTE_CRYPTO_CIPHER_KASUMI_F8;
+		break;
+	case ODP_CIPHER_ALG_SNOW3G_UEA2:
+		cipher_xform->cipher.algo = RTE_CRYPTO_CIPHER_SNOW3G_UEA2;
+		break;
+	case ODP_CIPHER_ALG_ZUC_EEA3:
+		cipher_xform->cipher.algo = RTE_CRYPTO_CIPHER_ZUC_EEA3;
+		break;
 	default:
 		rc = -1;
 	}
@@ -227,6 +260,15 @@ static int auth_alg_odp_to_rte(odp_auth_alg_t auth_alg,
 		break;
 	case ODP_AUTH_ALG_AES_CMAC:
 		auth_xform->auth.algo = RTE_CRYPTO_AUTH_AES_CMAC;
+		break;
+	case ODP_AUTH_ALG_KASUMI_F9:
+		auth_xform->auth.algo = RTE_CRYPTO_AUTH_KASUMI_F9;
+		break;
+	case ODP_AUTH_ALG_SNOW3G_UIA2:
+		auth_xform->auth.algo = RTE_CRYPTO_AUTH_SNOW3G_UIA2;
+		break;
+	case ODP_AUTH_ALG_ZUC_EIA3:
+		auth_xform->auth.algo = RTE_CRYPTO_AUTH_ZUC_EIA3;
 		break;
 	default:
 		rc = -1;
@@ -473,6 +515,12 @@ static void capability_process(struct rte_cryptodev_info *dev_info,
 			}
 			if (cap_cipher_algo == RTE_CRYPTO_CIPHER_AES_CTR)
 				ciphers->bit.aes_ctr = 1;
+			if (cap_cipher_algo == RTE_CRYPTO_CIPHER_KASUMI_F8)
+				ciphers->bit.kasumi_f8 = 1;
+			if (cap_cipher_algo == RTE_CRYPTO_CIPHER_SNOW3G_UEA2)
+				ciphers->bit.snow3g_uea2 = 1;
+			if (cap_cipher_algo == RTE_CRYPTO_CIPHER_ZUC_EEA3)
+				ciphers->bit.zuc_eea3 = 1;
 		}
 
 		if (cap->sym.xform_type == RTE_CRYPTO_SYM_XFORM_AUTH) {
@@ -499,6 +547,16 @@ static void capability_process(struct rte_cryptodev_info *dev_info,
 				auths->bit.aes_gmac = 1;
 			if (cap_auth_algo == RTE_CRYPTO_AUTH_AES_CMAC)
 				auths->bit.aes_cmac = 1;
+			/* KASUMI_F9 disabled for now because DPDK requires IV
+			 * to part of the packet, while ODP insists on IV being
+			 * present in iv part of operation
+			if (cap_auth_algo == RTE_CRYPTO_AUTH_KASUMI_F9)
+				auths->bit.kasumi_f9 = 1;
+				*/
+			if (cap_auth_algo == RTE_CRYPTO_AUTH_SNOW3G_UIA2)
+				auths->bit.snow3g_uia2 = 1;
+			if (cap_auth_algo == RTE_CRYPTO_AUTH_ZUC_EIA3)
+				auths->bit.zuc_eia3 = 1;
 		}
 
 		if (cap->sym.xform_type == RTE_CRYPTO_SYM_XFORM_AEAD) {
@@ -572,6 +630,7 @@ int odp_crypto_capability(odp_crypto_capability_t *capability)
 
 static int cipher_gen_capability(const struct rte_crypto_param_range *key_size,
 				 const struct rte_crypto_param_range *iv_size,
+				 odp_bool_t bit_mode,
 				 odp_crypto_cipher_capability_t *src,
 				 int num_copy)
 {
@@ -591,6 +650,7 @@ static int cipher_gen_capability(const struct rte_crypto_param_range *key_size,
 			if (idx < num_copy) {
 				src[idx].key_len = key_len;
 				src[idx].iv_len = iv_size;
+				src[idx].bit_mode = bit_mode;
 			}
 			idx++;
 
@@ -646,6 +706,7 @@ static int cipher_aead_capability(odp_cipher_alg_t cipher,
 
 		idx += cipher_gen_capability(&cap->sym.aead.key_size,
 					     &cap->sym.aead.iv_size,
+					     cipher_is_bit_mode(cipher),
 					     src + idx,
 					     num_copy - idx);
 	}
@@ -699,6 +760,7 @@ static int cipher_capability(odp_cipher_alg_t cipher,
 
 		idx += cipher_gen_capability(&cap->sym.cipher.key_size,
 					     &cap->sym.cipher.iv_size,
+					     cipher_is_bit_mode(cipher),
 					     src + idx,
 					     num_copy - idx);
 	}
@@ -732,6 +794,7 @@ static int auth_gen_capability(const struct rte_crypto_param_range *key_size,
 			       const struct rte_crypto_param_range *iv_size,
 			       const struct rte_crypto_param_range *digest_size,
 			       const struct rte_crypto_param_range *aad_size,
+			       odp_bool_t bit_mode,
 			       odp_crypto_auth_capability_t *src,
 			       int num_copy)
 {
@@ -766,6 +829,7 @@ static int auth_gen_capability(const struct rte_crypto_param_range *key_size,
 						aad_size->max;
 					src[idx].aad_len.inc =
 						aad_size->increment;
+					src[idx].bit_mode = bit_mode;
 				}
 				idx++;
 				if (iv_inc == 0)
@@ -830,6 +894,7 @@ static int auth_aead_capability(odp_auth_alg_t auth,
 					   &zero_range,
 					   &cap->sym.aead.digest_size,
 					   &cap->sym.aead.aad_size,
+					   auth_is_bit_mode(auth),
 					   src + idx,
 					   num_copy - idx);
 	}
@@ -921,6 +986,7 @@ static int auth_capability(odp_auth_alg_t auth,
 					   &cap->sym.auth.iv_size,
 					   &cap->sym.auth.digest_size,
 					   &cap->sym.auth.aad_size,
+					   auth_is_bit_mode(auth),
 					   src + idx,
 					   num_copy - idx);
 	}
