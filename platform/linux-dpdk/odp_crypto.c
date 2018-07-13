@@ -1294,7 +1294,13 @@ int odp_crypto_session_create(odp_crypto_session_param_t *param,
 			do_cipher_first = !param->auth_cipher_text;
 
 		/* Derive order */
-		if (param->cipher_alg == ODP_CIPHER_ALG_NULL) {
+		if (param->cipher_alg == ODP_CIPHER_ALG_NULL &&
+		    param->auth_alg == ODP_AUTH_ALG_NULL) {
+			rte_session = NULL;
+			cdev_id = ~0;
+			session->cdev_nb_qpairs = 0;
+			goto out_null;
+		} else if (param->cipher_alg == ODP_CIPHER_ALG_NULL) {
 			first_xform = &auth_xform;
 		} else if (param->auth_alg == ODP_AUTH_ALG_NULL) {
 			first_xform = &cipher_xform;
@@ -1334,9 +1340,10 @@ int odp_crypto_session_create(odp_crypto_session_param_t *param,
 		goto err;
 	}
 
+	session->cdev_nb_qpairs = global->enabled_crypto_dev_qpairs[cdev_id];
+out_null:
 	session->rte_session  = rte_session;
 	session->cdev_id = cdev_id;
-	session->cdev_nb_qpairs = global->enabled_crypto_dev_qpairs[cdev_id];
 	session->cipher_xform = cipher_xform;
 	session->auth_xform = auth_xform;
 	if (param->cipher_iv.data)
@@ -1373,11 +1380,14 @@ int odp_crypto_session_destroy(odp_crypto_session_t _session)
 
 	rte_session = session->rte_session;
 
-	if (rte_cryptodev_sym_session_clear(session->cdev_id, rte_session) < 0)
-		return -1;
+	if (rte_session != NULL) {
+		if (rte_cryptodev_sym_session_clear(session->cdev_id,
+						    rte_session) < 0)
+			return -1;
 
-	if (rte_cryptodev_sym_session_free(rte_session) < 0)
-		return -1;
+		if (rte_cryptodev_sym_session_free(rte_session) < 0)
+			return -1;
+	}
 
 	/* remove the crypto_session_entry_t */
 	memset(session, 0, sizeof(*session));
@@ -1665,10 +1675,6 @@ int odp_crypto_int(odp_packet_t pkt_in,
 	if (session == NULL)
 		return -1;
 
-	rte_session = session->rte_session;
-	if (rte_session == NULL)
-		return -1;
-
 	/* Resolve output buffer */
 	if (ODP_PACKET_INVALID == out_pkt &&
 	    ODP_POOL_INVALID != session->p.output_pool) {
@@ -1697,6 +1703,12 @@ int odp_crypto_int(odp_packet_t pkt_in,
 		odp_packet_free(pkt_in);
 		pkt_in = ODP_PACKET_INVALID;
 	}
+
+	rte_session = session->rte_session;
+	/* NULL rte_session means that it is a NULL-NULL operation.
+	 * Just return new packet. */
+	if (rte_session == NULL)
+		goto out;
 
 	odp_spinlock_lock(&global->lock);
 	op = rte_crypto_op_alloc(global->crypto_op_pool,
@@ -1774,7 +1786,9 @@ int odp_crypto_int(odp_packet_t pkt_in,
 					 session->p.auth_digest_len,
 					 pkt_hdr->crypto_digest_buf);
 	}
+	rte_crypto_op_free(op);
 
+out:
 	/* Fill in result */
 	packet_subtype_set(out_pkt, ODP_EVENT_PACKET_CRYPTO);
 	op_result = get_op_result_from_packet(out_pkt);
@@ -1788,7 +1802,6 @@ int odp_crypto_int(odp_packet_t pkt_in,
 
 	pkt_hdr = packet_hdr(out_pkt);
 	pkt_hdr->p.flags.crypto_err = !op_result->ok;
-	rte_crypto_op_free(op);
 
 	/* Synchronous, simply return results */
 	*pkt_out = out_pkt;
