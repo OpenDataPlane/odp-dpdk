@@ -266,6 +266,9 @@ static int auth_alg_odp_to_rte(odp_auth_alg_t auth_alg,
 	case ODP_AUTH_ALG_AES_CMAC:
 		auth_xform->auth.algo = RTE_CRYPTO_AUTH_AES_CMAC;
 		break;
+	case ODP_AUTH_ALG_AES_XCBC_MAC:
+		auth_xform->auth.algo = RTE_CRYPTO_AUTH_AES_XCBC_MAC;
+		break;
 	case ODP_AUTH_ALG_KASUMI_F9:
 		auth_xform->auth.algo = RTE_CRYPTO_AUTH_KASUMI_F9;
 		break;
@@ -556,6 +559,8 @@ static void capability_process(struct rte_cryptodev_info *dev_info,
 				auths->bit.aes_gmac = 1;
 			if (cap_auth_algo == RTE_CRYPTO_AUTH_AES_CMAC)
 				auths->bit.aes_cmac = 1;
+			if (cap_auth_algo == RTE_CRYPTO_AUTH_AES_XCBC_MAC)
+				auths->bit.aes_xcbc_mac = 1;
 			/* KASUMI_F9 disabled for now because DPDK requires IV
 			 * to part of the packet, while ODP insists on IV being
 			 * present in iv part of operation
