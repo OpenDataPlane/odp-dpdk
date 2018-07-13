@@ -575,13 +575,10 @@ static void capability_process(struct rte_cryptodev_info *dev_info,
 				auths->bit.aes128_gcm = 1;
 #endif
 			}
-			/* AES-CCM algorithm produces errors in Ubuntu Trusty,
-			 * so it is disabled for now
 			if (cap_aead_algo == RTE_CRYPTO_AEAD_AES_CCM) {
 				ciphers->bit.aes_ccm = 1;
 				auths->bit.aes_ccm = 1;
 			}
-			*/
 		}
 	}
 }
