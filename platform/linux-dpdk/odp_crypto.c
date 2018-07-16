@@ -8,10 +8,8 @@
 
 #include <odp_posix_extensions.h>
 #include <odp/api/crypto.h>
-#include <odp_internal.h>
-#include <odp/api/atomic.h>
+#include <odp_init_internal.h>
 #include <odp/api/spinlock.h>
-#include <odp/api/sync.h>
 #include <odp/api/debug.h>
 #include <odp/api/align.h>
 #include <odp/api/shared_memory.h>
@@ -20,6 +18,8 @@
 #include <odp/api/random.h>
 #include <odp/api/packet.h>
 #include <odp/api/plat/packet_inlines.h>
+#include <odp/api/time.h>
+#include <odp/api/plat/time_inlines.h>
 #include <odp_packet_internal.h>
 
 /* Inlined API functions */

@@ -55,7 +55,7 @@ run_sched_pktio()
 	fi
 
 	# 1 worker
-	export ODP_PLATFORM_PARAMS="-m 512 --file-prefix="sched" \
+	export ODP_PLATFORM_PARAMS="-m 256 --file-prefix="sched" \
 --proc-type auto --no-pci --vdev net_pcap1,iface=$IF1 \
 --vdev net_pcap2,iface=$IF2"
 
@@ -66,7 +66,7 @@ run_sched_pktio()
 	sleep 1
 
 	# Run generator with one worker
-	export ODP_PLATFORM_PARAMS="-m 512 --file-prefix="gen" \
+	export ODP_PLATFORM_PARAMS="-m 256 --file-prefix="gen" \
 --proc-type auto --no-pci \
 --vdev net_pcap0,iface=$IF0"
 

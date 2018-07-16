@@ -67,7 +67,7 @@ run_l2fwd()
 		exit 1
 	fi
 
-	export ODP_PLATFORM_PARAMS="-m 512 --file-prefix="gen" \
+	export ODP_PLATFORM_PARAMS="-m 256 --file-prefix="gen" \
 --proc-type auto --no-pci \
 --vdev net_pcap0,iface=$IF0"
 
@@ -88,7 +88,7 @@ run_l2fwd()
 	fi
 	LOG=odp_l2fwd_tmp.log
 
-	export ODP_PLATFORM_PARAMS="-m 512 --file-prefix="l2fwd" \
+	export ODP_PLATFORM_PARAMS="-m 256 --file-prefix="l2fwd" \
 --proc-type auto --no-pci --vdev net_pcap1,iface=$IF1 \
 --vdev net_pcap2,iface=$IF2"
 

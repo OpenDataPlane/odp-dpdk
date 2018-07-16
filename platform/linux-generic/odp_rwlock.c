@@ -11,6 +11,9 @@
 #include <odp/api/rwlock.h>
 #include <odp/api/cpu.h>
 
+#include <odp/api/plat/atomic_inlines.h>
+#include <odp/api/plat/cpu_inlines.h>
+
 void odp_rwlock_init(odp_rwlock_t *rwlock)
 {
 	odp_atomic_init_u32(&rwlock->cnt, 0);

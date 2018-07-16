@@ -25,16 +25,19 @@
 
 #include <odp/api/cpu.h>
 #include <odp/api/hints.h>
-#include <odp/api/thread.h>
 
 #include <odp/api/system_info.h>
 #include <odp_debug_internal.h>
+#include <odp_errno_define.h>
 #include <odp_classification_internal.h>
 #include <odp_packet_io_internal.h>
 #include <odp_libconfig_internal.h>
 #include <odp/api/plat/packet_inlines.h>
-#include <net/if.h>
+#include <odp/api/time.h>
+#include <odp/api/plat/time_inlines.h>
+#include <odp_packet_dpdk.h>
 
+#include <net/if.h>
 #include <protocols/udp.h>
 
 #include <rte_config.h>
@@ -49,6 +52,38 @@
 
 /* Minimum RX burst size */
 #define DPDK_MIN_RX_BURST 4
+
+/** DPDK runtime configuration options */
+typedef struct {
+	int num_rx_desc;
+	int num_tx_desc;
+	int rx_drop_en;
+} dpdk_opt_t;
+
+/** Packet socket using dpdk mmaped rings for both Rx and Tx */
+typedef struct ODP_ALIGNED_CACHE {
+	uint16_t port_id;		  /**< DPDK port identifier */
+	uint16_t mtu;			  /**< maximum transmission unit */
+	uint8_t lockless_rx;		  /**< no locking for rx */
+	uint8_t lockless_tx;		  /**< no locking for tx */
+	uint8_t min_rx_burst;		  /**< minimum RX burst size */
+	odp_pktin_hash_proto_t hash;	  /**< Packet input hash protocol */
+	char ifname[32];
+	/** RX queue locks */
+	odp_ticketlock_t ODP_ALIGNED_CACHE rx_lock[PKTIO_MAX_QUEUES];
+	odp_ticketlock_t tx_lock[PKTIO_MAX_QUEUES];  /**< TX queue locks */
+	uint8_t vdev_sysc_promisc;	/**< promiscuous mode defined with
+					    system call */
+	dpdk_opt_t opt;
+} pkt_dpdk_t;
+
+ODP_STATIC_ASSERT(PKTIO_PRIVATE_SIZE >= sizeof(pkt_dpdk_t),
+		  "PKTIO_PRIVATE_SIZE too small");
+
+static inline pkt_dpdk_t *pkt_priv(pktio_entry_t *pktio_entry)
+{
+	return (pkt_dpdk_t *)(uintptr_t)(pktio_entry->s.pkt_priv);
+}
 
 /* Ops for all implementation of pktio.
  * Order matters. The first implementation to setup successfully
@@ -81,7 +116,7 @@ static int lookup_opt(const char *opt_name, const char *drv_name, int *val)
 static int init_options(pktio_entry_t *pktio_entry,
 			const struct rte_eth_dev_info *dev_info)
 {
-	dpdk_opt_t *opt = &pktio_entry->s.pkt_dpdk.opt;
+	dpdk_opt_t *opt = &pkt_priv(pktio_entry)->opt;
 
 	if (!lookup_opt("num_rx_desc", dev_info->driver_name,
 			&opt->num_rx_desc))
@@ -109,7 +144,7 @@ static int init_options(pktio_entry_t *pktio_entry,
 	opt->rx_drop_en = !!opt->rx_drop_en;
 
 	ODP_PRINT("DPDK interface (%s): %" PRIu16 "\n", dev_info->driver_name,
-		  pktio_entry->s.pkt_dpdk.port_id);
+		  pkt_priv(pktio_entry)->port_id);
 	ODP_PRINT("  num_rx_desc: %d\n", opt->num_rx_desc);
 	ODP_PRINT("  num_tx_desc: %d\n", opt->num_tx_desc);
 	ODP_PRINT("  rx_drop_en: %d\n", opt->rx_drop_en);
@@ -175,25 +210,26 @@ static int input_queues_config_pkt_dpdk(pktio_entry_t *pktio_entry,
 					const odp_pktin_queue_param_t *p)
 {
 	odp_pktin_mode_t mode = pktio_entry->s.param.in_mode;
+	pkt_dpdk_t *pkt_dpdk = pkt_priv(pktio_entry);
 
 	/**
 	 * Scheduler synchronizes input queue polls. Only single thread
 	 * at a time polls a queue */
 	if (mode == ODP_PKTIN_MODE_SCHED ||
 	    p->op_mode == ODP_PKTIO_OP_MT_UNSAFE)
-		pktio_entry->s.pkt_dpdk.lockless_rx = 1;
+		pkt_dpdk->lockless_rx = 1;
 	else
-		pktio_entry->s.pkt_dpdk.lockless_rx = 0;
+		pkt_dpdk->lockless_rx = 0;
 
 	if (p->hash_enable && p->num_queues > 1) {
-		pktio_entry->s.pkt_dpdk.hash = p->hash_proto;
+		pkt_dpdk->hash = p->hash_proto;
 	} else {
-		pktio_entry->s.pkt_dpdk.hash.proto.ipv4_udp = 1;
-		pktio_entry->s.pkt_dpdk.hash.proto.ipv4_tcp = 1;
-		pktio_entry->s.pkt_dpdk.hash.proto.ipv4 = 1;
-		pktio_entry->s.pkt_dpdk.hash.proto.ipv6_udp = 1;
-		pktio_entry->s.pkt_dpdk.hash.proto.ipv6_tcp = 1;
-		pktio_entry->s.pkt_dpdk.hash.proto.ipv6 = 1;
+		pkt_dpdk->hash.proto.ipv4_udp = 1;
+		pkt_dpdk->hash.proto.ipv4_tcp = 1;
+		pkt_dpdk->hash.proto.ipv4 = 1;
+		pkt_dpdk->hash.proto.ipv6_udp = 1;
+		pkt_dpdk->hash.proto.ipv6_tcp = 1;
+		pkt_dpdk->hash.proto.ipv6 = 1;
 	}
 
 	return 0;
@@ -202,7 +238,7 @@ static int input_queues_config_pkt_dpdk(pktio_entry_t *pktio_entry,
 static int output_queues_config_pkt_dpdk(pktio_entry_t *pktio_entry,
 					 const odp_pktout_queue_param_t *p)
 {
-	pkt_dpdk_t *pkt_dpdk = &pktio_entry->s.pkt_dpdk;
+	pkt_dpdk_t *pkt_dpdk = pkt_priv(pktio_entry);
 
 	if (p->op_mode == ODP_PKTIO_OP_MT_UNSAFE)
 		pkt_dpdk->lockless_tx = 1;
@@ -226,7 +262,7 @@ static int term_pkt_dpdk(void)
 static int dpdk_init_capability(pktio_entry_t *pktio_entry,
 				struct rte_eth_dev_info *dev_info)
 {
-	pkt_dpdk_t *pkt_dpdk = &pktio_entry->s.pkt_dpdk;
+	pkt_dpdk_t *pkt_dpdk = pkt_priv(pktio_entry);
 	odp_pktio_capability_t *capa = &pktio_entry->s.capa;
 	unsigned max_rx_queues;
 	struct ether_addr mac_addr;
@@ -339,7 +375,7 @@ static int setup_pkt_dpdk(odp_pktio_t pktio ODP_UNUSED,
 {
 	uint32_t mtu;
 	struct rte_eth_dev_info dev_info;
-	pkt_dpdk_t * const pkt_dpdk = &pktio_entry->s.pkt_dpdk;
+	pkt_dpdk_t * const pkt_dpdk = pkt_priv(pktio_entry);
 	int i;
 
 	if (!_dpdk_netdev_is_valid(netdev)) {
@@ -389,7 +425,7 @@ static int setup_pkt_dpdk(odp_pktio_t pktio ODP_UNUSED,
 
 static int close_pkt_dpdk(pktio_entry_t *pktio_entry)
 {
-	rte_eth_dev_stop(pktio_entry->s.pkt_dpdk.port_id);
+	rte_eth_dev_stop(pkt_priv(pktio_entry)->port_id);
 	return 0;
 }
 
@@ -431,7 +467,7 @@ static odp_bool_t tx_checksum(pktio_entry_t *pktio_entry, uint32_t *txq_flags)
 static int start_pkt_dpdk(pktio_entry_t *pktio_entry)
 {
 	int ret, i;
-	pkt_dpdk_t * const pkt_dpdk = &pktio_entry->s.pkt_dpdk;
+	pkt_dpdk_t * const pkt_dpdk = pkt_priv(pktio_entry);
 	uint16_t port_id = pkt_dpdk->port_id;
 	int sid = rte_eth_dev_socket_id(pkt_dpdk->port_id);
 	int socket_id =  sid < 0 ? 0 : sid;
@@ -556,7 +592,7 @@ static int start_pkt_dpdk(pktio_entry_t *pktio_entry)
 static int stop_pkt_dpdk(pktio_entry_t *pktio_entry)
 {
 	unsigned int i;
-	uint16_t port_id = pktio_entry->s.pkt_dpdk.port_id;
+	uint16_t port_id = pkt_priv(pktio_entry)->port_id;
 
 	for (i = 0; i < pktio_entry->s.num_in_queue; i++)
 		rte_eth_dev_rx_queue_stop(port_id, i);
@@ -573,7 +609,7 @@ static void _odp_pktio_send_completion(pktio_entry_t *pktio_entry)
 	unsigned j;
 	pool_t *pool = pool_entry_from_hdl(pktio_entry->s.pool);
 	struct rte_mempool *rte_mempool = pool->rte_mempool;
-	uint16_t port_id = pktio_entry->s.pkt_dpdk.port_id;
+	uint16_t port_id = pkt_priv(pktio_entry)->port_id;
 
 	for (j = 0; j < pktio_entry->s.num_out_queue; j++)
 		rte_eth_tx_done_cleanup(port_id, j, 0);
@@ -581,7 +617,7 @@ static void _odp_pktio_send_completion(pktio_entry_t *pktio_entry)
 	for (i = 0; i < ODP_CONFIG_PKTIO_ENTRIES; ++i) {
 		pktio_entry_t *entry = pktio_entry_ptr[i];
 
-		port_id = entry->s.pkt_dpdk.port_id;
+		port_id = pkt_priv(entry)->port_id;
 
 		if (rte_mempool_avail_count(rte_mempool) != 0)
 			return;
@@ -601,82 +637,13 @@ static void _odp_pktio_send_completion(pktio_entry_t *pktio_entry)
 	}
 }
 
-#define IP4_CSUM_RESULT(m) (m->ol_flags & PKT_RX_IP_CKSUM_MASK)
-#define L4_CSUM_RESULT(m) (m->ol_flags & PKT_RX_L4_CKSUM_MASK)
-#define HAS_L4_PROTO(m, proto) ((m->packet_type & RTE_PTYPE_L4_MASK) == proto)
-#define UDP4_CSUM(_p) (((_odp_udphdr_t *)_odp_packet_l4_ptr(_p, NULL))->chksum)
-
-#define PKTIN_CSUM_BITS 0x1C
-
-static inline int pkt_set_ol_rx(odp_pktin_config_opt_t *pktin_cfg,
-				odp_packet_hdr_t *pkt_hdr,
-				struct rte_mbuf *mbuf)
-{
-	uint64_t packet_csum_result;
-
-	if (pktin_cfg->bit.ipv4_chksum &&
-	    RTE_ETH_IS_IPV4_HDR(mbuf->packet_type)) {
-		packet_csum_result = IP4_CSUM_RESULT(mbuf);
-
-		if (packet_csum_result == PKT_RX_IP_CKSUM_GOOD) {
-			pkt_hdr->p.input_flags.l3_chksum_done = 1;
-		} else if (packet_csum_result != PKT_RX_IP_CKSUM_UNKNOWN) {
-			if (pktin_cfg->bit.drop_ipv4_err)
-				return -1;
-
-			pkt_hdr->p.input_flags.l3_chksum_done = 1;
-			pkt_hdr->p.flags.ip_err = 1;
-			pkt_hdr->p.flags.l3_chksum_err = 1;
-		}
-	}
-
-	if (pktin_cfg->bit.udp_chksum &&
-	    HAS_L4_PROTO(mbuf, RTE_PTYPE_L4_UDP)) {
-		packet_csum_result = L4_CSUM_RESULT(mbuf);
-
-		if (packet_csum_result == PKT_RX_L4_CKSUM_GOOD) {
-			pkt_hdr->p.input_flags.l4_chksum_done = 1;
-		} else if (packet_csum_result != PKT_RX_L4_CKSUM_UNKNOWN) {
-			if (pkt_hdr->p.input_flags.ipv4 &&
-			    pkt_hdr->p.input_flags.udp &&
-			    !UDP4_CSUM(packet_handle(pkt_hdr))) {
-				pkt_hdr->p.input_flags.l4_chksum_done = 1;
-				return 0;
-			}
-
-			if (pktin_cfg->bit.drop_udp_err)
-				return -1;
-
-			pkt_hdr->p.input_flags.l4_chksum_done = 1;
-			pkt_hdr->p.flags.udp_err = 1;
-			pkt_hdr->p.flags.l4_chksum_err = 1;
-		}
-	} else if (pktin_cfg->bit.tcp_chksum &&
-		   HAS_L4_PROTO(mbuf, RTE_PTYPE_L4_TCP)) {
-		packet_csum_result = L4_CSUM_RESULT(mbuf);
-
-		if (packet_csum_result == PKT_RX_L4_CKSUM_GOOD) {
-			pkt_hdr->p.input_flags.l4_chksum_done = 1;
-		} else if (packet_csum_result != PKT_RX_L4_CKSUM_UNKNOWN) {
-			if (pktin_cfg->bit.drop_tcp_err)
-				return -1;
-
-			pkt_hdr->p.input_flags.l4_chksum_done = 1;
-			pkt_hdr->p.flags.tcp_err = 1;
-			pkt_hdr->p.flags.l4_chksum_err = 1;
-		}
-	}
-
-	return 0;
-}
-
 static int recv_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 			 odp_packet_t pkt_table[], int num)
 {
 	uint16_t nb_rx, i;
 	odp_packet_t *saved_pkt_table;
-	pkt_dpdk_t * const pkt_dpdk = &pktio_entry->s.pkt_dpdk;
-	odp_pktin_config_opt_t *pktin_cfg = &pktio_entry->s.config.pktin;
+	pkt_dpdk_t * const pkt_dpdk = pkt_priv(pktio_entry);
+	odp_pktin_config_opt_t pktin_cfg = pktio_entry->s.config.pktin;
 	odp_proto_layer_t parse_layer = pktio_entry->s.config.parser.layer;
 	odp_pktio_t input = pktio_entry->s.handle;
 	uint8_t min = pkt_dpdk->min_rx_burst;
@@ -717,13 +684,19 @@ static int recv_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 
 	for (i = 0; i < nb_rx; ++i) {
 		odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt_table[i]);
+		struct rte_mbuf *mbuf = pkt_to_mbuf(pkt_table[i]);
 
 		packet_init(pkt_hdr);
 		pkt_hdr->input = input;
 
 		if (!pktio_cls_enabled(pktio_entry) &&
-		    parse_layer != ODP_PROTO_LAYER_NONE)
-			packet_parse_layer(pkt_hdr, parse_layer);
+		    parse_layer != ODP_PROTO_LAYER_NONE) {
+			if (dpdk_packet_parse_layer(pkt_hdr, mbuf, parse_layer,
+						    pktin_cfg)) {
+				odp_packet_free(pkt_table[i]);
+				continue;
+			}
+		}
 		packet_set_ts(pkt_hdr, ts);
 	}
 
@@ -743,39 +716,47 @@ static int recv_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 
 		for (i = 0; i < nb_rx; i++) {
 			odp_packet_t new_pkt;
+			odp_packet_t pkt = pkt_table[i];
 			odp_pool_t new_pool;
-			uint8_t *pkt_addr;
+			uint8_t *data;
 			odp_packet_hdr_t parsed_hdr;
-			int ret;
-			odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt_table[i]);
+			odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
+			struct rte_mbuf *mbuf = pkt_to_mbuf(pkt);
+			uint32_t pkt_len = odp_packet_len(pkt);
 
-			pkt_addr = odp_packet_data(pkt_table[i]);
-			ret = cls_classify_packet(pktio_entry, pkt_addr,
-						  odp_packet_len(pkt_table[i]),
-						  odp_packet_len(pkt_table[i]),
-						  &new_pool, &parsed_hdr, true);
-			if (ret) {
-				failed++;
-				odp_packet_free(pkt_table[i]);
+			data = odp_packet_data(pkt);
+			packet_parse_reset(&parsed_hdr);
+			packet_set_len(&parsed_hdr, pkt_len);
+			if (dpdk_packet_parse_common(&parsed_hdr.p, data,
+						     pkt_len, pkt_len, mbuf,
+						     ODP_PROTO_LAYER_ALL,
+						     pktin_cfg)) {
+				odp_packet_free(pkt);
 				continue;
 			}
-			if (new_pool != odp_packet_pool(pkt_table[i])) {
-				new_pkt = odp_packet_copy(pkt_table[i],
-							  new_pool);
+			if (cls_classify_packet(pktio_entry, data,
+						pkt_len, pkt_len, &new_pool,
+						&parsed_hdr, false)) {
+				failed++;
+				odp_packet_free(pkt);
+				continue;
+			}
+			if (new_pool != odp_packet_pool(pkt)) {
+				new_pkt = odp_packet_copy(pkt, new_pool);
 
-				odp_packet_free(pkt_table[i]);
+				odp_packet_free(pkt);
 				if (new_pkt == ODP_PACKET_INVALID) {
 					failed++;
 					continue;
 				}
 				pkt_table[i] = new_pkt;
+				pkt = new_pkt;
 			}
 			packet_set_ts(pkt_hdr, ts);
-			pktio_entry->s.stats.in_octets +=
-					odp_packet_len(pkt_table[i]);
+			pktio_entry->s.stats.in_octets += odp_packet_len(pkt);
 			copy_packet_cls_metadata(&parsed_hdr, pkt_hdr);
 			if (success != i)
-				pkt_table[success] = pkt_table[i];
+				pkt_table[success] = pkt;
 			++success;
 		}
 		pktio_entry->s.stats.in_errors += failed;
@@ -783,25 +764,6 @@ static int recv_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 		nb_rx = success;
 	}
 
-	if (pktin_cfg->all_bits & PKTIN_CSUM_BITS) {
-		int j;
-		odp_packet_t pkt;
-
-		for (i = 0, j = 0; i < nb_rx; i++) {
-			pkt = pkt_table[i];
-
-			if (pkt_set_ol_rx(pktin_cfg, packet_hdr(pkt),
-					  pkt_to_mbuf(pkt))) {
-				rte_pktmbuf_free(pkt_to_mbuf(pkt));
-				continue;
-			}
-			if (i != j)
-				pkt_table[j] = pkt;
-			j++;
-		}
-
-		nb_rx = j;
-	}
 	return nb_rx;
 }
 
@@ -919,7 +881,7 @@ static inline void pkt_set_ol_tx(odp_pktout_config_opt_t *pktout_cfg,
 static int send_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 			 const odp_packet_t pkt_table[], int num)
 {
-	pkt_dpdk_t * const pkt_dpdk = &pktio_entry->s.pkt_dpdk;
+	pkt_dpdk_t * const pkt_dpdk = pkt_priv(pktio_entry);
 	uint8_t chksum_insert_ena = pktio_entry->s.chksum_insert_ena;
 	odp_pktout_config_opt_t *pktout_cfg = &pktio_entry->s.config.pktout;
 	odp_pktout_config_opt_t *pktout_capa =
@@ -990,7 +952,7 @@ static uint32_t mtu_get_pkt_dpdk(pktio_entry_t *pktio_entry)
 	uint16_t mtu = 0;
 	int ret;
 
-	ret = rte_eth_dev_get_mtu(pktio_entry->s.pkt_dpdk.port_id, &mtu);
+	ret = rte_eth_dev_get_mtu(pkt_priv(pktio_entry)->port_id, &mtu);
 	if (ret < 0)
 		return 0;
 
@@ -998,13 +960,13 @@ static uint32_t mtu_get_pkt_dpdk(pktio_entry_t *pktio_entry)
 	 * try to use system call if dpdk cannot get mtu value.
 	 */
 	if (mtu == 0)
-		mtu = _dpdk_vdev_mtu(pktio_entry->s.pkt_dpdk.port_id);
+		mtu = _dpdk_vdev_mtu(pkt_priv(pktio_entry)->port_id);
 	return mtu;
 }
 
 static uint32_t dpdk_frame_maxlen(pktio_entry_t *pktio_entry)
 {
-	pkt_dpdk_t *pkt_dpdk = &pktio_entry->s.pkt_dpdk;
+	pkt_dpdk_t *pkt_dpdk = pkt_priv(pktio_entry);
 
 	return pkt_dpdk->mtu;
 }
@@ -1053,14 +1015,14 @@ static int _dpdk_vdev_promisc_mode_set(uint16_t port_id, int enable)
 
 static int promisc_mode_set_pkt_dpdk(pktio_entry_t *pktio_entry,  int enable)
 {
-	uint16_t port_id = pktio_entry->s.pkt_dpdk.port_id;
+	uint16_t port_id = pkt_priv(pktio_entry)->port_id;
 
 	if (enable)
 		rte_eth_promiscuous_enable(port_id);
 	else
 		rte_eth_promiscuous_disable(port_id);
 
-	if (pktio_entry->s.pkt_dpdk.vdev_sysc_promisc) {
+	if (pkt_priv(pktio_entry)->vdev_sysc_promisc) {
 		int ret = _dpdk_vdev_promisc_mode_set(port_id, enable);
 
 		if (ret < 0)
@@ -1097,9 +1059,9 @@ static int _dpdk_vdev_promisc_mode(uint16_t port_id)
 
 static int promisc_mode_get_pkt_dpdk(pktio_entry_t *pktio_entry)
 {
-	uint16_t port_id = pktio_entry->s.pkt_dpdk.port_id;
+	uint16_t port_id = pkt_priv(pktio_entry)->port_id;
 
-	if (pktio_entry->s.pkt_dpdk.vdev_sysc_promisc)
+	if (pkt_priv(pktio_entry)->vdev_sysc_promisc)
 		return _dpdk_vdev_promisc_mode(port_id);
 	else
 		return rte_eth_promiscuous_get(port_id);
@@ -1107,7 +1069,7 @@ static int promisc_mode_get_pkt_dpdk(pktio_entry_t *pktio_entry)
 
 static int mac_get_pkt_dpdk(pktio_entry_t *pktio_entry, void *mac_addr)
 {
-	rte_eth_macaddr_get(pktio_entry->s.pkt_dpdk.port_id,
+	rte_eth_macaddr_get(pkt_priv(pktio_entry)->port_id,
 			    (struct ether_addr *)mac_addr);
 	return ETH_ALEN;
 }
@@ -1116,7 +1078,7 @@ static int mac_set_pkt_dpdk(pktio_entry_t *pktio_entry, const void *mac_addr)
 {
 	struct ether_addr addr = *(const struct ether_addr *)mac_addr;
 
-	return rte_eth_dev_default_mac_addr_set(pktio_entry->s.pkt_dpdk.port_id,
+	return rte_eth_dev_default_mac_addr_set(pkt_priv(pktio_entry)->port_id,
 						&addr);
 }
 
@@ -1131,7 +1093,7 @@ static int link_status_pkt_dpdk(pktio_entry_t *pktio_entry)
 {
 	struct rte_eth_link link;
 
-	rte_eth_link_get(pktio_entry->s.pkt_dpdk.port_id, &link);
+	rte_eth_link_get(pkt_priv(pktio_entry)->port_id, &link);
 	return link.link_status;
 }
 
@@ -1154,7 +1116,7 @@ static int stats_pkt_dpdk(pktio_entry_t *pktio_entry, odp_pktio_stats_t *stats)
 	int ret;
 	struct rte_eth_stats rte_stats;
 
-	ret = rte_eth_stats_get(pktio_entry->s.pkt_dpdk.port_id, &rte_stats);
+	ret = rte_eth_stats_get(pkt_priv(pktio_entry)->port_id, &rte_stats);
 
 	if (ret == 0) {
 		stats_convert(&rte_stats, stats);
@@ -1169,7 +1131,7 @@ static int stats_pkt_dpdk(pktio_entry_t *pktio_entry, odp_pktio_stats_t *stats)
 
 static int stats_reset_pkt_dpdk(pktio_entry_t *pktio_entry)
 {
-	rte_eth_stats_reset(pktio_entry->s.pkt_dpdk.port_id);
+	rte_eth_stats_reset(pkt_priv(pktio_entry)->port_id);
 	return 0;
 }
 

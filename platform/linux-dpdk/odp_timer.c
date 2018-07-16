@@ -12,7 +12,7 @@
 #include <odp/api/ticketlock.h>
 #include <odp/api/timer.h>
 
-#include <odp_internal.h>
+#include <odp_init_internal.h>
 #include <odp_debug_internal.h>
 #include <odp_ring_internal.h>
 #include <odp_timer_internal.h>

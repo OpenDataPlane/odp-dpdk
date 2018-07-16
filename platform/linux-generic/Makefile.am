@@ -20,32 +20,32 @@ DISTCLEANFILES = include/odp_libconfig_config.h
 include/odp_libconfig_config.h: $(top_srcdir)/config/odp-$(with_platform).conf $(top_builddir)/config.status
 	cd $(top_builddir) && $(SHELL) ./config.status $(subdir)/$@
 
+odpapiabiarchincludedir = $(archincludedir)/odp/api/abi
+odpapiabiarchinclude_HEADERS =
+
 if !ODP_ABI_COMPAT
 odpapiplatincludedir= $(includedir)/odp/api/plat
 odpapiplatinclude_HEADERS = \
 		  include/odp/api/plat/atomic_inlines.h \
 		  include/odp/api/plat/buffer_inline_types.h \
 		  include/odp/api/plat/byteorder_inlines.h \
-		  include/odp/api/plat/byteorder_inlines_api.h \
+		  include/odp/api/plat/cpu_inlines.h \
 		  include/odp/api/plat/event_inlines.h \
 		  include/odp/api/plat/packet_flag_inlines.h \
-		  include/odp/api/plat/packet_flag_inlines_api.h \
 		  include/odp/api/plat/packet_inline_types.h \
 		  include/odp/api/plat/packet_inlines.h \
-		  include/odp/api/plat/packet_inlines_api.h \
 		  include/odp/api/plat/pktio_inlines.h \
-		  include/odp/api/plat/pktio_inlines_api.h \
 		  include/odp/api/plat/pool_inline_types.h \
+		  include/odp/api/plat/queue_inlines.h \
+		  include/odp/api/plat/queue_inline_types.h \
 		  include/odp/api/plat/std_clib_inlines.h \
 		  include/odp/api/plat/strong_types.h \
 		  include/odp/api/plat/sync_inlines.h \
 		  include/odp/api/plat/thread_inlines.h \
-		  include/odp/api/plat/thread_inlines_api.h \
 		  include/odp/api/plat/ticketlock_inlines.h \
-		  include/odp/api/plat/ticketlock_inlines_api.h
+		  include/odp/api/plat/time_inlines.h
 
-odpapiabiarchincludedir = $(archincludedir)/odp/api/abi
-odpapiabiarchinclude_HEADERS = \
+odpapiabiarchinclude_HEADERS += \
 		  include-abi/odp/api/abi/align.h \
 		  include-abi/odp/api/abi/atomic.h \
 		  include-abi/odp/api/abi/barrier.h \
@@ -83,7 +83,6 @@ odpapiabiarchinclude_HEADERS = \
 endif
 
 noinst_HEADERS = \
-		  arch/odp_arch_time_internal.h \
 		  include/odp_align_internal.h \
 		  include/odp_atomic_internal.h \
 		  include/odp_bitmap_internal.h \
@@ -97,7 +96,8 @@ noinst_HEADERS = \
 		  include/odp_errno_define.h \
 		  include/odp_fdserver_internal.h \
 		  include/odp_forward_typedefs_internal.h \
-		  include/odp_internal.h \
+		  include/odp_global_data.h \
+		  include/odp_init_internal.h \
 		  include/odp_ipsec_internal.h \
 		  include/odp_ishm_internal.h \
 		  include/odp_ishmphy_internal.h \
@@ -111,10 +111,13 @@ noinst_HEADERS = \
 		  include/odp_packet_io_internal.h \
 		  include/odp_packet_io_ipc_internal.h \
 		  include/odp_packet_io_ring_internal.h \
-		  include/odp_packet_netmap.h \
-		  include/odp_packet_null.h \
 		  include/odp_packet_socket.h \
-		  include/odp_packet_tap.h \
+		  include/odp_socket_common.h \
+		  include/odp_packet_io_stats_common.h \
+		  include/odp_packet_io_stats.h \
+		  include/odp_sysfs_stats.h \
+		  include/odp_ethtool_stats.h \
+		  include/odp_ethtool_rss.h \
 		  include/odp_pcapng.h \
 		  include/odp_pkt_queue_internal.h \
 		  include/odp_pool_internal.h \
@@ -124,6 +127,7 @@ noinst_HEADERS = \
 		  include/odp_queue_lf.h \
 		  include/odp_queue_scalable_internal.h \
 		  include/odp_ring_internal.h \
+		  include/odp_ring_spsc_internal.h \
 		  include/odp_ring_st_internal.h \
 		  include/odp_schedule_if.h \
 		  include/odp_schedule_scalable_config.h \
@@ -131,6 +135,7 @@ noinst_HEADERS = \
 		  include/odp_schedule_scalable_ordered.h \
 		  include/odp_shm_internal.h \
 		  include/odp_sorted_list_internal.h \
+		  include/odp_sysinfo_internal.h \
 		  include/odp_timer_internal.h \
 		  include/odp_timer_wheel_internal.h \
 		  include/odp_traffic_mngr_internal.h \
@@ -150,14 +155,14 @@ __LIB__libodp_linux_la_SOURCES = \
 			   odp_buffer.c \
 			   odp_chksum.c \
 			   odp_classification.c \
-			   odp_cpu.c \
 			   odp_cpumask.c \
 			   odp_cpumask_task.c \
-			   odp_crypto.c \
 			   odp_errno.c \
 			   odp_event.c \
 			   odp_fdserver.c \
-			   odp_hash.c \
+			   odp_hash_crc32.c \
+			   odp_hash_crc32c.c \
+			   odp_hash_crc_gen.c \
 			   odp_impl.c \
 			   odp_init.c \
 			   odp_ipsec.c \
@@ -177,7 +182,7 @@ __LIB__libodp_linux_la_SOURCES = \
 			   odp_queue_if.c \
 			   odp_queue_lf.c \
 			   odp_queue_scalable.c \
-			   odp_random.c \
+			   odp_queue_spsc.c \
 			   odp_rwlock.c \
 			   odp_rwlock_recursive.c \
 			   odp_schedule_basic.c \
@@ -200,9 +205,13 @@ __LIB__libodp_linux_la_SOURCES = \
 			   odp_traffic_mngr.c \
 			   odp_version.c \
 			   odp_weak.c \
+			   pktio/stats/ethtool_stats.c \
+			   pktio/stats/sysfs_stats.c \
+			   pktio/stats/packet_io_stats.c \
 			   pktio/dpdk.c \
 			   pktio/dpdk_parse.c \
-			   pktio/ethtool.c \
+			   pktio/socket_common.c \
+			   pktio/ethtool_rss.c \
 			   pktio/io_ops.c \
 			   pktio/ipc.c \
 			   pktio/loop.c \
@@ -212,52 +221,68 @@ __LIB__libodp_linux_la_SOURCES = \
 			   pktio/ring.c \
 			   pktio/socket.c \
 			   pktio/socket_mmap.c \
-			   pktio/sysfs.c \
 			   pktio/tap.c
+
+if WITH_OPENSSL
+__LIB__libodp_linux_la_SOURCES += \
+			   odp_crypto_openssl.c \
+			   odp_random_openssl.c
+else
+__LIB__libodp_linux_la_SOURCES += \
+			   odp_crypto_null.c \
+			   odp_random_null.c
+endif
 if ODP_ABI_COMPAT
 __LIB__libodp_linux_la_SOURCES += \
 			   odp_atomic_api.c \
-			   odp_byteorder.c \
+			   odp_byteorder_api.c \
+			   odp_cpu_api.c \
 			   odp_event_api.c \
 			   odp_packet_api.c \
 			   odp_packet_flags_api.c \
 			   odp_pktio_api.c \
-			   odp_std_clib.c \
-			   odp_sync.c \
+			   odp_queue_api.c \
+			   odp_std_clib_api.c \
+			   odp_sync_api.c \
 			   odp_thread_api.c \
-			   odp_ticketlock.c
+			   odp_ticketlock_api.c \
+			   odp_time_api.c
 endif
 
 if ARCH_IS_ARM
 __LIB__libodp_linux_la_SOURCES += arch/default/odp_cpu_cycles.c \
 				  arch/default/odp_global_time.c \
 				  arch/default/odp_sysinfo_parse.c
+odpapiabiarchinclude_HEADERS += arch/default/odp/api/abi/cpu_inlines.h \
+				arch/default/odp/api/abi/cpu_time.h
 if !ODP_ABI_COMPAT
 odpapiabiarchinclude_HEADERS += arch/arm/odp/api/abi/cpu.h
 endif
 noinst_HEADERS += arch/arm/odp_atomic.h \
 		  arch/arm/odp_cpu.h \
 		  arch/arm/odp_cpu_idling.h \
-		  arch/default/odp_cpu_idling.h \
 		  arch/arm/odp_llsc.h
 endif
 if ARCH_IS_AARCH64
 __LIB__libodp_linux_la_SOURCES += arch/default/odp_cpu_cycles.c \
 				  arch/aarch64/odp_global_time.c \
 				  arch/default/odp_sysinfo_parse.c
+odpapiabiarchinclude_HEADERS += arch/default/odp/api/abi/cpu_inlines.h \
+				arch/default/odp/api/abi/cpu_time.h
 if !ODP_ABI_COMPAT
 odpapiabiarchinclude_HEADERS += arch/aarch64/odp/api/abi/cpu.h
 endif
 noinst_HEADERS += arch/aarch64/odp_atomic.h \
 		  arch/aarch64/odp_cpu.h \
 		  arch/aarch64/odp_cpu_idling.h \
-		  arch/default/odp_cpu_idling.h \
 		  arch/aarch64/odp_llsc.h
 endif
 if ARCH_IS_DEFAULT
 __LIB__libodp_linux_la_SOURCES += arch/default/odp_cpu_cycles.c \
 				  arch/default/odp_global_time.c \
 				  arch/default/odp_sysinfo_parse.c
+odpapiabiarchinclude_HEADERS += arch/default/odp/api/abi/cpu_inlines.h \
+				arch/default/odp/api/abi/cpu_time.h
 if !ODP_ABI_COMPAT
 odpapiabiarchinclude_HEADERS += arch/default/odp/api/abi/cpu.h
 endif
@@ -268,6 +293,8 @@ if ARCH_IS_MIPS64
 __LIB__libodp_linux_la_SOURCES += arch/mips64/odp_cpu_cycles.c \
 				  arch/default/odp_global_time.c \
 				  arch/mips64/odp_sysinfo_parse.c
+odpapiabiarchinclude_HEADERS += arch/default/odp/api/abi/cpu_inlines.h \
+				arch/default/odp/api/abi/cpu_time.h
 if !ODP_ABI_COMPAT
 odpapiabiarchinclude_HEADERS += arch/mips64/odp/api/abi/cpu.h
 endif
@@ -278,6 +305,8 @@ if ARCH_IS_POWERPC
 __LIB__libodp_linux_la_SOURCES += arch/default/odp_cpu_cycles.c \
 				  arch/default/odp_global_time.c \
 				  arch/powerpc/odp_sysinfo_parse.c
+odpapiabiarchinclude_HEADERS += arch/default/odp/api/abi/cpu_inlines.h \
+				arch/default/odp/api/abi/cpu_time.h
 if !ODP_ABI_COMPAT
 odpapiabiarchinclude_HEADERS += arch/powerpc/odp/api/abi/cpu.h
 endif
@@ -289,11 +318,14 @@ __LIB__libodp_linux_la_SOURCES += arch/x86/cpu_flags.c \
 				  arch/x86/odp_cpu_cycles.c \
 				  arch/x86/odp_global_time.c \
 				  arch/x86/odp_sysinfo_parse.c
+odpapiabiarchinclude_HEADERS += arch/x86/odp/api/abi/cpu_inlines.h \
+				arch/x86/odp/api/abi/cpu_rdtsc.h \
+				arch/x86/odp/api/abi/cpu_time.h
 if !ODP_ABI_COMPAT
 odpapiabiarchinclude_HEADERS += arch/x86/odp/api/abi/cpu.h
 endif
-noinst_HEADERS += arch/x86/cpu_flags.h
-noinst_HEADERS += arch/default/odp_cpu.h \
+noinst_HEADERS += arch/x86/cpu_flags.h \
+		  arch/default/odp_cpu.h \
 		  arch/default/odp_cpu_idling.h
 endif
 

@@ -45,15 +45,16 @@
 #include <odp_debug_internal.h>
 #include <odp/api/event.h>
 #include <odp/api/hints.h>
-#include <odp_internal.h>
+#include <odp_init_internal.h>
+#include <odp_errno_define.h>
 #include <odp/api/queue.h>
 #include <odp/api/shared_memory.h>
 #include <odp/api/spinlock.h>
 #include <odp/api/std_types.h>
 #include <odp/api/sync.h>
 #include <odp/api/time.h>
+#include <odp/api/plat/time_inlines.h>
 #include <odp/api/timer.h>
-#include <odp_arch_time_internal.h>
 #include <odp_timer_internal.h>
 
 /* Inlined API functions */

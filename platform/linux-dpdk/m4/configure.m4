@@ -9,7 +9,14 @@ AM_CONDITIONAL([HAVE_PCAP], [false])
 AM_CONDITIONAL([PKTIO_DPDK], [false])
 ODP_PTHREAD
 ODP_TIMER
-ODP_OPENSSL
+AC_ARG_WITH([openssl],
+	    [AS_HELP_STRING([--without-openssl],
+			    [compile without OpenSSL (results in disabled crypto and random support)])],
+	    [],
+	    [with_openssl=yes])
+AS_IF([test "$with_openssl" != "no"],
+      [ODP_OPENSSL])
+AM_CONDITIONAL([WITH_OPENSSL], [test x$with_openssl != xno])
 ODP_LIBCONFIG([linux-dpdk])
 m4_include([platform/linux-dpdk/m4/odp_pcapng.m4])
 ODP_SCHEDULER
@@ -36,6 +43,7 @@ case "${host}" in
   ;;
 esac
 
+AC_DEFINE([ODP_PKTIO_DPDK], [1])
 AC_CONFIG_COMMANDS_PRE([dnl
 AM_CONDITIONAL([PLATFORM_IS_LINUX_DPDK],
 	       [test "${with_platform}" = "linux-dpdk"])

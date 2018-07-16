@@ -7,10 +7,8 @@
  */
 
 #include "config.h"
+#include <odp_posix_extensions.h>
 
-#ifndef _GNU_SOURCE
-#define _GNU_SOURCE
-#endif
 #include <stdint.h>
 #include <string.h>
 #include <malloc.h>
@@ -28,7 +26,11 @@
 #include <odp_traffic_mngr_internal.h>
 #include <odp/api/plat/packet_inlines.h>
 #include <odp/api/plat/byteorder_inlines.h>
+#include <odp/api/time.h>
+#include <odp/api/plat/time_inlines.h>
 #include <odp_macros_internal.h>
+#include <odp_init_internal.h>
+#include <odp_errno_define.h>
 
 /* Local vars */
 static const
@@ -106,7 +108,7 @@ static odp_bool_t tm_demote_pkt_desc(tm_system_t *tm_system,
 				     tm_shaper_obj_t *timer_shaper,
 				     pkt_desc_t *demoted_pkt_desc);
 
-static int queue_tm_reenq(queue_t queue, odp_buffer_hdr_t *buf_hdr)
+static int queue_tm_reenq(void *queue, odp_buffer_hdr_t *buf_hdr)
 {
 	odp_tm_queue_t tm_queue = MAKE_ODP_TM_QUEUE((uint8_t *)queue -
 						    offsetof(tm_queue_obj_t,
@@ -116,7 +118,7 @@ static int queue_tm_reenq(queue_t queue, odp_buffer_hdr_t *buf_hdr)
 	return odp_tm_enq(tm_queue, pkt);
 }
 
-static int queue_tm_reenq_multi(queue_t queue ODP_UNUSED,
+static int queue_tm_reenq_multi(void *queue ODP_UNUSED,
 				odp_buffer_hdr_t *buf[] ODP_UNUSED,
 				int num ODP_UNUSED)
 {
@@ -178,7 +180,7 @@ static void tm_init_random_data(tm_random_data_t *tm_random_data)
 	byte_cnt = 0;
 	while (byte_cnt < 256)
 		byte_cnt += odp_random_data(&tm_random_data->buf[byte_cnt],
-					    256 - byte_cnt, 1);
+					    256 - byte_cnt, ODP_RANDOM_BASIC);
 
 	tm_random_data->next_random_byte = 0;
 }
@@ -622,8 +624,8 @@ static void tm_sched_config_set(tm_shaper_obj_t *shaper_obj,
 }
 
 /* Any locking required and validity checks must be done by the caller! */
-static void tm_threshold_config_set(tm_wred_node_t    *wred_node,
-				    odp_tm_threshold_t thresholds_profile)
+static int tm_threshold_config_set(tm_wred_node_t    *wred_node,
+				   odp_tm_threshold_t thresholds_profile)
 {
 	tm_queue_thresholds_t *threshold_params;
 
@@ -633,15 +635,18 @@ static void tm_threshold_config_set(tm_wred_node_t    *wred_node,
 	}
 
 	if (thresholds_profile == ODP_TM_INVALID)
-		return;
+		return 0;
 
 	threshold_params = tm_get_profile_params(thresholds_profile,
 						 TM_THRESHOLD_PROFILE);
-	if (threshold_params == NULL)
-		return;
+	if (threshold_params == NULL) {
+		ODP_DBG("threshold_params is NULL\n");
+		return -1;
+	}
 
 	threshold_params->ref_cnt++;
 	wred_node->threshold_params = threshold_params;
+	return 0;
 }
 
 /* Any locking required and validity checks must be done by the caller! */
@@ -1931,7 +1936,7 @@ static void egress_vlan_marking(tm_vlan_marking_t *vlan_marking,
 	uint32_t        hdr_len;
 	uint16_t        old_tci, new_tci;
 
-	ether_hdr_ptr = _odp_packet_l2_ptr(odp_pkt, &hdr_len);
+	ether_hdr_ptr = odp_packet_l2_ptr(odp_pkt, &hdr_len);
 	vlan_hdr_ptr  = (_odp_vlanhdr_t *)(ether_hdr_ptr + 1);
 
 	/* If the split_hdr variable below is TRUE, then this indicates that
@@ -1943,12 +1948,12 @@ static void egress_vlan_marking(tm_vlan_marking_t *vlan_marking,
 	 * correctness rather then performance. */
 	split_hdr = hdr_len < (_ODP_ETHHDR_LEN + _ODP_VLANHDR_LEN);
 	if (split_hdr) {
-		_odp_packet_copy_to_mem(odp_pkt, _ODP_ETHHDR_LEN,
+		odp_packet_copy_to_mem(odp_pkt, _ODP_ETHHDR_LEN,
 					_ODP_VLANHDR_LEN, &vlan_hdr);
 		vlan_hdr_ptr = &vlan_hdr;
 	}
 
-	old_tci = _odp_be_to_cpu_16(vlan_hdr_ptr->tci);
+	old_tci = odp_be_to_cpu_16(vlan_hdr_ptr->tci);
 	new_tci = old_tci;
 	if (vlan_marking->drop_eligible_enabled)
 		new_tci |= _ODP_VLANHDR_DEI_MASK;
@@ -1956,9 +1961,9 @@ static void egress_vlan_marking(tm_vlan_marking_t *vlan_marking,
 	if (new_tci == old_tci)
 		return;
 
-	vlan_hdr_ptr->tci = _odp_cpu_to_be_16(new_tci);
+	vlan_hdr_ptr->tci = odp_cpu_to_be_16(new_tci);
 	if (split_hdr)
-		_odp_packet_copy_from_mem(odp_pkt, _ODP_ETHHDR_LEN,
+		odp_packet_copy_from_mem(odp_pkt, _ODP_ETHHDR_LEN,
 					  _ODP_VLANHDR_LEN, &vlan_hdr);
 }
 
@@ -1970,8 +1975,8 @@ static void egress_ipv4_tos_marking(tm_tos_marking_t *tos_marking,
 	uint32_t       hdr_len, l3_offset, old_chksum, ones_compl_sum, tos_diff;
 	uint8_t        old_tos, new_tos, ecn;
 
-	l3_offset    = _odp_packet_l3_offset(odp_pkt);
-	ipv4_hdr_ptr = _odp_packet_l3_ptr(odp_pkt, &hdr_len);
+	l3_offset    = odp_packet_l3_offset(odp_pkt);
+	ipv4_hdr_ptr = odp_packet_l3_ptr(odp_pkt, &hdr_len);
 
 	/* If the split_hdr variable below is TRUE, then this indicates that
 	 * for this odp (output) packet the IPv4 header is not all in the same
@@ -1982,7 +1987,7 @@ static void egress_ipv4_tos_marking(tm_tos_marking_t *tos_marking,
 	 * correctness rather then performance. */
 	split_hdr = hdr_len < 12;
 	if (split_hdr) {
-		_odp_packet_copy_to_mem(odp_pkt, l3_offset,
+		odp_packet_copy_to_mem(odp_pkt, l3_offset,
 					_ODP_IPV4HDR_LEN, &ipv4_hdr);
 		ipv4_hdr_ptr = &ipv4_hdr;
 	}
@@ -2013,7 +2018,7 @@ static void egress_ipv4_tos_marking(tm_tos_marking_t *tos_marking,
 	 * in this specific case the carry out check does NOT need to be
 	 * repeated since it can be proven that the carry in sum cannot
 	 * cause another carry out. */
-	old_chksum     = (uint32_t)_odp_be_to_cpu_16(ipv4_hdr_ptr->chksum);
+	old_chksum     = (uint32_t)odp_be_to_cpu_16(ipv4_hdr_ptr->chksum);
 	ones_compl_sum = (~old_chksum) & 0xFFFF;
 	tos_diff       = ((uint32_t)new_tos) + ((~(uint32_t)old_tos) & 0xFFFF);
 	ones_compl_sum += tos_diff;
@@ -2022,9 +2027,9 @@ static void egress_ipv4_tos_marking(tm_tos_marking_t *tos_marking,
 				 (ones_compl_sum & 0xFFFF);
 
 	ipv4_hdr_ptr->tos    = new_tos;
-	ipv4_hdr_ptr->chksum = _odp_cpu_to_be_16((~ones_compl_sum) & 0xFFFF);
+	ipv4_hdr_ptr->chksum = odp_cpu_to_be_16((~ones_compl_sum) & 0xFFFF);
 	if (split_hdr)
-		_odp_packet_copy_from_mem(odp_pkt, l3_offset,
+		odp_packet_copy_from_mem(odp_pkt, l3_offset,
 					  _ODP_IPV4HDR_LEN, &ipv4_hdr);
 }
 
@@ -2036,8 +2041,8 @@ static void egress_ipv6_tc_marking(tm_tos_marking_t *tos_marking,
 	uint32_t       hdr_len, old_ver_tc_flow, new_ver_tc_flow, l3_offset;
 	uint8_t        old_tc, new_tc, ecn;
 
-	l3_offset    = _odp_packet_l3_offset(odp_pkt);
-	ipv6_hdr_ptr = _odp_packet_l3_ptr(odp_pkt, &hdr_len);
+	l3_offset    = odp_packet_l3_offset(odp_pkt);
+	ipv6_hdr_ptr = odp_packet_l3_ptr(odp_pkt, &hdr_len);
 
 	/* If the split_hdr variable below is TRUE, then this indicates that
 	 * for this odp (output) packet the IPv6 header is not all in the same
@@ -2048,12 +2053,12 @@ static void egress_ipv6_tc_marking(tm_tos_marking_t *tos_marking,
 	 * correctness rather then performance. */
 	split_hdr = hdr_len < 4;
 	if (split_hdr) {
-		_odp_packet_copy_to_mem(odp_pkt, l3_offset,
+		odp_packet_copy_to_mem(odp_pkt, l3_offset,
 					_ODP_IPV6HDR_LEN, &ipv6_hdr);
 		ipv6_hdr_ptr = &ipv6_hdr;
 	}
 
-	old_ver_tc_flow = _odp_be_to_cpu_32(ipv6_hdr_ptr->ver_tc_flow);
+	old_ver_tc_flow = odp_be_to_cpu_32(ipv6_hdr_ptr->ver_tc_flow);
 	old_tc          = (old_ver_tc_flow & _ODP_IPV6HDR_TC_MASK)
 				>> _ODP_IPV6HDR_TC_SHIFT;
 	new_tc          = old_tc;
@@ -2074,10 +2079,10 @@ static void egress_ipv6_tc_marking(tm_tos_marking_t *tos_marking,
 
 	new_ver_tc_flow = (old_ver_tc_flow & ~_ODP_IPV6HDR_TC_MASK) |
 			  (new_tc << _ODP_IPV6HDR_TC_SHIFT);
-	ipv6_hdr_ptr->ver_tc_flow = _odp_cpu_to_be_32(new_ver_tc_flow);
+	ipv6_hdr_ptr->ver_tc_flow = odp_cpu_to_be_32(new_ver_tc_flow);
 
 	if (split_hdr)
-		_odp_packet_copy_from_mem(odp_pkt, l3_offset,
+		odp_packet_copy_from_mem(odp_pkt, l3_offset,
 					  _ODP_IPV6HDR_LEN, &ipv6_hdr);
 }
 
@@ -4087,15 +4092,17 @@ int odp_tm_queue_threshold_config(odp_tm_queue_t tm_queue,
 				  odp_tm_threshold_t thresholds_profile)
 {
 	tm_queue_obj_t *tm_queue_obj;
+	int ret;
 
 	tm_queue_obj = GET_TM_QUEUE_OBJ(tm_queue);
 	if (!tm_queue_obj)
 		return -1;
 
 	odp_ticketlock_lock(&tm_profile_lock);
-	tm_threshold_config_set(tm_queue_obj->tm_wred_node, thresholds_profile);
+	ret = tm_threshold_config_set(tm_queue_obj->tm_wred_node,
+				      thresholds_profile);
 	odp_ticketlock_unlock(&tm_profile_lock);
-	return 0;
+	return ret;
 }
 
 int odp_tm_queue_wred_config(odp_tm_queue_t tm_queue,

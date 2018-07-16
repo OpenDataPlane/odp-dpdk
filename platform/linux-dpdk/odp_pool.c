@@ -15,7 +15,7 @@
 #include <odp_align_internal.h>
 #include <odp/api/shared_memory.h>
 #include <odp/api/align.h>
-#include <odp_internal.h>
+#include <odp_init_internal.h>
 #include <odp_config_internal.h>
 #include <odp/api/hints.h>
 #include <odp/api/debug.h>

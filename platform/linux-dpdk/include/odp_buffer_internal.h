@@ -18,7 +18,6 @@ extern "C" {
 #endif
 
 #include <odp/api/std_types.h>
-#include <odp/api/atomic.h>
 #include <odp/api/pool.h>
 #include <odp/api/buffer.h>
 #include <odp/api/debug.h>

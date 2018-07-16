@@ -36,12 +36,55 @@ extern "C" {
 
 /** @cond _ODP_HIDE_FROM_DOXYGEN_ */
 
+#ifndef _ODP_NO_INLINE
+	/* Inline functions by default */
+	#define _ODP_INLINE static inline
+	#define odp_packet_offset __odp_packet_offset
+	#define odp_packet_data __odp_packet_data
+	#define odp_packet_seg_len __odp_packet_seg_len
+	#define odp_packet_data_seg_len __odp_packet_data_seg_len
+	#define odp_packet_len __odp_packet_len
+	#define odp_packet_headroom __odp_packet_headroom
+	#define odp_packet_tailroom __odp_packet_tailroom
+	#define odp_packet_pool __odp_packet_pool
+	#define odp_packet_input __odp_packet_input
+	#define odp_packet_input_index __odp_packet_input_index
+	#define odp_packet_num_segs __odp_packet_num_segs
+	#define odp_packet_user_ptr __odp_packet_user_ptr
+	#define odp_packet_user_area __odp_packet_user_area
+	#define odp_packet_user_area_size __odp_packet_user_area_size
+	#define odp_packet_l2_offset __odp_packet_l2_offset
+	#define odp_packet_l3_offset __odp_packet_l3_offset
+	#define odp_packet_l4_offset __odp_packet_l4_offset
+	#define odp_packet_l2_ptr __odp_packet_l2_ptr
+	#define odp_packet_l3_ptr __odp_packet_l3_ptr
+	#define odp_packet_l4_ptr __odp_packet_l4_ptr
+	#define odp_packet_flow_hash __odp_packet_flow_hash
+	#define odp_packet_flow_hash_set __odp_packet_flow_hash_set
+	#define odp_packet_ts __odp_packet_ts
+	#define odp_packet_head __odp_packet_head
+	#define odp_packet_is_segmented __odp_packet_is_segmented
+	#define odp_packet_first_seg __odp_packet_first_seg
+	#define odp_packet_last_seg __odp_packet_last_seg
+	#define odp_packet_next_seg __odp_packet_next_seg
+	#define odp_packet_prefetch __odp_packet_prefetch
+	#define odp_packet_copy_from_mem __odp_packet_copy_from_mem
+	#define odp_packet_copy_to_mem __odp_packet_copy_to_mem
+	#define odp_packet_from_event __odp_packet_from_event
+	#define odp_packet_to_event __odp_packet_to_event
+	#define odp_packet_from_event_multi __odp_packet_from_event_multi
+	#define odp_packet_to_event_multi __odp_packet_to_event_multi
+#else
+	#undef _ODP_INLINE
+	#define _ODP_INLINE
+#endif
+
 extern const _odp_packet_inline_offset_t _odp_packet_inline;
 
 extern const _odp_pool_inline_offset_t _odp_pool_inline;
 
-static inline void *_odp_packet_offset(odp_packet_t pkt, uint32_t offset,
-				       uint32_t *len, odp_packet_seg_t *seg)
+_ODP_INLINE void *odp_packet_offset(odp_packet_t pkt, uint32_t offset,
+				    uint32_t *len, odp_packet_seg_t *seg)
 {
 	struct rte_mbuf *mb = &_odp_pkt_get(pkt, struct rte_mbuf, mb);
 
@@ -70,7 +113,7 @@ err:
 	return NULL;
 }
 
-static inline void *_odp_packet_data(odp_packet_t pkt)
+_ODP_INLINE void *odp_packet_data(odp_packet_t pkt)
 {
 	uint8_t *buf_addr = (uint8_t *)_odp_pkt_get(pkt, void *, buf_addr);
 	uint16_t data_off = _odp_pkt_get(pkt, uint16_t, data);
@@ -78,60 +121,60 @@ static inline void *_odp_packet_data(odp_packet_t pkt)
 	return (void *)(buf_addr + data_off);
 }
 
-static inline uint32_t _odp_packet_seg_len(odp_packet_t pkt)
+_ODP_INLINE uint32_t odp_packet_seg_len(odp_packet_t pkt)
 {
 	return _odp_pkt_get(pkt, uint16_t, seg_len);
 }
 
-static inline uint32_t _odp_packet_len(odp_packet_t pkt)
+_ODP_INLINE uint32_t odp_packet_len(odp_packet_t pkt)
 {
 	return _odp_pkt_get(pkt, uint32_t, pkt_len);
 }
 
-static inline void *_odp_packet_data_seg_len(odp_packet_t pkt,
-					     uint32_t *seg_len)
+_ODP_INLINE void *odp_packet_data_seg_len(odp_packet_t pkt,
+					  uint32_t *seg_len)
 {
-	*seg_len = _odp_packet_seg_len(pkt);
-	return _odp_packet_data(pkt);
+	*seg_len = odp_packet_seg_len(pkt);
+	return odp_packet_data(pkt);
 }
 
-static inline uint32_t _odp_packet_headroom(odp_packet_t pkt)
+_ODP_INLINE uint32_t odp_packet_headroom(odp_packet_t pkt)
 {
 	return rte_pktmbuf_headroom(&_odp_pkt_get(pkt, struct rte_mbuf, mb));
 }
 
-static inline uint32_t _odp_packet_tailroom(odp_packet_t pkt)
+_ODP_INLINE uint32_t odp_packet_tailroom(odp_packet_t pkt)
 {
 	struct rte_mbuf *mb = &_odp_pkt_get(pkt, struct rte_mbuf, mb);
 
 	return rte_pktmbuf_tailroom(rte_pktmbuf_lastseg(mb));
 }
 
-static inline odp_pool_t _odp_packet_pool(odp_packet_t pkt)
+_ODP_INLINE odp_pool_t odp_packet_pool(odp_packet_t pkt)
 {
 	void *pool = _odp_pkt_get(pkt, void *, pool);
 
 	return _odp_pool_get(pool, odp_pool_t, pool_hdl);
 }
 
-static inline odp_pktio_t _odp_packet_input(odp_packet_t pkt)
+_ODP_INLINE odp_pktio_t odp_packet_input(odp_packet_t pkt)
 {
 	return _odp_pkt_get(pkt, odp_pktio_t, input);
 }
 
-static inline int _odp_packet_input_index(odp_packet_t pkt)
+_ODP_INLINE int odp_packet_input_index(odp_packet_t pkt)
 {
-	odp_pktio_t pktio = _odp_packet_input(pkt);
+	odp_pktio_t pktio = odp_packet_input(pkt);
 
-	return _odp_pktio_index(pktio);
+	return odp_pktio_index(pktio);
 }
 
-static inline int _odp_packet_num_segs(odp_packet_t pkt)
+_ODP_INLINE int odp_packet_num_segs(odp_packet_t pkt)
 {
 	return _odp_pkt_get(pkt, uint16_t, nb_segs);
 }
 
-static inline void *_odp_packet_user_ptr(odp_packet_t pkt)
+_ODP_INLINE void *odp_packet_user_ptr(odp_packet_t pkt)
 {
 	_odp_packet_flags_t flags;
 
@@ -143,58 +186,58 @@ static inline void *_odp_packet_user_ptr(odp_packet_t pkt)
 	return _odp_pkt_get(pkt, void *, user_ptr);
 }
 
-static inline void *_odp_packet_user_area(odp_packet_t pkt)
+_ODP_INLINE void *odp_packet_user_area(odp_packet_t pkt)
 {
 	return (void *)((char *)pkt + _odp_packet_inline.udata);
 }
 
-static inline uint32_t _odp_packet_user_area_size(odp_packet_t pkt)
+_ODP_INLINE uint32_t odp_packet_user_area_size(odp_packet_t pkt)
 {
 	void *pool = _odp_pkt_get(pkt, void *, pool);
 
 	return _odp_pool_get(pool, uint32_t, uarea_size);
 }
 
-static inline uint32_t _odp_packet_l2_offset(odp_packet_t pkt)
+_ODP_INLINE uint32_t odp_packet_l2_offset(odp_packet_t pkt)
 {
 	return _odp_pkt_get(pkt, uint16_t, l2_offset);
 }
 
-static inline uint32_t _odp_packet_l3_offset(odp_packet_t pkt)
+_ODP_INLINE uint32_t odp_packet_l3_offset(odp_packet_t pkt)
 {
 	return _odp_pkt_get(pkt, uint16_t, l3_offset);
 }
 
-static inline uint32_t _odp_packet_l4_offset(odp_packet_t pkt)
+_ODP_INLINE uint32_t odp_packet_l4_offset(odp_packet_t pkt)
 {
 	return _odp_pkt_get(pkt, uint16_t, l4_offset);
 }
 
-static inline void *_odp_packet_l2_ptr(odp_packet_t pkt, uint32_t *len)
+_ODP_INLINE void *odp_packet_l2_ptr(odp_packet_t pkt, uint32_t *len)
 {
-	return _odp_packet_offset(pkt, _odp_pkt_get(pkt, uint16_t, l2_offset),
+	return odp_packet_offset(pkt, _odp_pkt_get(pkt, uint16_t, l2_offset),
 				  len, NULL);
 }
 
-static inline void *_odp_packet_l3_ptr(odp_packet_t pkt, uint32_t *len)
+_ODP_INLINE void *odp_packet_l3_ptr(odp_packet_t pkt, uint32_t *len)
 {
-	return _odp_packet_offset(pkt, _odp_pkt_get(pkt, uint16_t, l3_offset),
+	return odp_packet_offset(pkt, _odp_pkt_get(pkt, uint16_t, l3_offset),
 				  len, NULL);
 }
 
-static inline void *_odp_packet_l4_ptr(odp_packet_t pkt, uint32_t *len)
+_ODP_INLINE void *odp_packet_l4_ptr(odp_packet_t pkt, uint32_t *len)
 {
-	return _odp_packet_offset(pkt, _odp_pkt_get(pkt, uint16_t, l4_offset),
+	return odp_packet_offset(pkt, _odp_pkt_get(pkt, uint16_t, l4_offset),
 				  len, NULL);
 }
 
-static inline uint32_t _odp_packet_flow_hash(odp_packet_t pkt)
+_ODP_INLINE uint32_t odp_packet_flow_hash(odp_packet_t pkt)
 {
 	return _odp_pkt_get(pkt, uint32_t, rss);
 }
 
-static inline void _odp_packet_flow_hash_set(odp_packet_t pkt,
-					     uint32_t flow_hash)
+_ODP_INLINE void odp_packet_flow_hash_set(odp_packet_t pkt,
+					  uint32_t flow_hash)
 {
 	uint32_t *rss = &_odp_pkt_get(pkt, uint32_t, rss);
 	uint64_t *ol_flags = &_odp_pkt_get(pkt, uint64_t, ol_flags);
@@ -203,37 +246,37 @@ static inline void _odp_packet_flow_hash_set(odp_packet_t pkt,
 	*ol_flags |= _odp_packet_inline.rss_flag;
 }
 
-static inline odp_time_t _odp_packet_ts(odp_packet_t pkt)
+_ODP_INLINE odp_time_t odp_packet_ts(odp_packet_t pkt)
 {
 	return _odp_pkt_get(pkt, odp_time_t, timestamp);
 }
 
-static inline void *_odp_packet_head(odp_packet_t pkt)
+_ODP_INLINE void *odp_packet_head(odp_packet_t pkt)
 {
-	return (uint8_t *)_odp_packet_data(pkt) - _odp_packet_headroom(pkt);
+	return (uint8_t *)odp_packet_data(pkt) - odp_packet_headroom(pkt);
 }
 
-static inline int _odp_packet_is_segmented(odp_packet_t pkt)
+_ODP_INLINE int odp_packet_is_segmented(odp_packet_t pkt)
 {
 	struct rte_mbuf *mb = &_odp_pkt_get(pkt, struct rte_mbuf, mb);
 
 	return !rte_pktmbuf_is_contiguous(mb);
 }
 
-static inline odp_packet_seg_t _odp_packet_first_seg(odp_packet_t pkt)
+_ODP_INLINE odp_packet_seg_t odp_packet_first_seg(odp_packet_t pkt)
 {
 	return (odp_packet_seg_t)(uintptr_t)pkt;
 }
 
-static inline odp_packet_seg_t _odp_packet_last_seg(odp_packet_t pkt)
+_ODP_INLINE odp_packet_seg_t odp_packet_last_seg(odp_packet_t pkt)
 {
 	struct rte_mbuf *mb = &_odp_pkt_get(pkt, struct rte_mbuf, mb);
 
 	return (odp_packet_seg_t)(uintptr_t)rte_pktmbuf_lastseg(mb);
 }
 
-static inline odp_packet_seg_t _odp_packet_next_seg(odp_packet_t pkt,
-						    odp_packet_seg_t seg)
+_ODP_INLINE odp_packet_seg_t odp_packet_next_seg(odp_packet_t pkt,
+						 odp_packet_seg_t seg)
 {
 	struct rte_mbuf *mb = (struct rte_mbuf *)(uintptr_t)seg;
 	(void)pkt;
@@ -244,29 +287,29 @@ static inline odp_packet_seg_t _odp_packet_next_seg(odp_packet_t pkt,
 		return (odp_packet_seg_t)(uintptr_t)mb->next;
 }
 
-static inline void _odp_packet_prefetch(odp_packet_t pkt, uint32_t offset,
-					uint32_t len)
+_ODP_INLINE void odp_packet_prefetch(odp_packet_t pkt, uint32_t offset,
+				     uint32_t len)
 {
-	const char *addr = (char *)_odp_packet_data(pkt) + offset;
+	const char *addr = (char *)odp_packet_data(pkt) + offset;
 	size_t ofs;
 
 	for (ofs = 0; ofs < len; ofs += RTE_CACHE_LINE_SIZE)
 		rte_prefetch0(addr + ofs);
 }
 
-static inline int _odp_packet_copy_to_mem(odp_packet_t pkt, uint32_t offset,
-					  uint32_t len, void *dst)
+_ODP_INLINE int odp_packet_copy_to_mem(odp_packet_t pkt, uint32_t offset,
+				       uint32_t len, void *dst)
 {
 	void *mapaddr;
 	uint32_t seglen = 0; /* GCC */
 	uint32_t cpylen;
 	uint8_t *dstaddr = (uint8_t *)dst;
 
-	if (offset + len > _odp_packet_len(pkt))
+	if (offset + len > odp_packet_len(pkt))
 		return -1;
 
 	while (len > 0) {
-		mapaddr = _odp_packet_offset(pkt, offset, &seglen, NULL);
+		mapaddr = odp_packet_offset(pkt, offset, &seglen, NULL);
 		cpylen = len > seglen ? seglen : len;
 		memcpy(dstaddr, mapaddr, cpylen);
 		offset  += cpylen;
@@ -277,19 +320,19 @@ static inline int _odp_packet_copy_to_mem(odp_packet_t pkt, uint32_t offset,
 	return 0;
 }
 
-static inline int _odp_packet_copy_from_mem(odp_packet_t pkt, uint32_t offset,
-					    uint32_t len, const void *src)
+_ODP_INLINE int odp_packet_copy_from_mem(odp_packet_t pkt, uint32_t offset,
+					 uint32_t len, const void *src)
 {
 	void *mapaddr;
 	uint32_t seglen = 0; /* GCC */
 	uint32_t cpylen;
 	const uint8_t *srcaddr = (const uint8_t *)src;
 
-	if (offset + len > _odp_packet_len(pkt))
+	if (offset + len > odp_packet_len(pkt))
 		return -1;
 
 	while (len > 0) {
-		mapaddr = _odp_packet_offset(pkt, offset, &seglen, NULL);
+		mapaddr = odp_packet_offset(pkt, offset, &seglen, NULL);
 		cpylen = len > seglen ? seglen : len;
 		memcpy(mapaddr, srcaddr, cpylen);
 		offset  += cpylen;
@@ -300,33 +343,33 @@ static inline int _odp_packet_copy_from_mem(odp_packet_t pkt, uint32_t offset,
 	return 0;
 }
 
-static inline odp_packet_t _odp_packet_from_event(odp_event_t ev)
+_ODP_INLINE odp_packet_t odp_packet_from_event(odp_event_t ev)
 {
 	return (odp_packet_t)ev;
 }
 
-static inline odp_event_t _odp_packet_to_event(odp_packet_t pkt)
+_ODP_INLINE odp_event_t odp_packet_to_event(odp_packet_t pkt)
 {
 	return (odp_event_t)pkt;
 }
 
-static inline void _odp_packet_from_event_multi(odp_packet_t pkt[],
-						const odp_event_t ev[],
-						int num)
+_ODP_INLINE void odp_packet_from_event_multi(odp_packet_t pkt[],
+					     const odp_event_t ev[],
+					     int num)
 {
 	int i;
 
 	for (i = 0; i < num; i++)
-		pkt[i] = _odp_packet_from_event(ev[i]);
+		pkt[i] = odp_packet_from_event(ev[i]);
 }
 
-static inline void _odp_packet_to_event_multi(const odp_packet_t pkt[],
-					      odp_event_t ev[], int num)
+_ODP_INLINE void odp_packet_to_event_multi(const odp_packet_t pkt[],
+					   odp_event_t ev[], int num)
 {
 	int i;
 
 	for (i = 0; i < num; i++)
-		ev[i] = _odp_packet_to_event(pkt[i]);
+		ev[i] = odp_packet_to_event(pkt[i]);
 }
 
 #ifdef __cplusplus

@@ -15,29 +15,32 @@
 #include <odp/api/shared_memory.h>
 #include <odp/api/sync.h>
 #include <odp/api/thread.h>
+#include <odp/api/plat/thread_inlines.h>
 #include <odp/api/thrmask.h>
 #include <odp/api/time.h>
+#include <odp/api/plat/time_inlines.h>
 
-#include <odp_internal.h>
 #include <odp_config_internal.h>
 #include <odp_debug_internal.h>
 #include <odp_ishm_internal.h>
 #include <odp_ishmpool_internal.h>
 
 #include <odp_align_internal.h>
+#include <odp/api/plat/cpu_inlines.h>
 #include <odp_llqueue.h>
 #include <odp_queue_scalable_internal.h>
 #include <odp_schedule_if.h>
 #include <odp_bitset.h>
 #include <odp_packet_io_internal.h>
+#include <odp_timer_internal.h>
 
 #include <limits.h>
 #include <stdbool.h>
 #include <string.h>
 
 #include <odp/api/plat/ticketlock_inlines.h>
-#define LOCK(a) _odp_ticketlock_lock((a))
-#define UNLOCK(a) _odp_ticketlock_unlock((a))
+#define LOCK(a) odp_ticketlock_lock((a))
+#define UNLOCK(a) odp_ticketlock_unlock((a))
 
 #define MAXTHREADS ATOM_BITSET_SIZE
 
@@ -887,6 +890,8 @@ static int _schedule(odp_queue_t *from, odp_event_t ev[], int num_evts)
 
 	ts = sched_ts;
 	atomq = ts->atomq;
+
+	timer_run();
 
 	/* Once an atomic queue has been scheduled to a thread, it will stay
 	 * on that thread until empty or 'rotated' by WRR
@@ -2002,7 +2007,7 @@ static int sched_queue(uint32_t queue_index)
 	return 0;
 }
 
-static int ord_enq_multi(queue_t handle, void *buf_hdr[], int num,
+static int ord_enq_multi(void *handle, void *buf_hdr[], int num,
 			 int *ret)
 
 {

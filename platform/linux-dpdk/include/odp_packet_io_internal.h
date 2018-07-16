@@ -31,7 +31,6 @@ extern "C" {
 
 #define PKTIO_MAX_QUEUES 64
 #include <linux/if_ether.h>
-#include <odp_packet_null.h>
 
 #define PKTIO_NAME_LEN 256
 
@@ -40,36 +39,8 @@ extern "C" {
 
 /* Forward declaration */
 struct pktio_if_ops;
-struct pkt_dpdk_t;
 
-typedef struct {
-	odp_queue_t loopq;		/**< loopback queue for "loop" device */
-	odp_bool_t promisc;		/**< promiscuous mode state */
-	uint8_t idx;			/**< index of "loop" device */
-} pkt_loop_t;
-
-/** DPDK runtime configuration options */
-typedef struct {
-	int num_rx_desc;
-	int num_tx_desc;
-	int rx_drop_en;
-} dpdk_opt_t;
-
-/** Packet socket using dpdk mmaped rings for both Rx and Tx */
-typedef struct {
-	uint16_t port_id;		  /**< DPDK port identifier */
-	uint16_t mtu;			  /**< maximum transmission unit */
-	uint8_t lockless_rx;		  /**< no locking for rx */
-	uint8_t lockless_tx;		  /**< no locking for tx */
-	uint8_t min_rx_burst;		  /**< minimum RX burst size */
-	odp_pktin_hash_proto_t hash;	  /**< Packet input hash protocol */
-	char ifname[32];
-	odp_ticketlock_t rx_lock[PKTIO_MAX_QUEUES];  /**< RX queue locks */
-	odp_ticketlock_t tx_lock[PKTIO_MAX_QUEUES];  /**< TX queue locks */
-	uint8_t vdev_sysc_promisc;	/**< promiscuous mode defined with
-					    system call */
-	dpdk_opt_t opt;
-} pkt_dpdk_t;
+#define PKTIO_PRIVATE_SIZE 1280
 
 struct pktio_entry {
 	const struct pktio_if_ops *ops; /**< Implementation specific methods */
@@ -79,11 +50,7 @@ struct pktio_entry {
 	uint8_t cls_enabled;            /**< classifier enabled */
 	uint8_t chksum_insert_ena;      /**< pktout checksum offload enabled */
 	odp_pktio_t handle;		/**< pktio handle */
-	union {
-		pkt_loop_t pkt_loop;	/**< Using loopback for IO */
-		pkt_dpdk_t pkt_dpdk;	/**< using DPDK API for IO */
-		pkt_null_t pkt_null;	/**< using null for IO */
-	};
+	unsigned char ODP_ALIGNED_CACHE pkt_priv[PKTIO_PRIVATE_SIZE];
 	enum {
 		/* Not allocated */
 		PKTIO_STATE_FREE = 0,
@@ -105,6 +72,7 @@ struct pktio_entry {
 	odp_pktio_config_t config;	/**< Device configuration */
 	classifier_t cls;		/**< classifier linked with this pktio*/
 	odp_pktio_stats_t stats;	/**< statistic counters for pktio */
+	odp_proto_chksums_t in_chksums; /**< Checksums validation settings */
 	char name[PKTIO_NAME_LEN];	/**< name of pktio provided to
 					   pktio_open() */
 	odp_pool_t pool;
@@ -118,7 +86,7 @@ struct pktio_entry {
 
 	struct {
 		odp_queue_t        queue;
-		queue_t            queue_int;
+		void              *queue_int;
 		odp_pktin_queue_t  pktin;
 	} in_queue[PKTIO_MAX_QUEUES];
 
@@ -203,7 +171,7 @@ static inline pktio_entry_t *get_pktio_entry(odp_pktio_t pktio)
 		return NULL;
 	}
 
-	idx = _odp_pktio_index(pktio);
+	idx = odp_pktio_index(pktio);
 
 	return pktio_entry_ptr[idx];
 }
