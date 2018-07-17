@@ -44,6 +44,12 @@ static const char *cipher_alg_name(odp_cipher_alg_t cipher)
 		return "aes_ccm";
 	case ODP_CIPHER_ALG_CHACHA20_POLY1305:
 		return "chacha20_poly1305";
+	case ODP_CIPHER_ALG_KASUMI_F8:
+		return "kasumi_f8";
+	case ODP_CIPHER_ALG_SNOW3G_UEA2:
+		return "snow3g_uea2";
+	case ODP_CIPHER_ALG_ZUC_EEA3:
+		return "zuc_eea3";
 	default:
 		return "Unknown";
 	}
@@ -76,6 +82,12 @@ static const char *auth_alg_name(odp_auth_alg_t auth)
 		return "aes_cmac";
 	case ODP_AUTH_ALG_CHACHA20_POLY1305:
 		return "chacha20_poly1305";
+	case ODP_AUTH_ALG_KASUMI_F9:
+		return "kasumi_f9";
+	case ODP_AUTH_ALG_SNOW3G_UIA2:
+		return "snow3g_uia2";
+	case ODP_AUTH_ALG_ZUC_EIA3:
+		return "zuc_eia3";
 	default:
 		return "Unknown";
 	}
@@ -99,6 +111,12 @@ static void print_cipher_algos(odp_crypto_cipher_algos_t ciphers)
 		printf("%s ", cipher_alg_name(ODP_CIPHER_ALG_AES_CCM));
 	if (ciphers.bit.chacha20_poly1305)
 		printf("%s ", cipher_alg_name(ODP_CIPHER_ALG_CHACHA20_POLY1305));
+	if (ciphers.bit.kasumi_f8)
+		printf("%s ", cipher_alg_name(ODP_CIPHER_ALG_KASUMI_F8));
+	if (ciphers.bit.snow3g_uea2)
+		printf("%s ", cipher_alg_name(ODP_CIPHER_ALG_SNOW3G_UEA2));
+	if (ciphers.bit.zuc_eea3)
+		printf("%s ", cipher_alg_name(ODP_CIPHER_ALG_ZUC_EEA3));
 }
 
 static void print_auth_algos(odp_crypto_auth_algos_t auths)
@@ -127,6 +145,12 @@ static void print_auth_algos(odp_crypto_auth_algos_t auths)
 		printf("%s ", auth_alg_name(ODP_AUTH_ALG_AES_XCBC_MAC));
 	if (auths.bit.chacha20_poly1305)
 		printf("%s ", auth_alg_name(ODP_AUTH_ALG_CHACHA20_POLY1305));
+	if (auths.bit.kasumi_f9)
+		printf("%s ", auth_alg_name(ODP_AUTH_ALG_KASUMI_F9));
+	if (auths.bit.snow3g_uia2)
+		printf("%s ", auth_alg_name(ODP_AUTH_ALG_SNOW3G_UIA2));
+	if (auths.bit.zuc_eia3)
+		printf("%s ", auth_alg_name(ODP_AUTH_ALG_ZUC_EIA3));
 }
 
 static void print_cipher_capa(odp_cipher_alg_t cipher)
@@ -145,8 +169,12 @@ static void print_cipher_capa(odp_cipher_alg_t cipher)
 
 	printf("        %s:\n", cipher_alg_name(cipher));
 	for (i = 0; i < rc; i++) {
-		printf("            key %d iv %d\n",
+		printf("            key %d iv %d",
 		       capa[i].key_len, capa[i].iv_len);
+		if (capa[i].bit_mode)
+			printf(" using bits");
+		printf("\n");
+	}
 }
 
 static void print_auth_capa(odp_auth_alg_t auth)
@@ -173,6 +201,8 @@ static void print_auth_capa(odp_auth_alg_t auth)
 		if (capa[i].aad_len.max != 0)
 			printf(" aad %d, %d, %d",
 			       capa[i].aad_len.min, capa[i].aad_len.max, capa[i].aad_len.inc);
+		if (capa[i].bit_mode)
+			printf(" using bits");
 		printf("\n");
 	}
 }
@@ -195,6 +225,12 @@ static void print_cipher_caps(odp_crypto_cipher_algos_t ciphers)
 		print_cipher_capa(ODP_CIPHER_ALG_AES_CCM);
 	if (ciphers.bit.chacha20_poly1305)
 		print_cipher_capa(ODP_CIPHER_ALG_CHACHA20_POLY1305);
+	if (ciphers.bit.kasumi_f8)
+		print_cipher_capa(ODP_CIPHER_ALG_KASUMI_F8);
+	if (ciphers.bit.snow3g_uea2)
+		print_cipher_capa(ODP_CIPHER_ALG_SNOW3G_UEA2);
+	if (ciphers.bit.zuc_eea3)
+		print_cipher_capa(ODP_CIPHER_ALG_ZUC_EEA3);
 }
 
 static void print_auth_caps(odp_crypto_auth_algos_t auths)
@@ -223,6 +259,12 @@ static void print_auth_caps(odp_crypto_auth_algos_t auths)
 		print_auth_capa(ODP_AUTH_ALG_AES_XCBC_MAC);
 	if (auths.bit.chacha20_poly1305)
 		print_auth_capa(ODP_AUTH_ALG_CHACHA20_POLY1305);
+	if (auths.bit.kasumi_f9)
+		print_auth_capa(ODP_AUTH_ALG_KASUMI_F9);
+	if (auths.bit.snow3g_uia2)
+		print_auth_capa(ODP_AUTH_ALG_SNOW3G_UIA2);
+	if (auths.bit.zuc_eia3)
+		print_auth_capa(ODP_AUTH_ALG_ZUC_EIA3);
 }
 
 int main(void)
