@@ -609,7 +609,7 @@ int odp_crypto_capability(odp_crypto_capability_t *capability)
 	cdev_count = rte_cryptodev_count();
 	if (cdev_count == 0) {
 		ODP_ERR("No crypto devices available\n");
-		return -1;
+		return 0;
 	}
 
 	for (cdev_id = 0; cdev_id < cdev_count; cdev_id++) {
