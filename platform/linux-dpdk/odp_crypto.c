@@ -570,12 +570,39 @@ int odp_crypto_capability(odp_crypto_capability_t *capability)
 	return 0;
 }
 
+static int cipher_capa_insert(odp_crypto_cipher_capability_t *src,
+			      odp_crypto_cipher_capability_t *capa,
+			      int idx,
+			      int size)
+{
+	int i = 0;
+
+	while (1) {
+		if (i >= size) {
+			return idx + 1;
+		} else if (i == idx) {
+			src[i] = *capa;
+			return idx + 1;
+		} else if (src[i].key_len < capa->key_len ||
+			   (src[i].key_len == capa->key_len &&
+			    src[i].iv_len < capa->iv_len)) {
+			i++;
+		} else {
+			memmove(&src[i + 1], &src[i],
+				sizeof(*capa) * (idx - i));
+			src[i] = *capa;
+			return idx + 1;
+		}
+	}
+}
+
 static int cipher_gen_capability(const struct rte_crypto_param_range *key_size,
 				 const struct rte_crypto_param_range *iv_size,
 				 odp_crypto_cipher_capability_t *src,
+				 int offset,
 				 int num_copy)
 {
-	int idx = 0;
+	int idx = offset;
 
 	uint32_t key_size_min = key_size->min;
 	uint32_t key_size_max = key_size->max;
@@ -588,11 +615,12 @@ static int cipher_gen_capability(const struct rte_crypto_param_range *key_size,
 	     key_len += key_inc) {
 		for (uint32_t iv_size = iv_size_min;
 		     iv_size <= iv_size_max; iv_size += iv_inc) {
-			if (idx < num_copy) {
-				src[idx].key_len = key_len;
-				src[idx].iv_len = iv_size;
-			}
-			idx++;
+			odp_crypto_cipher_capability_t capa;
+
+			capa.key_len = key_len;
+			capa.iv_len = iv_size;
+
+			idx = cipher_capa_insert(src, &capa, idx, num_copy);
 
 			if (iv_inc == 0)
 				break;
@@ -644,10 +672,10 @@ static int cipher_aead_capability(odp_cipher_alg_t cipher,
 		if (cap->op == RTE_CRYPTO_OP_TYPE_UNDEFINED)
 			continue;
 
-		idx += cipher_gen_capability(&cap->sym.aead.key_size,
-					     &cap->sym.aead.iv_size,
-					     src + idx,
-					     num_copy - idx);
+		idx = cipher_gen_capability(&cap->sym.aead.key_size,
+					    &cap->sym.aead.iv_size,
+					    src, idx,
+					    num_copy);
 	}
 
 	if (idx < num_copy)
@@ -697,10 +725,10 @@ static int cipher_capability(odp_cipher_alg_t cipher,
 		if (cap->op == RTE_CRYPTO_OP_TYPE_UNDEFINED)
 			continue;
 
-		idx += cipher_gen_capability(&cap->sym.cipher.key_size,
-					     &cap->sym.cipher.iv_size,
-					     src + idx,
-					     num_copy - idx);
+		idx = cipher_gen_capability(&cap->sym.cipher.key_size,
+					    &cap->sym.cipher.iv_size,
+					    src, idx,
+					    num_copy);
 	}
 
 	if (idx < num_copy)
@@ -728,14 +756,44 @@ int odp_crypto_cipher_capability(odp_cipher_alg_t cipher,
 		return cipher_capability(cipher, dst, num_copy);
 }
 
+static int auth_capa_insert(odp_crypto_auth_capability_t *src,
+			    odp_crypto_auth_capability_t *capa,
+			    int idx,
+			    int size)
+{
+	int i = 0;
+
+	while (1) {
+		if (i >= size) {
+			return idx + 1;
+		} else if (i == idx) {
+			src[i] = *capa;
+			return idx + 1;
+		} else if (src[i].digest_len < capa->digest_len ||
+			   (src[i].digest_len == capa->digest_len &&
+			    src[i].key_len < capa->key_len) ||
+			   (src[i].digest_len == capa->digest_len &&
+			    src[i].key_len == capa->key_len &&
+			    src[i].iv_len < capa->iv_len)) {
+			i++;
+		} else {
+			memmove(&src[i + 1], &src[i],
+				sizeof(*capa) * (idx - i));
+			src[i] = *capa;
+			return idx + 1;
+		}
+	}
+}
+
 static int auth_gen_capability(const struct rte_crypto_param_range *key_size,
 			       const struct rte_crypto_param_range *iv_size,
 			       const struct rte_crypto_param_range *digest_size,
 			       const struct rte_crypto_param_range *aad_size,
 			       odp_crypto_auth_capability_t *src,
+			       int offset,
 			       int num_copy)
 {
-	int idx = 0;
+	int idx = offset;
 
 	uint16_t key_size_min = key_size->min;
 	uint16_t key_size_max = key_size->max;
@@ -756,18 +814,18 @@ static int auth_gen_capability(const struct rte_crypto_param_range *key_size,
 			for (uint16_t iv_size = iv_size_min;
 			     iv_size <= iv_size_max;
 			     iv_size += iv_inc) {
-				if (idx < num_copy) {
-					src[idx].key_len = key_len;
-					src[idx].digest_len = digest_len;
-					src[idx].iv_len = iv_size;
-					src[idx].aad_len.min =
-						aad_size->min;
-					src[idx].aad_len.max =
-						aad_size->max;
-					src[idx].aad_len.inc =
-						aad_size->increment;
-				}
-				idx++;
+				odp_crypto_auth_capability_t capa;
+
+				capa.digest_len = digest_len;
+				capa.key_len = key_len;
+				capa.iv_len = iv_size;
+				capa.aad_len.min = aad_size->min;
+				capa.aad_len.max = aad_size->max;
+				capa.aad_len.inc = aad_size->increment;
+
+				idx = auth_capa_insert(src, &capa, idx,
+						       num_copy);
+
 				if (iv_inc == 0)
 					break;
 			}
@@ -826,12 +884,12 @@ static int auth_aead_capability(odp_auth_alg_t auth,
 		if (cap->op == RTE_CRYPTO_OP_TYPE_UNDEFINED)
 			continue;
 
-		idx += auth_gen_capability(&zero_range,
-					   &zero_range,
-					   &cap->sym.aead.digest_size,
-					   &cap->sym.aead.aad_size,
-					   src + idx,
-					   num_copy - idx);
+		idx = auth_gen_capability(&zero_range,
+					  &zero_range,
+					  &cap->sym.aead.digest_size,
+					  &cap->sym.aead.aad_size,
+					  src, idx,
+					  num_copy);
 	}
 
 	if (idx < num_copy)
@@ -915,14 +973,14 @@ static int auth_capability(odp_auth_alg_t auth,
 				  &cap->sym.auth.key_size) != 0)
 			continue;
 
-		idx += auth_gen_capability(key_size_override ?
-					   &key_range_override :
-					   &cap->sym.auth.key_size,
-					   &cap->sym.auth.iv_size,
-					   &cap->sym.auth.digest_size,
-					   &cap->sym.auth.aad_size,
-					   src + idx,
-					   num_copy - idx);
+		idx = auth_gen_capability(key_size_override ?
+					  &key_range_override :
+					  &cap->sym.auth.key_size,
+					  &cap->sym.auth.iv_size,
+					  &cap->sym.auth.digest_size,
+					  &cap->sym.auth.aad_size,
+					  src, idx,
+					  num_copy);
 	}
 
 	if (idx < num_copy)
