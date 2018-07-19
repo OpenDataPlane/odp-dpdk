@@ -53,6 +53,7 @@ typedef struct crypto_session_entry_s {
 	struct rte_cryptodev_sym_session *rte_session;
 	struct rte_crypto_sym_xform cipher_xform;
 	struct rte_crypto_sym_xform auth_xform;
+	uint16_t cdev_nb_qpairs;
 	uint8_t cdev_id;
 	uint8_t cipher_iv_data[MAX_IV_LENGTH];
 	uint8_t auth_iv_data[MAX_IV_LENGTH];
@@ -62,6 +63,7 @@ typedef struct crypto_global_s {
 	odp_spinlock_t                lock;
 	uint8_t enabled_crypto_devs;
 	uint8_t enabled_crypto_dev_ids[RTE_CRYPTO_MAX_DEVS];
+	uint16_t enabled_crypto_dev_nb_qpairs[RTE_CRYPTO_MAX_DEVS];
 	crypto_session_entry_t *free;
 	crypto_session_entry_t sessions[MAX_SESSIONS];
 	int is_crypto_dev_initialized;
@@ -91,6 +93,30 @@ static inline int is_valid_size(uint16_t length,
 	}
 
 	return -1;
+}
+
+static int cipher_is_bit_mode(odp_cipher_alg_t cipher_alg)
+{
+	switch (cipher_alg) {
+	case ODP_CIPHER_ALG_KASUMI_F8:
+	case ODP_CIPHER_ALG_SNOW3G_UEA2:
+	case ODP_CIPHER_ALG_ZUC_EEA3:
+		return 1;
+	default:
+		return 0;
+	}
+}
+
+static int auth_is_bit_mode(odp_auth_alg_t auth_alg)
+{
+	switch (auth_alg) {
+	case ODP_AUTH_ALG_KASUMI_F9:
+	case ODP_AUTH_ALG_SNOW3G_UIA2:
+	case ODP_AUTH_ALG_ZUC_EIA3:
+		return 1;
+	default:
+		return 0;
+	}
 }
 
 static int cipher_is_aead(odp_cipher_alg_t cipher_alg)
@@ -187,6 +213,15 @@ static int cipher_alg_odp_to_rte(odp_cipher_alg_t cipher_alg,
 	case ODP_CIPHER_ALG_AES_CTR:
 		cipher_xform->cipher.algo = RTE_CRYPTO_CIPHER_AES_CTR;
 		break;
+	case ODP_CIPHER_ALG_KASUMI_F8:
+		cipher_xform->cipher.algo = RTE_CRYPTO_CIPHER_KASUMI_F8;
+		break;
+	case ODP_CIPHER_ALG_SNOW3G_UEA2:
+		cipher_xform->cipher.algo = RTE_CRYPTO_CIPHER_SNOW3G_UEA2;
+		break;
+	case ODP_CIPHER_ALG_ZUC_EEA3:
+		cipher_xform->cipher.algo = RTE_CRYPTO_CIPHER_ZUC_EEA3;
+		break;
 	default:
 		rc = -1;
 	}
@@ -219,6 +254,9 @@ static int auth_alg_odp_to_rte(odp_auth_alg_t auth_alg,
 	case ODP_AUTH_ALG_SHA1_HMAC:
 		auth_xform->auth.algo = RTE_CRYPTO_AUTH_SHA1_HMAC;
 		break;
+	case ODP_AUTH_ALG_SHA384_HMAC:
+		auth_xform->auth.algo = RTE_CRYPTO_AUTH_SHA384_HMAC;
+		break;
 	case ODP_AUTH_ALG_SHA512_HMAC:
 		auth_xform->auth.algo = RTE_CRYPTO_AUTH_SHA512_HMAC;
 		break;
@@ -227,6 +265,18 @@ static int auth_alg_odp_to_rte(odp_auth_alg_t auth_alg,
 		break;
 	case ODP_AUTH_ALG_AES_CMAC:
 		auth_xform->auth.algo = RTE_CRYPTO_AUTH_AES_CMAC;
+		break;
+	case ODP_AUTH_ALG_AES_XCBC_MAC:
+		auth_xform->auth.algo = RTE_CRYPTO_AUTH_AES_XCBC_MAC;
+		break;
+	case ODP_AUTH_ALG_KASUMI_F9:
+		auth_xform->auth.algo = RTE_CRYPTO_AUTH_KASUMI_F9;
+		break;
+	case ODP_AUTH_ALG_SNOW3G_UIA2:
+		auth_xform->auth.algo = RTE_CRYPTO_AUTH_SNOW3G_UIA2;
+		break;
+	case ODP_AUTH_ALG_ZUC_EIA3:
+		auth_xform->auth.algo = RTE_CRYPTO_AUTH_ZUC_EIA3;
 		break;
 	default:
 		rc = -1;
@@ -410,9 +460,11 @@ int odp_crypto_init_global(void)
 			return -1;
 		}
 
-		global->enabled_crypto_devs++;
-		global->enabled_crypto_dev_ids[global->enabled_crypto_devs - 1] =
+		global->enabled_crypto_dev_ids[global->enabled_crypto_devs] =
 			cdev_id;
+		global->enabled_crypto_dev_nb_qpairs[global->enabled_crypto_devs] =
+			nb_queue_pairs;
+		global->enabled_crypto_devs++;
 	}
 
 	/* create crypto op pool */
@@ -473,6 +525,12 @@ static void capability_process(struct rte_cryptodev_info *dev_info,
 			}
 			if (cap_cipher_algo == RTE_CRYPTO_CIPHER_AES_CTR)
 				ciphers->bit.aes_ctr = 1;
+			if (cap_cipher_algo == RTE_CRYPTO_CIPHER_KASUMI_F8)
+				ciphers->bit.kasumi_f8 = 1;
+			if (cap_cipher_algo == RTE_CRYPTO_CIPHER_SNOW3G_UEA2)
+				ciphers->bit.snow3g_uea2 = 1;
+			if (cap_cipher_algo == RTE_CRYPTO_CIPHER_ZUC_EEA3)
+				ciphers->bit.zuc_eea3 = 1;
 		}
 
 		if (cap->sym.xform_type == RTE_CRYPTO_SYM_XFORM_AUTH) {
@@ -493,12 +551,26 @@ static void capability_process(struct rte_cryptodev_info *dev_info,
 			}
 			if (cap_auth_algo == RTE_CRYPTO_AUTH_SHA1_HMAC)
 				auths->bit.sha1_hmac = 1;
+			if (cap_auth_algo == RTE_CRYPTO_AUTH_SHA384_HMAC)
+				auths->bit.sha384_hmac = 1;
 			if (cap_auth_algo == RTE_CRYPTO_AUTH_SHA512_HMAC)
 				auths->bit.sha512_hmac = 1;
 			if (cap_auth_algo == RTE_CRYPTO_AUTH_AES_GMAC)
 				auths->bit.aes_gmac = 1;
 			if (cap_auth_algo == RTE_CRYPTO_AUTH_AES_CMAC)
 				auths->bit.aes_cmac = 1;
+			if (cap_auth_algo == RTE_CRYPTO_AUTH_AES_XCBC_MAC)
+				auths->bit.aes_xcbc_mac = 1;
+			/* KASUMI_F9 disabled for now because DPDK requires IV
+			 * to part of the packet, while ODP insists on IV being
+			 * present in iv part of operation
+			if (cap_auth_algo == RTE_CRYPTO_AUTH_KASUMI_F9)
+				auths->bit.kasumi_f9 = 1;
+				*/
+			if (cap_auth_algo == RTE_CRYPTO_AUTH_SNOW3G_UIA2)
+				auths->bit.snow3g_uia2 = 1;
+			if (cap_auth_algo == RTE_CRYPTO_AUTH_ZUC_EIA3)
+				auths->bit.zuc_eia3 = 1;
 		}
 
 		if (cap->sym.xform_type == RTE_CRYPTO_SYM_XFORM_AEAD) {
@@ -513,13 +585,10 @@ static void capability_process(struct rte_cryptodev_info *dev_info,
 				auths->bit.aes128_gcm = 1;
 #endif
 			}
-			/* AES-CCM algorithm produces errors in Ubuntu Trusty,
-			 * so it is disabled for now
 			if (cap_aead_algo == RTE_CRYPTO_AEAD_AES_CCM) {
 				ciphers->bit.aes_ccm = 1;
 				auths->bit.aes_ccm = 1;
 			}
-			*/
 		}
 	}
 }
@@ -540,7 +609,7 @@ int odp_crypto_capability(odp_crypto_capability_t *capability)
 	cdev_count = rte_cryptodev_count();
 	if (cdev_count == 0) {
 		ODP_ERR("No crypto devices available\n");
-		return -1;
+		return 0;
 	}
 
 	for (cdev_id = 0; cdev_id < cdev_count; cdev_id++) {
@@ -570,12 +639,41 @@ int odp_crypto_capability(odp_crypto_capability_t *capability)
 	return 0;
 }
 
+static int cipher_capa_insert(odp_crypto_cipher_capability_t *src,
+			      odp_crypto_cipher_capability_t *capa,
+			      int idx,
+			      int size)
+{
+	int i = 0;
+
+	while (1) {
+		if (i >= size) {
+			return idx + 1;
+		} else if (i == idx) {
+			src[i] = *capa;
+			return idx + 1;
+		} else if (!memcmp(&src[i], capa, sizeof(*capa))) {
+			return idx;
+		} else if (src[i].key_len < capa->key_len ||
+			   (src[i].key_len == capa->key_len &&
+			    src[i].iv_len < capa->iv_len)) {
+			i++;
+		} else {
+			memmove(&src[i + 1], &src[i], sizeof(*capa) * (idx - i));
+			src[i] = *capa;
+			return idx + 1;
+		}
+	}
+}
+
 static int cipher_gen_capability(const struct rte_crypto_param_range *key_size,
 				 const struct rte_crypto_param_range *iv_size,
+				 odp_bool_t bit_mode,
 				 odp_crypto_cipher_capability_t *src,
+				 int offset,
 				 int num_copy)
 {
-	int idx = 0;
+	int idx = offset;
 
 	uint32_t key_size_min = key_size->min;
 	uint32_t key_size_max = key_size->max;
@@ -588,11 +686,13 @@ static int cipher_gen_capability(const struct rte_crypto_param_range *key_size,
 	     key_len += key_inc) {
 		for (uint32_t iv_size = iv_size_min;
 		     iv_size <= iv_size_max; iv_size += iv_inc) {
-			if (idx < num_copy) {
-				src[idx].key_len = key_len;
-				src[idx].iv_len = iv_size;
-			}
-			idx++;
+			odp_crypto_cipher_capability_t capa;
+
+			capa.key_len = key_len;
+			capa.iv_len = iv_size;
+			capa.bit_mode = bit_mode;
+
+			idx = cipher_capa_insert(src, &capa, idx, num_copy);
 
 			if (iv_inc == 0)
 				break;
@@ -644,10 +744,11 @@ static int cipher_aead_capability(odp_cipher_alg_t cipher,
 		if (cap->op == RTE_CRYPTO_OP_TYPE_UNDEFINED)
 			continue;
 
-		idx += cipher_gen_capability(&cap->sym.aead.key_size,
-					     &cap->sym.aead.iv_size,
-					     src + idx,
-					     num_copy - idx);
+		idx = cipher_gen_capability(&cap->sym.aead.key_size,
+					    &cap->sym.aead.iv_size,
+					    cipher_is_bit_mode(cipher),
+					    src, idx,
+					    num_copy);
 	}
 
 	if (idx < num_copy)
@@ -697,10 +798,11 @@ static int cipher_capability(odp_cipher_alg_t cipher,
 		if (cap->op == RTE_CRYPTO_OP_TYPE_UNDEFINED)
 			continue;
 
-		idx += cipher_gen_capability(&cap->sym.cipher.key_size,
-					     &cap->sym.cipher.iv_size,
-					     src + idx,
-					     num_copy - idx);
+		idx = cipher_gen_capability(&cap->sym.cipher.key_size,
+					    &cap->sym.cipher.iv_size,
+					    cipher_is_bit_mode(cipher),
+					    src, idx,
+					    num_copy);
 	}
 
 	if (idx < num_copy)
@@ -719,7 +821,11 @@ int odp_crypto_cipher_capability(odp_cipher_alg_t cipher,
 	if (cipher == ODP_CIPHER_ALG_NULL) {
 		if (num_copy >= 1)
 			memset(dst, 0, sizeof(odp_crypto_cipher_capability_t));
-		return 1;
+		if (num_copy >= 2) {
+			memset(&dst[1], 0, sizeof(odp_crypto_cipher_capability_t));
+			dst[1].bit_mode = true;
+		}
+		return 2;
 	}
 
 	if (cipher_is_aead(cipher))
@@ -728,14 +834,46 @@ int odp_crypto_cipher_capability(odp_cipher_alg_t cipher,
 		return cipher_capability(cipher, dst, num_copy);
 }
 
+static int auth_capa_insert(odp_crypto_auth_capability_t *src,
+			    odp_crypto_auth_capability_t *capa,
+			    int idx,
+			    int size)
+{
+	int i = 0;
+
+	while (1) {
+		if (i >= size) {
+			return idx + 1;
+		} else if (i == idx) {
+			src[i] = *capa;
+			return idx + 1;
+		} else if (!memcmp(&src[i], capa, sizeof(*capa))) {
+			return idx;
+		} else if (src[i].digest_len < capa->digest_len ||
+			   (src[i].digest_len == capa->digest_len &&
+			    src[i].key_len < capa->key_len) ||
+			   (src[i].digest_len == capa->digest_len &&
+			    src[i].key_len == capa->key_len &&
+			    src[i].iv_len < capa->iv_len)) {
+			i++;
+		} else {
+			memmove(&src[i + 1], &src[i], sizeof(*capa) * (idx - i));
+			src[i] = *capa;
+			return idx + 1;
+		}
+	}
+}
+
 static int auth_gen_capability(const struct rte_crypto_param_range *key_size,
 			       const struct rte_crypto_param_range *iv_size,
 			       const struct rte_crypto_param_range *digest_size,
 			       const struct rte_crypto_param_range *aad_size,
+			       odp_bool_t bit_mode,
 			       odp_crypto_auth_capability_t *src,
+			       int offset,
 			       int num_copy)
 {
-	int idx = 0;
+	int idx = offset;
 
 	uint16_t key_size_min = key_size->min;
 	uint16_t key_size_max = key_size->max;
@@ -756,18 +894,18 @@ static int auth_gen_capability(const struct rte_crypto_param_range *key_size,
 			for (uint16_t iv_size = iv_size_min;
 			     iv_size <= iv_size_max;
 			     iv_size += iv_inc) {
-				if (idx < num_copy) {
-					src[idx].key_len = key_len;
-					src[idx].digest_len = digest_len;
-					src[idx].iv_len = iv_size;
-					src[idx].aad_len.min =
-						aad_size->min;
-					src[idx].aad_len.max =
-						aad_size->max;
-					src[idx].aad_len.inc =
-						aad_size->increment;
-				}
-				idx++;
+				odp_crypto_auth_capability_t capa;
+
+				capa.digest_len = digest_len;
+				capa.key_len = key_len;
+				capa.iv_len = iv_size;
+				capa.aad_len.min = aad_size->min;
+				capa.aad_len.max = aad_size->max;
+				capa.aad_len.inc = aad_size->increment;
+				capa.bit_mode = bit_mode;
+
+				idx = auth_capa_insert(src, &capa, idx, num_copy);
+
 				if (iv_inc == 0)
 					break;
 			}
@@ -826,12 +964,13 @@ static int auth_aead_capability(odp_auth_alg_t auth,
 		if (cap->op == RTE_CRYPTO_OP_TYPE_UNDEFINED)
 			continue;
 
-		idx += auth_gen_capability(&zero_range,
-					   &zero_range,
-					   &cap->sym.aead.digest_size,
-					   &cap->sym.aead.aad_size,
-					   src + idx,
-					   num_copy - idx);
+		idx = auth_gen_capability(&zero_range,
+					  &zero_range,
+					  &cap->sym.aead.digest_size,
+					  &cap->sym.aead.aad_size,
+					  auth_is_bit_mode(auth),
+					  src, idx,
+					  num_copy);
 	}
 
 	if (idx < num_copy)
@@ -915,14 +1054,15 @@ static int auth_capability(odp_auth_alg_t auth,
 				  &cap->sym.auth.key_size) != 0)
 			continue;
 
-		idx += auth_gen_capability(key_size_override ?
-					   &key_range_override :
-					   &cap->sym.auth.key_size,
-					   &cap->sym.auth.iv_size,
-					   &cap->sym.auth.digest_size,
-					   &cap->sym.auth.aad_size,
-					   src + idx,
-					   num_copy - idx);
+		idx = auth_gen_capability(key_size_override ?
+					  &key_range_override :
+					  &cap->sym.auth.key_size,
+					  &cap->sym.auth.iv_size,
+					  &cap->sym.auth.digest_size,
+					  &cap->sym.auth.aad_size,
+					  auth_is_bit_mode(auth),
+					  src, idx,
+					  num_copy);
 	}
 
 	if (idx < num_copy)
@@ -941,7 +1081,11 @@ int odp_crypto_auth_capability(odp_auth_alg_t auth,
 	if (auth == ODP_AUTH_ALG_NULL) {
 		if (num_copy >= 1)
 			memset(dst, 0, sizeof(odp_crypto_auth_capability_t));
-		return 1;
+		if (num_copy >= 2) {
+			memset(&dst[1], 0, sizeof(odp_crypto_auth_capability_t));
+			dst[1].bit_mode = true;
+		}
+		return 2;
 	}
 
 	if (auth_is_aead(auth))
@@ -1290,7 +1434,13 @@ int odp_crypto_session_create(odp_crypto_session_param_t *param,
 			do_cipher_first = !param->auth_cipher_text;
 
 		/* Derive order */
-		if (param->cipher_alg == ODP_CIPHER_ALG_NULL) {
+		if (param->cipher_alg == ODP_CIPHER_ALG_NULL &&
+		    param->auth_alg == ODP_AUTH_ALG_NULL) {
+			rte_session = NULL;
+			cdev_id = ~0;
+			session->cdev_nb_qpairs = 0;
+			goto out_null;
+		} else if (param->cipher_alg == ODP_CIPHER_ALG_NULL) {
 			first_xform = &auth_xform;
 		} else if (param->auth_alg == ODP_AUTH_ALG_NULL) {
 			first_xform = &cipher_xform;
@@ -1330,6 +1480,8 @@ int odp_crypto_session_create(odp_crypto_session_param_t *param,
 		goto err;
 	}
 
+	session->cdev_nb_qpairs = global->enabled_crypto_dev_nb_qpairs[cdev_id];
+out_null:
 	session->rte_session  = rte_session;
 	session->cdev_id = cdev_id;
 	session->cipher_xform = cipher_xform;
@@ -1368,11 +1520,14 @@ int odp_crypto_session_destroy(odp_crypto_session_t _session)
 
 	rte_session = session->rte_session;
 
-	if (rte_cryptodev_sym_session_clear(session->cdev_id, rte_session) < 0)
-		return -1;
+	if (rte_session != NULL) {
+		if (rte_cryptodev_sym_session_clear(session->cdev_id,
+						    rte_session) < 0)
+			return -1;
 
-	if (rte_cryptodev_sym_session_free(rte_session) < 0)
-		return -1;
+		if (rte_cryptodev_sym_session_free(rte_session) < 0)
+			return -1;
+	}
 
 	/* remove the crypto_session_entry_t */
 	memset(session, 0, sizeof(*session));
@@ -1634,23 +1789,11 @@ static void crypto_fill_sym_param(crypto_session_entry_t *session,
 		*rc_auth = ODP_CRYPTO_ALG_ERR_IV_INVALID;
 	}
 
-	/* For SNOW3G algorithms, offset/length must be in bits */
-	if (cipher_xform->cipher.algo == RTE_CRYPTO_CIPHER_SNOW3G_UEA2) {
-		op->sym->cipher.data.offset = param->cipher_range.offset << 3;
-		op->sym->cipher.data.length = param->cipher_range.length << 3;
-	} else {
-		op->sym->cipher.data.offset = param->cipher_range.offset;
-		op->sym->cipher.data.length = param->cipher_range.length;
-	}
+	op->sym->cipher.data.offset = param->cipher_range.offset;
+	op->sym->cipher.data.length = param->cipher_range.length;
 
-	/* For SNOW3G algorithms, offset/length must be in bits */
-	if (auth_xform->auth.algo == RTE_CRYPTO_AUTH_SNOW3G_UIA2) {
-		op->sym->auth.data.offset = param->auth_range.offset << 3;
-		op->sym->auth.data.length = param->auth_range.length << 3;
-	} else {
-		op->sym->auth.data.offset = param->auth_range.offset;
-		op->sym->auth.data.length = param->auth_range.length;
-	}
+	op->sym->auth.data.offset = param->auth_range.offset;
+	op->sym->auth.data.length = param->auth_range.length;
 }
 
 static
@@ -1670,10 +1813,6 @@ int odp_crypto_int(odp_packet_t pkt_in,
 
 	session = (crypto_session_entry_t *)(intptr_t)param->session;
 	if (session == NULL)
-		return -1;
-
-	rte_session = session->rte_session;
-	if (rte_session == NULL)
 		return -1;
 
 	/* Resolve output buffer */
@@ -1705,6 +1844,12 @@ int odp_crypto_int(odp_packet_t pkt_in,
 		pkt_in = ODP_PACKET_INVALID;
 	}
 
+	rte_session = session->rte_session;
+	/* NULL rte_session means that it is a NULL-NULL operation.
+	 * Just return new packet. */
+	if (rte_session == NULL)
+		goto out;
+
 	odp_spinlock_lock(&global->lock);
 	op = rte_crypto_op_alloc(global->crypto_op_pool,
 				 RTE_CRYPTO_OP_TYPE_SYMMETRIC);
@@ -1725,7 +1870,7 @@ int odp_crypto_int(odp_packet_t pkt_in,
 	if (rc_cipher == ODP_CRYPTO_ALG_ERR_NONE &&
 	    rc_auth == ODP_CRYPTO_ALG_ERR_NONE) {
 		int retry_count = 0;
-		int queue_pair = odp_cpu_id();
+		int queue_pair = odp_cpu_id() % session->cdev_nb_qpairs;
 		int rc;
 
 		/* Set crypto operation data parameters */
@@ -1781,7 +1926,9 @@ int odp_crypto_int(odp_packet_t pkt_in,
 					 session->p.auth_digest_len,
 					 pkt_hdr->crypto_digest_buf);
 	}
+	rte_crypto_op_free(op);
 
+out:
 	/* Fill in result */
 	packet_subtype_set(out_pkt, ODP_EVENT_PACKET_CRYPTO);
 	op_result = get_op_result_from_packet(out_pkt);
@@ -1795,7 +1942,6 @@ int odp_crypto_int(odp_packet_t pkt_in,
 
 	pkt_hdr = packet_hdr(out_pkt);
 	pkt_hdr->p.flags.crypto_err = !op_result->ok;
-	rte_crypto_op_free(op);
 
 	/* Synchronous, simply return results */
 	*pkt_out = out_pkt;
