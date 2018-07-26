@@ -34,6 +34,8 @@ extern "C" {
 #include <rte_config.h>
 #include <rte_mbuf.h>
 
+#include <rte_memcpy.h>
+
 /** @cond _ODP_HIDE_FROM_DOXYGEN_ */
 
 #ifndef _ODP_NO_INLINE
@@ -297,8 +299,8 @@ _ODP_INLINE void odp_packet_prefetch(odp_packet_t pkt, uint32_t offset,
 		rte_prefetch0(addr + ofs);
 }
 
-_ODP_INLINE int odp_packet_copy_to_mem(odp_packet_t pkt, uint32_t offset,
-				       uint32_t len, void *dst)
+static inline int _odp_packet_copy_to_mem_seg(odp_packet_t pkt, uint32_t offset,
+					      uint32_t len, void *dst)
 {
 	void *mapaddr;
 	uint32_t seglen = 0; /* GCC */
@@ -311,11 +313,25 @@ _ODP_INLINE int odp_packet_copy_to_mem(odp_packet_t pkt, uint32_t offset,
 	while (len > 0) {
 		mapaddr = odp_packet_offset(pkt, offset, &seglen, NULL);
 		cpylen = len > seglen ? seglen : len;
-		memcpy(dstaddr, mapaddr, cpylen);
+		rte_memcpy(dstaddr, mapaddr, cpylen);
 		offset  += cpylen;
 		dstaddr += cpylen;
 		len     -= cpylen;
 	}
+
+	return 0;
+}
+
+_ODP_INLINE int odp_packet_copy_to_mem(odp_packet_t pkt, uint32_t offset,
+				       uint32_t len, void *dst)
+{
+	uint32_t seg_len = odp_packet_seg_len(pkt);
+	uint8_t *data    = (uint8_t *)odp_packet_data(pkt);
+
+	if (odp_unlikely(offset + len > seg_len))
+		return _odp_packet_copy_to_mem_seg(pkt, offset, len, dst);
+
+	rte_memcpy(dst, data + offset, len);
 
 	return 0;
 }
