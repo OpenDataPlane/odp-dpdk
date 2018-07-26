@@ -341,7 +341,7 @@ static odp_queue_t queue_create(const char *name,
 	return handle;
 }
 
-void sched_cb_queue_destroy_finalize(uint32_t queue_index)
+void sched_queue_destroy_finalize(uint32_t queue_index)
 {
 	queue_entry_t *queue = qentry_from_index(queue_index);
 
@@ -354,7 +354,7 @@ void sched_cb_queue_destroy_finalize(uint32_t queue_index)
 	UNLOCK(queue);
 }
 
-void sched_cb_queue_set_status(uint32_t queue_index, int status)
+void sched_queue_set_status(uint32_t queue_index, int status)
 {
 	queue_entry_t *queue = qentry_from_index(queue_index);
 
@@ -741,8 +741,8 @@ static int queue_info(odp_queue_t handle, odp_queue_info_t *info)
 	return 0;
 }
 
-int sched_cb_queue_deq_multi(uint32_t queue_index, odp_event_t ev[],
-			     int max_num, int update_status)
+int sched_queue_deq(uint32_t queue_index, odp_event_t ev[], int max_num,
+		    int update_status)
 {
 	int num_deq;
 	ring_st_t ring_st;
@@ -784,7 +784,7 @@ int sched_cb_queue_deq_multi(uint32_t queue_index, odp_event_t ev[],
 	return num_deq;
 }
 
-int sched_cb_queue_empty(uint32_t queue_index)
+int sched_queue_empty(uint32_t queue_index)
 {
 	queue_entry_t *queue = qentry_from_index(queue_index);
 	int ret = 0;
