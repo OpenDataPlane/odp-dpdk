@@ -926,9 +926,8 @@ int _odp_packet_set_data(odp_packet_t pkt, uint32_t offset,
 	void *mapaddr;
 	uint32_t seglen = 0; /* GCC */
 	uint32_t setlen;
-	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
 
-	if (offset + len > packet_len(pkt_hdr))
+	if (offset + len > odp_packet_len(pkt))
 		return -1;
 
 	while (len > 0) {
@@ -952,9 +951,8 @@ int _odp_packet_cmp_data(odp_packet_t pkt, uint32_t offset,
 	uint32_t seglen = 0; /* GCC */
 	uint32_t cmplen;
 	int ret;
-	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
 
-	ODP_ASSERT(offset + len <= packet_len(pkt_hdr));
+	ODP_ASSERT(offset + len <= odp_packet_len(pkt));
 
 	while (len > 0) {
 		mapaddr = odp_packet_offset(pkt, offset, &seglen, NULL);
@@ -1211,7 +1209,7 @@ static uint32_t packet_sum16_32(odp_packet_hdr_t *pkt_hdr,
 {
 	uint32_t sum = 0;
 
-	if (offset + len > packet_len(pkt_hdr))
+	if (offset + len > odp_packet_len(packet_handle(pkt_hdr)))
 		return 0;
 
 	while (len > 0) {
@@ -1734,7 +1732,7 @@ static int _odp_packet_tcp_udp_chksum_insert(odp_packet_t pkt, uint16_t proto)
 	uint16_t l3_ver;
 	uint16_t chksum;
 	uint32_t chksum_offset;
-	uint32_t frame_len = packet_len(pkt_hdr);
+	uint32_t frame_len = odp_packet_len(pkt);
 
 	if (pkt_hdr->p.l3_offset == ODP_PACKET_OFFSET_INVALID)
 		return -1;
@@ -1819,7 +1817,7 @@ static int packet_l4_chksum(odp_packet_hdr_t *pkt_hdr,
 			    odp_proto_chksums_t chksums,
 			    uint32_t l4_part_sum)
 {
-	uint32_t len = packet_len(pkt_hdr);
+	uint32_t len = odp_packet_len(packet_handle(pkt_hdr));
 
 	/* UDP chksum == 0 case is covered in parse_udp() */
 	if (chksums.chksum.udp &&
@@ -1867,9 +1865,10 @@ int packet_parse_layer(odp_packet_hdr_t *pkt_hdr,
 		       odp_proto_layer_t layer,
 		       odp_proto_chksums_t chksums)
 {
-	uint32_t seg_len = odp_packet_seg_len((odp_packet_t)pkt_hdr);
-	uint32_t len = packet_len(pkt_hdr);
-	const uint8_t *base = odp_packet_data((odp_packet_t)pkt_hdr);
+	odp_packet_t pkt = packet_handle(pkt_hdr);
+	uint32_t seg_len = odp_packet_seg_len(pkt);
+	uint32_t len = odp_packet_len(pkt);
+	const uint8_t *base = odp_packet_data(pkt);
 	uint32_t offset = 0;
 	uint16_t ethtype;
 	uint32_t l4_part_sum = 0;
@@ -1903,7 +1902,7 @@ int odp_packet_parse(odp_packet_t pkt, uint32_t offset,
 	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
 	const uint8_t *data;
 	uint32_t seg_len;
-	uint32_t len = packet_len(pkt_hdr);
+	uint32_t len = odp_packet_len(pkt);
 	odp_proto_t proto = param->proto;
 	odp_proto_layer_t layer = param->last_layer;
 	int ret;
