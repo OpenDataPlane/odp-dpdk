@@ -110,7 +110,7 @@ noinst_HEADERS = \
 		  ${top_srcdir}/platform/linux-generic/include/odp_pkt_queue_internal.h \
 		  include/odp_pool_internal.h \
 		  include/odp_posix_extensions.h \
-		  ${top_srcdir}/platform/linux-generic/include/odp_queue_internal.h \
+		  ${top_srcdir}/platform/linux-generic/include/odp_queue_basic_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_queue_if.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_queue_lf.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_ring_internal.h \
@@ -232,7 +232,7 @@ endif
 if ARCH_IS_AARCH64
 __LIB__libodp_linux_la_SOURCES += arch/default/odp_cpu_cycles.c \
 				 arch/aarch64/odp_global_time.c \
-				 arch/default/odp_sysinfo_parse.c
+				 arch/aarch64/odp_sysinfo_parse.c
 odpapiabiarchinclude_HEADERS += arch/default/odp/api/abi/cpu_inlines.h \
 				arch/default/odp/api/abi/cpu_time.h
 if !ODP_ABI_COMPAT

@@ -148,6 +148,10 @@ before_install:
           # Allow forwaring on virtual interfaces used for testing
         - sudo iptables --policy FORWARD ACCEPT
 
+          # workaround for tap driver issues on recent Travis images
+          # Allow forwaring on virtual interfaces used for testing
+        - sudo iptables --policy FORWARD ACCEPT
+
 install:
         - if [ -z "$CROSS_ARCH" ] ;
           then

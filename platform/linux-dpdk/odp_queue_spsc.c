@@ -4,7 +4,7 @@
  * SPDX-License-Identifier:     BSD-3-Clause
  */
 #include <odp/api/hints.h>
-#include <odp_queue_internal.h>
+#include <odp_queue_basic_internal.h>
 
 #include "config.h"
 #include <odp_debug_internal.h>

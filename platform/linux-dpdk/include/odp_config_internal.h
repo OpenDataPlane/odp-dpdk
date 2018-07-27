@@ -12,6 +12,11 @@ extern "C" {
 #endif
 
 /*
+ * Maximum number of CPUs supported. Maximum CPU ID is CONFIG_NUM_CPU - 1.
+ */
+#define CONFIG_NUM_CPU 256
+
+/*
  * Maximum number of pools
  */
 #define ODP_CONFIG_POOLS 256
@@ -117,7 +122,7 @@ extern "C" {
  * This controls the burst size on various enqueue, dequeue, etc calls. Large
  * burst size improves throughput, but may degrade QoS (increase latency).
  */
-#define CONFIG_BURST_SIZE 16
+#define CONFIG_BURST_SIZE 32
 
 /*
  * Maximum number of events in a pool
