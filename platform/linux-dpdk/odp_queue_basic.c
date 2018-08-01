@@ -552,10 +552,10 @@ static inline int plain_queue_deq(queue_entry_t *queue,
 		return -1;
 	}
 
+	UNLOCK(queue);
+
 	num_deq = ring_mpmc_deq_multi(queue->s.ring_mpmc, (void **)buf_hdr,
 				      num);
-
-	UNLOCK(queue);
 
 	return num_deq;
 }
