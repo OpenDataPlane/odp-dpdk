@@ -389,7 +389,7 @@ static int queue_destroy(odp_queue_t handle)
 	if (queue->s.spsc)
 		empty = ring_spsc_is_empty(queue->s.ring_spsc);
 	else
-		empty = ring_st_is_empty(queue->s.ring_st);
+		empty = ring_mpmc_is_empty(queue->s.ring_mpmc);
 
 	if (!empty) {
 		UNLOCK(queue);
@@ -397,9 +397,9 @@ static int queue_destroy(odp_queue_t handle)
 		return -1;
 	}
 	if (queue->s.spsc)
-		ring_spsc_free(queue->s.ring_st);
+		ring_spsc_free(queue->s.ring_spsc);
 	else
-		ring_st_free(queue->s.ring_st);
+		ring_mpmc_free(queue->s.ring_mpmc);
 
 	switch (queue->s.status) {
 	case QUEUE_STATUS_READY:
@@ -478,7 +478,8 @@ static inline int enq_multi(void *q_int, odp_buffer_hdr_t *buf_hdr[],
 		return -1;
 	}
 
-	num_enq = ring_st_enq_multi(queue->s.ring_st, (void **)buf_hdr, num);
+	num_enq = ring_mpmc_enq_multi(queue->s.ring_mpmc, (void **)buf_hdr,
+				      num);
 
 	if (odp_unlikely(num_enq == 0)) {
 		UNLOCK(queue);
@@ -551,7 +552,8 @@ static inline int plain_queue_deq(queue_entry_t *queue,
 		return -1;
 	}
 
-	num_deq = ring_st_deq_multi(queue->s.ring_st, (void **)buf_hdr, num);
+	num_deq = ring_mpmc_deq_multi(queue->s.ring_mpmc, (void **)buf_hdr,
+				      num);
 
 	UNLOCK(queue);
 
@@ -682,8 +684,9 @@ static int queue_init(queue_entry_t *queue, const char *name,
 		queue->s.enqueue_multi = queue_int_enq_multi;
 		queue->s.dequeue_multi = queue_int_deq_multi;
 
-		queue->s.ring_st = ring_st_create(queue->s.name, queue_size);
-		if (queue->s.ring_st == NULL)
+		queue->s.ring_mpmc = ring_mpmc_create(queue->s.name,
+						      queue_size);
+		if (queue->s.ring_mpmc == NULL)
 			return -1;
 	}
 
@@ -745,11 +748,11 @@ int sched_queue_deq(uint32_t queue_index, odp_event_t ev[], int max_num,
 		    int update_status)
 {
 	int num_deq;
-	ring_st_t ring_st;
+	ring_mpmc_t ring_mpmc;
 	queue_entry_t *queue = qentry_from_index(queue_index);
 	int status_sync = sched_fn->status_sync;
 
-	ring_st = queue->s.ring_st;
+	ring_mpmc = queue->s.ring_mpmc;
 
 	LOCK(queue);
 
@@ -760,7 +763,7 @@ int sched_queue_deq(uint32_t queue_index, odp_event_t ev[], int max_num,
 		return -1;
 	}
 
-	num_deq = ring_st_deq_multi(ring_st, (void **)ev, max_num);
+	num_deq = ring_mpmc_deq_multi(ring_mpmc, (void **)ev, max_num);
 
 	if (num_deq == 0) {
 		/* Already empty queue */
@@ -797,7 +800,7 @@ int sched_queue_empty(uint32_t queue_index)
 		return -1;
 	}
 
-	if (ring_st_is_empty(queue->s.ring_st)) {
+	if (ring_mpmc_is_empty(queue->s.ring_mpmc)) {
 		/* Already empty queue. Update status. */
 		if (queue->s.status == QUEUE_STATUS_SCHED)
 			queue->s.status = QUEUE_STATUS_NOTSCHED;

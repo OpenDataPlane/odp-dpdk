@@ -38,7 +38,7 @@ static void ring_spsc_name_to_mz_name(const char *name, char *ring_name)
 			ODP_QUEUE_NAME_LEN : RTE_RING_NAMESIZE;
 
 	do {
-		snprintf(ring_name, max_len, "%d-%s", i++, name);
+		snprintf(ring_name, max_len, "%d-spsc-%s", i++, name);
 		ring_name[max_len - 1] = 0;
 	} while (rte_ring_lookup(ring_name) != NULL);
 }
