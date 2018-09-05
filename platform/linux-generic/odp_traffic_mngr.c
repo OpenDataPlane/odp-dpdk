@@ -108,20 +108,20 @@ static odp_bool_t tm_demote_pkt_desc(tm_system_t *tm_system,
 				     tm_shaper_obj_t *timer_shaper,
 				     pkt_desc_t *demoted_pkt_desc);
 
-static int queue_tm_reenq(void *queue, odp_buffer_hdr_t *buf_hdr)
+static int queue_tm_reenq(odp_queue_t queue, odp_buffer_hdr_t *buf_hdr)
 {
-	odp_tm_queue_t tm_queue = MAKE_ODP_TM_QUEUE((uint8_t *)queue -
-						    offsetof(tm_queue_obj_t,
-							     tm_qentry));
+	odp_tm_queue_t tm_queue = MAKE_ODP_TM_QUEUE(odp_queue_context(queue));
 	odp_packet_t pkt = packet_from_buf_hdr(buf_hdr);
 
 	return odp_tm_enq(tm_queue, pkt);
 }
 
-static int queue_tm_reenq_multi(void *queue ODP_UNUSED,
-				odp_buffer_hdr_t *buf[] ODP_UNUSED,
-				int num ODP_UNUSED)
+static int queue_tm_reenq_multi(odp_queue_t queue, odp_buffer_hdr_t *buf[],
+				int num)
 {
+	(void)queue;
+	(void)buf;
+	(void)num;
 	ODP_ABORT("Invalid call to queue_tm_reenq_multi()\n");
 	return 0;
 }
@@ -3936,8 +3936,10 @@ odp_tm_queue_t odp_tm_queue_create(odp_tm_t odp_tm,
 		free(tm_queue_obj);
 		return ODP_TM_INVALID;
 	}
-	tm_queue_obj->tm_qentry = queue_fn->from_ext(queue);
-	queue_fn->set_enq_deq_fn(tm_queue_obj->tm_qentry,
+
+	tm_queue_obj->queue = queue;
+	odp_queue_context_set(queue, tm_queue_obj, sizeof(tm_queue_obj_t));
+	queue_fn->set_enq_deq_fn(queue,
 				 queue_tm_reenq, queue_tm_reenq_multi,
 				 NULL, NULL);
 
@@ -3967,12 +3969,9 @@ odp_tm_queue_t odp_tm_queue_create(odp_tm_t odp_tm,
 
 int odp_tm_queue_destroy(odp_tm_queue_t tm_queue)
 {
-	tm_wred_params_t *wred_params;
 	tm_shaper_obj_t  *shaper_obj;
 	tm_queue_obj_t   *tm_queue_obj;
-	tm_wred_node_t   *tm_wred_node;
 	tm_system_t      *tm_system;
-	uint32_t          color;
 
 	/* First lookup tm_queue. */
 	tm_queue_obj = GET_TM_QUEUE_OBJ(tm_queue);
@@ -3990,28 +3989,11 @@ int odp_tm_queue_destroy(odp_tm_queue_t tm_queue)
 	    (tm_queue_obj->pkt        != ODP_PACKET_INVALID))
 		return -1;
 
-	/* Check that there is no shaper profile, threshold profile or wred
-	 * profile currently associated with this tm_queue. */
-	if (shaper_obj->shaper_params != NULL)
-		return -1;
-
-	tm_wred_node = tm_queue_obj->tm_wred_node;
-	if (tm_wred_node != NULL) {
-		if (tm_wred_node->threshold_params != NULL)
-			return -1;
-
-		for (color = 0; color < ODP_NUM_PACKET_COLORS; color++) {
-			wred_params = tm_wred_node->wred_params[color];
-			if (wred_params != NULL)
-				return -1;
-		}
-	}
-
 	/* Now that all of the checks are done, time to so some freeing. */
 	odp_ticketlock_lock(&tm_system->tm_system_lock);
 	tm_system->queue_num_tbl[tm_queue_obj->queue_num - 1] = NULL;
 
-	odp_queue_destroy(queue_fn->to_ext(tm_queue_obj->tm_qentry));
+	odp_queue_destroy(tm_queue_obj->queue);
 
 	/* First delete any associated tm_wred_node and then the tm_queue_obj
 	 * itself */

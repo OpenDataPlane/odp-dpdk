@@ -18,6 +18,7 @@
 #include <odp/api/hints.h>
 #include <odp/api/plat/byteorder_inlines.h>
 #include <odp_queue_if.h>
+#include <odp/api/plat/queue_inlines.h>
 
 #include <protocols/eth.h>
 #include <protocols/ip.h>
@@ -93,7 +94,7 @@ static int loopback_recv(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 {
 	int nbr, i;
 	odp_buffer_hdr_t *hdr_tbl[QUEUE_MULTI_MAX];
-	void *queue;
+	odp_queue_t queue;
 	odp_packet_hdr_t *pkt_hdr;
 	odp_packet_t pkt;
 	odp_time_t ts_val;
@@ -106,8 +107,8 @@ static int loopback_recv(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 
 	odp_ticketlock_lock(&pktio_entry->s.rxl);
 
-	queue = queue_fn->from_ext(pkt_priv(pktio_entry)->loopq);
-	nbr = queue_fn->deq_multi(queue, hdr_tbl, num);
+	queue = pkt_priv(pktio_entry)->loopq;
+	nbr = odp_queue_deq_multi(queue, (odp_event_t *)hdr_tbl, num);
 
 	if (pktio_entry->s.config.pktin.bit.ts_all ||
 	    pktio_entry->s.config.pktin.bit.ts_ptp) {
@@ -235,7 +236,8 @@ static inline void loopback_fix_checksums(odp_packet_t pkt,
 	uint8_t l4_proto;
 	void *l3_hdr;
 	uint32_t l3_len;
-	odp_bool_t ipv4_chksum_pkt, udp_chksum_pkt, tcp_chksum_pkt;
+	odp_bool_t ipv4_chksum_pkt, udp_chksum_pkt, tcp_chksum_pkt,
+		   sctp_chksum_pkt;
 	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
 
 	l3_hdr = odp_packet_l3_ptr(pkt, &l3_len);
@@ -259,6 +261,11 @@ static inline void loopback_fix_checksums(odp_packet_t pkt,
 					   l4_proto == _ODP_IPPROTO_TCP,
 					   pkt_hdr->p.flags.l4_chksum_set,
 					   pkt_hdr->p.flags.l4_chksum);
+	sctp_chksum_pkt =  OL_TX_CHKSUM_PKT(pktout_cfg->bit.sctp_chksum,
+					    pktout_capa->bit.sctp_chksum,
+					    l4_proto == _ODP_IPPROTO_SCTP,
+					    pkt_hdr->p.flags.l4_chksum_set,
+					    pkt_hdr->p.flags.l4_chksum);
 
 	if (ipv4_chksum_pkt)
 		_odp_packet_ipv4_chksum_insert(pkt);
@@ -268,13 +275,16 @@ static inline void loopback_fix_checksums(odp_packet_t pkt,
 
 	if (udp_chksum_pkt)
 		_odp_packet_udp_chksum_insert(pkt);
+
+	if (sctp_chksum_pkt)
+		_odp_packet_sctp_chksum_insert(pkt);
 }
 
 static int loopback_send(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 			 const odp_packet_t pkt_tbl[], int num)
 {
 	odp_buffer_hdr_t *hdr_tbl[QUEUE_MULTI_MAX];
-	void *queue;
+	odp_queue_t queue;
 	int i;
 	int ret;
 	int nb_tx = 0;
@@ -324,8 +334,8 @@ static int loopback_send(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 
 	odp_ticketlock_lock(&pktio_entry->s.txl);
 
-	queue = queue_fn->from_ext(pkt_priv(pktio_entry)->loopq);
-	ret = queue_fn->enq_multi(queue, hdr_tbl, nb_tx);
+	queue = pkt_priv(pktio_entry)->loopq;
+	ret = odp_queue_enq_multi(queue, (odp_event_t *)hdr_tbl, nb_tx);
 
 	if (ret > 0) {
 		pktio_entry->s.stats.out_ucast_pkts += ret;
@@ -375,9 +385,11 @@ static int loopback_init_capability(pktio_entry_t *pktio_entry)
 	capa->config.pktin.bit.ipv4_chksum = 1;
 	capa->config.pktin.bit.tcp_chksum = 1;
 	capa->config.pktin.bit.udp_chksum = 1;
+	capa->config.pktin.bit.sctp_chksum = 1;
 	capa->config.pktout.bit.ipv4_chksum = 1;
 	capa->config.pktout.bit.tcp_chksum = 1;
 	capa->config.pktout.bit.udp_chksum = 1;
+	capa->config.pktout.bit.sctp_chksum = 1;
 	capa->config.inbound_ipsec = 1;
 	capa->config.outbound_ipsec = 1;
 
@@ -387,6 +399,8 @@ static int loopback_init_capability(pktio_entry_t *pktio_entry)
 		capa->config.pktout.bit.udp_chksum;
 	capa->config.pktout.bit.tcp_chksum_ena =
 		capa->config.pktout.bit.tcp_chksum;
+	capa->config.pktout.bit.sctp_chksum_ena =
+		capa->config.pktout.bit.sctp_chksum;
 
 	return 0;
 }
