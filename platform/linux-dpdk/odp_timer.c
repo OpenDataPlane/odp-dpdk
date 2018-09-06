@@ -21,7 +21,6 @@
 #include <rte_timer.h>
 
 /* TODO: timer ABI spec needs update
- * - ODP_TIMER_INVALID: 0xffffffff -> NULL
  * - Remove "struct timer_pool_s"
  */
 
