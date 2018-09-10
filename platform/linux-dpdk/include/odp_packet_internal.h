@@ -115,7 +115,7 @@ typedef struct {
 	odp_time_t timestamp;
 
 	/* Classifier destination queue */
-	void *dst_queue;
+	odp_queue_t dst_queue;
 
 	/* Result for crypto packet op */
 	odp_crypto_packet_result_t crypto_op_result;
