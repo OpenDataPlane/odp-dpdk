@@ -384,8 +384,10 @@ static int queue_destroy(odp_queue_t handle)
 
 	if (queue->s.spsc)
 		empty = ring_spsc_is_empty(queue->s.ring_spsc);
-	else
+	else if (queue->s.type == ODP_QUEUE_TYPE_SCHED)
 		empty = ring_st_is_empty(queue->s.ring_st);
+	else
+		empty = ring_mpmc_is_empty(queue->s.ring_mpmc);
 
 	if (!empty) {
 		UNLOCK(queue);
@@ -393,9 +395,11 @@ static int queue_destroy(odp_queue_t handle)
 		return -1;
 	}
 	if (queue->s.spsc)
-		ring_spsc_free(queue->s.ring_st);
-	else
+		ring_spsc_free(queue->s.ring_spsc);
+	else if (queue->s.type == ODP_QUEUE_TYPE_SCHED)
 		ring_st_free(queue->s.ring_st);
+	else
+		ring_mpmc_free(queue->s.ring_mpmc);
 
 	switch (queue->s.status) {
 	case QUEUE_STATUS_READY:
@@ -458,23 +462,15 @@ static inline int _plain_queue_enq_multi(odp_queue_t handle,
 {
 	queue_entry_t *queue;
 	int ret, num_enq;
+	ring_mpmc_t ring_mpmc;
 
 	queue = qentry_from_handle(handle);
+	ring_mpmc = queue->s.ring_mpmc;
 
 	if (sched_fn->ord_enq_multi(handle, (void **)buf_hdr, num, &ret))
 		return ret;
 
-	LOCK(queue);
-
-	if (odp_unlikely(queue->s.status < QUEUE_STATUS_READY)) {
-		UNLOCK(queue);
-		ODP_ERR("Bad queue status\n");
-		return -1;
-	}
-
-	num_enq = ring_st_enq_multi(queue->s.ring_st, (void **)buf_hdr, num);
-
-	UNLOCK(queue);
+	num_enq = ring_mpmc_enq_multi(ring_mpmc, (void **)buf_hdr, num);
 
 	return num_enq;
 }
@@ -484,20 +480,12 @@ static inline int _plain_queue_deq_multi(odp_queue_t handle,
 {
 	int num_deq;
 	queue_entry_t *queue;
+	ring_mpmc_t ring_mpmc;
 
 	queue = qentry_from_handle(handle);
+	ring_mpmc = queue->s.ring_mpmc;
 
-	LOCK(queue);
-
-	if (odp_unlikely(queue->s.status < QUEUE_STATUS_READY)) {
-		/* Bad queue, or queue has been destroyed. */
-		UNLOCK(queue);
-		return -1;
-	}
-
-	num_deq = ring_st_deq_multi(queue->s.ring_st, (void **)buf_hdr, num);
-
-	UNLOCK(queue);
+	num_deq = ring_mpmc_deq_multi(ring_mpmc, (void **)buf_hdr, num);
 
 	return num_deq;
 }
@@ -868,15 +856,23 @@ static int queue_init(queue_entry_t *queue, const char *name,
 			queue->s.dequeue            = plain_queue_deq;
 			queue->s.dequeue_multi      = plain_queue_deq_multi;
 			queue->s.orig_dequeue_multi = plain_queue_deq_multi;
+
+			queue->s.ring_mpmc = ring_mpmc_create(queue->s.name,
+							      queue_size);
+			if (queue->s.ring_mpmc == NULL) {
+				ODP_ERR("Creating MPMC ring failed\n");
+				return -1;
+			}
 		} else {
 			queue->s.enqueue            = sched_queue_enq;
 			queue->s.enqueue_multi      = sched_queue_enq_multi;
-		}
 
-		queue->s.ring_st =  ring_st_create(queue->s.name, queue_size);
-		if (queue->s.ring_st == NULL) {
-			ODP_ERR("Creating ST ring failed\n");
-			return -1;
+			queue->s.ring_st =  ring_st_create(queue->s.name,
+							   queue_size);
+			if (queue->s.ring_st == NULL) {
+				ODP_ERR("Creating ST ring failed\n");
+				return -1;
+			}
 		}
 	}
 
