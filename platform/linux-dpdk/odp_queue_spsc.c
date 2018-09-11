@@ -86,6 +86,7 @@ void queue_spsc_init(queue_entry_t *queue, uint32_t queue_size)
 	queue->s.dequeue = queue_spsc_deq;
 	queue->s.enqueue_multi = queue_spsc_enq_multi;
 	queue->s.dequeue_multi = queue_spsc_deq_multi;
+	queue->s.orig_dequeue_multi = queue_spsc_deq_multi;
 
 	queue->s.ring_spsc = ring_spsc_create(queue->s.name, queue_size);
 	if (queue->s.ring_spsc == NULL)
