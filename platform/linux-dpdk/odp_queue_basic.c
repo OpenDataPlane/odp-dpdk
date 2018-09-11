@@ -457,9 +457,12 @@ static inline int _plain_queue_enq_multi(odp_queue_t handle,
 					 odp_buffer_hdr_t *buf_hdr[], int num)
 {
 	queue_entry_t *queue;
-	int num_enq;
+	int ret, num_enq;
 
 	queue = qentry_from_handle(handle);
+
+	if (sched_fn->ord_enq_multi(handle, (void **)buf_hdr, num, &ret))
+		return ret;
 
 	LOCK(queue);
 
