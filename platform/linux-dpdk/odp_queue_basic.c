@@ -453,18 +453,13 @@ static odp_queue_t queue_lookup(const char *name)
 	return ODP_QUEUE_INVALID;
 }
 
-static inline int _sched_queue_enq_multi(odp_queue_t handle,
+static inline int _plain_queue_enq_multi(odp_queue_t handle,
 					 odp_buffer_hdr_t *buf_hdr[], int num)
 {
-	int sched = 0;
-	int ret;
 	queue_entry_t *queue;
 	int num_enq;
 
 	queue = qentry_from_handle(handle);
-
-	if (sched_fn->ord_enq_multi(handle, (void **)buf_hdr, num, &ret))
-		return ret;
 
 	LOCK(queue);
 
@@ -476,41 +471,9 @@ static inline int _sched_queue_enq_multi(odp_queue_t handle,
 
 	num_enq = ring_st_enq_multi(queue->s.ring_st, (void **)buf_hdr, num);
 
-	if (odp_unlikely(num_enq == 0)) {
-		UNLOCK(queue);
-		return 0;
-	}
-
-	if (queue->s.status == QUEUE_STATUS_NOTSCHED) {
-		queue->s.status = QUEUE_STATUS_SCHED;
-		sched = 1;
-	}
-
 	UNLOCK(queue);
 
-	/* Add queue to scheduling */
-	if (sched && sched_fn->sched_queue(queue->s.index))
-		ODP_ABORT("schedule_queue failed\n");
-
 	return num_enq;
-}
-
-static int plain_queue_enq_multi(odp_queue_t handle,
-				 odp_buffer_hdr_t *buf_hdr[], int num)
-{
-	return _sched_queue_enq_multi(handle, buf_hdr, num);
-}
-
-static int plain_queue_enq(odp_queue_t handle, odp_buffer_hdr_t *buf_hdr)
-{
-	int ret;
-
-	ret = _sched_queue_enq_multi(handle, &buf_hdr, 1);
-
-	if (ret == 1)
-		return 0;
-	else
-		return -1;
 }
 
 static inline int _plain_queue_deq_multi(odp_queue_t handle,
@@ -534,6 +497,24 @@ static inline int _plain_queue_deq_multi(odp_queue_t handle,
 	UNLOCK(queue);
 
 	return num_deq;
+}
+
+static int plain_queue_enq_multi(odp_queue_t handle,
+				 odp_buffer_hdr_t *buf_hdr[], int num)
+{
+	return _plain_queue_enq_multi(handle, buf_hdr, num);
+}
+
+static int plain_queue_enq(odp_queue_t handle, odp_buffer_hdr_t *buf_hdr)
+{
+	int ret;
+
+	ret = _plain_queue_enq_multi(handle, &buf_hdr, 1);
+
+	if (ret == 1)
+		return 0;
+	else
+		return -1;
 }
 
 static int plain_queue_deq_multi(odp_queue_t handle,
@@ -687,22 +668,48 @@ static int queue_info(odp_queue_t handle, odp_queue_info_t *info)
 	return 0;
 }
 
-static int sched_queue_enq_multi(odp_queue_t handle,
-				 odp_buffer_hdr_t *buf_hdr[], int num)
+static inline int _sched_queue_enq_multi(odp_queue_t handle,
+					 odp_buffer_hdr_t *buf_hdr[], int num)
 {
-	return _sched_queue_enq_multi(handle, buf_hdr, num);
-}
-
-static int sched_queue_enq(odp_queue_t handle, odp_buffer_hdr_t *buf_hdr)
-{
+	int sched = 0;
 	int ret;
+	queue_entry_t *queue;
+	int num_enq;
+	ring_st_t ring_st;
 
-	ret = _sched_queue_enq_multi(handle, &buf_hdr, 1);
+	queue = qentry_from_handle(handle);
+	ring_st = queue->s.ring_st;
 
-	if (ret == 1)
-		return 0;
-	else
+	if (sched_fn->ord_enq_multi(handle, (void **)buf_hdr, num, &ret))
+		return ret;
+
+	LOCK(queue);
+
+	if (odp_unlikely(queue->s.status < QUEUE_STATUS_READY)) {
+		UNLOCK(queue);
+		ODP_ERR("Bad queue status\n");
 		return -1;
+	}
+
+	num_enq = ring_st_enq_multi(ring_st, (void **)buf_hdr, num);
+
+	if (odp_unlikely(num_enq == 0)) {
+		UNLOCK(queue);
+		return 0;
+	}
+
+	if (queue->s.status == QUEUE_STATUS_NOTSCHED) {
+		queue->s.status = QUEUE_STATUS_SCHED;
+		sched = 1;
+	}
+
+	UNLOCK(queue);
+
+	/* Add queue to scheduling */
+	if (sched && sched_fn->sched_queue(queue->s.index))
+		ODP_ABORT("schedule_queue failed\n");
+
+	return num_enq;
 }
 
 int sched_queue_deq(uint32_t queue_index, odp_event_t ev[], int max_num,
@@ -746,6 +753,24 @@ int sched_queue_deq(uint32_t queue_index, odp_event_t ev[], int max_num,
 	UNLOCK(queue);
 
 	return num_deq;
+}
+
+static int sched_queue_enq_multi(odp_queue_t handle,
+				 odp_buffer_hdr_t *buf_hdr[], int num)
+{
+	return _sched_queue_enq_multi(handle, buf_hdr, num);
+}
+
+static int sched_queue_enq(odp_queue_t handle, odp_buffer_hdr_t *buf_hdr)
+{
+	int ret;
+
+	ret = _sched_queue_enq_multi(handle, &buf_hdr, 1);
+
+	if (ret == 1)
+		return 0;
+	else
+		return -1;
 }
 
 int sched_queue_empty(uint32_t queue_index)
