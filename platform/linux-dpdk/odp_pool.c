@@ -62,7 +62,7 @@ const _odp_pool_inline_offset_t ODP_ALIGNED_CACHE _odp_pool_inline = {
 
 static inline odp_pool_t pool_index_to_handle(uint32_t pool_idx)
 {
-	return _odp_cast_scalar(odp_pool_t, pool_idx);
+	return _odp_cast_scalar(odp_pool_t, pool_idx + 1);
 }
 
 int odp_pool_init_global(void)

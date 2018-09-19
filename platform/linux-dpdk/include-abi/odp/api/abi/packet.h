@@ -32,7 +32,7 @@ typedef ODP_HANDLE_T(odp_packet_t);
 
 typedef ODP_HANDLE_T(odp_packet_seg_t);
 
-#define ODP_PACKET_SEG_INVALID _odp_cast_scalar(odp_packet_seg_t, NULL)
+#define ODP_PACKET_SEG_INVALID _odp_cast_scalar(odp_packet_seg_t, 0)
 
 typedef uint8_t odp_proto_l2_type_t;
 

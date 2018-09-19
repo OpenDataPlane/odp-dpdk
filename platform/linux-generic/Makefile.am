@@ -127,6 +127,7 @@ noinst_HEADERS = \
 		  include/odp_queue_lf.h \
 		  include/odp_queue_scalable_internal.h \
 		  include/odp_ring_internal.h \
+		  include/odp_ring_mpmc_internal.h \
 		  include/odp_ring_spsc_internal.h \
 		  include/odp_ring_st_internal.h \
 		  include/odp_schedule_if.h \
@@ -142,6 +143,7 @@ noinst_HEADERS = \
 		  include/protocols/eth.h \
 		  include/protocols/ip.h \
 		  include/protocols/ipsec.h \
+		  include/protocols/sctp.h \
 		  include/protocols/tcp.h \
 		  include/protocols/thash.h \
 		  include/protocols/udp.h

@@ -11,6 +11,7 @@
 #include <odp/api/shared_memory.h>
 #include <odp/api/ticketlock.h>
 #include <odp/api/timer.h>
+#include <odp/api/plat/queue_inlines.h>
 
 #include <odp_init_internal.h>
 #include <odp_debug_internal.h>
@@ -21,7 +22,6 @@
 #include <rte_timer.h>
 
 /* TODO: timer ABI spec needs update
- * - ODP_TIMER_INVALID: 0xffffffff -> NULL
  * - Remove "struct timer_pool_s"
  */
 

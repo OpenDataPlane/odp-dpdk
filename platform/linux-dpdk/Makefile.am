@@ -114,6 +114,7 @@ noinst_HEADERS = \
 		  ${top_srcdir}/platform/linux-generic/include/odp_queue_if.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_queue_lf.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_ring_internal.h \
+		  include/odp_ring_mpmc_internal.h \
 		  include/odp_ring_spsc_internal.h \
 		  include/odp_ring_st_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_schedule_if.h \
@@ -126,6 +127,7 @@ noinst_HEADERS = \
 		  include/protocols/eth.h \
 		  include/protocols/ip.h \
 		  include/protocols/ipsec.h \
+		  include/protocols/sctp.h \
 		  include/protocols/tcp.h \
 		  include/protocols/thash.h \
 		  include/protocols/udp.h \

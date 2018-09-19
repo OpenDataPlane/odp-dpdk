@@ -24,6 +24,7 @@
 
 /* Inlined API functions */
 #include <odp/api/plat/event_inlines.h>
+#include <odp/api/plat/queue_inlines.h>
 
 #include <rte_config.h>
 #include <rte_crypto.h>

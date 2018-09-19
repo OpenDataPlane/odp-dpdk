@@ -561,7 +561,7 @@ static int start_pkt_dpdk(pktio_entry_t *pktio_entry)
 
 	for (i = 0; i < nbtxq; i++) {
 		ret = rte_eth_tx_queue_setup(port_id, i,
-					     pkt_dpdk->opt.num_rx_desc,
+					     pkt_dpdk->opt.num_tx_desc,
 					     socket_id, txconf);
 		if (ret < 0) {
 			ODP_ERR("txq:err=%d, port=%" PRIu16 "\n", ret, port_id);

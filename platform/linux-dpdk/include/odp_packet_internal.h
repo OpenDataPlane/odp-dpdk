@@ -115,7 +115,7 @@ typedef struct {
 	odp_time_t timestamp;
 
 	/* Classifier destination queue */
-	void *dst_queue;
+	odp_queue_t dst_queue;
 
 	/* Result for crypto packet op */
 	odp_crypto_packet_result_t crypto_op_result;
@@ -265,6 +265,7 @@ int _odp_packet_cmp_data(odp_packet_t pkt, uint32_t offset,
 int _odp_packet_ipv4_chksum_insert(odp_packet_t pkt);
 int _odp_packet_tcp_chksum_insert(odp_packet_t pkt);
 int _odp_packet_udp_chksum_insert(odp_packet_t pkt);
+int _odp_packet_sctp_chksum_insert(odp_packet_t pkt);
 
 /* We can't enforce tailroom reservation for received packets */
 ODP_STATIC_ASSERT(CONFIG_PACKET_TAILROOM == 0,
