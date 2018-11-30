@@ -99,9 +99,6 @@ typedef struct {
 
 timer_global_t *timer_global;
 
-/* Enable timer polling from scheduler or queue dequeue. */
-odp_bool_t inline_timers = true;
-
 static inline timer_entry_t *timer_from_hdl(odp_timer_t timer_hdl)
 {
 	return (timer_entry_t *)(uintptr_t)timer_hdl;
@@ -115,9 +112,10 @@ int odp_timer_init_global(const odp_init_t *params)
 		if (params->not_used.feat.timer) {
 			/* Timer is not initialized. Disable _timer_run()
 			 * calls. */
-			inline_timers = false;
+			odp_global_rw->inline_timers = false;
 			return 0;
 	}
+	odp_global_rw->inline_timers = true;
 
 	shm = odp_shm_reserve("timer_global", sizeof(timer_global_t),
 			      ODP_CACHE_LINE_SIZE, 0);
