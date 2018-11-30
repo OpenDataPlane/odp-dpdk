@@ -176,7 +176,6 @@ __LIB__libodp_linux_la_SOURCES = \
 			   ../linux-generic/odp_schedule_basic.c \
 			   odp_schedule_if.c \
 			   ../linux-generic/odp_schedule_sp.c \
-			   ../linux-generic/odp_schedule_iquery.c \
 			   odp_shared_memory.c \
 			   ../linux-generic/odp_sorted_list.c \
 			   ../linux-generic/odp_spinlock.c \
