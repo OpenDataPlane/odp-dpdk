@@ -691,8 +691,9 @@ static int recv_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 
 		if (!pktio_cls_enabled(pktio_entry) &&
 		    parse_layer != ODP_PROTO_LAYER_NONE) {
-			if (dpdk_packet_parse_layer(pkt_hdr, mbuf, parse_layer,
-						    pktin_cfg)) {
+			if (_odp_dpdk_packet_parse_layer(pkt_hdr, mbuf,
+							 parse_layer,
+							 pktin_cfg)) {
 				odp_packet_free(pkt_table[i]);
 				continue;
 			}
@@ -727,10 +728,11 @@ static int recv_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 			data = odp_packet_data(pkt);
 			packet_parse_reset(&parsed_hdr);
 			packet_set_len(&parsed_hdr, pkt_len);
-			if (dpdk_packet_parse_common(&parsed_hdr.p, data,
-						     pkt_len, pkt_len, mbuf,
-						     ODP_PROTO_LAYER_ALL,
-						     pktin_cfg)) {
+			if (_odp_dpdk_packet_parse_common(&parsed_hdr.p, data,
+							  pkt_len, pkt_len,
+							  mbuf,
+							  ODP_PROTO_LAYER_ALL,
+							  pktin_cfg)) {
 				odp_packet_free(pkt);
 				continue;
 			}
