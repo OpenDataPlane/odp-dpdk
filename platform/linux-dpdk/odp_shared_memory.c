@@ -99,7 +99,7 @@ static void name_to_mz_name(const char *name, char *mz_name)
 	/* Use pid and counter to make name unique */
 	do {
 		snprintf(mz_name, RTE_MEMZONE_NAMESIZE, SHM_BLOCK_NAME,
-			 (odp_instance_t)odp_global_data.main_pid, i++, name);
+			 (odp_instance_t)odp_global_ro.main_pid, i++, name);
 		mz_name[RTE_MEMZONE_NAMESIZE - 1] = 0;
 	} while (mz_name_used(mz_name));
 }
@@ -158,7 +158,7 @@ int _odp_shm_init_global(const odp_init_t *init ODP_UNUSED)
 {
 	void *addr;
 
-	if ((getpid() != odp_global_data.main_pid) ||
+	if ((getpid() != odp_global_ro.main_pid) ||
 	    (syscall(SYS_gettid) != getpid())) {
 		ODP_ERR("shm_init_global() must be performed by the main "
 			"ODP process!\n.");
@@ -191,7 +191,7 @@ int _odp_shm_term_global(void)
 	shm_block_t *block;
 	int idx;
 
-	if ((getpid() != odp_global_data.main_pid) ||
+	if ((getpid() != odp_global_ro.main_pid) ||
 	    (syscall(SYS_gettid) != getpid())) {
 		ODP_ERR("shm_term_global() must be performed by the main "
 			"ODP process!\n.");
