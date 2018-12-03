@@ -49,6 +49,7 @@ AM_CONDITIONAL([PLATFORM_IS_LINUX_DPDK],
 	       [test "${with_platform}" = "linux-dpdk"])
 AC_CONFIG_FILES([platform/linux-dpdk/Makefile
 		 platform/linux-dpdk/libodp-linux.pc
+		 platform/linux-dpdk/dumpconfig/Makefile
 		 platform/linux-dpdk/test/Makefile
 		 platform/linux-dpdk/test/validation/api/pktio/Makefile])
 ])
