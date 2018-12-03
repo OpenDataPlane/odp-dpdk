@@ -21,6 +21,7 @@
 #include <odp/api/debug.h>
 #include <odp_debug_internal.h>
 #include <odp/api/cpumask.h>
+#include <odp_libconfig_internal.h>
 
 #include <string.h>
 #include <stdlib.h>
@@ -65,6 +66,32 @@ static inline odp_pool_t pool_index_to_handle(uint32_t pool_idx)
 	return _odp_cast_scalar(odp_pool_t, pool_idx + 1);
 }
 
+static int read_config_file(pool_table_t *pool_tbl)
+{
+	const char *str;
+	int val = 0;
+
+	ODP_PRINT("Pool config:\n");
+
+	str = "pool.pkt.max_num";
+	if (!_odp_libconfig_lookup_int(str, &val)) {
+		ODP_ERR("Config option '%s' not found.\n", str);
+		return -1;
+	}
+
+	if (val < 0 || val > CONFIG_POOL_MAX_NUM) {
+		ODP_ERR("Bad value %s = %u\n", str, val);
+		return -1;
+	}
+
+	pool_tbl->config.pkt_max_num = val;
+	ODP_PRINT("  %s: %i\n", str, val);
+
+	ODP_PRINT("\n");
+
+	return 0;
+}
+
 int odp_pool_init_global(void)
 {
 	uint32_t i;
@@ -81,6 +108,11 @@ int odp_pool_init_global(void)
 
 	memset(pool_tbl, 0, sizeof(pool_table_t));
 	pool_tbl->shm = shm;
+
+	if (read_config_file(pool_tbl)) {
+		odp_shm_free(shm);
+		return -1;
+	}
 
 	for (i = 0; i < ODP_CONFIG_POOLS; i++) {
 		pool_t *pool = pool_entry(i);
@@ -133,7 +165,7 @@ int odp_pool_capability(odp_pool_capability_t *capa)
 	/* Packet pools */
 	capa->pkt.max_pools        = ODP_CONFIG_POOLS;
 	capa->pkt.max_len          = 0;
-	capa->pkt.max_num	   = CONFIG_POOL_MAX_NUM;
+	capa->pkt.max_num	   = pool_tbl->config.pkt_max_num;
 	capa->pkt.min_headroom     = CONFIG_PACKET_HEADROOM;
 	capa->pkt.max_headroom     = CONFIG_PACKET_HEADROOM;
 	capa->pkt.min_tailroom     = CONFIG_PACKET_TAILROOM;
