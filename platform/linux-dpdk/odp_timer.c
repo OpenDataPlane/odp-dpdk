@@ -13,8 +13,9 @@
 #include <odp/api/timer.h>
 #include <odp/api/plat/queue_inlines.h>
 
-#include <odp_init_internal.h>
 #include <odp_debug_internal.h>
+#include <odp_init_internal.h>
+#include <odp_queue_if.h>
 #include <odp_ring_internal.h>
 #include <odp_timer_internal.h>
 
@@ -24,9 +25,6 @@
 /* TODO: timer ABI spec needs update
  * - Remove "struct timer_pool_s"
  */
-
-/* TODO: Add this to queue interface. Sets a queue to poll timer on dequeue */
-void queue_enable_timer_poll(odp_queue_t queue);
 
 /* Timer states */
 #define NOT_TICKING 0
@@ -357,10 +355,8 @@ odp_timer_t odp_timer_alloc(odp_timer_pool_t tp,
 	timer->queue     = queue;
 	timer->tmo_event = ODP_EVENT_INVALID;
 
-	/* Enable timer polling from dequeue operation. Scheduler polls timer
-	 * by default. */
-	if (odp_queue_type(queue) == ODP_QUEUE_TYPE_PLAIN)
-		queue_enable_timer_poll(queue);
+	/* Add timer to queue */
+	queue_fn->timer_add(queue);
 
 	odp_ticketlock_lock(&timer_pool->lock);
 
@@ -400,10 +396,10 @@ retry:
 		ev = ODP_EVENT_INVALID;
 	}
 
-	odp_ticketlock_unlock(&timer->lock);
+	/* Remove timer from queue */
+	queue_fn->timer_rem(timer->queue);
 
-	/* TODO: disable timer polling from queue. Needs better queue <-> timer
-	 * interface. */
+	odp_ticketlock_unlock(&timer->lock);
 
 	odp_ticketlock_lock(&timer_pool->lock);
 
