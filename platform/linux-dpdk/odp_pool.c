@@ -279,6 +279,17 @@ static int check_params(odp_pool_param_t *params)
 			return -1;
 		}
 
+		if (params->pkt.max_num > capa.pkt.max_num) {
+			ODP_ERR("pkt.max_num too large %u\n",
+				params->pkt.max_num);
+			return -1;
+		}
+
+		if (params->pkt.num > capa.pkt.max_num) {
+			ODP_ERR("pkt.num too large %u\n", params->pkt.num);
+			return -1;
+		}
+
 		if (params->pkt.seg_len > capa.pkt.max_seg_len) {
 			ODP_ERR("pkt.seg_len too large %u\n",
 				params->pkt.seg_len);
