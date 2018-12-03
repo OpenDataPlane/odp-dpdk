@@ -94,6 +94,7 @@ typedef struct {
 	odp_shm_t shm;
 	odp_ticketlock_t lock;
 	volatile uint64_t wait_counter;
+	int num_timer_pools;
 
 } timer_global_t;
 
@@ -108,14 +109,12 @@ int odp_timer_init_global(const odp_init_t *params)
 {
 	odp_shm_t shm;
 
-	if (params)
-		if (params->not_used.feat.timer) {
-			/* Timer is not initialized. Disable _timer_run()
-			 * calls. */
-			odp_global_rw->inline_timers = false;
-			return 0;
-	}
-	odp_global_rw->inline_timers = true;
+	/* Timers are not polled until at least one timer pool has been
+	 * created. */
+	odp_global_rw->inline_timers = false;
+
+	if (params && params->not_used.feat.timer)
+		return 0;
 
 	shm = odp_shm_reserve("timer_global", sizeof(timer_global_t),
 			      ODP_CACHE_LINE_SIZE, 0);
@@ -177,6 +176,11 @@ odp_timer_pool_t odp_timer_pool_create(const char *name,
 	timer_entry_t *timer;
 	uint32_t i, num_timers;
 
+	if (odp_global_ro.init_param.not_used.feat.timer) {
+		ODP_ERR("Trying to use disabled ODP feature.\n");
+		return ODP_TIMER_POOL_INVALID;
+	}
+
 	if (param->res_ns < MAX_RES_NS) {
 		ODP_ERR("Too high resolution\n");
 		return ODP_TIMER_POOL_INVALID;
@@ -192,6 +196,12 @@ odp_timer_pool_t odp_timer_pool_create(const char *name,
 
 	odp_ticketlock_lock(&timer_global->lock);
 
+	if (timer_global->num_timer_pools >= MAX_TIMER_POOLS) {
+		odp_ticketlock_unlock(&timer_global->lock);
+		ODP_DBG("No more free timer pools\n");
+		return ODP_TIMER_POOL_INVALID;
+	}
+
 	for (i = 0; i < MAX_TIMER_POOLS; i++) {
 		timer_pool = &timer_global->timer_pool[i];
 
@@ -200,14 +210,13 @@ odp_timer_pool_t odp_timer_pool_create(const char *name,
 			break;
 		}
 	}
+	timer_global->num_timer_pools++;
+
+	/* Enable inline timer polling */
+	if (timer_global->num_timer_pools == 1)
+		odp_global_rw->inline_timers = true;
 
 	odp_ticketlock_unlock(&timer_global->lock);
-
-	if (i == MAX_TIMER_POOLS) {
-		ODP_ERR("No free timer pools\n");
-		return ODP_TIMER_POOL_INVALID;
-	}
-
 	if (name) {
 		strncpy(timer_pool->name, name,
 			ODP_TIMER_POOL_NAME_LEN);
@@ -250,6 +259,11 @@ void odp_timer_pool_destroy(odp_timer_pool_t tp)
 	odp_ticketlock_lock(&timer_global->lock);
 
 	timer_pool->used = 0;
+	timer_global->num_timer_pools--;
+
+	/* Disable inline timer polling */
+	if (timer_global->num_timer_pools == 0)
+		odp_global_rw->inline_timers = false;
 
 	odp_ticketlock_unlock(&timer_global->lock);
 }
