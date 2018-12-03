@@ -28,6 +28,7 @@
 #include <odp_libconfig_internal.h>
 #include <odp_timer_internal.h>
 #include <odp/api/plat/queue_inline_types.h>
+#include <odp_global_data.h>
 
 #define NUM_INTERNAL_QUEUES 64
 
@@ -537,44 +538,6 @@ static int error_enqueue_multi(odp_queue_t handle,
 	return -1;
 }
 
-static int timer_queue_deq_multi(odp_queue_t handle,
-				 odp_buffer_hdr_t *buf_hdr[], int num)
-{
-	timer_run();
-
-	return _plain_queue_deq_multi(handle, buf_hdr, num);
-}
-
-static odp_buffer_hdr_t *timer_queue_deq(odp_queue_t handle)
-{
-	odp_buffer_hdr_t *buf_hdr = NULL;
-	int ret;
-
-	timer_run();
-
-	ret = _plain_queue_deq_multi(handle, &buf_hdr, 1);
-
-	if (ret == 1)
-		return buf_hdr;
-	else
-		return NULL;
-}
-
-/* Enable timer polling on dequeue call */
-void queue_enable_timer_poll(odp_queue_t queue);
-
-void queue_enable_timer_poll(odp_queue_t handle)
-{
-	queue_entry_t *queue = qentry_from_handle(handle);
-
-	LOCK(queue);
-
-	queue->s.dequeue       = timer_queue_deq;
-	queue->s.dequeue_multi = timer_queue_deq_multi;
-
-	UNLOCK(queue);
-}
-
 static odp_buffer_hdr_t *error_dequeue(odp_queue_t handle)
 {
 	ODP_ERR("Dequeue not supported (0x%" PRIx64 ")\n",
@@ -966,6 +929,10 @@ static int queue_api_deq_multi(odp_queue_t handle, odp_event_t ev[], int num)
 {
 	queue_entry_t *queue = qentry_from_handle(handle);
 
+	if (odp_global_rw->inline_timers &&
+	    odp_atomic_load_u64(&queue->s.num_timers))
+		timer_run();
+
 	if (num > QUEUE_MULTI_MAX)
 		num = QUEUE_MULTI_MAX;
 
@@ -976,6 +943,10 @@ static int queue_api_deq_multi(odp_queue_t handle, odp_event_t ev[], int num)
 static odp_event_t queue_api_deq(odp_queue_t handle)
 {
 	queue_entry_t *queue = qentry_from_handle(handle);
+
+	if (odp_global_rw->inline_timers &&
+	    odp_atomic_load_u64(&queue->s.num_timers))
+		timer_run();
 
 	return (odp_event_t)queue->s.dequeue(handle);
 }
