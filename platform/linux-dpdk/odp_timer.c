@@ -15,6 +15,7 @@
 
 #include <odp_debug_internal.h>
 #include <odp_init_internal.h>
+#include <odp_libconfig_internal.h>
 #include <odp_queue_if.h>
 #include <odp_ring_internal.h>
 #include <odp_timer_internal.h>
@@ -93,6 +94,7 @@ typedef struct {
 	odp_ticketlock_t lock;
 	volatile uint64_t wait_counter;
 	int num_timer_pools;
+	int inline_poll_interval;
 
 } timer_global_t;
 
@@ -106,6 +108,8 @@ static inline timer_entry_t *timer_from_hdl(odp_timer_t timer_hdl)
 int odp_timer_init_global(const odp_init_t *params)
 {
 	odp_shm_t shm;
+	const char *conf_str;
+	int val = 0;
 
 	/* Timers are not polled until at least one timer pool has been
 	 * created. */
@@ -129,6 +133,14 @@ int odp_timer_init_global(const odp_init_t *params)
 	timer_global->shm = shm;
 	odp_ticketlock_init(&timer_global->lock);
 
+	conf_str =  "timer.inline_poll_interval";
+	if (!_odp_libconfig_lookup_int(conf_str, &val)) {
+		ODP_ERR("Config option '%s' not found.\n", conf_str);
+		odp_shm_free(shm);
+		return -1;
+	}
+	timer_global->inline_poll_interval = val;
+
 	rte_timer_subsystem_init();
 
 	return 0;
@@ -143,10 +155,19 @@ int odp_timer_term_global(void)
 	return 0;
 }
 
-unsigned int _timer_run(void)
+unsigned int _timer_run(int dec)
 {
-	/* TODO: limit rte_timer_manage call rate e.g. by recording/comparing
-	 * cycle counter values. */
+	static __thread int timer_run_cnt = 1;
+
+	/* Rate limit how often this thread checks the timer pools. */
+
+	if (timer_global->inline_poll_interval > 1) {
+		timer_run_cnt -= dec;
+		if (timer_run_cnt > 0)
+			return 0;
+		timer_run_cnt = timer_global->inline_poll_interval;
+	}
+
 	rte_timer_manage();
 
 	return 0;
