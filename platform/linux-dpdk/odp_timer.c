@@ -190,6 +190,9 @@ int odp_timer_capability(odp_timer_clk_src_t clk_src,
 	memset(capa, 0, sizeof(odp_timer_capability_t));
 
 	capa->highest_res_ns = MAX_RES_NS;
+	capa->max_pools_combined = MAX_TIMER_POOLS;
+	capa->max_pools = MAX_TIMER_POOLS;
+	capa->max_timers = MAX_TIMERS;
 
 	return 0;
 }
