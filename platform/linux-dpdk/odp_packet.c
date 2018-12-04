@@ -45,6 +45,7 @@ const _odp_packet_inline_offset_t ODP_ALIGNED_CACHE _odp_packet_inline = {
 	.timestamp        = offsetof(odp_packet_hdr_t, timestamp),
 	.input_flags      = offsetof(odp_packet_hdr_t, p.input_flags),
 	.flags            = offsetof(odp_packet_hdr_t, p.flags),
+	.subtype          = offsetof(odp_packet_hdr_t, subtype),
 	.buf_addr         = offsetof(odp_packet_hdr_t, buf_hdr.mb.buf_addr),
 	.data             = offsetof(odp_packet_hdr_t, buf_hdr.mb.data_off),
 	.pkt_len          = offsetof(odp_packet_hdr_t, buf_hdr.mb.pkt_len),

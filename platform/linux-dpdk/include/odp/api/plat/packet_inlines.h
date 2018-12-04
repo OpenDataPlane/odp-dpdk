@@ -23,6 +23,7 @@ extern "C" {
 #include <odp/api/hints.h>
 #include <odp/api/time.h>
 #include <odp/api/abi/buffer.h>
+#include <odp/api/abi/event.h>
 
 #include <odp/api/plat/packet_inline_types.h>
 #include <odp/api/plat/pool_inline_types.h>
@@ -76,6 +77,7 @@ extern "C" {
 	#define odp_packet_to_event __odp_packet_to_event
 	#define odp_packet_from_event_multi __odp_packet_from_event_multi
 	#define odp_packet_to_event_multi __odp_packet_to_event_multi
+	#define odp_packet_subtype __odp_packet_subtype
 #else
 	#undef _ODP_INLINE
 	#define _ODP_INLINE
@@ -401,6 +403,11 @@ _ODP_INLINE void odp_packet_to_event_multi(const odp_packet_t pkt[],
 
 	for (i = 0; i < num; i++)
 		ev[i] = odp_packet_to_event(pkt[i]);
+}
+
+_ODP_INLINE odp_event_subtype_t odp_packet_subtype(odp_packet_t pkt)
+{
+	return (odp_event_subtype_t)_odp_pkt_get(pkt, int8_t, subtype);
 }
 
 #ifdef __cplusplus

@@ -161,11 +161,6 @@ static inline odp_packet_t packet_from_buf_hdr(odp_buffer_hdr_t *buf_hdr)
 	return (odp_packet_t)(odp_packet_hdr_t *)buf_hdr;
 }
 
-static inline odp_event_subtype_t packet_subtype(odp_packet_t pkt)
-{
-	return packet_hdr(pkt)->subtype;
-}
-
 static inline void packet_subtype_set(odp_packet_t pkt, int ev)
 {
 	packet_hdr(pkt)->subtype = ev;
