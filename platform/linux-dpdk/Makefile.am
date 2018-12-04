@@ -110,13 +110,14 @@ noinst_HEADERS = \
 		  ${top_srcdir}/platform/linux-generic/include/odp_pkt_queue_internal.h \
 		  include/odp_pool_internal.h \
 		  include/odp_posix_extensions.h \
-		  ${top_srcdir}/platform/linux-generic/include/odp_queue_basic_internal.h \
+		  include/odp_queue_basic_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_queue_if.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_queue_lf.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_ring_internal.h \
-		  include/odp_ring_mpmc_internal.h \
-		  include/odp_ring_spsc_internal.h \
-		  include/odp_ring_st_internal.h \
+		  ${top_srcdir}/platform/linux-generic/include/odp_ring_mpmc_internal.h \
+		  include/odp_ptr_ring_mpmc_internal.h \
+		  include/odp_ptr_ring_spsc_internal.h \
+		  include/odp_ptr_ring_st_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_schedule_if.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_sorted_list_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_sysinfo_internal.h \
