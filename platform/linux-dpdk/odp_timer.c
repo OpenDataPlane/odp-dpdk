@@ -23,10 +23,6 @@
 #include <rte_cycles.h>
 #include <rte_timer.h>
 
-/* TODO: timer ABI spec needs update
- * - Remove "struct timer_pool_s"
- */
-
 /* Timer states */
 #define NOT_TICKING 0
 #define EXPIRED     1
@@ -99,6 +95,16 @@ typedef struct {
 } timer_global_t;
 
 timer_global_t *timer_global;
+
+static inline timer_pool_t *timer_pool_from_hdl(odp_timer_pool_t hdl)
+{
+	return (timer_pool_t *)(uintptr_t)hdl;
+}
+
+static inline odp_timer_pool_t timer_pool_to_hdl(timer_pool_t *tp)
+{
+	return (odp_timer_pool_t)tp;
+}
 
 static inline timer_entry_t *timer_from_hdl(odp_timer_t timer_hdl)
 {
@@ -264,7 +270,7 @@ odp_timer_pool_t odp_timer_pool_create(const char *name,
 			 timer_pool->free_timer.ring_mask, i);
 	}
 
-	return timer_pool;
+	return timer_pool_to_hdl(timer_pool);
 }
 
 void odp_timer_pool_start(void)
@@ -273,7 +279,7 @@ void odp_timer_pool_start(void)
 
 void odp_timer_pool_destroy(odp_timer_pool_t tp)
 {
-	timer_pool_t *timer_pool = tp;
+	timer_pool_t *timer_pool = timer_pool_from_hdl(tp);
 
 	odp_ticketlock_lock(&timer_global->lock);
 
@@ -332,7 +338,7 @@ uint64_t odp_timer_current_tick(odp_timer_pool_t tp)
 int odp_timer_pool_info(odp_timer_pool_t tp,
 			odp_timer_pool_info_t *info)
 {
-	timer_pool_t *timer_pool = tp;
+	timer_pool_t *timer_pool = timer_pool_from_hdl(tp);
 
 	info->param      = timer_pool->param;
 	info->cur_timers = timer_pool->cur_timers;
@@ -343,7 +349,7 @@ int odp_timer_pool_info(odp_timer_pool_t tp,
 
 uint64_t odp_timer_pool_to_u64(odp_timer_pool_t tp)
 {
-	return (uint64_t)(uintptr_t)tp;
+	return _odp_pri(tp);
 }
 
 odp_timer_t odp_timer_alloc(odp_timer_pool_t tp,
@@ -352,7 +358,7 @@ odp_timer_t odp_timer_alloc(odp_timer_pool_t tp,
 {
 	uint32_t timer_idx;
 	timer_entry_t *timer;
-	timer_pool_t *timer_pool = tp;
+	timer_pool_t *timer_pool = timer_pool_from_hdl(tp);
 
 	if (odp_unlikely(tp == ODP_TIMER_POOL_INVALID)) {
 		ODP_ERR("Invalid timer pool.\n");
