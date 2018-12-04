@@ -333,10 +333,9 @@ odp_timer_t odp_timer_alloc(odp_timer_pool_t tp,
 		return ODP_TIMER_INVALID;
 	}
 
-	timer_idx = ring_deq(&timer_pool->free_timer.ring_hdr,
-			     timer_pool->free_timer.ring_mask);
-
-	if (timer_idx == RING_EMPTY)
+	if (ring_deq(&timer_pool->free_timer.ring_hdr,
+		     timer_pool->free_timer.ring_mask,
+		     &timer_idx) == 0)
 		return ODP_TIMER_INVALID;
 
 	timer = &timer_pool->timer[timer_idx];
