@@ -3,9 +3,9 @@ AC_PREREQ([2.5])
 # Set correct API version
 ##########################################################################
 m4_define([odpapi_generation_version], [1])
-m4_define([odpapi_major_version], [19])
+m4_define([odpapi_major_version], [20])
 m4_define([odpapi_minor_version], [0])
-m4_define([odpapi_point_version], [2])
+m4_define([odpapi_point_version], [0])
 m4_define([odpapi_version],
     [odpapi_generation_version.odpapi_major_version.odpapi_minor_version.odpapi_point_version])
 AC_INIT([OpenDataPlane],[odpapi_version],[lng-odp@lists.linaro.org])
@@ -200,6 +200,12 @@ AC_ARG_ENABLE([abi-compat],
 	abi_compat=no
 	#if there is no ABI compatibility the .so numbers are meaningless
 	ODP_LIBSO_VERSION=0:0:0
+	# do not try -march=native for clang due to possible failures on
+	# clang optimizations
+	$CC --version | grep -q clang
+	if test $? -ne 0; then
+		ODP_CHECK_CFLAG([-march=native])
+	fi
     fi])
 AM_CONDITIONAL(ODP_ABI_COMPAT, [test "x$ODP_ABI_COMPAT" = "x1"])
 
@@ -285,6 +291,8 @@ AM_CONDITIONAL([ARCH_IS_X86_64], [test "x${ARCH_ABI}" = "xx86_64-linux"])
 DX_HTML_FEATURE(ON)
 DX_PDF_FEATURE(OFF)
 DX_PS_FEATURE(OFF)
+DX_ENV_APPEND(WITH_PLATFORM, $with_platform)
+
 DX_INIT_DOXYGEN($PACKAGE_NAME,
 		${srcdir}/doc/application-api-guide/Doxyfile,
 		${builddir}/doc/application-api-guide/output,
@@ -400,9 +408,10 @@ AC_MSG_RESULT([
 	debug:			${enable_debug}
 	cunit:			${cunit_support}
 	static tests linkage:	${enable_static_applications}
+	with_examples:		${with_examples}
+	with_tests:		${with_tests}
 	test_vald:		${test_vald}
 	test_perf:		${test_perf}
-	test_perf_proc:		${test_perf_proc}
 	test_cpp:		${test_cpp}
 	test_helper:		${test_helper}
 	test_example:		${test_example}

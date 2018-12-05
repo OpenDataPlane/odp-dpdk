@@ -130,6 +130,8 @@ typedef struct {
 	bench_info_t *bench;
 	/** Number of benchmark functions */
 	int num_bench;
+	/** Break worker loop if set to 1 */
+	int exit_thread;
 	struct {
 		/** Test packet length */
 		uint32_t len;
@@ -166,14 +168,10 @@ typedef struct {
 
 /** Global pointer to args */
 static args_t *gbl_args;
-/** Global barrier to synchronize main and worker */
-static odp_barrier_t barrier;
-/** Break worker loop if set to 1 */
-static int exit_thread;
 
 static void sig_handler(int signo ODP_UNUSED)
 {
-	exit_thread = 1;
+	gbl_args->exit_thread = 1;
 }
 
 /**
@@ -188,7 +186,7 @@ static void run_indef(args_t *args, int idx)
 
 	printf("Running %s() indefinitely\n", desc);
 
-	while (!exit_thread) {
+	while (!gbl_args->exit_thread) {
 		int ret;
 
 		if (args->bench[idx].init != NULL)
@@ -1317,9 +1315,6 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 
 	static const char *shortopts =  "b:i:h";
 
-	/* Let helper collect its own arguments (e.g. --odph_proc) */
-	argc = odph_parse_options(argc, argv);
-
 	appl_args->bench_idx = 0; /* Run all benchmarks */
 	appl_args->burst_size = TEST_DEF_BURST;
 
@@ -1513,6 +1508,7 @@ bench_info_t test_suite[] = {
  */
 int main(int argc, char *argv[])
 {
+	odph_helper_options_t helper_options;
 	odph_odpthread_t worker_thread;
 	int cpu;
 	odp_shm_t shm;
@@ -1521,11 +1517,22 @@ int main(int argc, char *argv[])
 	odp_pool_capability_t capa;
 	odp_pool_param_t params;
 	odp_instance_t instance;
+	odp_init_t init_param;
 	uint32_t pkt_num;
 	uint8_t ret;
 
+	/* Let helper collect its own arguments (e.g. --odph_proc) */
+	argc = odph_parse_options(argc, argv);
+	if (odph_options(&helper_options)) {
+		LOG_ERR("Error: reading ODP helper options failed.\n");
+		exit(EXIT_FAILURE);
+	}
+
+	odp_init_param_init(&init_param);
+	init_param.mem_model = helper_options.mem_model;
+
 	/* Init ODP before calling anything else */
-	if (odp_init_global(&instance, NULL, NULL)) {
+	if (odp_init_global(&instance, &init_param, NULL)) {
 		LOG_ERR("Error: ODP global init failed.\n");
 		exit(EXIT_FAILURE);
 	}
@@ -1622,8 +1629,6 @@ int main(int argc, char *argv[])
 	odp_pool_print(gbl_args->pool);
 
 	memset(&worker_thread, 0, sizeof(odph_odpthread_t));
-
-	odp_barrier_init(&barrier, 1 + 1);
 
 	signal(SIGINT, sig_handler);
 

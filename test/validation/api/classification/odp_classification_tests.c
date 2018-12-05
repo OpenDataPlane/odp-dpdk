@@ -18,6 +18,7 @@ static odp_pool_t pool_list[CLS_ENTRIES];
 static odp_pool_t pool_default;
 static odp_pktio_t pktio_loop;
 static odp_cls_testcase_u tc;
+static int global_num_l2_qos;
 
 #define NUM_COS_PMR_CHAIN	2
 #define NUM_COS_DEFAULT	1
@@ -79,7 +80,7 @@ int classification_suite_init(void)
 		cos_list[i] = ODP_COS_INVALID;
 
 	for (i = 0; i < CLS_ENTRIES; i++)
-		pmr_list[i] = ODP_PMR_INVAL;
+		pmr_list[i] = ODP_PMR_INVALID;
 
 	for (i = 0; i < CLS_ENTRIES; i++)
 		queue_list[i] = ODP_QUEUE_INVALID;
@@ -157,7 +158,7 @@ void configure_cls_pmr_chain(void)
 
 	odp_queue_param_init(&qparam);
 	qparam.type       = ODP_QUEUE_TYPE_SCHED;
-	qparam.sched.prio = ODP_SCHED_PRIO_NORMAL;
+	qparam.sched.prio = odp_schedule_default_prio();
 	qparam.sched.sync = ODP_SCHED_SYNC_PARALLEL;
 	qparam.sched.group = ODP_SCHED_GROUP_ALL;
 	qparam.sched.lock_count = queue_capa.max_ordered_locks;
@@ -182,7 +183,7 @@ void configure_cls_pmr_chain(void)
 
 	odp_queue_param_init(&qparam);
 	qparam.type       = ODP_QUEUE_TYPE_SCHED;
-	qparam.sched.prio = ODP_SCHED_PRIO_NORMAL;
+	qparam.sched.prio = odp_schedule_default_prio();
 	qparam.sched.sync = ODP_SCHED_SYNC_PARALLEL;
 	qparam.sched.group = ODP_SCHED_GROUP_ALL;
 	sprintf(queuename, "%s", "DstQueue");
@@ -211,7 +212,7 @@ void configure_cls_pmr_chain(void)
 	pmr_list[CLS_PMR_CHAIN_SRC] =
 	odp_cls_pmr_create(&pmr_param, 1, cos_list[CLS_DEFAULT],
 			   cos_list[CLS_PMR_CHAIN_SRC]);
-	CU_ASSERT_FATAL(pmr_list[CLS_PMR_CHAIN_SRC] != ODP_PMR_INVAL);
+	CU_ASSERT_FATAL(pmr_list[CLS_PMR_CHAIN_SRC] != ODP_PMR_INVALID);
 
 	val = CLS_PMR_CHAIN_PORT;
 	maskport = 0xffff;
@@ -223,7 +224,7 @@ void configure_cls_pmr_chain(void)
 	pmr_list[CLS_PMR_CHAIN_DST] =
 	odp_cls_pmr_create(&pmr_param, 1, cos_list[CLS_PMR_CHAIN_SRC],
 			   cos_list[CLS_PMR_CHAIN_DST]);
-	CU_ASSERT_FATAL(pmr_list[CLS_PMR_CHAIN_DST] != ODP_PMR_INVAL);
+	CU_ASSERT_FATAL(pmr_list[CLS_PMR_CHAIN_DST] != ODP_PMR_INVALID);
 }
 
 void test_cls_pmr_chain(void)
@@ -292,7 +293,7 @@ void configure_pktio_default_cos(void)
 
 	odp_queue_param_init(&qparam);
 	qparam.type       = ODP_QUEUE_TYPE_SCHED;
-	qparam.sched.prio = ODP_SCHED_PRIO_DEFAULT;
+	qparam.sched.prio = odp_schedule_default_prio();
 	qparam.sched.sync = ODP_SCHED_SYNC_PARALLEL;
 	qparam.sched.group = ODP_SCHED_GROUP_ALL;
 	sprintf(queuename, "%s", "DefaultQueue");
@@ -355,7 +356,7 @@ void configure_pktio_error_cos(void)
 
 	odp_queue_param_init(&qparam);
 	qparam.type       = ODP_QUEUE_TYPE_SCHED;
-	qparam.sched.prio = ODP_SCHED_PRIO_LOWEST;
+	qparam.sched.prio = odp_schedule_min_prio();
 	qparam.sched.sync = ODP_SCHED_SYNC_PARALLEL;
 	qparam.sched.group = ODP_SCHED_GROUP_ALL;
 	sprintf(queuename, "%s", "ErrorCos");
@@ -457,12 +458,17 @@ void configure_cos_with_l2_priority(void)
 	for (i = 0; i < CLS_L2_QOS_MAX; i++)
 		qos_tbl[i] = 0;
 
+	if (odp_schedule_num_prio() < num_qos)
+		num_qos = odp_schedule_num_prio();
+
+	global_num_l2_qos = num_qos;
+
 	odp_queue_param_init(&qparam);
 	qparam.type       = ODP_QUEUE_TYPE_SCHED;
 	qparam.sched.sync = ODP_SCHED_SYNC_PARALLEL;
 	qparam.sched.group = ODP_SCHED_GROUP_ALL;
 	for (i = 0; i < num_qos; i++) {
-		qparam.sched.prio = ODP_SCHED_PRIO_LOWEST - i;
+		qparam.sched.prio = odp_schedule_min_prio() + i;
 		sprintf(queuename, "%s_%d", "L2_Queue", i);
 		queue_tbl[i] = odp_queue_create(queuename, &qparam);
 		CU_ASSERT_FATAL(queue_tbl[i] != ODP_QUEUE_INVALID);
@@ -506,7 +512,7 @@ void test_cos_with_l2_priority(void)
 	pkt_info.udp = true;
 	pkt_info.vlan = true;
 
-	for (i = 0; i < CLS_L2_QOS_MAX; i++) {
+	for (i = 0; i < global_num_l2_qos; i++) {
 		pkt = create_packet(pkt_info);
 		CU_ASSERT_FATAL(pkt != ODP_PACKET_INVALID);
 		seqno = cls_pkt_get_seq(pkt);
@@ -538,7 +544,7 @@ void configure_pmr_cos(void)
 
 	odp_queue_param_init(&qparam);
 	qparam.type       = ODP_QUEUE_TYPE_SCHED;
-	qparam.sched.prio = ODP_SCHED_PRIO_HIGHEST;
+	qparam.sched.prio = odp_schedule_max_prio();
 	qparam.sched.sync = ODP_SCHED_SYNC_PARALLEL;
 	qparam.sched.group = ODP_SCHED_GROUP_ALL;
 	sprintf(queuename, "%s", "PMR_CoS");
@@ -569,7 +575,7 @@ void configure_pmr_cos(void)
 	pmr_list[CLS_PMR] = odp_cls_pmr_create(&pmr_param, 1,
 					       cos_list[CLS_DEFAULT],
 					       cos_list[CLS_PMR]);
-	CU_ASSERT_FATAL(pmr_list[CLS_PMR] != ODP_PMR_INVAL);
+	CU_ASSERT_FATAL(pmr_list[CLS_PMR] != ODP_PMR_INVALID);
 }
 
 void test_pmr_cos(void)
@@ -613,7 +619,7 @@ void configure_pktio_pmr_composite(void)
 
 	odp_queue_param_init(&qparam);
 	qparam.type       = ODP_QUEUE_TYPE_SCHED;
-	qparam.sched.prio = ODP_SCHED_PRIO_HIGHEST;
+	qparam.sched.prio = odp_schedule_max_prio();
 	qparam.sched.sync = ODP_SCHED_SYNC_PARALLEL;
 	qparam.sched.group = ODP_SCHED_GROUP_ALL;
 	sprintf(queuename, "%s", "cos_pmr_composite_queue");
@@ -652,7 +658,7 @@ void configure_pktio_pmr_composite(void)
 	pmr_list[CLS_PMR_SET] = odp_cls_pmr_create(pmr_params, num_terms,
 						   cos_list[CLS_DEFAULT],
 						   cos_list[CLS_PMR_SET]);
-	CU_ASSERT_FATAL(pmr_list[CLS_PMR_SET] != ODP_PMR_INVAL);
+	CU_ASSERT_FATAL(pmr_list[CLS_PMR_SET] != ODP_PMR_INVALID);
 }
 
 void test_pktio_pmr_composite_cos(void)

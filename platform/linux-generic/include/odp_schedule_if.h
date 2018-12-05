@@ -19,6 +19,15 @@ extern "C" {
 /* Number of ordered locks per queue */
 #define SCHEDULE_ORDERED_LOCKS_PER_QUEUE 2
 
+typedef struct schedule_config_t {
+	struct {
+		int all;
+		int worker;
+		int control;
+	} group_enable;
+
+} schedule_config_t;
+
 typedef void (*schedule_pktio_start_fn_t)(int pktio_index,
 					 int num_in_queue,
 					 int in_queue_idx[],
@@ -44,10 +53,9 @@ typedef void (*schedule_order_unlock_lock_fn_t)(void);
 typedef void (*schedule_order_lock_start_fn_t)(void);
 typedef void (*schedule_order_lock_wait_fn_t)(void);
 typedef uint32_t (*schedule_max_ordered_locks_fn_t)(void);
-typedef void (*schedule_save_context_fn_t)(uint32_t queue_index);
+typedef void (*schedule_config_fn_t)(schedule_config_t *config);
 
 typedef struct schedule_fn_t {
-	int                         status_sync;
 	schedule_pktio_start_fn_t   pktio_start;
 	schedule_thr_add_fn_t       thr_add;
 	schedule_thr_rem_fn_t       thr_rem;
@@ -66,10 +74,7 @@ typedef struct schedule_fn_t {
 	schedule_order_lock_wait_fn_t	wait_order_lock;
 	schedule_order_unlock_lock_fn_t  order_unlock_lock;
 	schedule_max_ordered_locks_fn_t max_ordered_locks;
-
-	/* Called only when status_sync is set */
-	schedule_unsched_queue_fn_t unsched_queue;
-	schedule_save_context_fn_t  save_context;
+	schedule_config_fn_t        config;
 
 } schedule_fn_t;
 
@@ -79,20 +84,27 @@ extern const schedule_fn_t *sched_fn;
 /* Interface for the scheduler */
 int sched_cb_pktin_poll(int pktio_index, int pktin_index,
 			odp_buffer_hdr_t *hdr_tbl[], int num);
-int sched_cb_pktin_poll_old(int pktio_index, int num_queue, int index[]);
 int sched_cb_pktin_poll_one(int pktio_index, int rx_queue, odp_event_t evts[]);
 void sched_cb_pktio_stop_finalize(int pktio_index);
 
 /* API functions */
 typedef struct {
-	uint64_t (*schedule_wait_time)(uint64_t);
-	odp_event_t (*schedule)(odp_queue_t *, uint64_t);
-	int (*schedule_multi)(odp_queue_t *, uint64_t, odp_event_t [], int);
+	uint64_t (*schedule_wait_time)(uint64_t ns);
+	odp_event_t (*schedule)(odp_queue_t *from, uint64_t wait);
+	int (*schedule_multi)(odp_queue_t *from, uint64_t wait,
+			      odp_event_t events[], int num);
+	int (*schedule_multi_wait)(odp_queue_t *from, odp_event_t events[],
+				   int num);
+	int (*schedule_multi_no_wait)(odp_queue_t *from, odp_event_t events[],
+				      int num);
 	void (*schedule_pause)(void);
 	void (*schedule_resume)(void);
 	void (*schedule_release_atomic)(void);
 	void (*schedule_release_ordered)(void);
 	void (*schedule_prefetch)(int);
+	int (*schedule_min_prio)(void);
+	int (*schedule_max_prio)(void);
+	int (*schedule_default_prio)(void);
 	int (*schedule_num_prio)(void);
 	odp_schedule_group_t (*schedule_group_create)(const char *,
 						      const odp_thrmask_t *);

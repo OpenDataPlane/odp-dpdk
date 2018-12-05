@@ -148,8 +148,6 @@ typedef struct {
 	char *if_str;		/**< Storage for interface names */
 } appl_args_t;
 
-static int exit_threads;	/**< Break workers loop if set to 1 */
-
 /**
  * Queue context
  */
@@ -250,13 +248,14 @@ typedef struct {
 		int num_rx_queue;
 		int num_tx_queue;
 	} pktios[MAX_PKTIOS];
+	/** Global barrier to synchronize main and workers */
+	odp_barrier_t barrier;
+	/** Break workers loop if set to 1 */
+	int exit_threads;
 } args_t;
 
 /** Global pointer to args */
 static args_t *gbl_args;
-
-/** Global barrier to synchronize main and workers */
-static odp_barrier_t barrier;
 
 /**
  * Lookup the destination port for a given packet
@@ -537,10 +536,10 @@ static int run_worker(void *arg)
 					gbl_args->pktios[i].num_tx_queue];
 		}
 	}
-	odp_barrier_wait(&barrier);
+	odp_barrier_wait(&gbl_args->barrier);
 
 	/* Loop packets */
-	while (!exit_threads) {
+	while (!gbl_args->exit_threads) {
 		pkts = odp_schedule_multi(&queue, ODP_SCHED_NO_WAIT, ev_tbl,
 					  MAX_PKT_BURST);
 		if (pkts <= 0)
@@ -732,7 +731,7 @@ static int print_speed_stats(int num_workers, stats_t *thr_stats,
 		timeout = 1;
 	}
 	/* Wait for all threads to be ready*/
-	odp_barrier_wait(&barrier);
+	odp_barrier_wait(&gbl_args->barrier);
 
 	do {
 		pkts = 0;
@@ -866,9 +865,6 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 	};
 
 	static const char *shortopts =  "+c:+t:+a:i:m:d:r:f:e:h";
-
-	/* let helper collect its own arguments (e.g. --odph_proc) */
-	argc = odph_parse_options(argc, argv);
 
 	appl_args->time = 0; /* loop forever if time to run is 0 */
 	appl_args->accuracy = DEF_STATS_INT;
@@ -1061,12 +1057,14 @@ int main(int argc, char *argv[])
 {
 	odp_cpumask_t cpumask;
 	odp_instance_t instance;
+	odp_init_t init_param;
 	odp_pool_t pool;
 	odp_pool_param_t params;
 	odp_shm_t shm;
 	odp_queue_capability_t queue_capa;
 	odp_pool_capability_t pool_capa;
 	odph_ethaddr_t new_addr;
+	odph_helper_options_t helper_options;
 	odph_odpthread_t thread_tbl[MAX_WORKERS];
 	stats_t *stats;
 	char cpumaskstr[ODP_CPUMASK_STR_SIZE];
@@ -1078,8 +1076,18 @@ int main(int argc, char *argv[])
 	int in_mode;
 	uint32_t queue_size, pool_size;
 
+	/* Let helper collect its own arguments (e.g. --odph_proc) */
+	argc = odph_parse_options(argc, argv);
+	if (odph_options(&helper_options)) {
+		LOG_ERR("Error: reading ODP helper options failed.\n");
+		exit(EXIT_FAILURE);
+	}
+
+	odp_init_param_init(&init_param);
+	init_param.mem_model = helper_options.mem_model;
+
 	/* Init ODP before calling anything else */
-	if (odp_init_global(&instance, NULL, NULL)) {
+	if (odp_init_global(&instance, &init_param, NULL)) {
 		LOG_ERR("Error: ODP global init failed.\n");
 		exit(EXIT_FAILURE);
 	}
@@ -1272,7 +1280,7 @@ int main(int argc, char *argv[])
 
 	stats = gbl_args->stats;
 
-	odp_barrier_init(&barrier, num_workers + 1);
+	odp_barrier_init(&gbl_args->barrier, num_workers + 1);
 
 	/* Create worker threads */
 	cpu = odp_cpumask_first(&cpumask);
@@ -1315,7 +1323,7 @@ int main(int argc, char *argv[])
 	for (i = 0; i < if_count; i++)
 		odp_pktio_stop(gbl_args->pktios[i].pktio);
 
-	exit_threads = 1;
+	gbl_args->exit_threads = 1;
 
 	/* Master thread waits for other threads to exit */
 	for (i = 0; i < num_workers; ++i)

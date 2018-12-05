@@ -47,7 +47,7 @@
  */
 static int sysconf_cpu_count(void)
 {
-	return odp_global_data.num_cpus_installed;
+	return odp_global_ro.num_cpus_installed;
 }
 
 #if defined __x86_64__ || defined __i386__ || defined __OCTEON__ || \
@@ -96,6 +96,8 @@ static uint64_t default_huge_page_size(void)
 	FILE *file;
 
 	file = fopen("/proc/meminfo", "rt");
+	if (!file)
+		return 0;
 
 	while (fgets(str, sizeof(str), file) != NULL) {
 		if (sscanf(str, "Hugepagesize:   %8lu kB", &sz) == 1) {
@@ -339,35 +341,34 @@ int odp_system_info_init(void)
 	int i;
 	FILE  *file;
 
-	memset(&odp_global_data.system_info, 0, sizeof(system_info_t));
+	memset(&odp_global_ro.system_info, 0, sizeof(system_info_t));
 
-	odp_global_data.system_info.page_size = ODP_PAGE_SIZE;
+	odp_global_ro.system_info.page_size = ODP_PAGE_SIZE;
 
 	/* By default, read max frequency from a cpufreq file */
 	for (i = 0; i < CONFIG_NUM_CPU; i++) {
 		uint64_t cpu_hz_max = read_cpufreq("cpuinfo_max_freq", i);
 
 		if (cpu_hz_max)
-			odp_global_data.system_info.cpu_hz_max[i] = cpu_hz_max;
+			odp_global_ro.system_info.cpu_hz_max[i] = cpu_hz_max;
 	}
 
 	file = fopen("/proc/cpuinfo", "rt");
-	if (file == NULL) {
-		ODP_ERR("Failed to open /proc/cpuinfo\n");
-		return -1;
+	if (file != NULL) {
+		/* Read CPU model, and set max cpu frequency
+		 * if not set from cpufreq. */
+		cpuinfo_parser(file, &odp_global_ro.system_info);
+		fclose(file);
+	} else {
+		_odp_dummy_cpuinfo(&odp_global_ro.system_info);
 	}
 
-	/* Read CPU model, and set max cpu frequency if not set from cpufreq. */
-	cpuinfo_parser(file, &odp_global_data.system_info);
-
-	fclose(file);
-
-	if (systemcpu(&odp_global_data.system_info)) {
+	if (systemcpu(&odp_global_ro.system_info)) {
 		ODP_ERR("systemcpu failed\n");
 		return -1;
 	}
 
-	system_hp(&odp_global_data.hugepage_info);
+	system_hp(&odp_global_ro.hugepage_info);
 
 	return 0;
 }
@@ -377,7 +378,7 @@ int odp_system_info_init(void)
  */
 int odp_system_info_term(void)
 {
-	free(odp_global_data.hugepage_info.default_huge_page_dir);
+	free(odp_global_ro.hugepage_info.default_huge_page_dir);
 
 	return 0;
 }
@@ -417,14 +418,14 @@ uint64_t odp_cpu_hz_max(void)
 uint64_t odp_cpu_hz_max_id(int id)
 {
 	if (id >= 0 && id < CONFIG_NUM_CPU)
-		return odp_global_data.system_info.cpu_hz_max[id];
+		return odp_global_ro.system_info.cpu_hz_max[id];
 	else
 		return 0;
 }
 
 uint64_t odp_sys_huge_page_size(void)
 {
-	return odp_global_data.hugepage_info.default_huge_page_size;
+	return odp_global_ro.hugepage_info.default_huge_page_size;
 }
 
 static int pagesz_compare(const void *pagesz1, const void *pagesz2)
@@ -442,8 +443,9 @@ int odp_sys_huge_page_size_all(uint64_t size[], int num)
 	/* See: kernel.org: hugetlbpage.txt */
 	dir = opendir("/sys/kernel/mm/hugepages");
 	if (!dir) {
-		ODP_ERR("Failed to open huge page directory\n");
-		return -1;
+		ODP_PRINT("Failed to open /sys/kernel/mm/hugepages: %s\n",
+			  strerror(errno));
+		return 0;
 	}
 
 	while ((entry = readdir(dir)) != NULL) {
@@ -465,7 +467,7 @@ int odp_sys_huge_page_size_all(uint64_t size[], int num)
 
 uint64_t odp_sys_page_size(void)
 {
-	return odp_global_data.system_info.page_size;
+	return odp_global_ro.system_info.page_size;
 }
 
 const char *odp_cpu_model_str(void)
@@ -476,19 +478,19 @@ const char *odp_cpu_model_str(void)
 const char *odp_cpu_model_str_id(int id)
 {
 	if (id >= 0 && id < CONFIG_NUM_CPU)
-		return odp_global_data.system_info.model_str[id];
+		return odp_global_ro.system_info.model_str[id];
 	else
 		return NULL;
 }
 
 int odp_sys_cache_line_size(void)
 {
-	return odp_global_data.system_info.cache_line_size;
+	return odp_global_ro.system_info.cache_line_size;
 }
 
 int odp_cpu_count(void)
 {
-	return odp_global_data.system_info.cpu_count;
+	return odp_global_ro.system_info.cpu_count;
 }
 
 void odp_sys_info_print(void)

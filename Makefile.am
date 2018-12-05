@@ -5,6 +5,7 @@ AM_DISTCHECK_CONFIGURE_FLAGS = --enable-user-guides	\
 
 if PLATFORM_IS_LINUX_GENERIC
 PLATFORM_DIR = platform/linux-generic
+PLATFORM_DUMPCONF_DIR = platform/linux-generic/dumpconfig
 PLATFORM_TEST_DIR = platform/linux-generic/test
 endif
 if PLATFORM_IS_LINUX_DPDK
@@ -15,12 +16,19 @@ endif
 SUBDIRS = \
 	  include \
 	  $(PLATFORM_DIR) \
+	  $(PLATFORM_DUMPCONF_DIR) \
 	  helper \
-	  test \
-	  $(PLATFORM_TEST_DIR) \
-	  helper/test \
-	  doc \
-	  example
+	  doc
+
+if WITH_EXAMPLES
+SUBDIRS += example
+endif
+
+if WITH_TESTS
+SUBDIRS += test
+SUBDIRS += helper/test
+SUBDIRS += $(PLATFORM_TEST_DIR)
+endif
 
 @DX_RULES@
 

@@ -30,7 +30,7 @@
 /* GNU lib C */
 #include <getopt.h>
 
-#define NUM_MSG              (512 * 1024)   /**< Number of msg in pool */
+#define MAX_BUF              (512 * 1024)   /**< Maximum pool size */
 #define MAX_ALLOCS            32            /**< Alloc burst size */
 #define QUEUES_PER_PRIO       64            /**< Queue per priority */
 #define NUM_PRIOS             2             /**< Number of tested priorities */
@@ -762,9 +762,6 @@ static void parse_args(int argc, char *argv[], test_args_t *args)
 
 	static const char *shortopts = "+c:fh";
 
-	/* let helper collect its own arguments (e.g. --odph_proc) */
-	argc = odph_parse_options(argc, argv);
-
 	args->cpu_count = 1; /* use one worker by default */
 
 	while (1) {
@@ -798,6 +795,7 @@ static void parse_args(int argc, char *argv[], test_args_t *args)
  */
 int main(int argc, char *argv[])
 {
+	odph_helper_options_t helper_options;
 	odph_odpthread_t *thread_tbl;
 	test_args_t args;
 	int num_workers;
@@ -811,17 +809,29 @@ int main(int argc, char *argv[])
 	odp_pool_param_t params;
 	int ret = 0;
 	odp_instance_t instance;
+	odp_init_t init_param;
 	odph_odpthread_params_t thr_params;
 	odp_queue_capability_t capa;
-	uint32_t num_queues;
+	odp_pool_capability_t pool_capa;
+	uint32_t num_queues, num_buf;
 
 	printf("\nODP example starts\n\n");
+
+	/* Let helper collect its own arguments (e.g. --odph_proc) */
+	argc = odph_parse_options(argc, argv);
+	if (odph_options(&helper_options)) {
+		LOG_ERR("Error: reading ODP helper options failed.\n");
+		exit(EXIT_FAILURE);
+	}
+
+	odp_init_param_init(&init_param);
+	init_param.mem_model = helper_options.mem_model;
 
 	memset(&args, 0, sizeof(args));
 	parse_args(argc, argv, &args);
 
 	/* ODP global init */
-	if (odp_init_global(&instance, NULL, NULL)) {
+	if (odp_init_global(&instance, &init_param, NULL)) {
 		LOG_ERR("ODP global init failed.\n");
 		return -1;
 	}
@@ -869,11 +879,19 @@ int main(int argc, char *argv[])
 	/*
 	 * Create message pool
 	 */
+	if (odp_pool_capability(&pool_capa)) {
+		LOG_ERR("Pool capabilities failed.\n");
+		return -1;
+	}
+
+	num_buf = MAX_BUF;
+	if (pool_capa.buf.max_num && pool_capa.buf.max_num < MAX_BUF)
+		num_buf = pool_capa.buf.max_num;
 
 	odp_pool_param_init(&params);
 	params.buf.size  = sizeof(test_message_t);
 	params.buf.align = 0;
-	params.buf.num   = NUM_MSG;
+	params.buf.num   = num_buf;
 	params.type      = ODP_POOL_BUFFER;
 
 	pool = odp_pool_create("msg_pool", &params);

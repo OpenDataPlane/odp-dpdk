@@ -605,10 +605,23 @@ static void queue_test_param(void)
 	odp_queue_param_t qparams;
 	odp_buffer_t enbuf;
 
-	/* Schedule type queue */
+	/* Defaults */
 	odp_queue_param_init(&qparams);
+	CU_ASSERT(qparams.type == ODP_QUEUE_TYPE_PLAIN);
+	CU_ASSERT(qparams.enq_mode == ODP_QUEUE_OP_MT);
+	CU_ASSERT(qparams.deq_mode == ODP_QUEUE_OP_MT);
+	CU_ASSERT(qparams.sched.prio == odp_schedule_default_prio());
+	CU_ASSERT(qparams.sched.sync == ODP_SCHED_SYNC_PARALLEL);
+	CU_ASSERT(qparams.sched.group == ODP_SCHED_GROUP_ALL);
+	CU_ASSERT(qparams.sched.lock_count == 0);
+	CU_ASSERT(qparams.nonblocking == ODP_BLOCKING);
+	CU_ASSERT(qparams.context == NULL);
+	CU_ASSERT(qparams.context_len == 0);
+	CU_ASSERT(qparams.size == 0);
+
+	/* Schedule type queue */
 	qparams.type       = ODP_QUEUE_TYPE_SCHED;
-	qparams.sched.prio = ODP_SCHED_PRIO_LOWEST;
+	qparams.sched.prio = odp_schedule_min_prio();
 	qparams.sched.sync = ODP_SCHED_SYNC_PARALLEL;
 	qparams.sched.group = ODP_SCHED_GROUP_WORKER;
 
@@ -618,7 +631,7 @@ static void queue_test_param(void)
 		  odp_queue_to_u64(ODP_QUEUE_INVALID));
 	CU_ASSERT(queue == odp_queue_lookup("test_queue"));
 	CU_ASSERT(ODP_QUEUE_TYPE_SCHED    == odp_queue_type(queue));
-	CU_ASSERT(ODP_SCHED_PRIO_LOWEST   == odp_queue_sched_prio(queue));
+	CU_ASSERT(odp_schedule_min_prio()   == odp_queue_sched_prio(queue));
 	CU_ASSERT(ODP_SCHED_SYNC_PARALLEL == odp_queue_sched_type(queue));
 	CU_ASSERT(ODP_SCHED_GROUP_WORKER  == odp_queue_sched_group(queue));
 
@@ -719,7 +732,7 @@ static void queue_test_info(void)
 	/* Create a scheduled ordered queue with explicitly set params */
 	odp_queue_param_init(&param);
 	param.type       = ODP_QUEUE_TYPE_SCHED;
-	param.sched.prio = ODP_SCHED_PRIO_NORMAL;
+	param.sched.prio = odp_schedule_default_prio();
 	param.sched.sync = ODP_SCHED_SYNC_ORDERED;
 	param.sched.group = ODP_SCHED_GROUP_ALL;
 	param.sched.lock_count = capability.max_ordered_locks;

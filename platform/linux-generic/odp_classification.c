@@ -35,6 +35,16 @@ static cos_tbl_t *cos_tbl;
 static pmr_tbl_t	*pmr_tbl;
 static _cls_queue_grp_tbl_t *queue_grp_tbl;
 
+typedef struct cls_global_t {
+	cos_tbl_t cos_tbl;
+	pmr_tbl_t pmr_tbl;
+	_cls_queue_grp_tbl_t queue_grp_tbl;
+	odp_shm_t shm;
+
+} cls_global_t;
+
+static cls_global_t *cls_global;
+
 static const rss_key default_rss = {
 	.u8 = {
 	0x6d, 0x5a, 0x56, 0xda, 0x25, 0x5b, 0x0e, 0xc2,
@@ -79,99 +89,45 @@ pmr_t *get_pmr_entry_internal(odp_pmr_t pmr)
 
 int odp_classification_init_global(void)
 {
-	odp_shm_t cos_shm;
-	odp_shm_t pmr_shm;
-	odp_shm_t queue_grp_shm;
+	odp_shm_t shm;
 	int i;
 
-	cos_shm = odp_shm_reserve("shm_odp_cos_tbl",
-				  sizeof(cos_tbl_t),
-				  sizeof(cos_t), 0);
+	shm = odp_shm_reserve("_odp_cls_global", sizeof(cls_global_t),
+			      ODP_CACHE_LINE_SIZE, 0);
+	if (shm == ODP_SHM_INVALID)
+		return -1;
 
-	if (cos_shm == ODP_SHM_INVALID) {
-		ODP_ERR("shm allocation failed for shm_odp_cos_tbl");
-		goto error;
-	}
+	cls_global = odp_shm_addr(shm);
+	memset(cls_global, 0, sizeof(cls_global_t));
 
-	cos_tbl = odp_shm_addr(cos_shm);
-	if (cos_tbl == NULL)
-		goto error_cos;
+	cls_global->shm = shm;
+	cos_tbl       = &cls_global->cos_tbl;
+	pmr_tbl       = &cls_global->pmr_tbl;
+	queue_grp_tbl = &cls_global->queue_grp_tbl;
 
-	memset(cos_tbl, 0, sizeof(cos_tbl_t));
 	for (i = 0; i < CLS_COS_MAX_ENTRY; i++) {
 		/* init locks */
 		cos_t *cos = get_cos_entry_internal(_odp_cos_from_ndx(i));
 		LOCK_INIT(&cos->s.lock);
 	}
 
-	pmr_shm = odp_shm_reserve("shm_odp_pmr_tbl",
-				  sizeof(pmr_tbl_t),
-				  sizeof(pmr_t), 0);
-
-	if (pmr_shm == ODP_SHM_INVALID) {
-		ODP_ERR("shm allocation failed for shm_odp_pmr_tbl");
-		goto error_cos;
-	}
-
-	pmr_tbl = odp_shm_addr(pmr_shm);
-	if (pmr_tbl == NULL)
-		goto error_pmr;
-
-	memset(pmr_tbl, 0, sizeof(pmr_tbl_t));
 	for (i = 0; i < CLS_PMR_MAX_ENTRY; i++) {
 		/* init locks */
 		pmr_t *pmr = get_pmr_entry_internal(_odp_pmr_from_ndx(i));
 		LOCK_INIT(&pmr->s.lock);
 	}
 
-	queue_grp_shm = odp_shm_reserve("shm_odp_cls_queue_grp_tbl",
-					sizeof(_cls_queue_grp_tbl_t),
-					sizeof(queue_entry_t *), 0);
-
-	if (queue_grp_shm == ODP_SHM_INVALID) {
-		ODP_ERR("shm allocation failed for queue_grp_tbl");
-		goto error_queue_grp;
-	}
-
-	queue_grp_tbl = odp_shm_addr(queue_grp_shm);
-	memset(queue_grp_tbl, 0, sizeof(_cls_queue_grp_tbl_t));
-
 	return 0;
-
-error_queue_grp:
-	odp_shm_free(queue_grp_shm);
-error_pmr:
-	odp_shm_free(pmr_shm);
-error_cos:
-	odp_shm_free(cos_shm);
-error:
-	return -1;
 }
 
 int odp_classification_term_global(void)
 {
-	int ret = 0;
-	int rc = 0;
-
-	ret = odp_shm_free(odp_shm_lookup("shm_odp_cos_tbl"));
-	if (ret < 0) {
-		ODP_ERR("shm free failed for shm_odp_cos_tbl");
-		rc = -1;
+	if (cls_global && odp_shm_free(cls_global->shm)) {
+		ODP_ERR("shm free failed");
+		return -1;
 	}
 
-	ret = odp_shm_free(odp_shm_lookup("shm_odp_pmr_tbl"));
-	if (ret < 0) {
-		ODP_ERR("shm free failed for shm_odp_pmr_tbl");
-		rc = -1;
-	}
-
-	ret = odp_shm_free(odp_shm_lookup("shm_odp_cls_queue_grp_tbl"));
-	if (ret < 0) {
-		ODP_ERR("shm free failed for shm_odp_cls_queue_grp_tbl");
-		rc = -1;
-	}
-
-	return rc;
+	return 0;
 }
 
 void odp_cls_cos_param_init(odp_cls_cos_param_t *param)
@@ -331,7 +287,7 @@ odp_pmr_t alloc_pmr(pmr_t **pmr)
 		UNLOCK(&pmr_tbl->pmr[i].s.lock);
 	}
 	ODP_ERR("CLS_PMR_MAX_ENTRY reached");
-	return ODP_PMR_INVAL;
+	return ODP_PMR_INVALID;
 }
 
 static
@@ -351,7 +307,8 @@ pmr_t *get_pmr_entry(odp_pmr_t pmr)
 {
 	uint32_t pmr_id = _odp_pmr_to_ndx(pmr);
 
-	if (pmr_id >= CLS_PMR_MAX_ENTRY || pmr == ODP_PMR_INVAL)
+	if (pmr_id >= CLS_PMR_MAX_ENTRY ||
+	    pmr == ODP_PMR_INVALID)
 		return NULL;
 	if (pmr_tbl->pmr[pmr_id].s.valid == 0)
 		return NULL;
@@ -696,20 +653,20 @@ odp_pmr_t odp_cls_pmr_create(const odp_pmr_param_t *terms, int num_terms,
 
 	if (NULL == cos_src || NULL == cos_dst) {
 		ODP_ERR("Invalid input handle");
-		return ODP_PMR_INVAL;
+		return ODP_PMR_INVALID;
 	}
 
 	if (num_terms > CLS_PMRTERM_MAX) {
 		ODP_ERR("no of terms greater than supported CLS_PMRTERM_MAX");
-		return ODP_PMR_INVAL;
+		return ODP_PMR_INVALID;
 	}
 
 	if (CLS_PMR_PER_COS_MAX == odp_atomic_load_u32(&cos_src->s.num_rule))
-		return ODP_PMR_INVAL;
+		return ODP_PMR_INVALID;
 
 	id = alloc_pmr(&pmr);
 	/*if alloc_pmr is successful it returns with the acquired lock*/
-	if (id == ODP_PMR_INVAL)
+	if (id == ODP_PMR_INVALID)
 		return id;
 
 	pmr->s.num_pmr = num_terms;
@@ -717,12 +674,12 @@ odp_pmr_t odp_cls_pmr_create(const odp_pmr_param_t *terms, int num_terms,
 		val_sz = terms[i].val_sz;
 		if (val_sz > CLS_PMR_TERM_BYTES_MAX) {
 			pmr->s.valid = 0;
-			return ODP_PMR_INVAL;
+			return ODP_PMR_INVALID;
 		}
 		if (0 > odp_pmr_create_term(&pmr->s.pmr_term_value[i],
 					    &terms[i])) {
 			UNLOCK(&pmr->s.lock);
-			return ODP_PMR_INVAL;
+			return ODP_PMR_INVALID;
 		}
 	}
 

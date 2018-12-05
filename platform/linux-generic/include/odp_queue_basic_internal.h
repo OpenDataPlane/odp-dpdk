@@ -54,6 +54,7 @@ struct queue_entry_s {
 		ring_spsc_t  ring_spsc;
 	};
 
+	odp_atomic_u64_t     num_timers;
 	int                  status;
 
 	queue_deq_multi_fn_t orig_dequeue_multi;
@@ -113,7 +114,6 @@ static inline queue_entry_t *qentry_from_handle(odp_queue_t handle)
 void queue_spsc_init(queue_entry_t *queue, uint32_t queue_size);
 
 /* Functions for schedulers */
-void sched_queue_destroy_finalize(uint32_t queue_index);
 void sched_queue_set_status(uint32_t queue_index, int status);
 int sched_queue_deq(uint32_t queue_index, odp_event_t ev[], int num,
 		    int update_status);

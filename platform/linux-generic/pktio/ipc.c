@@ -11,7 +11,7 @@
 #include <odp_packet_io_internal.h>
 #include <odp/api/system_info.h>
 #include <odp_shm_internal.h>
-#include <odp_ishm_internal.h>
+#include <odp_shm_internal.h>
 
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -233,7 +233,7 @@ static void _ipc_export_pool(struct pktio_info *pinfo,
 
 	snprintf(pinfo->slave.pool_name, ODP_POOL_NAME_LEN, "%s",
 		 _ipc_odp_buffer_pool_shm_name(pool_hdl));
-	pinfo->slave.pid = odp_global_data.main_pid;
+	pinfo->slave.pid = odp_global_ro.main_pid;
 	pinfo->slave.block_size = pool->block_size;
 	pinfo->slave.base_addr = pool->base_addr;
 }
@@ -423,7 +423,7 @@ static int ipc_pktio_open(odp_pktio_t id ODP_UNUSED,
 		snprintf(name, sizeof(name), "%s_info", dev);
 		shm = odp_shm_reserve(name, sizeof(struct pktio_info),
 				      ODP_CACHE_LINE_SIZE,
-				      _ODP_ISHM_EXPORT | _ODP_ISHM_LOCK);
+				      ODP_SHM_EXPORT | ODP_SHM_SINGLE_VA);
 		if (ODP_SHM_INVALID == shm) {
 			_ring_destroy("ipc_rx_cache");
 			ODP_ERR("can not create shm %s\n", name);
@@ -826,9 +826,13 @@ static int ipc_close(pktio_entry_t *pktio_entry)
 
 static int ipc_pktio_init_global(void)
 {
-	_ring_tailq_init();
-	ODP_PRINT("PKTIO: initialized ipc interface.\n");
-	return 0;
+	ODP_DBG("PKTIO: initializing ipc interface.\n");
+	return _ring_tailq_init();
+}
+
+static int ipc_pktio_term_global(void)
+{
+	return _ring_tailq_term();
 }
 
 const pktio_if_ops_t ipc_pktio_ops = {
@@ -836,7 +840,7 @@ const pktio_if_ops_t ipc_pktio_ops = {
 	.print = NULL,
 	.init_global = ipc_pktio_init_global,
 	.init_local = NULL,
-	.term = NULL,
+	.term = ipc_pktio_term_global,
 	.open = ipc_pktio_open,
 	.close = ipc_close,
 	.recv =  ipc_pktio_recv,

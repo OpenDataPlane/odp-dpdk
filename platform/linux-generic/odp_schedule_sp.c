@@ -26,11 +26,12 @@
 #define NUM_QUEUE         ODP_CONFIG_QUEUES
 #define NUM_PKTIO         ODP_CONFIG_PKTIO_ENTRIES
 #define NUM_ORDERED_LOCKS 1
-#define NUM_PRIO          3
 #define NUM_STATIC_GROUP  3
 #define NUM_GROUP         (NUM_STATIC_GROUP + 9)
 #define NUM_PKTIN         32
-#define LOWEST_QUEUE_PRIO (NUM_PRIO - 2)
+#define NUM_PRIO          3
+#define MAX_API_PRIO      (NUM_PRIO - 2)
+/* Lowest internal priority */
 #define PKTIN_PRIO        (NUM_PRIO - 1)
 #define CMD_QUEUE         0
 #define CMD_PKTIO         1
@@ -62,6 +63,7 @@ struct sched_cmd_s {
 	int                init;
 	int                num_pktin;
 	int                pktin_idx[NUM_PKTIN];
+	odp_queue_t        queue[NUM_PKTIN];
 };
 
 typedef struct ODP_ALIGNED_CACHE sched_cmd_t {
@@ -223,12 +225,21 @@ static int init_local(void)
 
 static int term_global(void)
 {
+	odp_event_t event;
 	int qi, ret = 0;
 
 	for (qi = 0; qi < NUM_QUEUE; qi++) {
+		int report = 1;
+
 		if (sched_global->queue_cmd[qi].s.init) {
-			/* todo: dequeue until empty ? */
-			sched_queue_destroy_finalize(qi);
+			while (sched_queue_deq(qi, &event, 1, 1) > 0) {
+				if (report) {
+					ODP_ERR("Queue not empty\n");
+					report = 0;
+				}
+				odp_event_free(event);
+			}
+
 		}
 	}
 
@@ -357,8 +368,8 @@ static int init_queue(uint32_t qi, const odp_schedule_param_t *sched_param)
 	if (!sched_group->s.group[group].allocated)
 		return -1;
 
-	if (sched_param->prio > 0)
-		prio = LOWEST_QUEUE_PRIO;
+	/* Inverted prio value (max = 0) vs API */
+	prio = MAX_API_PRIO - sched_param->prio;
 
 	sched_global->queue_cmd[qi].s.prio  = prio;
 	sched_global->queue_cmd[qi].s.group = group;
@@ -392,9 +403,8 @@ static inline sched_cmd_t *rem_head(int group, int prio)
 	int pktio;
 
 	prio_queue = &sched_global->prio_queue[group][prio];
-	ring_idx = ring_deq(&prio_queue->ring, RING_MASK);
 
-	if (ring_idx == RING_EMPTY)
+	if (ring_deq(&prio_queue->ring, RING_MASK, &ring_idx) == 0)
 		return NULL;
 
 	pktio = index_from_ring_idx(&index, ring_idx);
@@ -430,7 +440,7 @@ static int ord_enq_multi(odp_queue_t queue, void *buf_hdr[], int num,
 static void pktio_start(int pktio_index,
 			int num,
 			int pktin_idx[],
-			odp_queue_t odpq[] ODP_UNUSED)
+			odp_queue_t queue[])
 {
 	int i;
 	sched_cmd_t *cmd;
@@ -444,8 +454,10 @@ static void pktio_start(int pktio_index,
 		ODP_ABORT("Supports only %i pktin queues per interface\n",
 			  NUM_PKTIN);
 
-	for (i = 0; i < num; i++)
+	for (i = 0; i < num; i++) {
 		cmd->s.pktin_idx[i] = pktin_idx[i];
+		cmd->s.queue[i]     = queue[i];
+	}
 
 	cmd->s.num_pktin = num;
 
@@ -499,6 +511,26 @@ static uint64_t schedule_wait_time(uint64_t ns)
 	return ns;
 }
 
+static inline void enqueue_packets(odp_queue_t queue,
+				   odp_buffer_hdr_t *hdr_tbl[], int num_pkt)
+{
+	int num_enq, num_drop;
+
+	num_enq = odp_queue_enq_multi(queue, (odp_event_t *)hdr_tbl,
+				      num_pkt);
+
+	if (num_enq < 0)
+		num_enq = 0;
+
+	if (num_enq < num_pkt) {
+		num_drop = num_pkt - num_enq;
+
+		ODP_DBG("Dropped %i packets\n", num_drop);
+		odp_packet_free_multi((odp_packet_t *)&hdr_tbl[num_enq],
+				      num_drop);
+	}
+}
+
 static int schedule_multi(odp_queue_t *from, uint64_t wait,
 			  odp_event_t events[], int max_events ODP_UNUSED)
 {
@@ -521,17 +553,36 @@ static int schedule_multi(odp_queue_t *from, uint64_t wait,
 		uint32_t qi;
 		int num;
 
-		timer_run();
-
 		cmd = sched_cmd();
 
 		if (cmd && cmd->s.type == CMD_PKTIO) {
-			if (sched_cb_pktin_poll_old(cmd->s.index,
-						    cmd->s.num_pktin,
-						    cmd->s.pktin_idx)) {
-				/* Pktio stopped or closed. */
-				sched_cb_pktio_stop_finalize(cmd->s.index);
-			} else {
+			odp_buffer_hdr_t *hdr_tbl[CONFIG_BURST_SIZE];
+			int i;
+			int num_pkt = 0;
+			int max_num = CONFIG_BURST_SIZE;
+			int pktio_idx = cmd->s.index;
+			int num_pktin = cmd->s.num_pktin;
+			int *pktin_idx = cmd->s.pktin_idx;
+			odp_queue_t *queue = cmd->s.queue;
+
+			for (i = 0; i < num_pktin; i++) {
+				num_pkt = sched_cb_pktin_poll(pktio_idx,
+							      pktin_idx[i],
+							      hdr_tbl, max_num);
+
+				if (num_pkt < 0) {
+					/* Pktio stopped or closed. */
+					sched_cb_pktio_stop_finalize(pktio_idx);
+					break;
+				}
+
+				if (num_pkt == 0)
+					continue;
+
+				enqueue_packets(queue[i], hdr_tbl, num_pkt);
+			}
+
+			if (num_pkt >= 0) {
 				/* Continue polling pktio. */
 				add_tail(cmd);
 			}
@@ -541,6 +592,7 @@ static int schedule_multi(odp_queue_t *from, uint64_t wait,
 		}
 
 		if (cmd == NULL) {
+			timer_run(1);
 			/* All priority queues are empty */
 			if (wait == ODP_SCHED_NO_WAIT)
 				return 0;
@@ -564,28 +616,23 @@ static int schedule_multi(odp_queue_t *from, uint64_t wait,
 		qi  = cmd->s.index;
 		num = sched_queue_deq(qi, events, 1, 1);
 
-		if (num > 0) {
-			sched_local.cmd = cmd;
-
-			if (from)
-				*from = queue_from_index(qi);
-
-			return num;
-		}
-
-		if (num < 0) {
-			/* Destroyed queue */
-			sched_queue_destroy_finalize(qi);
+		if (num <= 0) {
+			timer_run(1);
+			/* Destroyed or empty queue. Remove empty queue from
+			 * scheduling. A dequeue operation to on an already
+			 * empty queue moves it to NOTSCHED state and
+			 * sched_queue() will be called on next enqueue. */
 			continue;
 		}
 
-		if (num == 0) {
-			/* Remove empty queue from scheduling. A dequeue
-			 * operation to on an already empty queue moves
-			 * it to NOTSCHED state and sched_queue() will
-			 * be called on next enqueue. */
-			continue;
-		}
+		timer_run(2);
+
+		sched_local.cmd = cmd;
+
+		if (from)
+			*from = queue_from_index(qi);
+
+		return num;
 	}
 }
 
@@ -597,6 +644,18 @@ static odp_event_t schedule(odp_queue_t *from, uint64_t wait)
 		return ev;
 
 	return ODP_EVENT_INVALID;
+}
+
+static int schedule_multi_wait(odp_queue_t *from, odp_event_t events[],
+			       int max_num)
+{
+	return schedule_multi(from, ODP_SCHED_WAIT, events, max_num);
+}
+
+static int schedule_multi_no_wait(odp_queue_t *from, odp_event_t events[],
+				  int max_num)
+{
+	return schedule_multi(from, ODP_SCHED_NO_WAIT, events, max_num);
 }
 
 static void schedule_pause(void)
@@ -620,6 +679,21 @@ static void schedule_release_ordered(void)
 static void schedule_prefetch(int num)
 {
 	(void)num;
+}
+
+static int schedule_min_prio(void)
+{
+	return 0;
+}
+
+static int schedule_max_prio(void)
+{
+	return MAX_API_PRIO;
+}
+
+static int schedule_default_prio(void)
+{
+	return schedule_max_prio() / 2;
 }
 
 static int schedule_num_prio(void)
@@ -853,7 +927,6 @@ static void order_unlock(void)
 
 /* Fill in scheduler interface */
 const schedule_fn_t schedule_sp_fn = {
-	.status_sync   = 0,
 	.pktio_start   = pktio_start,
 	.thr_add       = thr_add,
 	.thr_rem       = thr_rem,
@@ -868,9 +941,7 @@ const schedule_fn_t schedule_sp_fn = {
 	.term_local    = term_local,
 	.order_lock    = order_lock,
 	.order_unlock  = order_unlock,
-	.max_ordered_locks = max_ordered_locks,
-	.unsched_queue = NULL,
-	.save_context  = NULL
+	.max_ordered_locks = max_ordered_locks
 };
 
 /* Fill in scheduler API calls */
@@ -878,11 +949,16 @@ const schedule_api_t schedule_sp_api = {
 	.schedule_wait_time       = schedule_wait_time,
 	.schedule                 = schedule,
 	.schedule_multi           = schedule_multi,
+	.schedule_multi_wait      = schedule_multi_wait,
+	.schedule_multi_no_wait   = schedule_multi_no_wait,
 	.schedule_pause           = schedule_pause,
 	.schedule_resume          = schedule_resume,
 	.schedule_release_atomic  = schedule_release_atomic,
 	.schedule_release_ordered = schedule_release_ordered,
 	.schedule_prefetch        = schedule_prefetch,
+	.schedule_min_prio        = schedule_min_prio,
+	.schedule_max_prio        = schedule_max_prio,
+	.schedule_default_prio    = schedule_default_prio,
 	.schedule_num_prio        = schedule_num_prio,
 	.schedule_group_create    = schedule_group_create,
 	.schedule_group_destroy   = schedule_group_destroy,

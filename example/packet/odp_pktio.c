@@ -85,6 +85,8 @@ typedef struct {
 typedef struct {
 	/** Application (parsed) arguments */
 	appl_args_t appl;
+	/** Shm for global data */
+	odp_shm_t shm;
 	/** Thread specific arguments */
 	thread_args_t thread[MAX_WORKERS];
 	/** Flag to exit worker threads */
@@ -341,6 +343,7 @@ static int pktio_ifburst_thread(void *arg)
  */
 int main(int argc, char *argv[])
 {
+	odph_helper_options_t helper_options;
 	odph_odpthread_t thread_tbl[MAX_WORKERS];
 	odp_pool_t pool;
 	int num_workers;
@@ -350,19 +353,22 @@ int main(int argc, char *argv[])
 	char cpumaskstr[ODP_CPUMASK_STR_SIZE];
 	odp_pool_param_t params;
 	odp_instance_t instance;
+	odp_init_t init_param;
 	odph_odpthread_params_t thr_params;
+	odp_shm_t shm;
 
-	args = calloc(1, sizeof(args_t));
-	if (args == NULL) {
-		EXAMPLE_ERR("Error: args mem alloc failed.\n");
+	/* Let helper collect its own arguments (e.g. --odph_proc) */
+	argc = odph_parse_options(argc, argv);
+	if (odph_options(&helper_options)) {
+		EXAMPLE_ERR("Error: reading ODP helper options failed.\n");
 		exit(EXIT_FAILURE);
 	}
 
-	/* Parse and store the application arguments */
-	parse_args(argc, argv, &args->appl);
+	odp_init_param_init(&init_param);
+	init_param.mem_model = helper_options.mem_model;
 
 	/* Init ODP before calling anything else */
-	if (odp_init_global(&instance, NULL, NULL)) {
+	if (odp_init_global(&instance, &init_param, NULL)) {
 		EXAMPLE_ERR("Error: ODP global init failed.\n");
 		exit(EXIT_FAILURE);
 	}
@@ -372,6 +378,21 @@ int main(int argc, char *argv[])
 		EXAMPLE_ERR("Error: ODP local init failed.\n");
 		exit(EXIT_FAILURE);
 	}
+
+	/* Reserve memory for args from shared mem */
+	shm = odp_shm_reserve("_appl_global_data", sizeof(args_t),
+			      ODP_CACHE_LINE_SIZE, 0);
+	args = odp_shm_addr(shm);
+	if (args == NULL) {
+		EXAMPLE_ERR("Error: shared mem alloc failed.\n");
+		exit(EXIT_FAILURE);
+	}
+
+	memset(args, 0, sizeof(args_t));
+	args->shm = shm;
+
+	/* Parse and store the application arguments */
+	parse_args(argc, argv, &args->appl);
 
 	/* Print both system and application information */
 	print_info(NO_PATH(argv[0]), &args->appl);
@@ -467,9 +488,14 @@ int main(int argc, char *argv[])
 
 	free(args->appl.if_names);
 	free(args->appl.if_str);
-	free(args);
 
 	odp_pool_destroy(pool);
+
+	if (odp_shm_free(args->shm)) {
+		EXAMPLE_ERR("Error: shm free global data\n");
+		exit(EXIT_FAILURE);
+	}
+
 	odp_term_local();
 	return odp_term_global(instance);
 }
@@ -567,9 +593,6 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 	};
 
 	static const char *shortopts = "+c:i:+m:t:h";
-
-	/* let helper collect its own arguments (e.g. --odph_proc) */
-	argc = odph_parse_options(argc, argv);
 
 	appl_args->cpu_count = 1; /* use one worker by default */
 	appl_args->mode = APPL_MODE_PKT_SCHED;

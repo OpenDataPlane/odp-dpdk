@@ -83,13 +83,6 @@ typedef uint64_t tm_handle_t;
 #define PF_REACHED_EGRESS   0x40
 #define PF_ERROR            0x80
 
-typedef struct {
-	uint32_t num_allocd;
-	uint32_t num_used;
-	uint32_t num_freed;
-	void **array_ptrs; /* Ptr to an array of num_allocd void * ptrs. */
-} dynamic_tbl_t;
-
 #define ODP_TM_NUM_PROFILES  4
 
 typedef enum {
@@ -98,6 +91,11 @@ typedef enum {
 	TM_THRESHOLD_PROFILE,
 	TM_WRED_PROFILE
 } profile_kind_t;
+
+typedef enum {
+	TM_STATUS_FREE = 0,
+	TM_STATUS_RESERVED
+} tm_status_t;
 
 typedef struct tm_queue_obj_s tm_queue_obj_t;
 typedef struct tm_node_obj_s tm_node_obj_t;
@@ -110,6 +108,7 @@ typedef struct {
 	_odp_int_name_t    name_tbl_id;
 	odp_tm_threshold_t thresholds_profile;
 	uint32_t           ref_cnt;
+	tm_status_t        status;
 } tm_queue_thresholds_t;
 
 typedef struct {
@@ -122,6 +121,7 @@ typedef struct {
 	odp_tm_percent_t max_drop_prob;
 	odp_bool_t       enable_wred;
 	odp_bool_t       use_byte_fullness;
+	tm_status_t      status;
 } tm_wred_params_t;
 
 typedef struct {
@@ -160,6 +160,7 @@ typedef struct {
 	uint32_t            ref_cnt;
 	odp_tm_sched_mode_t sched_modes[ODP_TM_MAX_PRIORITIES];
 	uint16_t            inverted_weights[ODP_TM_MAX_PRIORITIES];
+	tm_status_t         status;
 } tm_sched_params_t;
 
 typedef enum {
@@ -195,6 +196,7 @@ typedef struct {
 	int8_t          len_adjust;
 	odp_bool_t      dual_rate;
 	odp_bool_t      enabled;
+	tm_status_t     status;
 } tm_shaper_params_t;
 
 typedef enum { NO_CALLBACK, UNDELAY_PKT } tm_shaper_callback_reason_t;
@@ -253,7 +255,7 @@ typedef struct {
 	uint8_t num_priorities;
 	uint8_t highest_priority;
 	uint8_t locked;
-	tm_sched_state_t sched_states[0];
+	tm_sched_state_t sched_states[ODP_TM_MAX_PRIORITIES];
 } tm_schedulers_obj_t;
 
 struct tm_queue_obj_s {
@@ -264,7 +266,7 @@ struct tm_queue_obj_s {
 	uint32_t pkts_dequeued_cnt;
 	uint32_t pkts_consumed_cnt;
 	_odp_int_pkt_queue_t _odp_int_pkt_queue;
-	tm_wred_node_t *tm_wred_node;
+	tm_wred_node_t tm_wred_node;
 	odp_packet_t pkt;
 	odp_packet_t sent_pkt;
 	uint32_t timer_seq;
@@ -282,13 +284,14 @@ struct tm_queue_obj_s {
 	uint8_t tm_idx;
 	uint8_t delayed_cnt;
 	uint8_t blocked_cnt;
+	tm_status_t status;
 	odp_queue_t queue;
 };
 
 struct tm_node_obj_s {
 	void                *user_context;
-	tm_wred_node_t      *tm_wred_node;
-	tm_schedulers_obj_t *schedulers_obj;
+	tm_wred_node_t       tm_wred_node;
+	tm_schedulers_obj_t  schedulers_obj;
 	tm_shaper_obj_t     *fanin_list_head;
 	tm_shaper_obj_t     *fanin_list_tail;
 	tm_shaper_obj_t      shaper_obj;
@@ -301,6 +304,7 @@ struct tm_node_obj_s {
 	uint8_t              level;   /* Primarily for debugging */
 	uint8_t              tm_idx;
 	uint8_t              marked;
+	tm_status_t          status;
 };
 
 typedef struct {
@@ -369,8 +373,8 @@ struct tm_system_s {
 
 	void               *trace_buffer;
 	uint32_t            next_queue_num;
-	tm_queue_obj_t    **queue_num_tbl;
-	input_work_queue_t *input_work_queue;
+	tm_queue_obj_t     *queue_num_tbl[ODP_TM_MAX_TM_QUEUES];
+	input_work_queue_t  input_work_queue;
 	tm_queue_cnts_t     priority_queue_cnts;
 	tm_queue_cnts_t     total_queue_cnts;
 	pkt_desc_t          egress_pkt_desc;
@@ -379,7 +383,7 @@ struct tm_system_s {
 	_odp_timer_wheel_t     _odp_int_timer_wheel;
 	_odp_int_sorted_pool_t _odp_int_sorted_pool;
 
-	tm_node_obj_t        *root_node;
+	tm_node_obj_t         root_node;
 	odp_tm_egress_t       egress;
 	odp_tm_requirements_t requirements;
 	odp_tm_capabilities_t capabilities;
@@ -396,6 +400,7 @@ struct tm_system_s {
 	uint8_t    tm_idx;
 	uint8_t    first_enq;
 	odp_bool_t is_idle;
+	tm_status_t status;
 
 	uint64_t shaper_green_cnt;
 	uint64_t shaper_yellow_cnt;
@@ -408,15 +413,13 @@ struct tm_system_s {
  * while the input work queue is shared - timers are not. */
 
 struct tm_system_group_s {
-	tm_system_group_t *prev;
-	tm_system_group_t *next;
-
 	odp_barrier_t  tm_group_barrier;
 	tm_system_t   *first_tm_system;
 	uint32_t       num_tm_systems;
 	uint32_t       first_enq;
 	pthread_t      thread;
 	pthread_attr_t attr;
+	tm_status_t    status;
 };
 
 #ifdef __cplusplus

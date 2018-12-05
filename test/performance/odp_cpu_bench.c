@@ -95,12 +95,12 @@ typedef struct {
 	odp_queue_t queue[MAX_GROUPS][QUEUES_PER_GROUP];
 	/* Test lookup table */
 	lookup_entry_t *lookup_tbl;
+	/* Break workers loop if set to 1 */
+	int exit_threads;
 } args_t;
 
 /* Global pointer to args */
 static args_t *gbl_args;
-
-static volatile int exit_threads; /* Break workers loop if set to 1 */
 
 static const uint8_t test_udp_packet[] = {
 	0x00, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x00, 0x01,
@@ -177,7 +177,7 @@ static const uint8_t test_udp_packet[] = {
 
 static void sig_handler(int signo ODP_UNUSED)
 {
-	exit_threads = 1;
+	gbl_args->exit_threads = 1;
 }
 
 static inline void init_packet(odp_packet_t pkt, uint32_t seq, uint16_t group)
@@ -280,7 +280,7 @@ static int run_thread(void *arg)
 	c1 = odp_cpu_cycles();
 	t1 = odp_time_local();
 
-	while (!exit_threads) {
+	while (!gbl_args->exit_threads) {
 		odp_event_t  event_tbl[MAX_EVENT_BURST];
 		odp_queue_t dst_queue;
 		int num_events;
@@ -382,9 +382,6 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 
 	static const char *shortopts = "+a:+c:+l:+t:h";
 
-	/* Let helper collect its own arguments (e.g. --odph_proc) */
-	argc = odph_parse_options(argc, argv);
-
 	appl_args->accuracy = 1; /* Get and print pps stats second */
 	appl_args->cpu_count = 1;
 	appl_args->lookup_tbl_size = DEF_LOOKUP_TBL_SIZE;
@@ -474,9 +471,10 @@ static int print_stats(int num_workers, stats_t **thr_stats, int duration,
 
 		pkts_prev = pkts;
 		elapsed += accuracy;
-	} while (!exit_threads && (loop_forever || (elapsed < duration)));
+	} while (!gbl_args->exit_threads &&
+		 (loop_forever || (elapsed < duration)));
 
-	exit_threads = 1;
+	gbl_args->exit_threads = 1;
 	odp_barrier_wait(&gbl_args->term_barrier);
 
 	pkts = 0;
@@ -523,6 +521,7 @@ static void gbl_args_init(args_t *args)
 int main(int argc, char *argv[])
 {
 	stats_t *stats[MAX_WORKERS];
+	odph_helper_options_t helper_options;
 	odph_odpthread_t thread_tbl[MAX_WORKERS];
 	odp_cpumask_t cpumask;
 	odp_pool_capability_t pool_capa;
@@ -545,6 +544,13 @@ int main(int argc, char *argv[])
 	int cpu;
 	int ret = 0;
 
+	/* Let helper collect its own arguments (e.g. --odph_proc) */
+	argc = odph_parse_options(argc, argv);
+	if (odph_options(&helper_options)) {
+		LOG_ERR("Error: reading ODP helper options failed.\n");
+		exit(EXIT_FAILURE);
+	}
+
 	odp_init_param_init(&init);
 
 	/* List features not to be used (may optimize performance) */
@@ -553,6 +559,8 @@ int main(int argc, char *argv[])
 	init.not_used.feat.ipsec  = 1;
 	init.not_used.feat.timer  = 1;
 	init.not_used.feat.tm     = 1;
+
+	init.mem_model = helper_options.mem_model;
 
 	/* Signal handler has to be registered before global init in case ODP
 	 * implementation creates internal threads/processes. */

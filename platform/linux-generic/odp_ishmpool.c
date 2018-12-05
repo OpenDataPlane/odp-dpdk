@@ -50,7 +50,7 @@
 #include <odp_shm_internal.h>
 #include <odp_debug_internal.h>
 #include <odp_align_internal.h>
-#include <odp_ishm_internal.h>
+#include <odp_shm_internal.h>
 #include <odp_ishmpool_internal.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -223,7 +223,7 @@ static pool_t *_odp_ishmbud_pool_create(const char *pool_name, int store_idx,
 
 	/* allocate required memory: */
 	blk_idx = _odp_ishm_reserve(pool_name, total_sz, -1,
-				    ODP_CACHE_LINE_SIZE, flags, 0);
+				    ODP_CACHE_LINE_SIZE, 0, flags, 0);
 	if (blk_idx < 0) {
 		ODP_ERR("_odp_ishm_reserve failed.");
 		return NULL;
@@ -558,7 +558,7 @@ static pool_t *_odp_ishmslab_pool_create(const char *pool_name, int store_idx,
 
 	/* allocate required memory: */
 	blk_idx = _odp_ishm_reserve(pool_name, total_sz, -1,
-				    ODP_CACHE_LINE_SIZE, flags, 0);
+				    ODP_CACHE_LINE_SIZE, 0, flags, 0);
 	if (blk_idx < 0) {
 		ODP_ERR("_odp_ishm_reserve failed.");
 		return NULL;
@@ -783,24 +783,4 @@ void _odp_ishm_pool_init(void)
 
 	for (i = 0; i < MAX_NB_POOL; i++)
 		pool_blk_idx[i] = -1;
-}
-
-_odp_ishm_pool_t *_odp_ishm_pool_lookup(const char *pool_name)
-{
-	int block_idx;
-	int store_idx;
-
-	/* search for a _ishm block with the given name */
-	block_idx = _odp_ishm_lookup_by_name(pool_name);
-	if (block_idx < 0)
-		return NULL;
-
-	/* a block with that name exists: make sure it is within
-	 * the registered pools */
-	for (store_idx = 0; store_idx < MAX_NB_POOL; store_idx++) {
-		if (pool_blk_idx[store_idx] == block_idx)
-			return  _odp_ishm_address(block_idx);
-	}
-
-	return NULL;
 }

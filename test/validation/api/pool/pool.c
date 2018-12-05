@@ -11,6 +11,16 @@
 
 #define PKT_LEN 400
 #define PKT_NUM 500
+#define MAX_NUM_DEFAULT (10 * 1024 * 1024)
+
+typedef struct {
+	odp_barrier_t init_barrier;
+	odp_atomic_u32_t index;
+	uint32_t nb_threads;
+	odp_pool_t pool;
+} global_shared_mem_t;
+
+static global_shared_mem_t *global_mem;
 
 static const int default_buffer_size = 1500;
 static const int default_buffer_num = 1000;
@@ -32,7 +42,7 @@ static void pool_test_create_destroy_buffer(void)
 
 	odp_pool_param_init(&param);
 
-	param.type      = ODP_POOL_BUFFER,
+	param.type      = ODP_POOL_BUFFER;
 	param.buf.size  = default_buffer_size;
 	param.buf.align = ODP_CACHE_LINE_SIZE;
 	param.buf.num   = default_buffer_num;
@@ -106,7 +116,7 @@ static void pool_test_alloc_packet(void)
 
 	odp_pool_param_init(&param);
 
-	param.type    = ODP_POOL_PACKET,
+	param.type    = ODP_POOL_PACKET;
 	param.pkt.num = PKT_NUM;
 	param.pkt.len = PKT_LEN;
 
@@ -145,7 +155,7 @@ static void pool_test_alloc_packet_subparam(void)
 
 	odp_pool_param_init(&param);
 
-	param.type             = ODP_POOL_PACKET,
+	param.type             = ODP_POOL_PACKET;
 	param.pkt.num          = PKT_NUM;
 	param.pkt.len          = PKT_LEN;
 	param.pkt.num_subparam = num_sub;
@@ -270,6 +280,252 @@ static void pool_test_info_data_range(void)
 	CU_ASSERT(odp_pool_destroy(pool) == 0);
 }
 
+static void pool_test_buf_max_num(void)
+{
+	odp_pool_t pool;
+	odp_pool_param_t param;
+	odp_pool_capability_t capa;
+	uint32_t max_num, num, i;
+	odp_shm_t shm;
+	odp_buffer_t *buf;
+
+	CU_ASSERT_FATAL(odp_pool_capability(&capa) == 0);
+
+	max_num = MAX_NUM_DEFAULT;
+	if (capa.buf.max_num)
+		max_num = capa.buf.max_num;
+
+	odp_pool_param_init(&param);
+
+	param.type     = ODP_POOL_BUFFER;
+	param.buf.num  = max_num;
+	param.buf.size = 10;
+
+	pool = odp_pool_create("test_buf_max_num", &param);
+
+	CU_ASSERT_FATAL(pool != ODP_POOL_INVALID);
+
+	shm = odp_shm_reserve("test_max_num_shm",
+			      max_num * sizeof(odp_buffer_t),
+			      sizeof(odp_buffer_t), 0);
+
+	CU_ASSERT_FATAL(shm != ODP_SHM_INVALID);
+
+	buf = odp_shm_addr(shm);
+
+	num = 0;
+	for (i = 0; i < max_num; i++) {
+		buf[num] = odp_buffer_alloc(pool);
+
+		if (buf[num] != ODP_BUFFER_INVALID)
+			num++;
+	}
+
+	CU_ASSERT(num == max_num);
+
+	for (i = 0; i < num; i++)
+		odp_buffer_free(buf[i]);
+
+	CU_ASSERT(odp_shm_free(shm) == 0);
+	CU_ASSERT(odp_pool_destroy(pool) == 0);
+}
+
+static void pool_test_pkt_max_num(void)
+{
+	odp_pool_t pool;
+	odp_pool_param_t param;
+	odp_pool_capability_t capa;
+	uint32_t max_num, num, i;
+	odp_shm_t shm;
+	odp_packet_t *pkt;
+	uint32_t len = 10;
+
+	CU_ASSERT_FATAL(odp_pool_capability(&capa) == 0);
+
+	max_num = MAX_NUM_DEFAULT;
+	if (capa.pkt.max_num)
+		max_num = capa.pkt.max_num;
+
+	odp_pool_param_init(&param);
+
+	param.type         = ODP_POOL_PACKET;
+	param.pkt.num      = max_num;
+	param.pkt.max_num  = max_num;
+	param.pkt.len      = len;
+	param.pkt.max_len  = len;
+	param.pkt.headroom = 0;
+
+	pool = odp_pool_create("test_packet_max_num", &param);
+
+	CU_ASSERT_FATAL(pool != ODP_POOL_INVALID);
+
+	shm = odp_shm_reserve("test_max_num_shm",
+			      max_num * sizeof(odp_packet_t),
+			      sizeof(odp_packet_t), 0);
+
+	CU_ASSERT_FATAL(shm != ODP_SHM_INVALID);
+
+	pkt = odp_shm_addr(shm);
+
+	num = 0;
+	for (i = 0; i < max_num; i++) {
+		pkt[num] = odp_packet_alloc(pool, len);
+
+		if (pkt[num] != ODP_PACKET_INVALID)
+			num++;
+	}
+
+	CU_ASSERT(num == max_num);
+
+	for (i = 0; i < num; i++)
+		odp_packet_free(pkt[i]);
+
+	CU_ASSERT(odp_shm_free(shm) == 0);
+	CU_ASSERT(odp_pool_destroy(pool) == 0);
+}
+
+static void pool_test_tmo_max_num(void)
+{
+	odp_pool_t pool;
+	odp_pool_param_t param;
+	odp_pool_capability_t capa;
+	uint32_t max_num, num, i;
+	odp_shm_t shm;
+	odp_timeout_t *tmo;
+
+	CU_ASSERT_FATAL(odp_pool_capability(&capa) == 0);
+
+	max_num = MAX_NUM_DEFAULT;
+	if (capa.tmo.max_num)
+		max_num = capa.tmo.max_num;
+
+	odp_pool_param_init(&param);
+
+	param.type    = ODP_POOL_TIMEOUT;
+	param.tmo.num = max_num;
+
+	pool = odp_pool_create("test_tmo_max_num", &param);
+
+	CU_ASSERT_FATAL(pool != ODP_POOL_INVALID);
+
+	shm = odp_shm_reserve("test_max_num_shm",
+			      max_num * sizeof(odp_packet_t),
+			      sizeof(odp_packet_t), 0);
+
+	CU_ASSERT_FATAL(shm != ODP_SHM_INVALID);
+
+	tmo = odp_shm_addr(shm);
+
+	num = 0;
+	for (i = 0; i < max_num; i++) {
+		tmo[num] = odp_timeout_alloc(pool);
+
+		if (tmo[num] != ODP_TIMEOUT_INVALID)
+			num++;
+	}
+
+	CU_ASSERT(num == max_num);
+
+	for (i = 0; i < num; i++)
+		odp_timeout_free(tmo[i]);
+
+	CU_ASSERT(odp_shm_free(shm) == 0);
+	CU_ASSERT(odp_pool_destroy(pool) == 0);
+}
+
+static void buffer_alloc_loop(odp_pool_t pool, int num, int buffer_size)
+{
+	int allocs;
+
+	/* Allocate, modify, and free buffers */
+	for (allocs = 0; allocs < num;) {
+		odp_buffer_t buf;
+		uint8_t *data;
+		int i;
+
+		buf = odp_buffer_alloc(pool);
+		if (buf == ODP_BUFFER_INVALID)
+			continue;
+
+		data = odp_buffer_addr(buf);
+
+		for (i = 0; i < buffer_size; i++)
+			data[i] = i;
+
+		odp_buffer_free(buf);
+		allocs++;
+	}
+}
+
+static int run_pool_test_create_after_fork(void *arg ODP_UNUSED)
+{
+	int thr_index;
+
+	thr_index = odp_atomic_fetch_inc_u32(&global_mem->index);
+
+	/* Thread 0 allocates the shared pool */
+	if (thr_index == 0) {
+		odp_pool_t pool;
+		odp_pool_param_t param;
+
+		odp_pool_param_init(&param);
+
+		param.type      = ODP_POOL_BUFFER;
+		param.buf.size  = default_buffer_size;
+		param.buf.align = ODP_CACHE_LINE_SIZE;
+		param.buf.num   = default_buffer_num;
+
+		pool = odp_pool_create(NULL, &param);
+		CU_ASSERT_FATAL(pool != ODP_POOL_INVALID);
+		global_mem->pool = pool;
+	}
+
+	odp_barrier_wait(&global_mem->init_barrier);
+
+	buffer_alloc_loop(global_mem->pool, default_buffer_num,
+			  default_buffer_size);
+
+	return CU_get_number_of_failures();
+}
+
+static void pool_test_create_after_fork(void)
+{
+	odp_shm_t shm;
+	odp_cpumask_t unused;
+	pthrd_arg thrdarg;
+
+	/* No single VA required since reserve is done before fork */
+	shm = odp_shm_reserve(NULL, sizeof(global_shared_mem_t), 0, 0);
+	CU_ASSERT_FATAL(shm != ODP_SHM_INVALID);
+	global_mem = odp_shm_addr(shm);
+	CU_ASSERT_PTR_NOT_NULL_FATAL(global_mem);
+
+	thrdarg.numthrds = odp_cpumask_default_worker(&unused, 0);
+	if (thrdarg.numthrds > MAX_WORKERS)
+		thrdarg.numthrds = MAX_WORKERS;
+
+	global_mem->nb_threads = thrdarg.numthrds;
+	global_mem->pool = ODP_POOL_INVALID;
+	odp_barrier_init(&global_mem->init_barrier, thrdarg.numthrds + 1);
+	odp_atomic_init_u32(&global_mem->index, 0);
+
+	/* Fork here */
+	odp_cunit_thread_create(run_pool_test_create_after_fork, &thrdarg);
+
+	/* Wait until thread 0 has created the test pool */
+	odp_barrier_wait(&global_mem->init_barrier);
+
+	buffer_alloc_loop(global_mem->pool, default_buffer_num,
+			  default_buffer_size);
+
+	/* Wait for all thread endings */
+	CU_ASSERT(odp_cunit_thread_exit(&thrdarg) >= 0);
+
+	CU_ASSERT(!odp_pool_destroy(global_mem->pool));
+
+	CU_ASSERT(!odp_shm_free(shm));
+}
+
 odp_testinfo_t pool_suite[] = {
 	ODP_TEST_INFO(pool_test_create_destroy_buffer),
 	ODP_TEST_INFO(pool_test_create_destroy_packet),
@@ -279,6 +535,10 @@ odp_testinfo_t pool_suite[] = {
 	ODP_TEST_INFO(pool_test_info_packet),
 	ODP_TEST_INFO(pool_test_lookup_info_print),
 	ODP_TEST_INFO(pool_test_info_data_range),
+	ODP_TEST_INFO(pool_test_buf_max_num),
+	ODP_TEST_INFO(pool_test_pkt_max_num),
+	ODP_TEST_INFO(pool_test_tmo_max_num),
+	ODP_TEST_INFO(pool_test_create_after_fork),
 	ODP_TEST_INFO_NULL,
 };
 

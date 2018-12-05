@@ -110,6 +110,24 @@ typedef enum {
 	 */
 	ODP_CIPHER_ALG_CHACHA20_POLY1305,
 
+	/** Confidentiality F8 algorithm (UEA1)
+	 *
+	 *  KASUMI-based F8 algorithm (also known as UEA1).
+	 */
+	ODP_CIPHER_ALG_KASUMI_F8,
+
+	/** Confidentiality UEA2 algorithm (128-EEA1)
+	 *
+	 *  SNOW 3G-based UEA2 algorithm (also known as 128-EEA1).
+	 */
+	ODP_CIPHER_ALG_SNOW3G_UEA2,
+
+	/** Confidentiality 128-EEA3 algorithm
+	 *
+	 *  ZUC-based 128-EEA3 algorithm.
+	 */
+	ODP_CIPHER_ALG_ZUC_EEA3,
+
 	/** @deprecated  Use ODP_CIPHER_ALG_AES_CBC instead */
 	ODP_DEPRECATE(ODP_CIPHER_ALG_AES128_CBC),
 
@@ -214,6 +232,27 @@ typedef enum {
 	 */
 	ODP_AUTH_ALG_CHACHA20_POLY1305,
 
+	/** Integrity F9 algorithm (UIA1)
+	 *
+	 *  KASUMI-based F9 algorithm (also known as UIA1).
+	 *
+	 *  IV (9 bytes) is a concatenation of COUNT (32b), FRESH (32b) and
+	 *  DIRECTION (LSB-aligned, 1b).
+	 */
+	ODP_AUTH_ALG_KASUMI_F9,
+
+	/** Integrity UIA2 algorithm (128-EEA1)
+	 *
+	 *  SNOW 3G-based UIA2 algorithm (also known as 128-EIA1).
+	 */
+	ODP_AUTH_ALG_SNOW3G_UIA2,
+
+	/** Integrity 128-EIA3 algorithm
+	 *
+	 *  ZUC-based 128-EIA3 algorithm.
+	 */
+	ODP_AUTH_ALG_ZUC_EIA3,
+
 	/** @deprecated  Use ODP_AUTH_ALG_MD5_HMAC instead */
 	ODP_DEPRECATE(ODP_AUTH_ALG_MD5_96),
 
@@ -254,6 +293,15 @@ typedef union odp_crypto_cipher_algos_t {
 
 		/** ODP_CIPHER_ALG_CHACHA20_POLY1305 */
 		uint32_t chacha20_poly1305 : 1;
+
+		/** ODP_CIPHER_ALG_KASUMI_F8 */
+		uint32_t kasumi_f8   : 1;
+
+		/** ODP_CIPHER_ALG_SNOW3G_UEA2 */
+		uint32_t snow3g_uea2 : 1;
+
+		/** ODP_CIPHER_ALG_ZUC_EEA3 */
+		uint32_t zuc_eea3    : 1;
 
 		/** @deprecated  Use aes_cbc instead */
 		uint32_t ODP_DEPRECATE(aes128_cbc) : 1;
@@ -312,6 +360,15 @@ typedef union odp_crypto_auth_algos_t {
 		/** ODP_AUTH_ALG_CHACHA20_POLY1305 */
 		uint32_t chacha20_poly1305 : 1;
 
+		/** ODP_AUTH_ALG_KASUMI_F9 */
+		uint32_t kasumi_f9   : 1;
+
+		/** ODP_AUTH_ALG_SNOW3G_UIA2 */
+		uint32_t snow3g_uia2 : 1;
+
+		/** ODP_AUTH_ALG_ZUC_EIA3 */
+		uint32_t zuc_eia3    : 1;
+
 		/** @deprecated  Use md5_hmac instead */
 		uint32_t ODP_DEPRECATE(md5_96)     : 1;
 
@@ -365,7 +422,10 @@ typedef odp_packet_data_range_t ODP_DEPRECATE(odp_crypto_data_range_t);
  * Crypto API session creation parameters
  */
 typedef struct odp_crypto_session_param_t {
-	/** Encode vs. decode operation */
+	/** Encode vs. decode operation
+	 *
+	 *  The default value is ODP_CRYPTO_OP_ENCODE.
+	 */
 	odp_crypto_op_t op;
 
 	/** Authenticate cipher vs. plain text
@@ -378,18 +438,31 @@ typedef struct odp_crypto_session_param_t {
 	 *
 	 *  true:  Authenticate cipher text
 	 *  false: Authenticate plain text
+	 *
+	 *  The default value is false.
 	 */
 	odp_bool_t auth_cipher_text;
 
-	/** Preferred sync vs. async for odp_crypto_operation() */
+	/** Preferred sync vs. async for odp_crypto_operation()
+	 *
+	 *  The default value is ODP_CRYPTO_SYNC.
+	 */
 	odp_crypto_op_mode_t pref_mode;
 
-	/** Operation mode when using packet interface: sync or async */
+	/** Operation mode when using packet interface: sync or async
+	 *
+	 *  The default value is ODP_CRYPTO_SYNC.
+	 */
 	odp_crypto_op_mode_t op_mode;
 
 	/** Cipher algorithm
 	 *
-	 *  Use odp_crypto_capability() for supported algorithms.
+	 *  Select cipher algorithm to be used. ODP_CIPHER_ALG_NULL indicates
+	 *  that ciphering is disabled. Use odp_crypto_capability() for
+	 *  supported algorithms. Note that some algorithms restrict choice of
+	 *  the pairing authentication algorithm. When ciphering is enabled
+	 *  cipher key and IV need to be set. The default value is
+	 *  ODP_CIPHER_ALG_NULL.
 	 */
 	odp_cipher_alg_t cipher_alg;
 
@@ -410,7 +483,18 @@ typedef struct odp_crypto_session_param_t {
 
 	/** Authentication algorithm
 	 *
-	 *  Use odp_crypto_capability() for supported algorithms.
+	 *  Select authentication algorithm to be used. ODP_AUTH_ALG_NULL
+	 *  indicates that authentication is disabled. Use
+	 *  odp_crypto_capability() for supported algorithms. Note that some
+	 *  algorithms restrict choice of the pairing cipher algorithm. When
+	 *  single algorithm provides both ciphering and authentication
+	 *  (i.e. Authenticated Encryption), authentication side key
+	 *  (auth_key) and IV (auth_iv) are ignored, and cipher side values are
+	 *  used instead. These algorithms ignore authentication side key
+	 *  and IV: ODP_AUTH_ALG_AES_GCM, ODP_AUTH_ALG_AES_CCM and
+	 *  ODP_AUTH_ALG_CHACHA20_POLY1305. Otherwise, all authentication side
+	 *  parameters must be set when authentication is enabled. The default
+	 *  value is ODP_AUTH_ALG_NULL.
 	 */
 	odp_auth_alg_t auth_alg;
 
@@ -698,6 +782,22 @@ typedef struct odp_crypto_cipher_capability_t {
 	/** IV length in bytes */
 	uint32_t iv_len;
 
+	/** Cipher is operating in bitwise mode
+	 *
+	 * This cipher works on series of bits, rather than sequences of bytes:
+	 * cipher_range in odp_crypto_op_param_t and
+	 * odp_crypto_packet_op_param_t will use bits, rather than bytes.
+	 *
+	 * Note: data buffer MUST start on the byte boundary, using offset
+	 * which is not divisible by 8 is unsupported and will result in
+	 * unspecified behaviour.
+	 *
+	 * Note2: currently data length MUST be divisible by 8. Specifying data
+	 * which does not consist of full bytes will result in unspecified
+	 * behaviour.
+	 */
+	odp_bool_t bit_mode;
+
 } odp_crypto_cipher_capability_t;
 
 /**
@@ -725,6 +825,18 @@ typedef struct odp_crypto_auth_capability_t {
 		 *  (in bytes) */
 		uint32_t inc;
 	} aad_len;
+
+	/** Auth is operating in bitstring mode
+	 *
+	 * This auth works on series of bits, rather than sequences of bytes:
+	 * auth_range in odp_crypto_op_param_t and
+	 * odp_crypto_packet_op_param_t will use bits, rather than bytes.
+	 *
+	 * Note: data buffer MUST start on the byte boundary, using offset
+	 * which is not divisible by 8 is unsupported and will result in
+	 * unpredictable behaviour.
+	 */
+	odp_bool_t bit_mode;
 
 } odp_crypto_auth_capability_t;
 

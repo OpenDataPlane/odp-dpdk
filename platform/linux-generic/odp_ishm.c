@@ -14,32 +14,20 @@
  * internal shared memory is guaranteed to always be located at the same virtual
  * address, i.e. pointers to internal shared memory are fully shareable
  * between odp threads (regardless of thread type or fork time) in that case.
- * Internal shared memory is mainly meant to be used internaly within ODP
+ * Internal shared memory is mainly meant to be used internally within ODP
  * (hence its name), but may also be allocated by odp applications and drivers,
  * in the future (through these interfaces).
- * To guarrentee this full pointer shareability (when reserved with the
- * _ODP_ISHM_SINGLE_VA flag) internal shared memory is handled as follows:
- * At global_init time, a huge virtual address space reservation is performed.
- * Note that this is just reserving virtual space, not physical memory.
+ * To guarantee this full pointer shareability (when reserved with the
+ * _ODP_ISHM_SINGLE_VA flag) the whole internal shared memory area is reserved
+ * at global_init time.
  * Because all ODP threads (pthreads or processes) are descendants of the ODP
- * instantiation process, this VA space is inherited by all ODP threads.
- * When internal shmem reservation actually occurs, and
- * when reserved with the _ODP_ISHM_SINGLE_VA flag, physical memory is
- * allocated, and mapped (MAP_FIXED) to some part in the huge preallocated
- * address space area:
- * because this virtual address space is common to all ODP threads, we
- * know this mapping will succeed, and not clash with anything else.
- * Hence, an ODP threads which perform a lookup for the same ishm block
- * can map it at the same VA address.
- * When internal shared memory is released, the physical memory is released
- * and the corresponding virtual space returned to its "pool" of preallocated
- * virtual space (assuming it was allocated from there).
- * Note, though, that, if 2 linux processes share the same ishm block,
- * the virtual space is marked as released as soon as one of the processes
- * releases the ishm block, but the physical memory space is actually released
- * by the kernel once all processes have done a ishm operation (i,e. a sync).
- * This is due to the fact that linux does not contain any syscall to unmap
- * memory from a different process.
+ * instantiation process, this address space is inherited by all ODP threads.
+ * When internal shmem reservation actually occurs, and when reserved with the
+ * _ODP_ISHM_SINGLE_VA flag, memory is allocated from the pre-reserved single
+ * VA memory.
+ * When an internal shared memory block is released, the memory is returned to
+ * its "pool" of pre-reserved memory (assuming it was allocated from there). The
+ * memory is not returned back to kernel until odp_term_global().
  *
  * This file contains functions to handle the VA area (handling fragmentation
  * and defragmentation resulting from different allocs/release) and also
@@ -60,9 +48,10 @@
 #include <odp_debug_internal.h>
 #include <odp_align_internal.h>
 #include <odp_fdserver_internal.h>
-#include <odp_ishm_internal.h>
+#include <odp_shm_internal.h>
 #include <odp_ishmphy_internal.h>
 #include <odp_ishmpool_internal.h>
+#include <odp_libconfig_internal.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -84,7 +73,7 @@
  *
  * This is the number of separate ISHM areas that can be reserved concurrently
  * (Note that freeing such blocks may take time, or possibly never happen
- * if some of the block ownwers never procsync() after free). This number
+ * if some of the block owners never procsync() after free). This number
  * should take that into account)
  */
 #define ISHM_MAX_NB_BLOCKS 128
@@ -137,6 +126,8 @@
 #define EXPORT_FILE_LINE6_FMT "user_length: %" PRIu64
 #define EXPORT_FILE_LINE7_FMT "user_flags: %" PRIu32
 #define EXPORT_FILE_LINE8_FMT "align: %" PRIu32
+#define EXPORT_FILE_LINE9_FMT "offset: %" PRIu64
+
 /*
  * A fragment describes a piece of the shared virtual address space,
  * and is allocated only when allocation is done with the _ODP_ISHM_SINGLE_VA
@@ -164,7 +155,7 @@ typedef struct ishm_fragment {
  * will allocate both a block and a fragment.
  * Blocks contain only global data common to all processes.
  */
-typedef enum {UNKNOWN, HUGE, NORMAL, EXTERNAL} huge_flag_t;
+typedef enum {UNKNOWN, HUGE, NORMAL, EXTERNAL, CACHED} huge_flag_t;
 typedef struct ishm_block {
 	char name[ISHM_NAME_MAXLEN];    /* name for the ishm block (if any) */
 	char filename[ISHM_FILENAME_MAXLEN]; /* name of the .../odp-* file  */
@@ -173,6 +164,7 @@ typedef struct ishm_block {
 	uint32_t flags;          /* block creation flags.                   */
 	uint32_t external_fd:1;  /* block FD was externally provided        */
 	uint64_t user_len;	 /* length, as requested at reserve time.   */
+	uint64_t offset;	 /* offset from beginning of the fd */
 	void *start;		 /* only valid if _ODP_ISHM_SINGLE_VA is set*/
 	uint64_t len;		 /* length. multiple of page size. 0 if free*/
 	ishm_fragment_t *fragment; /* used when _ODP_ISHM_SINGLE_VA is used */
@@ -191,8 +183,14 @@ typedef struct ishm_block {
 typedef struct {
 	odp_spinlock_t  lock;
 	uint64_t dev_seq;	/* used when creating device names */
+	/* limit for reserving memory using huge pages */
+	uint64_t huge_page_limit;
 	uint32_t odpthread_cnt;	/* number of running ODP threads   */
 	ishm_block_t  block[ISHM_MAX_NB_BLOCKS];
+	void *single_va_start;	/* start of single VA memory */
+	int single_va_fd;	/* single VA memory file descriptor */
+	odp_bool_t single_va_huge; /* single VA memory from huge pages */
+	char single_va_filename[ISHM_FILENAME_MAXLEN];
 } ishm_table_t;
 static ishm_table_t *ishm_tbl;
 
@@ -238,12 +236,175 @@ typedef struct {
 } ishm_ftable_t;
 static ishm_ftable_t *ishm_ftbl;
 
+struct huge_page_cache {
+	uint64_t len;
+	int max_fds; /* maximum amount requested of pre-allocated huge pages */
+	int total;   /* amount of actually pre-allocated huge pages */
+	int idx;     /* retrieve fd[idx] to get a free file descriptor */
+	int fd[];    /* list of file descriptors */
+};
+
+static struct huge_page_cache *hpc;
+
 #ifndef MAP_ANONYMOUS
 #define MAP_ANONYMOUS MAP_ANON
 #endif
 
 /* prototypes: */
 static void procsync(void);
+
+static int hp_create_file(uint64_t len, const char *filename)
+{
+	int fd;
+	void *addr;
+
+	if (len <= 0) {
+		ODP_ERR("Length is wrong\n");
+		return -1;
+	}
+
+	fd = open(filename, O_RDWR | O_CREAT | O_TRUNC,
+		  S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+	if (fd < 0) {
+		ODP_ERR("Could not create cache file %s\n", filename);
+		return -1;
+	}
+
+	/* remove file from file system */
+	unlink(filename);
+
+	if (ftruncate(fd, len) == -1) {
+		ODP_ERR("Could not truncate file: %s\n", strerror(errno));
+		close(fd);
+		return -1;
+	}
+
+	/* commit huge page */
+	addr = _odp_ishmphy_map(fd, len, 0, 0);
+	if (addr == NULL) {
+		/* no more pages available */
+		close(fd);
+		return -1;
+	}
+	_odp_ishmphy_unmap(addr, len, 0);
+
+	ODP_DBG("Created HP cache file %s, fd: %d\n", filename, fd);
+
+	return fd;
+}
+
+static void hp_init(void)
+{
+	char filename[ISHM_FILENAME_MAXLEN];
+	char dir[ISHM_FILENAME_MAXLEN];
+	int count;
+	void *addr;
+
+	if (!_odp_libconfig_lookup_ext_int("shm", NULL, "num_cached_hp",
+					   &count)) {
+		return;
+	}
+
+	if (count <= 0)
+		return;
+
+	ODP_DBG("Init HP cache with up to %d pages\n", count);
+
+	if (!odp_global_ro.hugepage_info.default_huge_page_dir) {
+		ODP_ERR("No huge page dir\n");
+		return;
+	}
+
+	snprintf(dir, ISHM_FILENAME_MAXLEN, "%s/%s",
+		 odp_global_ro.hugepage_info.default_huge_page_dir,
+		 odp_global_ro.uid);
+
+	if (mkdir(dir, 0744) != 0) {
+		if (errno != EEXIST) {
+			ODP_ERR("Failed to create dir: %s\n", strerror(errno));
+			return;
+		}
+	}
+
+	snprintf(filename, ISHM_FILENAME_MAXLEN,
+		 "%s/odp-%d-ishm_cached",
+		 dir,
+		 odp_global_ro.main_pid);
+
+	addr = mmap(NULL,
+		    sizeof(struct huge_page_cache) + sizeof(int) * count,
+		    PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+	if (addr == MAP_FAILED) {
+		ODP_ERR("Unable to mmap memory for huge page cache\n.");
+		return;
+	}
+
+	hpc = addr;
+
+	hpc->max_fds = count;
+	hpc->total = 0;
+	hpc->idx = -1;
+	hpc->len = odp_sys_huge_page_size();
+
+	for (int i = 0; i < count; ++i) {
+		int fd;
+
+		fd = hp_create_file(hpc->len, filename);
+		if (fd == -1) {
+			do {
+				hpc->fd[i++] = -1;
+			} while (i < count);
+			break;
+		}
+		hpc->total++;
+		hpc->fd[i] = fd;
+	}
+	hpc->idx = hpc->total - 1;
+
+	ODP_DBG("HP cache has %d huge pages of size 0x%08" PRIx64 "\n",
+		hpc->total, hpc->len);
+}
+
+static void hp_term(void)
+{
+	if (NULL == hpc)
+		return;
+
+	for (int i = 0; i < hpc->total; i++) {
+		if (hpc->fd[i] != -1)
+			close(hpc->fd[i]);
+	}
+
+	hpc->total = 0;
+	hpc->idx = -1;
+	hpc->len = 0;
+}
+
+static int hp_get_cached(uint64_t len)
+{
+	int fd;
+
+	if (NULL == hpc || hpc->idx < 0 || len != hpc->len)
+		return -1;
+
+	fd = hpc->fd[hpc->idx];
+	hpc->fd[hpc->idx--] = -1;
+
+	return fd;
+}
+
+static int hp_put_cached(int fd)
+{
+	if (NULL == hpc || odp_unlikely(++hpc->idx >= hpc->total)) {
+		hpc->idx--;
+		ODP_ERR("Trying to put more FD than allowed: %d\n", fd);
+		return -1;
+	}
+
+	hpc->fd[hpc->idx] = fd;
+
+	return 0;
+}
 
 /*
  * Take a piece of the preallocated virtual space to fit "size" bytes.
@@ -260,7 +421,7 @@ static void *alloc_fragment(uintptr_t size, int block_index, intptr_t align,
 	ishm_fragment_t *rem_fragmnt;
 	uintptr_t border;/* possible start of new fragment (next alignement)  */
 	intptr_t left;	 /* room remaining after, if the segment is allocated */
-	uintptr_t remainder = odp_global_data.shm_max_memory;
+	uintptr_t remainder = odp_global_ro.shm_max_memory;
 
 	/*
 	 * search for the best bit, i.e. search for the unallocated fragment
@@ -286,7 +447,8 @@ static void *alloc_fragment(uintptr_t size, int block_index, intptr_t align,
 	}
 
 	if (!(*best_fragmnt)) {
-		ODP_ERR("unable to get virtual address for shmem block!\n.");
+		ODP_ERR("Out of single VA memory. Try increasing "
+			"'shm.single_va_size_kb' in ODP config.\n");
 		return NULL;
 	}
 
@@ -408,51 +570,101 @@ static void free_fragment(ishm_fragment_t *fragmnt)
 	}
 }
 
+static char *create_seq_string(char *output, size_t size)
+{
+	snprintf(output, size, "%08" PRIu64, ishm_tbl->dev_seq++);
+
+	return output;
+}
+
+static int create_export_file(ishm_block_t *new_block, const char *name,
+			      uint64_t len, uint32_t flags, uint32_t align,
+			      odp_bool_t single_va, uint64_t offset)
+{
+	FILE *export_file;
+
+	snprintf(new_block->exptname, ISHM_FILENAME_MAXLEN,
+		 ISHM_EXPTNAME_FORMAT,
+		 odp_global_ro.shm_dir,
+		 odp_global_ro.uid,
+		 odp_global_ro.main_pid,
+		 name);
+	export_file = fopen(new_block->exptname, "w");
+	if (export_file == NULL) {
+		ODP_ERR("open failed: err=%s.\n",
+			strerror(errno));
+		new_block->exptname[0] = 0;
+		return -1;
+	}
+
+	fprintf(export_file, EXPORT_FILE_LINE1_FMT "\n");
+	fprintf(export_file, EXPORT_FILE_LINE2_FMT "\n",  new_block->name);
+	if (single_va)
+		fprintf(export_file, EXPORT_FILE_LINE3_FMT "\n",
+			ishm_tbl->single_va_filename);
+	else
+		fprintf(export_file, EXPORT_FILE_LINE3_FMT "\n",
+			new_block->filename);
+
+	fprintf(export_file, EXPORT_FILE_LINE4_FMT "\n", len);
+	fprintf(export_file, EXPORT_FILE_LINE5_FMT "\n", flags);
+	fprintf(export_file, EXPORT_FILE_LINE6_FMT "\n",
+		new_block->user_len);
+	fprintf(export_file, EXPORT_FILE_LINE7_FMT "\n",
+		new_block->user_flags);
+	fprintf(export_file, EXPORT_FILE_LINE8_FMT "\n", align);
+	fprintf(export_file, EXPORT_FILE_LINE9_FMT "\n", offset);
+
+	fclose(export_file);
+
+	return 0;
+}
+
 /*
  * Create file with size len. returns -1 on error
  * Creates a file to /dev/shm/odp-<pid>-<sequence_or_name> (for normal pages)
- * or /mnt/huge/odp-<pid>-<sequence_or_name> (for huge pages)
+ * or /mnt/huge/odp-<pid>-<sequence_or_name> (for huge pages).
  * Return the new file descriptor, or -1 on error.
  */
 static int create_file(int block_index, huge_flag_t huge, uint64_t len,
-		       uint32_t flags, uint32_t align)
+		       uint32_t flags, uint32_t align, odp_bool_t single_va)
 {
 	char *name;
 	int  fd;
-	ishm_block_t *new_block;	  /* entry in the main block table    */
+	ishm_block_t *new_block = NULL;	/* entry in the main block table    */
 	char seq_string[ISHM_FILENAME_MAXLEN];   /* used to construct filename*/
 	char filename[ISHM_FILENAME_MAXLEN]; /* filename in /dev/shm or
 					      *		    /mnt/huge */
 	int  oflag = O_RDWR | O_CREAT | O_TRUNC; /* flags for open	      */
-	FILE *export_file;
 	char dir[ISHM_FILENAME_MAXLEN];
 
-	new_block = &ishm_tbl->block[block_index];
-	name = new_block->name;
-
-	/* create the filename: */
-	snprintf(seq_string, ISHM_FILENAME_MAXLEN, "%08" PRIu64,
-		 ishm_tbl->dev_seq++);
+	/* No ishm_block_t for the master single VA memory file */
+	if (single_va) {
+		name = (char *)(uintptr_t)"single_va";
+	} else {
+		new_block = &ishm_tbl->block[block_index];
+		name = new_block->name;
+		if (!name || !name[0])
+			name = create_seq_string(seq_string,
+						 ISHM_FILENAME_MAXLEN);
+	}
 
 	/* huge dir must be known to create files there!: */
 	if ((huge == HUGE) &&
-	    (!odp_global_data.hugepage_info.default_huge_page_dir))
+	    (!odp_global_ro.hugepage_info.default_huge_page_dir))
 		return -1;
 
 	if (huge == HUGE)
 		snprintf(dir, ISHM_FILENAME_MAXLEN, "%s/%s",
-			 odp_global_data.hugepage_info.default_huge_page_dir,
-			 odp_global_data.uid);
+			 odp_global_ro.hugepage_info.default_huge_page_dir,
+			 odp_global_ro.uid);
 	else
 		snprintf(dir, ISHM_FILENAME_MAXLEN, "%s/%s",
-			 odp_global_data.shm_dir,
-			 odp_global_data.uid);
+			 odp_global_ro.shm_dir,
+			 odp_global_ro.uid);
 
-	snprintf(filename, ISHM_FILENAME_MAXLEN,
-		 ISHM_FILENAME_FORMAT,
-		 dir,
-		 odp_global_data.main_pid,
-		 (name && name[0]) ? name : seq_string);
+	snprintf(filename, ISHM_FILENAME_MAXLEN, ISHM_FILENAME_FORMAT, dir,
+		 odp_global_ro.main_pid, name);
 
 	mkdir(dir, 0744);
 
@@ -472,38 +684,21 @@ static int create_file(int block_index, huge_flag_t huge, uint64_t len,
 		return -1;
 	}
 
+	/* No export file is created since this is only for internal use.*/
+	if (single_va) {
+		snprintf(ishm_tbl->single_va_filename, ISHM_FILENAME_MAXLEN,
+			 "%s", filename);
+		return fd;
+	}
 
 	/* if _ODP_ISHM_EXPORT is set, create a description file for
 	 * external ref:
 	 */
 	if (flags & _ODP_ISHM_EXPORT) {
 		memcpy(new_block->filename, filename, ISHM_FILENAME_MAXLEN);
-		snprintf(new_block->exptname, ISHM_FILENAME_MAXLEN,
-			 ISHM_EXPTNAME_FORMAT,
-			 odp_global_data.shm_dir,
-			 odp_global_data.uid,
-			 odp_global_data.main_pid,
-			 (name && name[0]) ? name : seq_string);
-		export_file = fopen(new_block->exptname, "w");
-		if (export_file == NULL) {
-			ODP_ERR("open failed: err=%s.\n",
-				strerror(errno));
-			new_block->exptname[0] = 0;
-		} else {
-			fprintf(export_file, EXPORT_FILE_LINE1_FMT "\n");
-			fprintf(export_file, EXPORT_FILE_LINE2_FMT "\n",  name);
-			fprintf(export_file, EXPORT_FILE_LINE3_FMT "\n",
-				new_block->filename);
-			fprintf(export_file, EXPORT_FILE_LINE4_FMT "\n", len);
-			fprintf(export_file, EXPORT_FILE_LINE5_FMT "\n", flags);
-			fprintf(export_file, EXPORT_FILE_LINE6_FMT "\n",
-				new_block->user_len);
-			fprintf(export_file, EXPORT_FILE_LINE7_FMT "\n",
-				new_block->user_flags);
-			fprintf(export_file, EXPORT_FILE_LINE8_FMT "\n", align);
 
-			fclose(export_file);
-		}
+		create_export_file(new_block, name, len, flags, align, false,
+				   0);
 	} else {
 		new_block->exptname[0] = 0;
 		/* remove the file from the filesystem, keeping its fd open */
@@ -516,8 +711,9 @@ static int create_file(int block_index, huge_flag_t huge, uint64_t len,
 /* delete the files related to a given ishm block: */
 static void delete_file(ishm_block_t *block)
 {
-	/* remove the .../odp-* file, unless fd was external: */
-	if (block->filename[0] != 0)
+	/* remove the .../odp-* file, unless fd was external or single va */
+	if (block->filename[0] != 0 &&
+	    strcmp(block->filename, ishm_tbl->single_va_filename))
 		unlink(block->filename);
 	/* also remove possible description file (if block was exported): */
 	if (block->exptname[0] != 0)
@@ -525,20 +721,18 @@ static void delete_file(ishm_block_t *block)
 }
 
 /*
- * performs the mapping, possibly allocating a fragment of the pre-reserved
- * VA space if the _ODP_ISHM_SINGLE_VA flag was given.
- * Sets fd, and returns the mapping address.
- * This function will also set the _ODP_ISHM_SINGLE_VA flag if the alignment
- * requires it
+ * Performs the mapping.
+ * Sets fd, and returns the mapping address. Not to be used with
+ * _ODP_ISHM_SINGLE_VA blocks.
  * Mutex must be assured by the caller.
  */
 static void *do_map(int block_index, uint64_t len, uint32_t align,
-		    uint32_t flags, huge_flag_t huge, int *fd)
+		    uint64_t offset, uint32_t flags, huge_flag_t huge, int *fd)
 {
 	ishm_block_t *new_block;	  /* entry in the main block table   */
-	void *addr = NULL;
 	void *mapped_addr;
-	ishm_fragment_t *fragment = NULL;
+
+	ODP_ASSERT(!(flags & _ODP_ISHM_SINGLE_VA));
 
 	new_block = &ishm_tbl->block[block_index];
 
@@ -548,33 +742,16 @@ static void *do_map(int block_index, uint64_t len, uint32_t align,
 	 * unless a fd was already given
 	 */
 	if (*fd < 0) {
-		*fd = create_file(block_index, huge, len, flags, align);
+		*fd = create_file(block_index, huge, len, flags, align, false);
 		if (*fd < 0)
 			return NULL;
 	} else {
 		new_block->filename[0] = 0;
 	}
 
-	/* allocate an address range in the prebooked VA area if needed */
-	if (flags & _ODP_ISHM_SINGLE_VA) {
-		addr = alloc_fragment(len, block_index, align, &fragment);
-		if (!addr) {
-			ODP_ERR("alloc_fragment failed.\n");
-			if (!new_block->external_fd) {
-				close(*fd);
-				*fd = -1;
-				delete_file(new_block);
-			}
-			return NULL;
-		}
-		new_block->fragment = fragment;
-	}
-
 	/* try to mmap: */
-	mapped_addr = _odp_ishmphy_map(*fd, addr, len, flags);
+	mapped_addr = _odp_ishmphy_map(*fd, len, offset, flags);
 	if (mapped_addr == NULL) {
-		if (flags & _ODP_ISHM_SINGLE_VA)
-			free_fragment(fragment);
 		if (!new_block->external_fd) {
 			close(*fd);
 			*fd = -1;
@@ -587,36 +764,86 @@ static void *do_map(int block_index, uint64_t len, uint32_t align,
 }
 
 /*
+ * Allocate block from pre-reserved single VA memory
+ */
+static void *alloc_single_va(const char *name, int new_index, uint64_t size,
+			     uint32_t align, uint32_t flags, int *fd,
+			     uint64_t *len_out)
+{
+	uint64_t len;
+	uint64_t page_sz;
+	char *file_name = (char *)(uintptr_t)name;
+	void *addr;
+	ishm_block_t *new_block = &ishm_tbl->block[new_index];
+	ishm_fragment_t *fragment = NULL;
+	char seq_string[ISHM_FILENAME_MAXLEN];
+
+	if (!file_name || !file_name[0])
+		file_name = create_seq_string(seq_string, ISHM_FILENAME_MAXLEN);
+
+	/* Common fd for all single VA blocks */
+	*fd = ishm_tbl->single_va_fd;
+
+	if (ishm_tbl->single_va_huge) {
+		page_sz = odp_sys_huge_page_size();
+		new_block->huge = HUGE;
+	} else {
+		page_sz = odp_sys_page_size();
+		new_block->huge = NORMAL;
+	}
+	new_block->filename[0] = 0;
+
+	len = (size + (page_sz - 1)) & (-page_sz);
+
+	if (align < page_sz)
+		align = page_sz;
+
+	/* Allocate memory from the pre-reserved single VA space */
+	addr = alloc_fragment(len, new_index, align, &fragment);
+	if (!addr) {
+		ODP_ERR("alloc_fragment failed.\n");
+		return NULL;
+	}
+	new_block->fragment = fragment;
+
+	/* Create export info file */
+	if (flags & _ODP_ISHM_EXPORT) {
+		uint64_t offset = (uintptr_t)addr -
+				  (uintptr_t)ishm_tbl->single_va_start;
+		memcpy(new_block->filename, ishm_tbl->single_va_filename,
+		       ISHM_FILENAME_MAXLEN);
+
+		create_export_file(new_block, file_name, len, flags, align,
+				   true, offset);
+	} else {
+		new_block->exptname[0] = 0;
+	}
+
+	*len_out = len;
+	return addr;
+}
+
+/*
  * Performs an extra mapping (for a process trying to see an existing block
- * i.e. performing a lookup).
+ * i.e. performing a lookup). Not to be used with _ODP_ISHM_SINGLE_VA blocks.
  * Mutex must be assured by the caller.
  */
 static void *do_remap(int block_index, int fd)
 {
 	void *mapped_addr;
-	ishm_fragment_t *fragment;
 	uint64_t len;
+	uint64_t offset;
 	uint32_t flags;
 
 	len   = ishm_tbl->block[block_index].len;
+	offset = ishm_tbl->block[block_index].offset;
 	flags = ishm_tbl->block[block_index].flags;
 
-	if (flags & _ODP_ISHM_SINGLE_VA) {
-		fragment = ishm_tbl->block[block_index].fragment;
-		if (!fragment) {
-			ODP_ERR("invalid fragment failure.\n");
-			return NULL;
-		}
-
-		/* try to mmap: */
-		mapped_addr = _odp_ishmphy_map(fd, fragment->start, len, flags);
-		if (mapped_addr == NULL)
-			return NULL;
-		return mapped_addr;
-	}
+	ODP_ASSERT(!(flags & _ODP_ISHM_SINGLE_VA));
 
 	/* try to mmap: */
-	mapped_addr = _odp_ishmphy_map(fd, NULL, len, flags);
+	mapped_addr = _odp_ishmphy_map(fd, len, offset, flags);
+
 	if (mapped_addr == NULL)
 		return NULL;
 
@@ -624,8 +851,8 @@ static void *do_remap(int block_index, int fd)
 }
 
 /*
- * Performs unmapping, possibly freeing a prereserved VA space fragment,
- * if the _ODP_ISHM_SINGLE_VA flag was set at alloc time
+ * Performs unmapping, possibly freeing a pre-reserved single VA memory
+ * fragment, if the _ODP_ISHM_SINGLE_VA flag was set at alloc time.
  * Mutex must be assured by the caller.
  */
 static int do_unmap(void *start, uint64_t size, uint32_t flags,
@@ -669,56 +896,6 @@ static int find_block_by_name(const char *name)
 }
 
 /*
- * Search for a block by address (only works when flag _ODP_ISHM_SINGLE_VA
- * was set at reserve() time, or if the block is already known by this
- * process).
- * Search is performed in the process table and in the global ishm table.
- * The provided address does not have to be at start: any address
- * within the fragment is OK.
- * Returns the index to the found block (if any) or -1 if none.
- * Mutex must be assured by the caller.
- */
-static int find_block_by_address(void *addr)
-{
-	int block_index;
-	int i;
-	ishm_fragment_t *fragmnt;
-
-	/*
-	 * first check if there is already a process known block for this
-	 * address
-	 */
-	for (i = 0; i < ishm_proctable->nb_entries; i++) {
-		block_index = ishm_proctable->entry[i].block_index;
-		if ((addr > ishm_proctable->entry[i].start) &&
-		    ((char *)addr < ((char *)ishm_proctable->entry[i].start +
-				     ishm_tbl->block[block_index].len)))
-			return block_index;
-	}
-
-	/*
-	 * then check if there is a existing single VA block known by some other
-	 * process and containing the given address
-	 */
-	for (i = 0; i < ISHM_MAX_NB_BLOCKS; i++) {
-		if ((!ishm_tbl->block[i].len) ||
-		    (!(ishm_tbl->block[i].flags & _ODP_ISHM_SINGLE_VA)))
-			continue;
-		fragmnt = ishm_tbl->block[i].fragment;
-		if (!fragmnt) {
-			ODP_ERR("find_fragment: invalid NULL fragment\n");
-			return -1;
-		}
-		if ((addr >= fragmnt->start) &&
-		    ((char *)addr < ((char *)fragmnt->start + fragmnt->len)))
-			return i;
-	}
-
-	/* address does not belong to any accessible block: */
-	return -1;
-}
-
-/*
  * Search a given ishm block in the process local table. Return its index
  * in the process table or -1 if not found (meaning that the ishm table
  * block index was not referenced in the process local table, i.e. the
@@ -755,7 +932,9 @@ static void procsync(void)
 		block = &ishm_tbl->block[ishm_proctable->entry[i].block_index];
 		if (ishm_proctable->entry[i].seq != block->seq) {
 			/* obsolete entry: free memory and remove proc entry */
-			close(ishm_proctable->entry[i].fd);
+			if (ishm_proctable->entry[i].fd !=
+			    ishm_tbl->single_va_fd)
+				close(ishm_proctable->entry[i].fd);
 			_odp_ishmphy_unmap(ishm_proctable->entry[i].start,
 					   ishm_proctable->entry[i].len,
 					   ishm_proctable->entry[i].flags);
@@ -791,6 +970,8 @@ static int block_free_internal(int block_index, int close_fd, int deregister)
 
 	proc_index = procfind_block(block_index);
 	if (proc_index >= 0) {
+		int fd = ishm_proctable->entry[proc_index].fd;
+
 		/* remove the mapping and possible fragment */
 		do_unmap(ishm_proctable->entry[proc_index].start,
 			 block->len,
@@ -798,8 +979,12 @@ static int block_free_internal(int block_index, int close_fd, int deregister)
 			 block_index);
 
 		/* close the related fd */
-		if (close_fd)
-			close(ishm_proctable->entry[proc_index].fd);
+		if (close_fd && (fd != ishm_tbl->single_va_fd)) {
+			if (block->huge == CACHED)
+				hp_put_cached(fd);
+			else
+				close(fd);
+		}
 
 		/* remove entry from process local table: */
 		last = ishm_proctable->nb_entries - 1;
@@ -839,17 +1024,17 @@ static int block_free_internal(int block_index, int close_fd, int deregister)
  * main block table (>=0) or -1 on error.
  */
 int _odp_ishm_reserve(const char *name, uint64_t size, int fd,
-		      uint32_t align, uint32_t flags, uint32_t user_flags)
+		      uint32_t align, uint64_t offset,  uint32_t flags,
+		      uint32_t user_flags)
 {
 	int new_index;			      /* index in the main block table*/
 	ishm_block_t *new_block;	      /* entry in the main block table*/
 	uint64_t page_sz;		      /* normal page size. usually 4K*/
 	uint64_t page_hp_size;		      /* huge page size */
 	uint32_t hp_align;
-	uint64_t len;			      /* mapped length */
+	uint64_t len = 0;		      /* mapped length */
 	void *addr = NULL;		      /* mapping address */
 	int new_proc_entry;
-	struct stat statbuf;
 	static int  huge_error_printed;       /* to avoid millions of error...*/
 
 	odp_spinlock_lock(&ishm_tbl->lock);
@@ -884,24 +1069,20 @@ int _odp_ishm_reserve(const char *name, uint64_t size, int fd,
 	else
 		new_block->name[0] = 0;
 
+	new_block->offset = 0;
+
 	/* save user data: */
 	new_block->user_flags = user_flags;
 	new_block->user_len = size;
 
 	/* If a file descriptor is provided, get the real size and map: */
 	if (fd >= 0) {
-		if (fstat(fd, &statbuf) < 0) {
-			odp_spinlock_unlock(&ishm_tbl->lock);
-			ODP_ERR("_ishm_reserve failed (fstat failed: %s).\n",
-				strerror(errno));
-			__odp_errno = errno;
-			return -1;
-		}
-		len = statbuf.st_size;
 		new_block->external_fd = 1;
-		/* note that the huge page flag is meningless here as huge
+		len = size;
+		/* note that the huge page flag is meaningless here as huge
 		 * page is determined by the provided file descriptor: */
-		addr = do_map(new_index, len, align, flags, EXTERNAL, &fd);
+		addr = do_map(new_index, len, align, offset, flags, EXTERNAL,
+			      &fd);
 		if (addr == NULL) {
 			odp_spinlock_unlock(&ishm_tbl->lock);
 			ODP_ERR("_ishm_reserve failed.\n");
@@ -910,10 +1091,12 @@ int _odp_ishm_reserve(const char *name, uint64_t size, int fd,
 		new_block->huge = EXTERNAL;
 	} else {
 		new_block->external_fd = 0;
+		new_block->huge = UNKNOWN;
 	}
 
 	/* Otherwise, Try first huge pages when possible and needed: */
-	if ((fd < 0) && page_hp_size && (size > page_sz)) {
+	if ((fd < 0) && page_hp_size && ((flags &  _ODP_ISHM_USE_HP) ||
+					 size > ishm_tbl->huge_page_limit)) {
 		/* at least, alignment in VA should match page size, but user
 		 * can request more: If the user requirement exceeds the page
 		 * size then we have to make sure the block will be mapped at
@@ -925,19 +1108,42 @@ int _odp_ishm_reserve(const char *name, uint64_t size, int fd,
 		else
 			flags |= _ODP_ISHM_SINGLE_VA;
 
+		if (flags & _ODP_ISHM_SINGLE_VA)
+			goto use_single_va;
+
 		/* roundup to page size */
 		len = (size + (page_hp_size - 1)) & (-page_hp_size);
-		addr = do_map(new_index, len, hp_align, flags, HUGE, &fd);
 
-		if (addr == NULL) {
-			if (!huge_error_printed) {
-				ODP_ERR("No huge pages, fall back to normal "
-					"pages. "
-					"check: /proc/sys/vm/nr_hugepages.\n");
-				huge_error_printed = 1;
+		/* try pre-allocated pages */
+		fd = hp_get_cached(len);
+		if (fd != -1) {
+			/* do as if user provided a fd */
+			new_block->external_fd = 1;
+			addr = do_map(new_index, len, hp_align, 0, flags,
+				      CACHED, &fd);
+			if (addr == NULL) {
+				ODP_ERR("Could not use cached hp %d\n",
+					fd);
+				hp_put_cached(fd);
+				fd = -1;
+			} else {
+				new_block->huge = CACHED;
 			}
-		} else {
-			new_block->huge = HUGE;
+		}
+		if (fd == -1) {
+			addr = do_map(new_index, len, hp_align, 0, flags, HUGE,
+				      &fd);
+
+			if (addr == NULL) {
+				if (!huge_error_printed) {
+					ODP_ERR("No huge pages, fall back to "
+						"normal pages. Check: "
+						"/proc/sys/vm/nr_hugepages.\n");
+					huge_error_printed = 1;
+				}
+			} else {
+				new_block->huge = HUGE;
+			}
 		}
 	}
 
@@ -953,16 +1159,29 @@ int _odp_ishm_reserve(const char *name, uint64_t size, int fd,
 		else
 			flags |= _ODP_ISHM_SINGLE_VA;
 
+		if (flags & _ODP_ISHM_SINGLE_VA)
+			goto use_single_va;
+
 		/* roundup to page size */
 		len = (size + (page_sz - 1)) & (-page_sz);
-		addr = do_map(new_index, len, align, flags, NORMAL, &fd);
+		addr = do_map(new_index, len, align, 0, flags, NORMAL, &fd);
 		new_block->huge = NORMAL;
 	}
 
+use_single_va:
+	/* Reserve memory from single VA space */
+	if (fd < 0 && (flags & _ODP_ISHM_SINGLE_VA))
+		addr = alloc_single_va(name, new_index, size, align, flags, &fd,
+				       &len);
+
 	/* if neither huge pages or normal pages works, we cannot proceed: */
 	if ((fd < 0) || (addr == NULL) || (len == 0)) {
-		if ((!new_block->external_fd) && (fd >= 0))
+		if (new_block->external_fd) {
+			if (new_block->huge == CACHED)
+				hp_put_cached(fd);
+		} else if (fd >= 0 && (fd != ishm_tbl->single_va_fd)) {
 			close(fd);
+		}
 		delete_file(new_block);
 		odp_spinlock_unlock(&ishm_tbl->lock);
 		ODP_ERR("_ishm_reserve failed.\n");
@@ -998,6 +1217,65 @@ int _odp_ishm_reserve(const char *name, uint64_t size, int fd,
 }
 
 /*
+ * Pre-reserve all single VA memory. Called only in global init.
+ */
+static void *reserve_single_va(uint64_t size, int *fd_out)
+{
+	uint64_t page_sz;	/* normal page size. usually 4K*/
+	uint64_t page_hp_size;	/* huge page size */
+	uint64_t len;		/* mapped length */
+	int fd = -1;
+	void *addr = NULL;
+
+	/* Get system page sizes: page_hp_size is 0 if no huge page available*/
+	page_sz      = odp_sys_page_size();
+	page_hp_size = odp_sys_huge_page_size();
+
+	/* Try first huge pages when possible and needed: */
+	if (page_hp_size && (size > page_sz)) {
+		/* roundup to page size */
+		len = (size + (page_hp_size - 1)) & (-page_hp_size);
+		fd = create_file(-1, HUGE, len, 0, 0, true);
+		if (fd >= 0) {
+			addr = _odp_ishmphy_reserve_single_va(len, fd);
+			if (!addr) {
+				close(fd);
+				unlink(ishm_tbl->single_va_filename);
+				fd = -1;
+			}
+		}
+		if (fd < 0)
+			ODP_ERR("No huge pages, fall back to normal pages. "
+				"Check: /proc/sys/vm/nr_hugepages.\n");
+		ishm_tbl->single_va_huge = true;
+	}
+
+	/* Fall back to normal pages if necessary */
+	if (fd < 0) {
+		/* roundup to page size */
+		len = (size + (page_sz - 1)) & (-page_sz);
+
+		fd = create_file(-1, NORMAL, len, 0, 0, true);
+		if (fd >= 0)
+			addr = _odp_ishmphy_reserve_single_va(len, fd);
+		ishm_tbl->single_va_huge = false;
+	}
+
+	/* If neither huge pages or normal pages works, we cannot proceed: */
+	if ((fd < 0) || (len == 0) || !addr) {
+		if (fd >= 0) {
+			close(fd);
+			unlink(ishm_tbl->single_va_filename);
+		}
+		ODP_ERR("Reserving single VA memory failed.\n");
+		return NULL;
+	}
+
+	*fd_out = fd;
+	return addr;
+}
+
+/*
  * Try to map an memory block mapped by another ODP instance into the
  * current ODP instance.
  * returns 0 on success.
@@ -1012,6 +1290,7 @@ int _odp_ishm_find_exported(const char *remote_name, pid_t external_odp_pid,
 	uint64_t len;
 	uint32_t flags;
 	uint64_t user_len;
+	uint64_t offset;
 	uint32_t user_flags;
 	uint32_t align;
 	int fd;
@@ -1020,8 +1299,8 @@ int _odp_ishm_find_exported(const char *remote_name, pid_t external_odp_pid,
 	/* try to read the block description file: */
 	snprintf(export_filename, ISHM_FILENAME_MAXLEN,
 		 ISHM_EXPTNAME_FORMAT,
-		 odp_global_data.shm_dir,
-		 odp_global_data.uid,
+		 odp_global_ro.shm_dir,
+		 odp_global_ro.uid,
 		 external_odp_pid,
 		 remote_name);
 
@@ -1056,6 +1335,9 @@ int _odp_ishm_find_exported(const char *remote_name, pid_t external_odp_pid,
 	if (fscanf(export_file, EXPORT_FILE_LINE8_FMT " ", &align) != 1)
 		goto error_exp_file;
 
+	if (fscanf(export_file, EXPORT_FILE_LINE9_FMT " ", &offset) != 1)
+		goto error_exp_file;
+
 	fclose(export_file);
 
 	/* now open the filename given in the description file: */
@@ -1066,15 +1348,21 @@ int _odp_ishm_find_exported(const char *remote_name, pid_t external_odp_pid,
 		return -1;
 	}
 
-	/* clear the _ODP_ISHM_EXPORT flag so we don't export that again*/
+	/* Clear the _ODP_ISHM_EXPORT flag so we don't export again. Single
+	 * VA doesn't hold up after export. */
 	flags &= ~(uint32_t)_ODP_ISHM_EXPORT;
+	flags &= ~(uint32_t)_ODP_ISHM_SINGLE_VA;
 
 	/* reserve the memory, providing the opened file descriptor: */
-	block_index = _odp_ishm_reserve(local_name, 0, fd, align, flags, 0);
+	block_index = _odp_ishm_reserve(local_name, len, fd, align, offset,
+					flags, 0);
 	if (block_index < 0) {
 		close(fd);
 		return block_index;
 	}
+
+	/* Offset is required to remap the block to other processes */
+	ishm_tbl->block[block_index].offset = offset;
 
 	/* set inherited info: */
 	ishm_tbl->block[block_index].user_flags = user_flags;
@@ -1117,59 +1405,6 @@ int _odp_ishm_free_by_index(int block_index)
 }
 
 /*
- * free and unmap internal shared memory, identified by its block name:
- * return -1 on error. 0 if OK.
- */
-int _odp_ishm_free_by_name(const char *name)
-{
-	int block_index;
-	int ret;
-
-	odp_spinlock_lock(&ishm_tbl->lock);
-	procsync();
-
-	/* search the block in main ishm table */
-	block_index = find_block_by_name(name);
-	if (block_index < 0) {
-		ODP_ERR("Request to free an non existing block..."
-			" (double free?)\n");
-		odp_spinlock_unlock(&ishm_tbl->lock);
-		return -1;
-	}
-
-	ret = block_free(block_index);
-	odp_spinlock_unlock(&ishm_tbl->lock);
-	return ret;
-}
-
-/*
- * Free and unmap internal shared memory identified by address:
- * return -1 on error. 0 if OK.
- */
-int _odp_ishm_free_by_address(void *addr)
-{
-	int block_index;
-	int ret;
-
-	odp_spinlock_lock(&ishm_tbl->lock);
-	procsync();
-
-	/* search the block in main ishm table */
-	block_index = find_block_by_address(addr);
-	if (block_index < 0) {
-		ODP_ERR("Request to free an non existing block..."
-			" (double free?)\n");
-		odp_spinlock_unlock(&ishm_tbl->lock);
-		return -1;
-	}
-
-	ret = block_free(block_index);
-
-	odp_spinlock_unlock(&ishm_tbl->lock);
-	return ret;
-}
-
-/*
  * Lookup for an ishm shared memory, identified by its block index
  * in the main ishm block table.
  * Map this ishm area in the process VA (if not already present).
@@ -1206,7 +1441,12 @@ static void *block_lookup(int block_index)
 	/* perform the mapping */
 	block = &ishm_tbl->block[block_index];
 
-	mapped_addr = do_remap(block_index, fd);
+	/* No need to remap single VA */
+	if (block->flags & _ODP_ISHM_SINGLE_VA)
+		mapped_addr = block->start;
+	else
+		mapped_addr = do_remap(block_index, fd);
+
 	if (mapped_addr == NULL) {
 		ODP_ERR(" lookup: Could not map existing shared memory!\n");
 		return NULL;
@@ -1226,28 +1466,9 @@ static void *block_lookup(int block_index)
 }
 
 /*
- * Lookup for an ishm shared memory, identified by its block_index.
- * Maps this ishmem area in the process VA (if not already present).
- * Returns the block user address, or NULL  if the index
- * does not match any known ishm blocks.
- */
-void *_odp_ishm_lookup_by_index(int block_index)
-{
-	void *ret;
-
-	odp_spinlock_lock(&ishm_tbl->lock);
-	procsync();
-
-	ret = block_lookup(block_index);
-	odp_spinlock_unlock(&ishm_tbl->lock);
-	return ret;
-}
-
-/*
  * Lookup for an ishm shared memory, identified by its block name.
- * Map this ishm area in the process VA (if not already present).
- * Return the block index, or -1  if the index
- * does not match any known ishm blocks.
+ * Return the block index, or -1  if the index does not match any known ishm
+ * blocks.
  */
 int _odp_ishm_lookup_by_name(const char *name)
 {
@@ -1258,68 +1479,25 @@ int _odp_ishm_lookup_by_name(const char *name)
 
 	/* search the block in main ishm table: return -1 if not found: */
 	block_index = find_block_by_name(name);
-	if ((block_index < 0) || (!block_lookup(block_index))) {
-		odp_spinlock_unlock(&ishm_tbl->lock);
-		return -1;
-	}
 
 	odp_spinlock_unlock(&ishm_tbl->lock);
 	return block_index;
 }
 
 /*
- * Lookup for an ishm shared memory block, identified by its VA address.
- * This works only if the block has already been looked-up (mapped) by the
- * current process or it it was created with the _ODP_ISHM_SINGLE_VA flag.
- * Map this ishm area in the process VA (if not already present).
- * Return the block index, or -1  if the address
- * does not match any known ishm blocks.
- */
-int _odp_ishm_lookup_by_address(void *addr)
-{
-	int block_index;
-
-	odp_spinlock_lock(&ishm_tbl->lock);
-	procsync();
-
-	/* search the block in main ishm table: return -1 if not found: */
-	block_index = find_block_by_address(addr);
-	if ((block_index < 0) || (!block_lookup(block_index))) {
-		odp_spinlock_unlock(&ishm_tbl->lock);
-		return -1;
-	}
-
-	odp_spinlock_unlock(&ishm_tbl->lock);
-	return block_index;
-}
-
-/*
- * Returns the VA address of a given block (which has to be known in the current
- * process). Returns NULL if the block is unknown.
+ * Returns the VA address of a given block. Maps this ishm area in the process
+ * VA (if not already present).
+ * Returns NULL if the block is unknown.
  */
 void *_odp_ishm_address(int block_index)
 {
-	int proc_index;
 	void *addr;
 
 	odp_spinlock_lock(&ishm_tbl->lock);
 	procsync();
 
-	if ((block_index < 0) ||
-	    (block_index >= ISHM_MAX_NB_BLOCKS) ||
-	    (ishm_tbl->block[block_index].len == 0)) {
-		ODP_ERR("Request for address on an invalid block\n");
-		odp_spinlock_unlock(&ishm_tbl->lock);
-		return NULL;
-	}
+	addr = block_lookup(block_index);
 
-	proc_index = procfind_block(block_index);
-	if (proc_index < 0) {
-		odp_spinlock_unlock(&ishm_tbl->lock);
-		return NULL;
-	}
-
-	addr = ishm_proctable->entry[proc_index].start;
 	odp_spinlock_unlock(&ishm_tbl->lock);
 	return addr;
 }
@@ -1415,7 +1593,7 @@ int _odp_ishm_cleanup_files(const char *dirpath)
 	int p_len;
 	int f_len;
 
-	snprintf(userdir, PATH_MAX, "%s/%s", dirpath, odp_global_data.uid);
+	snprintf(userdir, PATH_MAX, "%s/%s", dirpath, odp_global_ro.uid);
 
 	dir = opendir(userdir);
 	if (!dir) {
@@ -1424,7 +1602,7 @@ int _odp_ishm_cleanup_files(const char *dirpath)
 			dirpath, strerror(errno));
 		return 0;
 	}
-	snprintf(prefix, PATH_MAX, _ODP_FILES_FMT, odp_global_data.main_pid);
+	snprintf(prefix, PATH_MAX, _ODP_FILES_FMT, odp_global_ro.main_pid);
 	p_len = strlen(prefix);
 	while ((e = readdir(dir)) != NULL) {
 		if (strncmp(e->d_name, prefix, p_len) == 0) {
@@ -1451,39 +1629,60 @@ int _odp_ishm_cleanup_files(const char *dirpath)
 int _odp_ishm_init_global(const odp_init_t *init)
 {
 	void *addr;
-	void *spce_addr;
+	void *spce_addr = NULL;
 	int i;
+	int val_kb;
 	uid_t uid;
-	char *hp_dir = odp_global_data.hugepage_info.default_huge_page_dir;
-	uint64_t align;
-	uint64_t max_memory = ODP_CONFIG_ISHM_VA_PREALLOC_SZ;
-	uint64_t internal   = ODP_CONFIG_ISHM_VA_PREALLOC_SZ / 8;
+	char *hp_dir = odp_global_ro.hugepage_info.default_huge_page_dir;
+	uint64_t max_memory;
+	uint64_t internal;
+	uint64_t huge_page_limit;
+
+	if (!_odp_libconfig_lookup_ext_int("shm", NULL, "single_va_size_kb",
+					   &val_kb)) {
+		ODP_ERR("Unable to read single VA size from config\n");
+		return -1;
+	}
+
+	ODP_DBG("Shm single VA size: %dkB\n", val_kb);
+
+	max_memory = (uint64_t)val_kb * 1024;
+	internal   = max_memory / 8;
+
+	if (!_odp_libconfig_lookup_ext_int("shm", NULL, "huge_page_limit_kb",
+					   &val_kb)) {
+		ODP_ERR("Unable to read huge page usage limit from config\n");
+		return -1;
+	}
+	huge_page_limit = (uint64_t)val_kb * 1024;
+
+	ODP_DBG("Shm huge page usage limit: %dkB\n", val_kb);
 
 	/* user requested memory size + some extra for internal use */
 	if (init && init->shm.max_memory)
 		max_memory = init->shm.max_memory + internal;
 
-	odp_global_data.shm_max_memory = max_memory;
-	odp_global_data.shm_max_size   = max_memory - internal;
-	odp_global_data.main_pid = getpid();
-	odp_global_data.shm_dir = getenv("ODP_SHM_DIR");
-	if (odp_global_data.shm_dir) {
-		odp_global_data.shm_dir_from_env = 1;
+	odp_global_ro.shm_max_memory = max_memory;
+	odp_global_ro.shm_max_size   = max_memory - internal;
+	odp_global_ro.main_pid = getpid();
+	odp_global_ro.shm_dir = getenv("ODP_SHM_DIR");
+	if (odp_global_ro.shm_dir) {
+		odp_global_ro.shm_dir_from_env = 1;
 	} else {
-		odp_global_data.shm_dir =
+		odp_global_ro.shm_dir =
 			calloc(1, sizeof(ISHM_FILENAME_NORMAL_PAGE_DIR));
-		sprintf(odp_global_data.shm_dir, "%s",
+		sprintf(odp_global_ro.shm_dir, "%s",
 			ISHM_FILENAME_NORMAL_PAGE_DIR);
-		odp_global_data.shm_dir_from_env = 0;
+		odp_global_ro.shm_dir_from_env = 0;
 	}
 
-	ODP_DBG("ishm: using dir %s\n", odp_global_data.shm_dir);
+	ODP_DBG("ishm: using dir %s\n", odp_global_ro.shm_dir);
 
 	uid = getuid();
-	snprintf(odp_global_data.uid, UID_MAXLEN, "%d",
+	snprintf(odp_global_ro.uid, UID_MAXLEN, "%d",
 		 uid);
 
-	if ((syscall(SYS_gettid)) != odp_global_data.main_pid) {
+	if ((syscall(SYS_gettid)) != odp_global_ro.main_pid) {
 		ODP_ERR("ishm init must be performed by the main "
 			"ODP process!\n.");
 		return -1;
@@ -1491,14 +1690,12 @@ int _odp_ishm_init_global(const odp_init_t *init)
 
 	if (!hp_dir) {
 		ODP_DBG("NOTE: No support for huge pages\n");
-		align = odp_sys_page_size();
 	} else {
 		ODP_DBG("Huge pages mount point is: %s\n", hp_dir);
 		_odp_ishm_cleanup_files(hp_dir);
-		align = odp_sys_huge_page_size();
 	}
 
-	_odp_ishm_cleanup_files(odp_global_data.shm_dir);
+	_odp_ishm_cleanup_files(odp_global_ro.shm_dir);
 
 	/* allocate space for the internal shared mem block table: */
 	addr = mmap(NULL, sizeof(ishm_table_t),
@@ -1511,6 +1708,7 @@ int _odp_ishm_init_global(const odp_init_t *init)
 	memset(ishm_tbl, 0, sizeof(ishm_table_t));
 	ishm_tbl->dev_seq = 0;
 	ishm_tbl->odpthread_cnt = 0;
+	ishm_tbl->huge_page_limit = huge_page_limit;
 	odp_spinlock_init(&ishm_tbl->lock);
 
 	/* allocate space for the internal shared mem fragment table: */
@@ -1523,14 +1721,16 @@ int _odp_ishm_init_global(const odp_init_t *init)
 	ishm_ftbl = addr;
 	memset(ishm_ftbl, 0, sizeof(ishm_ftable_t));
 
-	/*
-	 *reserve the address space for _ODP_ISHM_SINGLE_VA reserved blocks,
-	 * only address space!
-	 */
-	spce_addr = _odp_ishmphy_book_va(max_memory, align);
-	if (!spce_addr) {
-		ODP_ERR("unable to reserve virtual space\n.");
-		goto init_glob_err3;
+	/* Reserve memory for _ODP_ISHM_SINGLE_VA reserved blocks */
+	ishm_tbl->single_va_fd = -1;
+	if (max_memory) {
+		spce_addr = reserve_single_va(max_memory,
+					      &ishm_tbl->single_va_fd);
+		if (!spce_addr) {
+			ODP_ERR("unable to reserve single VA memory\n.");
+			goto init_glob_err3;
+		}
+		ishm_tbl->single_va_start = spce_addr;
 	}
 
 	/* use the first fragment descriptor to describe to whole VA space: */
@@ -1564,11 +1764,14 @@ int _odp_ishm_init_global(const odp_init_t *init)
 	/* get ready to create pools: */
 	_odp_ishm_pool_init();
 
+	/* init cache files */
+	hp_init();
+
 	return 0;
 
 init_glob_err4:
-	if (_odp_ishmphy_unbook_va())
-		ODP_ERR("unable to unbook virtual space\n.");
+	if (_odp_ishmphy_free_single_va())
+		ODP_ERR("unable to free single VA memory\n.");
 init_glob_err3:
 	if (munmap(ishm_ftbl, sizeof(ishm_ftable_t)) < 0)
 		ODP_ERR("unable to munmap main fragment table\n.");
@@ -1585,7 +1788,7 @@ int _odp_ishm_init_local(void)
 	 * Do not re-run this for the main ODP process, as it has already
 	 * been done in advance at _odp_ishm_init_global() time:
 	 */
-	if ((getpid() == odp_global_data.main_pid) &&
+	if ((getpid() == odp_global_ro.main_pid) &&
 	    (syscall(SYS_gettid) == getpid()))
 		return 0;
 
@@ -1666,9 +1869,10 @@ int _odp_ishm_term_global(void)
 {
 	int ret = 0;
 	int index;
+	int fd = ishm_tbl->single_va_fd;
 	ishm_block_t *block;
 
-	if ((getpid() != odp_global_data.main_pid) ||
+	if ((getpid() != odp_global_ro.main_pid) ||
 	    (syscall(SYS_gettid) != getpid()))
 		ODP_ERR("odp_term_global() must be performed by the main "
 			"ODP process!\n.");
@@ -1687,6 +1891,9 @@ int _odp_ishm_term_global(void)
 	/* perform the last thread terminate which was postponed: */
 	ret = do_odp_ishm_term_local();
 
+	/* remove the file from the filesystem, keeping its fd open */
+	unlink(ishm_tbl->single_va_filename);
+
 	/* free the fragment table */
 	if (munmap(ishm_ftbl, sizeof(ishm_ftable_t)) < 0) {
 		ret |= -1;
@@ -1698,12 +1905,18 @@ int _odp_ishm_term_global(void)
 		ODP_ERR("unable to munmap main table\n.");
 	}
 
-	/* free the reserved VA space */
-	if (_odp_ishmphy_unbook_va())
+	/* free the reserved single VA memory */
+	if (_odp_ishmphy_free_single_va())
 		ret |= -1;
+	if ((fd >= 0) && close(fd)) {
+		ret |= -1;
+		ODP_ERR("unable to close single VA\n.");
+	}
 
-	if (!odp_global_data.shm_dir_from_env)
-		free(odp_global_data.shm_dir);
+	if (!odp_global_ro.shm_dir_from_env)
+		free(odp_global_ro.shm_dir);
+
+	hp_term();
 
 	return ret;
 }
@@ -1730,6 +1943,8 @@ int _odp_ishm_status(const char *title)
 	int nb_blocks = 0;
 	int single_va_blocks = 0;
 	int max_name_len = 0;
+	uint64_t lost_total = 0; /* statistics for total unused memory */
+	uint64_t len_total = 0;  /* statistics for total allocated memory */
 
 	odp_spinlock_lock(&ishm_tbl->lock);
 	procsync();
@@ -1747,10 +1962,10 @@ int _odp_ishm_status(const char *title)
 			max_name_len = str_len;
 	}
 
-	ODP_PRINT("ishm blocks allocated at: %s\n", title);
-
-	ODP_PRINT("    %-*s flag len        user_len seq ref start        fd"
-		  "  file\n", max_name_len, "name");
+	ODP_PRINT("%s\n", title);
+	ODP_PRINT("    %-*s flag %-29s %-08s   %-08s %-3s %-3s %-3s file\n",
+		  max_name_len, "name", "range", "user_len", "unused",
+		  "seq", "ref", "fd");
 
 	/* display block table: 1 line per entry +1 extra line if mapped here */
 	for (i = 0; i < ISHM_MAX_NB_BLOCKS; i++) {
@@ -1776,27 +1991,43 @@ int _odp_ishm_status(const char *title)
 		case EXTERNAL:
 			huge = 'E';
 			break;
+		case CACHED:
+			huge = 'C';
+			break;
 		default:
 			huge = '?';
 		}
 		proc_index = procfind_block(i);
-		ODP_PRINT("%2i  %-*s %s%c  0x%-08lx %-8lu %-3lu %-3lu",
+		lost_total += ishm_tbl->block[i].len -
+			      ishm_tbl->block[i].user_len;
+		len_total += ishm_tbl->block[i].len;
+		ODP_PRINT("%2i  %-*s %s%c  0x%-08lx-0x%08lx %-08ld   %-08ld %-3lu %-3lu",
 			  i, max_name_len, ishm_tbl->block[i].name,
 			  flags, huge,
-			  ishm_tbl->block[i].len,
+			  ishm_proctable->entry[proc_index].start,
+			  (uintptr_t)ishm_proctable->entry[proc_index].start +
+				ishm_tbl->block[i].len,
 			  ishm_tbl->block[i].user_len,
+			  ishm_tbl->block[i].len - ishm_tbl->block[i].user_len,
 			  ishm_tbl->block[i].seq,
 			  ishm_tbl->block[i].refcnt);
 
 		if (proc_index < 0)
 			continue;
 
-		ODP_PRINT("%-08lx %-3d",
-			  ishm_proctable->entry[proc_index].start,
+		ODP_PRINT(" %-3d",
 			  ishm_proctable->entry[proc_index].fd);
 
-		ODP_PRINT("%s\n", ishm_tbl->block[i].filename);
+		ODP_PRINT("%s\n", ishm_tbl->block[i].filename[0] ?
+			  ishm_tbl->block[i].filename : "(none)");
 	}
+	ODP_PRINT("TOTAL: %58s%-08ld %2s%-08ld\n",
+		  "", len_total,
+		  "", lost_total);
+	ODP_PRINT("%65s(%dMB) %4s(%dMB)\n",
+		  "", len_total / 1024 / 1024,
+		  "", lost_total / 1024 / 1024);
+
 
 	/* display the virtual space allocations... : */
 	ODP_PRINT("\nishm virtual space:\n");
@@ -1895,6 +2126,9 @@ void _odp_ishm_print(int block_index)
 		break;
 	case EXTERNAL:
 		str = "external";
+		break;
+	case CACHED:
+		str = "cached";
 		break;
 	default:
 		str = "??";

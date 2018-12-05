@@ -113,6 +113,35 @@ int odp_schedule_multi(odp_queue_t *from, uint64_t wait, odp_event_t events[],
 		       int num);
 
 /**
+ * Schedule, wait for events
+ *
+ * Like odp_schedule_multi(), but waits infinitely for events.
+ *
+ * @param[out] from    Output parameter for the source queue (where the event
+ *                     was dequeued from). Ignored if NULL.
+ * @param[out] events  Event array for output
+ * @param      num     Maximum number of events to output
+ *
+ * @return Number of events outputted (1 ... num)
+ */
+int odp_schedule_multi_wait(odp_queue_t *from, odp_event_t events[], int num);
+
+/**
+ * Schedule, do not wait for events
+ *
+ * Like odp_schedule_multi(), but does not wait for events.
+ *
+ * @param[out] from    Output parameter for the source queue (where the event
+ *                     was dequeued from). Ignored if NULL.
+ * @param[out] events  Event array for output
+ * @param      num     Maximum number of events to output
+ *
+ * @return Number of events outputted (0 ... num)
+ */
+int odp_schedule_multi_no_wait(odp_queue_t *from, odp_event_t events[],
+			       int num);
+
+/**
  * Pause scheduling
  *
  * Pause global scheduling for this thread. After this call, all schedule calls
@@ -181,7 +210,48 @@ void odp_schedule_release_ordered(void);
 void odp_schedule_prefetch(int num);
 
 /**
+ * Maximum scheduling priority level
+ *
+ * This is the maximum value that can be set to 'prio' field in
+ * odp_schedule_param_t (e.g. @see odp_queue_create()). Queues with a higher
+ * priority value are served with higher priority than queues with a lower
+ * priority value.
+ *
+ * @return Maximum scheduling priority level
+ */
+int odp_schedule_max_prio(void);
+
+/**
+ * Minimum scheduling priority level
+ *
+ * This is the minimum value that can be set to 'prio' field in
+ * odp_schedule_param_t (e.g. @see odp_queue_create()). Queues with a higher
+ * priority value are served with higher priority than queues with a lower
+ * priority value.
+ *
+ * @return Minimum scheduling priority level
+ */
+int odp_schedule_min_prio(void);
+
+/**
+ * Default scheduling priority level
+ *
+ * This is the default value of 'prio' field in odp_schedule_param_t
+ * (e.g. @see odp_queue_param_init()). The default value should be suitable for
+ * an application that uses single priority level for all its queues (uses
+ * scheduler only for load balancing and synchronization). Typically,
+ * the default value is between minimum and maximum values, but with a few
+ * priority levels it may be close or equal to those.
+ *
+ * @return Default scheduling priority level
+ */
+int odp_schedule_default_prio(void);
+
+/**
  * Number of scheduling priorities
+ *
+ * The number of priority levels support by the scheduler. It equals to
+ * odp_schedule_max_prio() - odp_schedule_min_prio() + 1.
  *
  * @return Number of scheduling priorities
  */

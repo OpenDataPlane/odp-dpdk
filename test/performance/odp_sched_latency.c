@@ -549,9 +549,6 @@ static void parse_args(int argc, char *argv[], test_args_t *args)
 
 	static const char *shortopts = "+c:s:l:t:m:n:o:p:rh";
 
-	/* Let helper collect its own arguments (e.g. --odph_proc) */
-	argc = odph_parse_options(argc, argv);
-
 	args->cpu_count = 1;
 	args->sync_type = ODP_SCHED_SYNC_PARALLEL;
 	args->sample_per_prio = SAMPLE_EVENT_PER_PRIO;
@@ -637,26 +634,40 @@ static void parse_args(int argc, char *argv[], test_args_t *args)
 int main(int argc, char *argv[])
 {
 	odp_instance_t instance;
+	odp_init_t init_param;
+	odph_helper_options_t helper_options;
 	odph_odpthread_t *thread_tbl;
 	odph_odpthread_params_t thr_params;
 	odp_cpumask_t cpumask;
 	odp_pool_t pool;
+	odp_pool_capability_t pool_capa;
 	odp_pool_param_t params;
 	odp_shm_t shm;
 	test_globals_t *globals;
 	test_args_t args;
 	char cpumaskstr[ODP_CPUMASK_STR_SIZE];
+	uint32_t pool_size;
 	int i, j;
 	int ret = 0;
 	int num_workers = 0;
 
 	printf("\nODP scheduling latency benchmark starts\n\n");
 
+	/* Let helper collect its own arguments (e.g. --odph_proc) */
+	argc = odph_parse_options(argc, argv);
+	if (odph_options(&helper_options)) {
+		LOG_ERR("Error: reading ODP helper options failed.\n");
+		exit(EXIT_FAILURE);
+	}
+
+	odp_init_param_init(&init_param);
+	init_param.mem_model = helper_options.mem_model;
+
 	memset(&args, 0, sizeof(args));
 	parse_args(argc, argv, &args);
 
 	/* ODP global init */
-	if (odp_init_global(&instance, NULL, NULL)) {
+	if (odp_init_global(&instance, &init_param, NULL)) {
 		LOG_ERR("ODP global init failed.\n");
 		return -1;
 	}
@@ -706,10 +717,19 @@ int main(int argc, char *argv[])
 	/*
 	 * Create event pool
 	 */
+	if (odp_pool_capability(&pool_capa)) {
+		LOG_ERR("pool capa failed\n");
+		return -1;
+	}
+
+	pool_size = EVENT_POOL_SIZE;
+	if (pool_capa.buf.max_num && pool_capa.buf.max_num < EVENT_POOL_SIZE)
+		pool_size = pool_capa.buf.max_num;
+
 	odp_pool_param_init(&params);
 	params.buf.size  = sizeof(test_event_t);
 	params.buf.align = 0;
-	params.buf.num   = EVENT_POOL_SIZE;
+	params.buf.num   = pool_size;
 	params.type      = ODP_POOL_BUFFER;
 
 	pool = odp_pool_create("event_pool", &params);

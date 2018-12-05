@@ -19,9 +19,7 @@
 #include <odp_buffer_internal.h>
 #include <odp_pool_internal.h>
 #include <odp/api/timer.h>
-
-/* Minimum number of scheduling rounds between checking timer pools. */
-#define CONFIG_TIMER_RUN_RATELIMIT_ROUNDS 1
+#include <odp_global_data.h>
 
 /**
  * Internal Timeout header
@@ -38,22 +36,14 @@ typedef struct {
 	odp_timer_t timer;
 } odp_timeout_hdr_t;
 
-/*
- * Whether to run timer pool processing 'inline' (on worker cores) or in
- * background threads (thread-per-timerpool).
- *
- * If the application will use both scheduler and timer this flag is set
- * to true, otherwise false. This application conveys this information via
- * the 'not_used' bits in odp_init_t which are passed to odp_global_init().
- */
-extern odp_bool_t inline_timers;
-
-unsigned _timer_run(void);
+/* A larger decrement value should be used after receiving events compared to
+ * an 'empty' call. */
+unsigned int _timer_run(int dec);
 
 /* Static inline wrapper to minimize modification of schedulers. */
-static inline unsigned timer_run(void)
+static inline unsigned int timer_run(int dec)
 {
-	return inline_timers ? _timer_run() : 0;
+	return odp_global_rw->inline_timers ? _timer_run(dec) : 0;
 }
 
 #endif

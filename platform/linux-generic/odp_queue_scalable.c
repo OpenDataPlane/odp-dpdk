@@ -24,9 +24,11 @@
 #include <odp_pool_internal.h>
 #include <odp_queue_scalable_internal.h>
 #include <odp_schedule_if.h>
-#include <odp_ishm_internal.h>
+#include <odp_timer_internal.h>
+#include <odp_shm_internal.h>
 #include <odp_ishmpool_internal.h>
 #include <odp/api/plat/queue_inline_types.h>
+#include <odp_global_data.h>
 
 #include <string.h>
 #include <inttypes.h>
@@ -110,7 +112,7 @@ static int queue_init(queue_entry_t *queue, const char *name,
 
 	sched_elem = &queue->s.sched_elem;
 	ring_size = param->size > 0 ?
-		ROUNDUP_POWER2_U32(param->size) : CONFIG_QUEUE_SIZE;
+		ROUNDUP_POWER2_U32(param->size) : CONFIG_SCAL_QUEUE_SIZE;
 	strncpy(queue->s.name, name ? name : "", ODP_QUEUE_NAME_LEN - 1);
 	queue->s.name[ODP_QUEUE_NAME_LEN - 1] = 0;
 	memcpy(&queue->s.param, param, sizeof(odp_queue_param_t));
@@ -124,6 +126,8 @@ static int queue_init(queue_entry_t *queue, const char *name,
 		ring[ring_idx] = NULL;
 
 	queue->s.type = queue->s.param.type;
+	odp_atomic_init_u64(&queue->s.num_timers, 0);
+
 	queue->s.enqueue = _queue_enq;
 	queue->s.dequeue = _queue_deq;
 	queue->s.enqueue_multi = _queue_enq_multi;
@@ -163,6 +167,8 @@ static int queue_init(queue_entry_t *queue, const char *name,
 
 	/* Queue initialized successfully, add it to the sched group */
 	if (queue->s.type == ODP_QUEUE_TYPE_SCHED) {
+		int prio = odp_schedule_max_prio() - param->sched.prio;
+
 		if (queue->s.param.sched.sync == ODP_SCHED_SYNC_ORDERED) {
 			sched_elem->rwin =
 				rwin_alloc(queue_shm_pool,
@@ -173,9 +179,9 @@ static int queue_init(queue_entry_t *queue, const char *name,
 			}
 		}
 		sched_elem->sched_grp = param->sched.group;
-		sched_elem->sched_prio = param->sched.prio;
+		sched_elem->sched_prio = prio;
 		sched_elem->schedq =
-			sched_queue_add(param->sched.group, param->sched.prio);
+			sched_queue_add(param->sched.group, prio);
 		ODP_ASSERT(sched_elem->schedq != NULL);
 
 	}
@@ -203,33 +209,29 @@ static int queue_init_global(void)
 	_odp_queue_inline_offset.context = offsetof(queue_entry_t,
 						    s.param.context);
 
-	/* Attach to the pool if it exists */
-	queue_shm_pool = _odp_ishm_pool_lookup("queue_shm_pool");
+	/* Create shared memory pool to allocate shared memory for the
+	 * queues. Use the default queue size.
+	 */
+	/* Add size of the array holding the queues */
+	pool_size = sizeof(queue_table_t);
+	/* Add storage required for queues */
+	pool_size += (CONFIG_SCAL_QUEUE_SIZE *
+		      sizeof(odp_buffer_hdr_t *)) * ODP_CONFIG_QUEUES;
+
+	/* Add the reorder window size */
+	pool_size += sizeof(reorder_window_t) * ODP_CONFIG_QUEUES;
+	/* Choose min_alloc and max_alloc such that buddy allocator is
+	 * is selected.
+	 */
+	min_alloc = 0;
+	max_alloc = CONFIG_SCAL_QUEUE_SIZE * sizeof(odp_buffer_hdr_t *);
+	queue_shm_pool = _odp_ishm_pool_create("queue_shm_pool",
+					       pool_size,
+					       min_alloc, max_alloc, 0);
 	if (queue_shm_pool == NULL) {
-		/* Create shared memory pool to allocate shared memory for the
-		 * queues. Use the default queue size.
-		 */
-		/* Add size of the array holding the queues */
-		pool_size = sizeof(queue_table_t);
-		/* Add storage required for queues */
-		pool_size += (CONFIG_QUEUE_SIZE * sizeof(odp_buffer_hdr_t *)) *
-			     ODP_CONFIG_QUEUES;
-		/* Add the reorder window size */
-		pool_size += sizeof(reorder_window_t) * ODP_CONFIG_QUEUES;
-		/* Choose min_alloc and max_alloc such that buddy allocator is
-		 * is selected.
-		 */
-		min_alloc = 0;
-		max_alloc = CONFIG_QUEUE_SIZE * sizeof(odp_buffer_hdr_t *);
-		queue_shm_pool = _odp_ishm_pool_create("queue_shm_pool",
-						       pool_size,
-						       min_alloc, max_alloc,
-						       _ODP_ISHM_SINGLE_VA);
-		if (queue_shm_pool == NULL) {
-			ODP_ERR("Failed to allocate shared memory pool for"
-				" queues\n");
-			goto queue_shm_pool_create_failed;
-		}
+		ODP_ERR("Failed to allocate shared memory pool for"
+			" queues\n");
+		goto queue_shm_pool_create_failed;
 	}
 
 	queue_tbl = (queue_table_t *)
@@ -356,13 +358,24 @@ static odp_queue_t queue_create(const char *name,
 				const odp_queue_param_t *param)
 {
 	int queue_idx;
-	odp_queue_t handle = ODP_QUEUE_INVALID;
 	queue_entry_t *queue;
+	odp_queue_type_t type;
 	odp_queue_param_t default_param;
+	odp_queue_t handle = ODP_QUEUE_INVALID;
 
 	if (param == NULL) {
 		odp_queue_param_init(&default_param);
 		param = &default_param;
+	}
+
+	type = param->type;
+
+	if (type == ODP_QUEUE_TYPE_SCHED) {
+		if (param->sched.prio < odp_schedule_min_prio() ||
+		    param->sched.prio > odp_schedule_max_prio()) {
+			ODP_ERR("Bad queue priority: %i\n", param->sched.prio);
+			return ODP_QUEUE_INVALID;
+		}
 	}
 
 	for (queue_idx = 0; queue_idx < ODP_CONFIG_QUEUES; queue_idx++) {
@@ -837,20 +850,32 @@ static odp_buffer_hdr_t *_queue_deq(odp_queue_t handle)
 static int queue_deq_multi(odp_queue_t handle, odp_event_t ev[], int num)
 {
 	queue_entry_t *queue;
+	int ret;
 
 	if (num > QUEUE_MULTI_MAX)
 		num = QUEUE_MULTI_MAX;
 
 	queue = qentry_from_ext(handle);
-	return queue->s.dequeue_multi(handle, (odp_buffer_hdr_t **)ev, num);
+
+	ret = queue->s.dequeue_multi(handle, (odp_buffer_hdr_t **)ev, num);
+
+	if (odp_global_rw->inline_timers &&
+	    odp_atomic_load_u64(&queue->s.num_timers))
+		timer_run(ret ? 2 : 1);
+
+	return ret;
 }
 
 static odp_event_t queue_deq(odp_queue_t handle)
 {
-	queue_entry_t *queue;
+	queue_entry_t *queue = qentry_from_ext(handle);
+	odp_event_t ev = (odp_event_t)queue->s.dequeue(handle);
 
-	queue = qentry_from_ext(handle);
-	return (odp_event_t)queue->s.dequeue(handle);
+	if (odp_global_rw->inline_timers &&
+	    odp_atomic_load_u64(&queue->s.num_timers))
+		timer_run(ev != ODP_EVENT_INVALID ? 2 : 1);
+
+	return ev;
 }
 
 static void queue_param_init(odp_queue_param_t *params)
@@ -860,7 +885,7 @@ static void queue_param_init(odp_queue_param_t *params)
 	params->enq_mode = ODP_QUEUE_OP_MT;
 	params->deq_mode = ODP_QUEUE_OP_MT;
 	params->nonblocking = ODP_BLOCKING;
-	params->sched.prio = ODP_SCHED_PRIO_DEFAULT;
+	params->sched.prio = odp_schedule_default_prio();
 	params->sched.sync = ODP_SCHED_SYNC_PARALLEL;
 	params->sched.group = ODP_SCHED_GROUP_ALL;
 }
@@ -957,6 +982,20 @@ static int queue_orig_multi(odp_queue_t handle,
 							     buf_hdr, num);
 }
 
+static void queue_timer_add(odp_queue_t handle)
+{
+	queue_entry_t *queue = qentry_from_ext(handle);
+
+	odp_atomic_inc_u64(&queue->s.num_timers);
+}
+
+static void queue_timer_rem(odp_queue_t handle)
+{
+	queue_entry_t *queue = qentry_from_ext(handle);
+
+	odp_atomic_dec_u64(&queue->s.num_timers);
+}
+
 /* API functions */
 _odp_queue_api_fn_t queue_scalable_api = {
 	.queue_create = queue_create,
@@ -989,5 +1028,7 @@ queue_fn_t queue_scalable_fn = {
 	.get_pktin = queue_get_pktin,
 	.set_pktin = queue_set_pktin,
 	.set_enq_deq_fn = queue_set_enq_deq_func,
-	.orig_deq_multi = queue_orig_multi
+	.orig_deq_multi = queue_orig_multi,
+	.timer_add = queue_timer_add,
+	.timer_rem = queue_timer_rem
 };

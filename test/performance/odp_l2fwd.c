@@ -95,13 +95,6 @@ typedef struct {
 	int verbose;		/* Verbose output */
 } appl_args_t;
 
-static int exit_threads;	/* Break workers loop if set to 1 */
-
-static void sig_handler(int signo ODP_UNUSED)
-{
-	exit_threads = 1;
-}
-
 /* Statistics */
 typedef union ODP_ALIGNED_CACHE {
 	struct {
@@ -175,11 +168,18 @@ typedef struct {
 	 * Table index is pktio_index of the API. This is used by the sched
 	 * mode. */
 	uint8_t dst_port_from_idx[MAX_PKTIO_INDEXES];
+	/* Break workers loop if set to 1 */
+	int exit_threads;
 
 } args_t;
 
 /* Global pointer to args */
 static args_t *gbl_args;
+
+static void sig_handler(int signo ODP_UNUSED)
+{
+	gbl_args->exit_threads = 1;
+}
 
 /*
  * Drop packets which input parsing marked as containing errors.
@@ -336,7 +336,7 @@ static int run_worker_sched_mode(void *arg)
 	odp_barrier_wait(&gbl_args->init_barrier);
 
 	/* Loop packets */
-	while (!exit_threads) {
+	while (!gbl_args->exit_threads) {
 		odp_event_t  ev_tbl[MAX_PKT_BURST];
 		odp_packet_t pkt_tbl[MAX_PKT_BURST];
 		int sent;
@@ -453,7 +453,7 @@ static int run_worker_plain_queue_mode(void *arg)
 	odp_barrier_wait(&gbl_args->init_barrier);
 
 	/* Loop packets */
-	while (!exit_threads) {
+	while (!gbl_args->exit_threads) {
 		int sent;
 		unsigned tx_drops;
 		odp_event_t event[MAX_PKT_BURST];
@@ -579,7 +579,7 @@ static int run_worker_direct_mode(void *arg)
 	odp_barrier_wait(&gbl_args->init_barrier);
 
 	/* Loop packets */
-	while (!exit_threads) {
+	while (!gbl_args->exit_threads) {
 		int sent;
 		unsigned tx_drops;
 
@@ -867,7 +867,8 @@ static int print_speed_stats(int num_workers, stats_t **thr_stats,
 			pkts_prev = pkts;
 		}
 		elapsed += timeout;
-	} while (!exit_threads && (loop_forever || (elapsed < duration)));
+	} while (!gbl_args->exit_threads && (loop_forever ||
+		 (elapsed < duration)));
 
 	if (stats_enabled)
 		printf("TEST RESULT: %" PRIu64 " maximum packets per second.\n",
@@ -1183,9 +1184,6 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 
 	static const char *shortopts =  "+c:+t:+a:i:m:o:r:d:s:e:k:g:vh";
 
-	/* let helper collect its own arguments (e.g. --odph_proc) */
-	argc = odph_parse_options(argc, argv);
-
 	appl_args->time = 0; /* loop forever if time to run is 0 */
 	appl_args->accuracy = 1; /* get and print pps stats second */
 	appl_args->cpu_count = 1; /* use one worker by default */
@@ -1427,6 +1425,7 @@ static void create_groups(int num, odp_schedule_group_t *group)
  */
 int main(int argc, char *argv[])
 {
+	odph_helper_options_t helper_options;
 	odph_odpthread_t thread_tbl[MAX_WORKERS];
 	odp_pool_t pool;
 	int i;
@@ -1448,6 +1447,13 @@ int main(int argc, char *argv[])
 	odp_pool_capability_t pool_capa;
 	uint32_t pkt_len, pkt_num;
 
+	/* Let helper collect its own arguments (e.g. --odph_proc) */
+	argc = odph_parse_options(argc, argv);
+	if (odph_options(&helper_options)) {
+		LOG_ERR("Error: reading ODP helper options failed.\n");
+		exit(EXIT_FAILURE);
+	}
+
 	odp_init_param_init(&init);
 
 	/* List features not to be used (may optimize performance) */
@@ -1456,6 +1462,8 @@ int main(int argc, char *argv[])
 	init.not_used.feat.ipsec  = 1;
 	init.not_used.feat.timer  = 1;
 	init.not_used.feat.tm     = 1;
+
+	init.mem_model = helper_options.mem_model;
 
 	/* Signal handler has to be registered before global init in case ODP
 	 * implementation creates internal threads/processes. */
@@ -1682,7 +1690,7 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	exit_threads = 1;
+	gbl_args->exit_threads = 1;
 	if (gbl_args->appl.in_mode != DIRECT_RECV)
 		odp_barrier_wait(&gbl_args->term_barrier);
 

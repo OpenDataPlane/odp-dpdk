@@ -99,7 +99,6 @@ noinst_HEADERS = \
 		  include/odp_global_data.h \
 		  include/odp_init_internal.h \
 		  include/odp_ipsec_internal.h \
-		  include/odp_ishm_internal.h \
 		  include/odp_ishmphy_internal.h \
 		  include/odp_ishmpool_internal.h \
 		  include/odp_libconfig_internal.h \
@@ -189,7 +188,6 @@ __LIB__libodp_linux_la_SOURCES = \
 			   odp_rwlock_recursive.c \
 			   odp_schedule_basic.c \
 			   odp_schedule_if.c \
-			   odp_schedule_iquery.c \
 			   odp_schedule_scalable.c \
 			   odp_schedule_scalable_ordered.c \
 			   odp_schedule_sp.c \

@@ -19,9 +19,6 @@ extern const schedule_api_t schedule_sp_api;
 extern const schedule_fn_t schedule_basic_fn;
 extern const schedule_api_t schedule_basic_api;
 
-extern const schedule_fn_t schedule_iquery_fn;
-extern const schedule_api_t schedule_iquery_api;
-
 extern const schedule_fn_t  schedule_scalable_fn;
 extern const schedule_api_t schedule_scalable_api;
 
@@ -42,6 +39,16 @@ int odp_schedule_multi(odp_queue_t *from, uint64_t wait, odp_event_t events[],
 		       int num)
 {
 	return sched_api->schedule_multi(from, wait, events, num);
+}
+
+int odp_schedule_multi_wait(odp_queue_t *from, odp_event_t events[], int num)
+{
+	return sched_api->schedule_multi_wait(from, events, num);
+}
+
+int odp_schedule_multi_no_wait(odp_queue_t *from, odp_event_t events[], int num)
+{
+	return sched_api->schedule_multi_no_wait(from, events, num);
 }
 
 void odp_schedule_pause(void)
@@ -67,6 +74,21 @@ void odp_schedule_release_ordered(void)
 void odp_schedule_prefetch(int num)
 {
 	return sched_api->schedule_prefetch(num);
+}
+
+int odp_schedule_min_prio(void)
+{
+	return sched_api->schedule_min_prio();
+}
+
+int odp_schedule_max_prio(void)
+{
+	return sched_api->schedule_max_prio();
+}
+
+int odp_schedule_default_prio(void)
+{
+	return sched_api->schedule_default_prio();
 }
 
 int odp_schedule_num_prio(void)
@@ -154,9 +176,6 @@ int _odp_schedule_init_global(void)
 	} else if (!strcmp(sched, "sp")) {
 		sched_fn = &schedule_sp_fn;
 		sched_api = &schedule_sp_api;
-	} else if (!strcmp(sched, "iquery")) {
-		sched_fn = &schedule_iquery_fn;
-		sched_api = &schedule_iquery_api;
 	} else if (!strcmp(sched, "scalable")) {
 		sched_fn = &schedule_scalable_fn;
 		sched_api = &schedule_scalable_api;

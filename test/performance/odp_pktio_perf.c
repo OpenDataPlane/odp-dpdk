@@ -125,12 +125,18 @@ typedef struct {
 	odp_barrier_t tx_barrier;
 	odp_pktio_t pktio_tx;
 	odp_pktio_t pktio_rx;
+	/* Pool from which transmitted packets are allocated */
+	odp_pool_t transmit_pkt_pool;
 	pkt_rx_stats_t *rx_stats;
 	pkt_tx_stats_t *tx_stats;
 	uint8_t src_mac[ODPH_ETHADDR_LEN];
 	uint8_t dst_mac[ODPH_ETHADDR_LEN];
 	uint32_t rx_stats_size;
 	uint32_t tx_stats_size;
+	/* Indicate to the receivers to shutdown */
+	odp_atomic_u32_t shutdown;
+	/* Sequence number of IP packets */
+	odp_atomic_u32_t ODP_ALIGNED_CACHE ip_seq;
 } test_globals_t;
 
 /* Status of max rate search */
@@ -152,15 +158,6 @@ typedef struct {
 	odp_u32be_t magic; /* Packet header magic number */
 } pkt_head_t;
 
-/* Pool from which transmitted packets are allocated */
-static odp_pool_t transmit_pkt_pool = ODP_POOL_INVALID;
-
-/* Sequence number of IP packets */
-static odp_atomic_u32_t ip_seq;
-
-/* Indicate to the receivers to shutdown */
-static odp_atomic_u32_t shutdown;
-
 /* Application global data */
 static test_globals_t *gbl_args;
 
@@ -180,7 +177,7 @@ static odp_packet_t pktio_create_packet(uint32_t seq)
 
 	payload_len = sizeof(pkt_hdr) + gbl_args->args.pkt_len;
 
-	pkt = odp_packet_alloc(transmit_pkt_pool,
+	pkt = odp_packet_alloc(gbl_args->transmit_pkt_pool,
 			       payload_len + ODPH_UDPHDR_LEN +
 			       ODPH_IPV4HDR_LEN + ODPH_ETHHDR_LEN);
 
@@ -261,7 +258,7 @@ static int alloc_packets(odp_packet_t *pkt_tbl, int num_pkts)
 	int n;
 	uint16_t seq;
 
-	seq = odp_atomic_fetch_add_u32(&ip_seq, num_pkts);
+	seq = odp_atomic_fetch_add_u32(&gbl_args->ip_seq, num_pkts);
 	for (n = 0; n < num_pkts; ++n) {
 		pkt_tbl[n] = pktio_create_packet(seq + n);
 		if (pkt_tbl[n] == ODP_PACKET_INVALID)
@@ -453,7 +450,7 @@ static int run_thread_rx(void *arg)
 			}
 			odp_event_free(ev[i]);
 		}
-		if (n_ev == 0 && odp_atomic_load_u32(&shutdown))
+		if (n_ev == 0 && odp_atomic_load_u32(&gbl_args->shutdown))
 			break;
 	}
 
@@ -618,7 +615,7 @@ static int run_test_single(odp_cpumask_t *thd_mask_tx,
 	thr_params.thr_type = ODP_THREAD_WORKER;
 	thr_params.instance = gbl_args->instance;
 
-	odp_atomic_store_u32(&shutdown, 0);
+	odp_atomic_store_u32(&gbl_args->shutdown, 0);
 
 	memset(thd_tbl, 0, sizeof(thd_tbl));
 	memset(gbl_args->rx_stats, 0, gbl_args->rx_stats_size);
@@ -652,7 +649,7 @@ static int run_test_single(odp_cpumask_t *thd_mask_tx,
 	odp_time_wait_ns(SHUTDOWN_DELAY_NS);
 
 	/* indicate to the receivers to exit */
-	odp_atomic_store_u32(&shutdown, 1);
+	odp_atomic_store_u32(&gbl_args->shutdown, 1);
 
 	/* wait for receivers */
 	odph_odpthreads_join(&thd_tbl[0]);
@@ -751,12 +748,13 @@ static int test_init(void)
 	params.pkt.num     = PKT_BUF_NUM;
 	params.type        = ODP_POOL_PACKET;
 
-	transmit_pkt_pool = odp_pool_create("pkt_pool_transmit", &params);
-	if (transmit_pkt_pool == ODP_POOL_INVALID)
+	gbl_args->transmit_pkt_pool = odp_pool_create("pkt_pool_transmit",
+						      &params);
+	if (gbl_args->transmit_pkt_pool == ODP_POOL_INVALID)
 		LOG_ABORT("Failed to create transmit pool\n");
 
-	odp_atomic_init_u32(&ip_seq, 0);
-	odp_atomic_init_u32(&shutdown, 0);
+	odp_atomic_init_u32(&gbl_args->ip_seq, 0);
+	odp_atomic_init_u32(&gbl_args->shutdown, 0);
 
 	iface    = gbl_args->args.ifaces[0];
 	schedule = gbl_args->args.schedule;
@@ -892,7 +890,7 @@ static int test_term(void)
 		}
 	}
 
-	if (odp_pool_destroy(transmit_pkt_pool) != 0) {
+	if (odp_pool_destroy(gbl_args->transmit_pkt_pool) != 0) {
 		LOG_ERR("Failed to destroy transmit pool\n");
 		ret = -1;
 	}
@@ -958,9 +956,6 @@ static void parse_args(int argc, char *argv[], test_args_t *args)
 	};
 
 	static const char *shortopts = "+c:t:b:pR:l:r:i:d:vh";
-
-	/* let helper collect its own arguments (e.g. --odph_proc) */
-	argc = odph_parse_options(argc, argv);
 
 	args->cpu_count      = 2;
 	args->num_tx_workers = 0; /* defaults to cpu_count+1/2 */
@@ -1042,9 +1037,21 @@ int main(int argc, char **argv)
 	int ret;
 	odp_shm_t shm;
 	int max_thrs;
+	odph_helper_options_t helper_options;
 	odp_instance_t instance;
+	odp_init_t init_param;
 
-	if (odp_init_global(&instance, NULL, NULL) != 0)
+	/* Let helper collect its own arguments (e.g. --odph_proc) */
+	argc = odph_parse_options(argc, argv);
+	if (odph_options(&helper_options)) {
+		LOG_ERR("Error: reading ODP helper options failed.\n");
+		exit(EXIT_FAILURE);
+	}
+
+	odp_init_param_init(&init_param);
+	init_param.mem_model = helper_options.mem_model;
+
+	if (odp_init_global(&instance, &init_param, NULL) != 0)
 		LOG_ABORT("Failed global init.\n");
 
 	if (odp_init_local(instance, ODP_THREAD_CONTROL) != 0)

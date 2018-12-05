@@ -96,7 +96,7 @@ run_l2fwd()
 	$STDBUF odp_l2fwd${EXEEXT} -i 0,1 -m 0 -t 30 -c 2 | tee $LOG
 	ret=$?
 
-	kill ${GEN_PID}
+	kill -2 ${GEN_PID}
 
 	if [ ! -f $LOG ]; then
 		echo "FAIL: $LOG not found"

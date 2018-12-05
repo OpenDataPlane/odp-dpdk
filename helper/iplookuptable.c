@@ -83,9 +83,9 @@ typedef struct trie_node {
 } trie_node_t;
 
 /** Number of L2\L3 entries(subtrees) per cache cube. */
-#define CACHE_NUM_SUBTREE	(1 << 13)
+#define CACHE_NUM_SUBTREE	(4 * 1024)
 /** Number of trie nodes per cache cube. */
-#define CACHE_NUM_TRIE		(1 << 20)
+#define CACHE_NUM_TRIE		(4 * 1024)
 
 /** @typedef cache_type_t
  *	Cache node type
@@ -187,11 +187,33 @@ cache_alloc_new_pool(
 {
 	odp_pool_t pool;
 	odp_pool_param_t param;
+	odp_pool_capability_t pool_capa;
 	odp_queue_t queue = tbl->free_slots[type];
 
 	odp_buffer_t buffer;
 	char pool_name[ODPH_TABLE_NAME_LEN + 8];
 	uint32_t size = 0, num = 0;
+
+	if (odp_pool_capability(&pool_capa)) {
+		ODPH_ERR("pool capa failed\n");
+		return -1;
+	}
+
+	if (pool_capa.buf.max_num) {
+		if (pool_capa.buf.max_num < CACHE_NUM_TRIE ||
+		    pool_capa.buf.max_num < CACHE_NUM_SUBTREE) {
+			ODPH_ERR("pool size too small\n");
+			return -1;
+		}
+	}
+
+	if (pool_capa.buf.max_size) {
+		if (pool_capa.buf.max_size < ENTRY_SIZE * ENTRY_NUM_SUBTREE ||
+		    pool_capa.buf.max_size < sizeof(trie_node_t)) {
+			ODPH_ERR("buffer size too small\n");
+			return -1;
+		}
+	}
 
 	/* Create new pool (new free buffers). */
 	odp_pool_param_init(&param);
@@ -223,7 +245,11 @@ cache_alloc_new_pool(
 	while ((buffer = odp_buffer_alloc(pool))
 			!= ODP_BUFFER_INVALID) {
 		cache_init_buffer(buffer, type, size);
-		odp_queue_enq(queue, odp_buffer_to_event(buffer));
+		if (odp_queue_enq(queue, odp_buffer_to_event(buffer))) {
+			ODPH_DBG("queue enqueue failed\n");
+			odp_buffer_free(buffer);
+			break;
+		}
 	}
 
 	tbl->cache_count[type]++;
@@ -449,9 +475,27 @@ odph_table_t odph_iplookup_table_create(const char *name,
 	odp_shm_t shm_tbl;
 	odp_queue_t queue;
 	odp_queue_param_t qparam;
+	odp_queue_capability_t queue_capa;
 	unsigned i;
-	uint32_t impl_size, l1_size;
+	uint32_t impl_size, l1_size, queue_size;
 	char queue_name[ODPH_TABLE_NAME_LEN + 2];
+
+	if (odp_queue_capability(&queue_capa)) {
+		ODPH_ERR("queue capa failed\n");
+		return NULL;
+	}
+
+	if (queue_capa.plain.max_size) {
+		if (queue_capa.plain.max_size < CACHE_NUM_TRIE ||
+		    queue_capa.plain.max_size < CACHE_NUM_SUBTREE) {
+			ODPH_ERR("queue size too small\n");
+			return NULL;
+		}
+	}
+
+	queue_size = CACHE_NUM_TRIE;
+	if (CACHE_NUM_SUBTREE > CACHE_NUM_TRIE)
+		queue_size = CACHE_NUM_SUBTREE;
 
 	/* Check for valid parameters */
 	if (strlen(name) == 0) {
@@ -502,6 +546,7 @@ odph_table_t odph_iplookup_table_create(const char *name,
 
 		odp_queue_param_init(&qparam);
 		qparam.type = ODP_QUEUE_TYPE_PLAIN;
+		qparam.size = queue_size;
 		sprintf(queue_name, "%s_%d", name, i);
 		queue = odp_queue_create(queue_name, &qparam);
 		if (queue == ODP_QUEUE_INVALID) {
@@ -585,24 +630,25 @@ prefix_insert_into_lx(
 		odph_iplookup_table_impl *tbl, prefix_entry_t *entry,
 		uint8_t cidr, odp_buffer_t nexthop, uint8_t level)
 {
-	uint8_t ret = 0;
+	int ret = 0;
 	uint32_t i = 0, limit = (1 << (level - cidr));
 	prefix_entry_t *e = entry, *ne = NULL;
 
 	for (i = 0; i < limit; i++, e++) {
-		if (e->child == 1) {
-			if (e->cidr > cidr)
-				continue;
+		if (e->cidr > cidr)
+			continue;
 
+		if (e->child == 1) {
 			e->cidr = cidr;
 			/* push to next level */
 			ne = (prefix_entry_t *)e->ptr;
 			ret = prefix_insert_into_lx(
 					tbl, ne, cidr, nexthop, cidr + 8);
+			if (ret == -1)
+				return -1;
+			if (ret == 0)
+				return ret;
 		} else {
-			if (e->cidr > cidr)
-				continue;
-
 			e->child = 0;
 			e->cidr = cidr;
 			e->nexthop = nexthop;
@@ -678,8 +724,9 @@ odph_iplookup_table_put_value(odph_table_t tbl, void *key, void *value)
 
 	nexthop = *((odp_buffer_t *)value);
 
-	if (prefix->cidr == 0)
+	if (prefix->cidr == 0 || prefix->cidr > 32)
 		return -1;
+
 	prefix->ip = prefix->ip & (0xffffffff << (IP_LENGTH - prefix->cidr));
 
 	/* insert into trie */
@@ -899,7 +946,7 @@ odph_iplookup_table_remove_value(odph_table_t tbl, void *key)
 	ip   = prefix->ip;
 	cidr = prefix->cidr;
 
-	if (cidr == 0)
+	if (cidr == 0 || cidr > 32)
 		return -EINVAL;
 
 	prefix_entry_t *entry = &impl->l1e[ip >> 16];

@@ -65,9 +65,10 @@ int odp_pktio_init_global(void)
 	odp_shm_t shm;
 	int pktio_if;
 
-	shm = odp_shm_reserve("odp_pktio_entries",
+	shm = odp_shm_reserve("_odp_pktio_entries",
 			      sizeof(pktio_table_t),
-			      sizeof(pktio_entry_t), 0);
+			      sizeof(pktio_entry_t),
+			      0);
 	if (shm == ODP_SHM_INVALID)
 		return -1;
 
@@ -612,9 +613,18 @@ static inline int pktin_recv_buf(pktio_entry_t *entry, int pktin_index,
 	odp_packet_t packets[num];
 	odp_packet_hdr_t *pkt_hdr;
 	odp_buffer_hdr_t *buf_hdr;
-	int i;
-	int pkts;
-	int num_rx = 0;
+	int i, pkts, num_rx, num_ev, num_dst;
+	odp_queue_t cur_queue;
+	odp_event_t ev[num];
+	odp_queue_t dst[num];
+	int dst_idx[num];
+
+	num_rx = 0;
+	num_dst = 0;
+	num_ev = 0;
+
+	/* Some compilers need this dummy initialization */
+	cur_queue = ODP_QUEUE_INVALID;
 
 	pkts = entry->s.ops->recv(entry, pktin_index, packets, num);
 
@@ -623,17 +633,52 @@ static inline int pktin_recv_buf(pktio_entry_t *entry, int pktin_index,
 		pkt_hdr = packet_hdr(pkt);
 		buf_hdr = packet_to_buf_hdr(pkt);
 
-		if (pkt_hdr->p.input_flags.dst_queue) {
-			int ret;
+		if (odp_unlikely(pkt_hdr->p.input_flags.dst_queue)) {
+			/* Sort events for enqueue multi operation(s) */
+			if (odp_unlikely(num_dst == 0)) {
+				num_dst = 1;
+				cur_queue = pkt_hdr->dst_queue;
+				dst[0] = cur_queue;
+				dst_idx[0] = 0;
+			}
 
-			ret = odp_queue_enq(pkt_hdr->dst_queue,
-					    odp_packet_to_event(pkt));
-			if (ret < 0)
-				odp_packet_free(pkt);
+			ev[num_ev] = odp_packet_to_event(pkt);
+
+			if (cur_queue != pkt_hdr->dst_queue) {
+				cur_queue = pkt_hdr->dst_queue;
+				dst[num_dst] = cur_queue;
+				dst_idx[num_dst] = num_ev;
+				num_dst++;
+			}
+
+			num_ev++;
 			continue;
 		}
 		buffer_hdrs[num_rx++] = buf_hdr;
 	}
+
+	/* Optimization for the common case */
+	if (odp_likely(num_dst == 0))
+		return num_rx;
+
+	for (i = 0; i < num_dst; i++) {
+		int num_enq, ret;
+		int idx = dst_idx[i];
+
+		if (i == (num_dst - 1))
+			num_enq = num_ev - idx;
+		else
+			num_enq = dst_idx[i + 1] - idx;
+
+		ret = odp_queue_enq_multi(dst[i], &ev[idx], num_enq);
+
+		if (ret < 0)
+			ret = 0;
+
+		if (ret < num_enq)
+			odp_event_free_multi(&ev[idx + ret], num_enq - ret);
+	}
+
 	return num_rx;
 }
 
@@ -824,54 +869,6 @@ int sched_cb_pktin_poll(int pktio_index, int pktin_index,
 	}
 
 	return pktin_recv_buf(entry, pktin_index, hdr_tbl, num);
-}
-
-int sched_cb_pktin_poll_old(int pktio_index, int num_queue, int index[])
-{
-	odp_buffer_hdr_t *hdr_tbl[QUEUE_MULTI_MAX];
-	int num, idx;
-	pktio_entry_t *entry = pktio_entry_by_index(pktio_index);
-	int state = entry->s.state;
-
-	if (odp_unlikely(state != PKTIO_STATE_STARTED)) {
-		if (state < PKTIO_STATE_ACTIVE ||
-		    state == PKTIO_STATE_STOP_PENDING)
-			return -1;
-
-		ODP_DBG("interface not started\n");
-		return 0;
-	}
-
-	for (idx = 0; idx < num_queue; idx++) {
-		odp_queue_t queue;
-		int num_enq;
-
-		num = pktin_recv_buf(entry, index[idx], hdr_tbl,
-				     QUEUE_MULTI_MAX);
-
-		if (num == 0)
-			continue;
-
-		if (num < 0) {
-			ODP_ERR("Packet recv error\n");
-			return -1;
-		}
-
-		queue = entry->s.in_queue[index[idx]].queue;
-		num_enq = odp_queue_enq_multi(queue,
-					      (odp_event_t *)hdr_tbl, num);
-
-		if (odp_unlikely(num_enq < num)) {
-			if (odp_unlikely(num_enq < 0))
-				num_enq = 0;
-
-			ODP_DBG("Interface %s dropped %i packets\n",
-				entry->s.name, num - num_enq);
-			buffer_free_multi(&hdr_tbl[num_enq], num - num_enq);
-		}
-	}
-
-	return 0;
 }
 
 void sched_cb_pktio_stop_finalize(int pktio_index)
@@ -1280,9 +1277,9 @@ int odp_pktio_term_global(void)
 					  pktio_if);
 	}
 
-	ret = odp_shm_free(odp_shm_lookup("odp_pktio_entries"));
+	ret = odp_shm_free(odp_shm_lookup("_odp_pktio_entries"));
 	if (ret != 0)
-		ODP_ERR("shm free failed for odp_pktio_entries");
+		ODP_ERR("shm free failed for _odp_pktio_entries");
 
 	return ret;
 }
@@ -1444,15 +1441,23 @@ int odp_pktin_queue_config(odp_pktio_t pktio,
 			odp_queue_param_t queue_param;
 			char name[ODP_QUEUE_NAME_LEN];
 			int pktio_id = odp_pktio_index(pktio);
+			odp_pktin_queue_param_ovr_t *queue_param_ovr = NULL;
+
+			if (param->queue_param_ovr)
+				queue_param_ovr = param->queue_param_ovr + i;
 
 			snprintf(name, sizeof(name), "odp-pktin-%i-%i",
 				 pktio_id, i);
 
-			if (param->classifier_enable)
+			if (param->classifier_enable) {
 				odp_queue_param_init(&queue_param);
-			else
+			} else {
 				memcpy(&queue_param, &param->queue_param,
 				       sizeof(odp_queue_param_t));
+				if (queue_param_ovr)
+					queue_param.sched.group =
+						queue_param_ovr->group;
+			}
 
 			queue_param.type = ODP_QUEUE_TYPE_PLAIN;
 

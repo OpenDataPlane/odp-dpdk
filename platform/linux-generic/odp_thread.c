@@ -54,7 +54,7 @@ int odp_thread_init_global(void)
 {
 	odp_shm_t shm;
 
-	shm = odp_shm_reserve("odp_thread_globals",
+	shm = odp_shm_reserve("_odp_thread_globals",
 			      sizeof(thread_globals_t),
 			      ODP_CACHE_LINE_SIZE, 0);
 
@@ -73,9 +73,9 @@ int odp_thread_term_global(void)
 {
 	int ret;
 
-	ret = odp_shm_free(odp_shm_lookup("odp_thread_globals"));
+	ret = odp_shm_free(odp_shm_lookup("_odp_thread_globals"));
 	if (ret < 0)
-		ODP_ERR("shm free failed for odp_thread_globals");
+		ODP_ERR("shm free failed for _odp_thread_globals");
 
 	return ret;
 }
@@ -136,6 +136,20 @@ int odp_thread_init_local(odp_thread_type_t type)
 {
 	int id;
 	int cpu;
+	int group_all, group_worker, group_control;
+
+	group_all = 1;
+	group_worker = 1;
+	group_control = 1;
+
+	if (sched_fn->config) {
+		schedule_config_t schedule_config;
+
+		sched_fn->config(&schedule_config);
+		group_all = schedule_config.group_enable.all;
+		group_worker = schedule_config.group_enable.worker;
+		group_control = schedule_config.group_enable.control;
+	}
 
 	odp_spinlock_lock(&thread_globals->lock);
 	id = alloc_id(type);
@@ -159,11 +173,13 @@ int odp_thread_init_local(odp_thread_type_t type)
 
 	_odp_this_thread = &thread_globals->thr[id];
 
-	sched_fn->thr_add(ODP_SCHED_GROUP_ALL, id);
+	if (group_all)
+		sched_fn->thr_add(ODP_SCHED_GROUP_ALL, id);
 
-	if (type == ODP_THREAD_WORKER)
+	if (type == ODP_THREAD_WORKER && group_worker)
 		sched_fn->thr_add(ODP_SCHED_GROUP_WORKER, id);
-	else if (type == ODP_THREAD_CONTROL)
+
+	if (type == ODP_THREAD_CONTROL && group_control)
 		sched_fn->thr_add(ODP_SCHED_GROUP_CONTROL, id);
 
 	return 0;
@@ -172,14 +188,30 @@ int odp_thread_init_local(odp_thread_type_t type)
 int odp_thread_term_local(void)
 {
 	int num;
+	int group_all, group_worker, group_control;
 	int id = _odp_this_thread->thr;
 	odp_thread_type_t type = _odp_this_thread->type;
 
-	sched_fn->thr_rem(ODP_SCHED_GROUP_ALL, id);
+	group_all = 1;
+	group_worker = 1;
+	group_control = 1;
 
-	if (type == ODP_THREAD_WORKER)
+	if (sched_fn->config) {
+		schedule_config_t schedule_config;
+
+		sched_fn->config(&schedule_config);
+		group_all = schedule_config.group_enable.all;
+		group_worker = schedule_config.group_enable.worker;
+		group_control = schedule_config.group_enable.control;
+	}
+
+	if (group_all)
+		sched_fn->thr_rem(ODP_SCHED_GROUP_ALL, id);
+
+	if (type == ODP_THREAD_WORKER && group_worker)
 		sched_fn->thr_rem(ODP_SCHED_GROUP_WORKER, id);
-	else if (type == ODP_THREAD_CONTROL)
+
+	if (type == ODP_THREAD_CONTROL && group_control)
 		sched_fn->thr_rem(ODP_SCHED_GROUP_CONTROL, id);
 
 	odp_spinlock_lock(&thread_globals->lock);

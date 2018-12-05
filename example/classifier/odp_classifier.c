@@ -73,14 +73,13 @@ typedef struct {
 	unsigned int cpu_count; /**< Number of CPUs to use */
 	uint32_t time;		/**< Number of seconds to run */
 	char *if_name;		/**< pointer to interface names */
+	int shutdown;		/**< Shutdown threads if !0 */
 } appl_args_t;
 
 enum packet_mode {
 	APPL_MODE_DROP,		/**< Packet is dropped */
 	APPL_MODE_REPLY		/**< Packet is sent back */
 };
-
-static int shutdown; /**< Shutdown threads if !0 */
 
 /* helper funcs */
 static int drop_err_pkts(odp_packet_t pkt_tbl[], unsigned len);
@@ -272,7 +271,7 @@ static int pktio_receive_thread(void *arg)
 	for (;;) {
 		odp_pktio_t pktio_tmp;
 
-		if (shutdown)
+		if (appl->shutdown)
 			break;
 
 		/* Use schedule to get buf from any input queue */
@@ -454,7 +453,7 @@ static void configure_cos(odp_cos_t default_cos, appl_args_t *args)
 
 		stats->pmr = odp_cls_pmr_create(&pmr_param, 1, default_cos,
 						stats->cos);
-		if (stats->pmr == ODP_PMR_INVAL) {
+		if (stats->pmr == ODP_PMR_INVALID) {
 			EXAMPLE_ERR("odp_pktio_pmr_cos failed");
 			exit(EXIT_FAILURE);
 		}
@@ -469,6 +468,7 @@ static void configure_cos(odp_cos_t default_cos, appl_args_t *args)
  */
 int main(int argc, char *argv[])
 {
+	odph_helper_options_t helper_options;
 	odph_odpthread_t thread_tbl[MAX_WORKERS];
 	odp_pool_t pool;
 	int num_workers;
@@ -482,10 +482,21 @@ int main(int argc, char *argv[])
 	odp_shm_t shm;
 	int ret;
 	odp_instance_t instance;
+	odp_init_t init_param;
 	odph_odpthread_params_t thr_params;
 
+	/* Let helper collect its own arguments (e.g. --odph_proc) */
+	argc = odph_parse_options(argc, argv);
+	if (odph_options(&helper_options)) {
+		EXAMPLE_ERR("Error: reading ODP helper options failed.\n");
+		exit(EXIT_FAILURE);
+	}
+
+	odp_init_param_init(&init_param);
+	init_param.mem_model = helper_options.mem_model;
+
 	/* Init ODP before calling anything else */
-	if (odp_init_global(&instance, NULL, NULL)) {
+	if (odp_init_global(&instance, &init_param, NULL)) {
 		EXAMPLE_ERR("Error: ODP global init failed.\n");
 		exit(EXIT_FAILURE);
 	}
@@ -574,7 +585,7 @@ int main(int argc, char *argv[])
 	print_cls_statistics(args);
 
 	odp_pktio_stop(pktio);
-	shutdown = 1;
+	args->shutdown = 1;
 	odph_odpthreads_join(thread_tbl);
 
 	for (i = 0; i < args->policy_count; i++) {
@@ -802,9 +813,6 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 	};
 
 	static const char *shortopts = "+c:t:i:p:m:t:h";
-
-	/* let helper collect its own arguments (e.g. --odph_proc) */
-	argc = odph_parse_options(argc, argv);
 
 	appl_args->cpu_count = 1; /* Use one worker by default */
 

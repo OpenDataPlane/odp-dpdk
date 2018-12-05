@@ -95,9 +95,6 @@ typedef struct {
 	 * Members below are not initialized by packet_init()
 	 */
 
-	/* Type of extra data */
-	uint8_t extra_type;
-
 	/* Flow hash value */
 	uint32_t flow_hash;
 
@@ -113,11 +110,6 @@ typedef struct {
 	/* Context for IPsec */
 	odp_ipsec_packet_result_t ipsec_ctx;
 
-#ifdef ODP_PKTIO_DPDK
-	/* Extra space for packet descriptors. E.g. DPDK mbuf. Keep as the last
-	 * member before data. */
-	uint8_t ODP_ALIGNED_CACHE extra[PKT_EXTRA_LEN];
-#endif
 	/* Packet data storage */
 	uint8_t data[0];
 } odp_packet_hdr_t;
@@ -153,11 +145,6 @@ static inline seg_entry_t *seg_entry_last(odp_packet_hdr_t *hdr)
 	last     = hdr->buf_hdr.last_seg;
 	last_seg = last->buf_hdr.num_seg - 1;
 	return &last->buf_hdr.seg[last_seg];
-}
-
-static inline odp_event_subtype_t packet_subtype(odp_packet_t pkt)
-{
-	return packet_hdr(pkt)->subtype;
 }
 
 static inline void packet_subtype_set(odp_packet_t pkt, int ev)

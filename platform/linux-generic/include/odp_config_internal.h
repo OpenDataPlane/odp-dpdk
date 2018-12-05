@@ -27,13 +27,6 @@ extern "C" {
 #define ODP_CONFIG_QUEUES 1024
 
 /*
- * Maximum queue depth. Maximum number of elements that can be stored in a
- * queue. This value is used only when the size is not explicitly provided
- * during queue creation.
- */
-#define CONFIG_QUEUE_SIZE 4096
-
-/*
  * Maximum number of ordered locks per queue
  */
 #define CONFIG_QUEUE_MAX_ORD_LOCKS 2
@@ -42,14 +35,6 @@ extern "C" {
  * Maximum number of packet IO resources
  */
 #define ODP_CONFIG_PKTIO_ENTRIES 64
-
-/*
- * Minimum buffer alignment
- *
- * This defines the minimum supported buffer alignment. Requests for values
- * below this will be rounded up to this value.
- */
-#define ODP_CONFIG_BUFFER_ALIGN_MIN 64
 
 /*
  * Maximum buffer alignment
@@ -125,23 +110,15 @@ extern "C" {
  * defined segment length (seg_len in odp_pool_param_t) will be rounded up into
  * this value.
  */
-#define CONFIG_PACKET_SEG_LEN_MIN CONFIG_PACKET_MAX_SEG_LEN
+#define CONFIG_PACKET_SEG_LEN_MIN ((2 * 1024) + \
+				   CONFIG_PACKET_HEADROOM + \
+				   CONFIG_PACKET_TAILROOM)
 
 /* Maximum number of shared memory blocks.
  *
  * This the the number of separate SHM areas that can be reserved concurrently
  */
 #define ODP_CONFIG_SHM_BLOCKS (ODP_CONFIG_POOLS + 48)
-
-/*
- * Size of the virtual address space pre-reserver for ISHM
- *
- * This is just virtual space preallocation size, not memory allocation.
- * This address space is used by ISHM to map things at a common address in
- * all ODP threads (when the _ODP_ISHM_SINGLE_VA flag is used).
- * In bytes.
- */
-#define ODP_CONFIG_ISHM_VA_PREALLOC_SZ (536870912L)
 
 /*
  * Maximum event burst size
@@ -152,9 +129,10 @@ extern "C" {
 #define CONFIG_BURST_SIZE 32
 
 /*
- * Maximum number of events in a pool
+ * Maximum number of events in a pool. Power of two minus one results optimal
+ * memory usage for the ring.
  */
-#define CONFIG_POOL_MAX_NUM (1 * 1024 * 1024)
+#define CONFIG_POOL_MAX_NUM ((1024 * 1024) - 1)
 
 /*
  * Maximum number of events in a thread local pool cache

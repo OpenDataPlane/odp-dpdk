@@ -27,6 +27,8 @@
 
 #include <string.h>
 
+static odp_ipsec_config_t *ipsec_config;
+
 int odp_ipsec_capability(odp_ipsec_capability_t *capa)
 {
 	int rc;
@@ -145,14 +147,12 @@ void odp_ipsec_config_init(odp_ipsec_config_t *config)
 	config->inbound.lookup.max_spi = UINT32_MAX;
 }
 
-static odp_ipsec_config_t ipsec_config;
-
 int odp_ipsec_config(const odp_ipsec_config_t *config)
 {
 	if (ODP_CONFIG_IPSEC_SAS > config->max_num_sa)
 		return -1;
 
-	ipsec_config = *config;
+	*ipsec_config = *config;
 
 	return 0;
 }
@@ -788,8 +788,8 @@ static ipsec_sa_t *ipsec_in_single(odp_packet_t pkt,
 		parse_param.proto = state.is_ipv4 ? ODP_PROTO_IPV4 :
 			state.is_ipv6 ? ODP_PROTO_IPV6 :
 			ODP_PROTO_NONE;
-		parse_param.last_layer = ipsec_config.inbound.parse_level;
-		parse_param.chksums = ipsec_config.inbound.chksums;
+		parse_param.last_layer = ipsec_config->inbound.parse_level;
+		parse_param.chksums = ipsec_config->inbound.chksums;
 
 		/* We do not care about return code here.
 		 * Parsing error should not result in IPsec error. */
@@ -811,9 +811,9 @@ err:
 
 /* Generate sequence number */
 static inline
-uint32_t ipsec_seq_no(ipsec_sa_t *ipsec_sa)
+uint64_t ipsec_seq_no(ipsec_sa_t *ipsec_sa)
 {
-	return odp_atomic_fetch_add_u32(&ipsec_sa->out.seq, 1);
+	return odp_atomic_fetch_add_u64(&ipsec_sa->hot.out.seq, 1);
 }
 
 /* Helper for calculating encode length using data length and block size */
@@ -872,14 +872,18 @@ static int ipsec_out_tunnel_ipv4(odp_packet_t *pkt,
 	state->ip_tot_len += _ODP_IPV4HDR_LEN;
 
 	out_ip.tot_len = odp_cpu_to_be_16(state->ip_tot_len);
-	/* No need to convert to BE: ID just should not be duplicated */
-	out_ip.id = odp_atomic_fetch_add_u32(&ipsec_sa->out.tun_ipv4.hdr_id,
-					     1);
 	if (ipsec_sa->copy_df)
 		flags = state->out_tunnel.ip_df;
 	else
 		flags = ((uint16_t)ipv4_param->df) << 14;
 	out_ip.frag_offset = odp_cpu_to_be_16(flags);
+
+	/* Allocate unique IP ID only for non-atomic datagrams */
+	if (out_ip.frag_offset == 0)
+		out_ip.id = _odp_ipsec_sa_alloc_ipv4_id(ipsec_sa);
+	else
+		out_ip.id = 0;
+
 	out_ip.ttl = ipv4_param->ttl;
 	/* Will be filled later by packet checksum update */
 	out_ip.chksum = 0;
@@ -976,23 +980,45 @@ static int ipsec_out_tunnel_ipv6(odp_packet_t *pkt,
 	return 0;
 }
 
+#define IPSEC_RANDOM_BUF_SIZE 256
+
+static int ipsec_random_data(uint8_t *data, uint32_t len)
+{
+	static __thread uint8_t buffer[IPSEC_RANDOM_BUF_SIZE];
+	static __thread uint32_t buffer_used = IPSEC_RANDOM_BUF_SIZE;
+
+	if (odp_likely(buffer_used + len <= IPSEC_RANDOM_BUF_SIZE)) {
+		memcpy(data, &buffer[buffer_used], len);
+		buffer_used += len;
+	} else if (odp_likely(len <= IPSEC_RANDOM_BUF_SIZE)) {
+		uint32_t rnd_len;
+
+		rnd_len = odp_random_data(buffer, IPSEC_RANDOM_BUF_SIZE,
+					  odp_global_ro.ipsec_rand_kind);
+		if (odp_unlikely(rnd_len != IPSEC_RANDOM_BUF_SIZE))
+			return -1;
+		memcpy(data, &buffer[0], len);
+		buffer_used = len;
+	} else {
+		return -1;
+	}
+	return 0;
+}
+
 static int ipsec_out_iv(ipsec_state_t *state,
-			ipsec_sa_t *ipsec_sa)
+			ipsec_sa_t *ipsec_sa,
+			uint64_t seq_no)
 {
 	if (ipsec_sa->use_counter_iv) {
-		uint64_t ctr;
-
 		/* Both GCM and CTR use 8-bit counters */
-		ODP_ASSERT(sizeof(ctr) == ipsec_sa->esp_iv_len);
+		ODP_ASSERT(sizeof(seq_no) == ipsec_sa->esp_iv_len);
 
-		ctr = odp_atomic_fetch_add_u64(&ipsec_sa->out.counter,
-					       1);
 		/* Check for overrun */
-		if (ctr == 0)
+		if (seq_no == 0)
 			return -1;
 
 		memcpy(state->iv, ipsec_sa->salt, ipsec_sa->salt_length);
-		memcpy(state->iv + ipsec_sa->salt_length, &ctr,
+		memcpy(state->iv + ipsec_sa->salt_length, &seq_no,
 		       ipsec_sa->esp_iv_len);
 
 		if (ipsec_sa->aes_ctr_iv) {
@@ -1002,12 +1028,7 @@ static int ipsec_out_iv(ipsec_state_t *state,
 			state->iv[15] = 1;
 		}
 	} else if (ipsec_sa->esp_iv_len) {
-		uint32_t len;
-
-		len = odp_random_data(state->iv, ipsec_sa->esp_iv_len,
-				      odp_global_data.ipsec_rand_kind);
-
-		if (len != ipsec_sa->esp_iv_len)
+		if (ipsec_random_data(state->iv, ipsec_sa->esp_iv_len))
 			return -1;
 	}
 
@@ -1036,6 +1057,7 @@ static int ipsec_out_esp(odp_packet_t *pkt,
 	unsigned trl_len;
 	unsigned pkt_len, new_len;
 	uint8_t proto = _ODP_IPPROTO_ESP;
+	uint64_t seq_no;
 
 	if (odp_unlikely(opt->flag.tfc_dummy)) {
 		ip_data_len = 0;
@@ -1069,7 +1091,9 @@ static int ipsec_out_esp(odp_packet_t *pkt,
 		return -1;
 	}
 
-	if (ipsec_out_iv(state, ipsec_sa) < 0) {
+	seq_no = ipsec_seq_no(ipsec_sa);
+
+	if (ipsec_out_iv(state, ipsec_sa, seq_no) < 0) {
 		status->error.alg = 1;
 		return -1;
 	}
@@ -1079,7 +1103,7 @@ static int ipsec_out_esp(odp_packet_t *pkt,
 
 	memset(&esp, 0, sizeof(esp));
 	esp.spi = odp_cpu_to_be_32(ipsec_sa->spi);
-	esp.seq_no = odp_cpu_to_be_32(ipsec_seq_no(ipsec_sa));
+	esp.seq_no = odp_cpu_to_be_32(seq_no & 0xffffffff);
 
 	state->esp.aad.spi = esp.spi;
 	state->esp.aad.seq_no = esp.seq_no;
@@ -1201,15 +1225,18 @@ static int ipsec_out_ah(odp_packet_t *pkt,
 		ipsec_sa->icv_len;
 	uint16_t ipsec_offset = state->ip_offset + state->ip_hdr_len;
 	uint8_t proto = _ODP_IPPROTO_AH;
+	uint64_t seq_no;
 
 	if (state->ip_tot_len + hdr_len > mtu) {
 		status->error.mtu = 1;
 		return -1;
 	}
 
+	seq_no = ipsec_seq_no(ipsec_sa);
+
 	memset(&ah, 0, sizeof(ah));
 	ah.spi = odp_cpu_to_be_32(ipsec_sa->spi);
-	ah.seq_no = odp_cpu_to_be_32(ipsec_seq_no(ipsec_sa));
+	ah.seq_no = odp_cpu_to_be_32(seq_no & 0xffffffff);
 	ah.next_header = state->ip_next_hdr;
 
 	odp_packet_copy_from_mem(*pkt, state->ip_next_hdr_offset, 1, &proto);
@@ -1245,7 +1272,7 @@ static int ipsec_out_ah(odp_packet_t *pkt,
 	ah.ah_len = hdr_len / 4 - 2;
 
 	/* For GMAC */
-	if (ipsec_out_iv(state, ipsec_sa) < 0) {
+	if (ipsec_out_iv(state, ipsec_sa, seq_no) < 0) {
 		status->error.alg = 1;
 		return -1;
 	}
@@ -1309,7 +1336,7 @@ static void ipsec_out_checksums(odp_packet_t pkt,
 	odp_bool_t ipv4_chksum_pkt, udp_chksum_pkt, tcp_chksum_pkt,
 		   sctp_chksum_pkt;
 	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
-	odp_ipsec_outbound_config_t outbound = ipsec_config.outbound;
+	odp_ipsec_outbound_config_t outbound = ipsec_config->outbound;
 
 	ipv4_chksum_pkt = OL_TX_CHKSUM_PKT(outbound.chksum.inner_ipv4,
 					   state->is_ipv4,
@@ -1360,7 +1387,14 @@ static ipsec_sa_t *ipsec_out_single(odp_packet_t pkt,
 	odp_ipsec_frag_mode_t frag_mode;
 	uint32_t mtu;
 
-	ipsec_sa = _odp_ipsec_sa_use(sa);
+	/*
+	 * No need to do _odp_ipsec_sa_use() here since an ODP application
+	 * is not allowed to do call IPsec output before SA creation has
+	 * completed nor call odp_ipsec_sa_disable() before IPsec output
+	 * has completed. IOW, the needed sychronization between threads
+	 * is done by the application.
+	 */
+	ipsec_sa = _odp_ipsec_sa_entry_from_hdl(sa);
 	ODP_ASSERT(NULL != ipsec_sa);
 
 	if (opt->flag.tfc_dummy) {
@@ -1462,6 +1496,18 @@ static ipsec_sa_t *ipsec_out_single(odp_packet_t pkt,
 
 	param.session = ipsec_sa->session;
 
+	/*
+	 * NOTE: Do not change to an asynchronous design without thinking
+	 * concurrency and what changes are required to guarantee that
+	 * used SAs are not destroyed when asynchronous operations are in
+	 * progress.
+	 *
+	 * The containing code does not hold a reference to the SA but
+	 * completes outbound processing synchronously and makes use of
+	 * the fact that the application may not disable (and then destroy)
+	 * the SA before this output routine returns (and all its side
+	 * effects are visible to the disabling thread).
+	 */
 	rc = odp_crypto_op(&pkt, &pkt, &param, 1);
 	if (rc < 0) {
 		ODP_DBG("Crypto failed\n");
@@ -1612,9 +1658,6 @@ int odp_ipsec_out(const odp_packet_t pkt_in[], int num_in,
 		out_pkt++;
 		sa_idx += sa_inc;
 		opt_idx += opt_inc;
-
-		/* Last thing */
-		_odp_ipsec_sa_unuse(ipsec_sa);
 	}
 
 	*num_out = out_pkt;
@@ -1657,7 +1700,7 @@ int odp_ipsec_in_enq(const odp_packet_t pkt_in[], int num_in,
 			queue = ipsec_sa->queue;
 		} else {
 			result->sa = ODP_IPSEC_SA_INVALID;
-			queue = ipsec_config.inbound.default_queue;
+			queue = ipsec_config->inbound.default_queue;
 		}
 
 		if (odp_queue_enq(queue, odp_ipsec_packet_to_event(pkt))) {
@@ -1722,9 +1765,6 @@ int odp_ipsec_out_enq(const odp_packet_t pkt_in[], int num_in,
 		in_pkt++;
 		sa_idx += sa_inc;
 		opt_idx += opt_inc;
-
-		/* Last thing */
-		_odp_ipsec_sa_unuse(ipsec_sa);
 	}
 
 	return in_pkt;
@@ -1864,9 +1904,6 @@ err:
 		in_pkt++;
 		sa_idx += sa_inc;
 		opt_idx += opt_inc;
-
-		/* Last thing */
-		_odp_ipsec_sa_unuse(ipsec_sa);
 	}
 
 	return in_pkt;
@@ -1900,19 +1937,37 @@ odp_event_t odp_ipsec_packet_to_event(odp_packet_t pkt)
 
 int _odp_ipsec_init_global(void)
 {
-	odp_ipsec_config_init(&ipsec_config);
+	odp_shm_t shm;
+
+	shm = odp_shm_reserve("_odp_ipsec", sizeof(odp_ipsec_config_t),
+			      ODP_CACHE_LINE_SIZE, 0);
+
+	ipsec_config = odp_shm_addr(shm);
+
+	if (ipsec_config == NULL) {
+		ODP_ERR("Shm reserve failed for odp_ipsec\n");
+		return -1;
+	}
+
+	odp_ipsec_config_init(ipsec_config);
 
 	memset(&default_out_opt, 0, sizeof(default_out_opt));
 
-	odp_global_data.ipsec_rand_kind = ODP_RANDOM_CRYPTO;
-	if (odp_global_data.ipsec_rand_kind > odp_random_max_kind())
-		odp_global_data.ipsec_rand_kind = odp_random_max_kind();
+	odp_global_ro.ipsec_rand_kind = ODP_RANDOM_CRYPTO;
+	if (odp_global_ro.ipsec_rand_kind > odp_random_max_kind())
+		odp_global_ro.ipsec_rand_kind = odp_random_max_kind();
 
 	return 0;
 }
 
 int _odp_ipsec_term_global(void)
 {
-	/* Do nothing for now */
+	odp_shm_t shm = odp_shm_lookup("_odp_ipsec");
+
+	if (shm == ODP_SHM_INVALID || odp_shm_free(shm)) {
+		ODP_ERR("Shm free failed for odp_ipsec");
+		return -1;
+	}
+
 	return 0;
 }
