@@ -257,7 +257,6 @@ script:
             else
               sudo ODP_SCHEDULER=basic LD_LIBRARY_PATH="$HOME/cunit-install/$CROSS_ARCH/lib:$LD_LIBRARY_PATH" ODP_SHM_DIR=/dev/shm/odp make check ;
               sudo ODP_SCHEDULER=sp LD_LIBRARY_PATH="$HOME/cunit-install/$CROSS_ARCH/lib:$LD_LIBRARY_PATH" ODP_SHM_DIR=/dev/shm/odp make check ;
-              sudo ODP_SCHEDULER=iquery LD_LIBRARY_PATH="$HOME/cunit-install/$CROSS_ARCH/lib:$LD_LIBRARY_PATH" ODP_SHM_DIR=/dev/shm/odp make check ;
             fi
           fi
         - make install
@@ -305,7 +304,6 @@ jobs:
                           - mkdir -p /dev/shm/odp
                           - sudo CCACHE_DISABLE=1 ODP_SCHEDULER=basic ODP_SHM_DIR=/dev/shm/odp LD_LIBRARY_PATH="$HOME/cunit-install/$CROSS_ARCH/lib:$LD_LIBRARY_PATH" make check
                           - sudo CCACHE_DISABLE=1 ODP_SCHEDULER=sp ODP_SHM_DIR=/dev/shm/odp LD_LIBRARY_PATH="$HOME/cunit-install/$CROSS_ARCH/lib:$LD_LIBRARY_PATH" make check
-                          - sudo CCACHE_DISABLE=1 ODP_SCHEDULER=iquery ODP_SHM_DIR=/dev/shm/odp LD_LIBRARY_PATH="$HOME/cunit-install/$CROSS_ARCH/lib:$LD_LIBRARY_PATH" make check
                           - bash <(curl -s https://codecov.io/bash) -X coveragepy
                 - stage: "build only"
                   env: TEST=doxygen
