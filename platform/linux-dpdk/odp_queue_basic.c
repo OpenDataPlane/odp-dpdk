@@ -40,8 +40,8 @@
 #include <string.h>
 #include <inttypes.h>
 
-#define MIN_QUEUE_SIZE 32
-#define MAX_QUEUE_SIZE (1 * 1024 * 1024)
+#define MIN_QUEUE_SIZE (32 - 1)
+#define MAX_QUEUE_SIZE ((1 * 1024 * 1024) - 1)
 
 static int queue_init(queue_entry_t *queue, const char *name,
 		      const odp_queue_param_t *param);
@@ -56,11 +56,11 @@ static int queue_capa(odp_queue_capability_t *capa, int sched)
 	/* Reserve some queues for internal use */
 	capa->max_queues        = ODP_CONFIG_QUEUES - NUM_INTERNAL_QUEUES;
 	capa->plain.max_num     = capa->max_queues;
-	capa->plain.max_size    = queue_glb->config.max_queue_size - 1;
+	capa->plain.max_size    = queue_glb->config.max_queue_size;
 	capa->plain.lockfree.max_num  = queue_glb->queue_lf_num;
 	capa->plain.lockfree.max_size = queue_glb->queue_lf_size;
 	capa->sched.max_num     = capa->max_queues;
-	capa->sched.max_size    = queue_glb->config.max_queue_size - 1;
+	capa->sched.max_size    = queue_glb->config.max_queue_size;
 
 	if (sched) {
 		capa->max_ordered_locks = sched_fn->max_ordered_locks();
@@ -87,8 +87,7 @@ static int read_config_file(queue_global_t *queue_glb)
 
 	val_u32 = val;
 
-	if (val_u32 > MAX_QUEUE_SIZE || val_u32 < MIN_QUEUE_SIZE ||
-	    !CHECK_IS_POWER2(val_u32)) {
+	if (val_u32 > MAX_QUEUE_SIZE || val_u32 < MIN_QUEUE_SIZE) {
 		ODP_ERR("Bad value %s = %u\n", str, val_u32);
 		return -1;
 	}
@@ -105,8 +104,7 @@ static int read_config_file(queue_global_t *queue_glb)
 	val_u32 = val;
 
 	if (val_u32 > queue_glb->config.max_queue_size ||
-	    val_u32 < MIN_QUEUE_SIZE ||
-	    !CHECK_IS_POWER2(val_u32)) {
+	    val_u32 < MIN_QUEUE_SIZE) {
 		ODP_ERR("Bad value %s = %u\n", str, val_u32);
 		return -1;
 	}
@@ -776,13 +774,17 @@ static int queue_init(queue_entry_t *queue, const char *name,
 	if (queue_size < MIN_QUEUE_SIZE)
 		queue_size = MIN_QUEUE_SIZE;
 
-	/* Round up if not already a power of two */
-	queue_size = ROUNDUP_POWER2_U32(queue_size);
-
 	if (queue_size > queue_glb->config.max_queue_size) {
 		ODP_ERR("Too large queue size %u\n", queue_size);
 		return -1;
 	}
+
+	/* Ring size must larger than queue_size */
+	if (CHECK_IS_POWER2(queue_size))
+		queue_size++;
+
+	/* Round up if not already a power of two */
+	queue_size = ROUNDUP_POWER2_U32(queue_size);
 
 	/* Single-producer / single-consumer plain queue has simple and
 	 * lock-free implementation */
