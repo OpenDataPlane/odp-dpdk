@@ -34,9 +34,15 @@
 /* Maximum number of timer pools */
 #define MAX_TIMER_POOLS  8
 
-/* Maximum number of timers per timer pool. Must be a power of two.
- * Validation test expects 2000 timers per thread and up to 32 threads. */
-#define MAX_TIMERS       (32 * 1024)
+/* Maximum ring size for storing timer pool timers. Must be a power of two. */
+#define MAX_TIMER_RING_SIZE (32 * 1024)
+
+/* Maximum number of timers per timer pool. Validation test expects 2000 timers
+ * per thread and up to 32 threads. */
+#define MAX_TIMERS (MAX_TIMER_RING_SIZE - 1)
+
+ODP_STATIC_ASSERT(MAX_TIMERS < MAX_TIMER_RING_SIZE,
+		  "MAX_TIMER_RING_SIZE too small");
 
 /* Actual resolution depends on application polling frequency. Promise
  * 10 usec resolution. */
@@ -65,13 +71,13 @@ typedef struct {
 } timer_entry_t;
 
 typedef struct timer_pool_s {
-	timer_entry_t timer[MAX_TIMERS];
+	timer_entry_t timer[MAX_TIMER_RING_SIZE];
 
 	struct {
 		uint32_t ring_mask;
 
 		ring_t   ring_hdr;
-		uint32_t ring_data[MAX_TIMERS];
+		uint32_t ring_data[MAX_TIMER_RING_SIZE];
 
 	} free_timer;
 
@@ -214,13 +220,17 @@ odp_timer_pool_t odp_timer_pool_create(const char *name,
 		return ODP_TIMER_POOL_INVALID;
 	}
 
-	num_timers = param->num_timers;
-	num_timers = ROUNDUP_POWER2_U32(num_timers);
-
-	if (num_timers > MAX_TIMERS) {
+	if (param->num_timers > MAX_TIMERS) {
 		ODP_ERR("Too many timers\n");
 		return ODP_TIMER_POOL_INVALID;
 	}
+
+	num_timers = param->num_timers;
+
+	/* Ring size must larger than param->num_timers */
+	if (CHECK_IS_POWER2(num_timers))
+		num_timers++;
+	num_timers = ROUNDUP_POWER2_U32(num_timers);
 
 	odp_ticketlock_lock(&timer_global->lock);
 
@@ -260,7 +270,7 @@ odp_timer_pool_t odp_timer_pool_create(const char *name,
 	timer_pool->cur_timers = 0;
 	timer_pool->hwm_timers = 0;
 
-	for (i = 0; i < num_timers; i++) {
+	for (i = 0; i < timer_pool->free_timer.ring_mask; i++) {
 		timer = &timer_pool->timer[i];
 		memset(timer, 0, sizeof(timer_entry_t));
 
