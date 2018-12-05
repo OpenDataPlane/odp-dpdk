@@ -634,6 +634,7 @@ static int cipher_gen_capability(const struct rte_crypto_param_range *key_size,
 
 			capa.key_len = key_len;
 			capa.iv_len = iv_size;
+			capa.bit_mode = false;
 
 			idx = cipher_capa_insert(src, &capa, idx, num_copy);
 
@@ -834,6 +835,7 @@ static int auth_gen_capability(const struct rte_crypto_param_range *key_size,
 				capa.digest_len = digest_len;
 				capa.key_len = key_len;
 				capa.iv_len = iv_size;
+				capa.bit_mode = false;
 				capa.aad_len.min = aad_size->min;
 				capa.aad_len.max = aad_size->max;
 				capa.aad_len.inc = aad_size->increment;
