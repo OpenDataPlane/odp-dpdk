@@ -8,9 +8,12 @@
 
 PCAP_IN=`find . ${TEST_DIR} $(dirname $0) -name udp64.pcap -print -quit`
 
+export ODP_PLATFORM_PARAMS="--no-pci \
+--vdev net_pcap0,rx_pcap=${PCAP_IN},tx_pcap=/dev/null"
+
 echo "Packet dump test using PCAP_IN = ${PCAP_IN}"
 
-./odp_packet_dump${EXEEXT} -i pcap:in=${PCAP_IN}:loops=10 -n 10 -o 0 -l 64
+./odp_packet_dump${EXEEXT} -i 0 -n 10 -o 0 -l 64
 STATUS=$?
 if [ "$STATUS" -ne 0 ]; then
   echo "Error: status was: $STATUS, expected 0"
