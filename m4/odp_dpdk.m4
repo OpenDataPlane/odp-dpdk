@@ -17,8 +17,8 @@ AS_CASE([$cur_driver],
     [rte_pmd_kasumi], [AS_VAR_APPEND([DPDK_LIBS], [" -lsso_kasumi"])],
     [rte_pmd_snow3g], [AS_VAR_APPEND([DPDK_LIBS], [" -lsso_snow3g"])],
     [rte_pmd_zuc], [AS_VAR_APPEND([DPDK_LIBS], [" -lsso_zuc"])],
-    [rte_pmd_qat], [AS_VAR_APPEND([DPDK_LIBS], [" -lcrypto -ldl"])],
-    [rte_pmd_openssl], [AS_VAR_APPEND([DPDK_LIBS], [" -lcrypto -ldl"])])
+    [rte_pmd_qat], [AS_VAR_APPEND([DPDK_LIBS], [" -lcrypto"])],
+    [rte_pmd_openssl], [AS_VAR_APPEND([DPDK_LIBS], [" -lcrypto"])])
 done
 AS_VAR_APPEND([DPDK_PMDS], [--no-whole-archive])
 have_pmd_pcap=no
