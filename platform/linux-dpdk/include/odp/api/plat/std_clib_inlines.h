@@ -12,6 +12,9 @@
 #include <string.h>
 
 #include <rte_config.h>
+#if defined(__clang__)
+#undef RTE_TOOLCHAIN_GCC
+#endif
 #include <rte_memcpy.h>
 
 #ifndef _ODP_NO_INLINE
