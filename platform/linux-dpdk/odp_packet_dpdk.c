@@ -41,6 +41,9 @@
 #include <protocols/udp.h>
 
 #include <rte_config.h>
+#if defined(__clang__)
+#undef RTE_TOOLCHAIN_GCC
+#endif
 #include <rte_ethdev.h>
 #include <rte_ip_frag.h>
 #include <rte_udp.h>

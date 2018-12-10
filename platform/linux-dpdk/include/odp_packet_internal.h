@@ -32,6 +32,9 @@ extern "C" {
 #include <odp_queue_if.h>
 
 #include <rte_config.h>
+#if defined(__clang__)
+#undef RTE_TOOLCHAIN_GCC
+#endif
 #include <rte_acl_osdep.h>
 
 /** Minimum segment length expected by packet_parse_common() */
