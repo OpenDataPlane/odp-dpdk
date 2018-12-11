@@ -7,8 +7,8 @@
 #
 
 PCAP_IN=`find . ${TEST_DIR} $(dirname $0) -name udp64.pcap -print -quit`
+PCAP_EMPTY=`find . ${TEST_DIR} $(dirname $0) -name empty.pcap -print -quit`
 PCAP_OUT="pcapout.pcap"
-PCAP_EMPTY="empty.pcap"
 PCAP_IN_SIZE=`stat -c %s ${PCAP_IN}`
 echo "using PCAP_IN = ${PCAP_IN}, PCAP_OUT = ${PCAP_OUT}"
 
