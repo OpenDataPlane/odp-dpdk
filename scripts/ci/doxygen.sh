@@ -7,3 +7,11 @@ if [ "${CC#clang}" != "${CC}" ] ; then
 fi
 
 exec "$(dirname "$0")"/build.sh
+make doxygen-doc 2>&1 |tee doxygen.log
+fgrep -rq warning ./doxygen.log
+if [ $? -eq 0 ]; then
+	exit -1
+else
+	exit  0
+fi
+
