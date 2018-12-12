@@ -10,7 +10,7 @@ else
 	export CXX="${TARGET_ARCH}-g++"
 fi
 export CPPFLAGS="-I/usr/include/${TARGET_ARCH}/dpdk"
-export CFLAGS="-march=armv7-a"
+export CFLAGS="-march=armv7-a -mfpu=neon"
 export CXXFLAGS="-march=armv7-a"
 
 exec "$(dirname "$0")"/build.sh
