@@ -9,7 +9,7 @@ odp_pktio_SOURCES = odp_pktio.c
 
 if test_example
 if HAVE_PMD_PCAP
-TESTS = packet_dump_run.sh pktio_run.sh
+TESTS = packet_dump_run.sh example_packet_pktio_run.sh
 endif
 endif
-EXTRA_DIST = packet_dump_run.sh pktio_run.sh udp64.pcap
+EXTRA_DIST = packet_dump_run.sh example_packet_pktio_run.sh udp64.pcap
