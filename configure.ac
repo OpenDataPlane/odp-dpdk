@@ -103,7 +103,7 @@ ODP_CHECK_CFLAG([-Wformat-truncation=0])
 ODP_CHECK_CFLAG([-Wformat-overflow=0])
 
 ODP_CFLAGS="$ODP_CFLAGS -std=c99"
-ODP_CXXFLAGS="$ODP_CXXFLAGS -std=c++11"
+ODP_CXXFLAGS="$ODP_CXXFLAGS -std=c++11 -Wno-deprecated-register"
 
 # Extra flags for example to suppress certain warning types
 ODP_CFLAGS="$ODP_CFLAGS $ODP_CFLAGS_EXTRA"
