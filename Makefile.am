@@ -10,6 +10,7 @@ PLATFORM_TEST_DIR = platform/linux-generic/test
 endif
 if PLATFORM_IS_LINUX_DPDK
 PLATFORM_DIR = platform/linux-dpdk
+PLATFORM_DUMPCONF_DIR = platform/linux-dpdk/dumpconfig
 PLATFORM_TEST_DIR = platform/linux-dpdk/test
 endif
 
