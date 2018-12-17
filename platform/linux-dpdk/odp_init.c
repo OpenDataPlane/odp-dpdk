@@ -81,9 +81,7 @@ struct odp_global_data_rw_t *odp_global_rw;
 
 static int odp_init_dpdk(const char *cmdline)
 {
-	char **dpdk_argv;
 	int dpdk_argc;
-	char *full_cmdline;
 	int i, cmdlen;
 	odp_cpumask_t mask;
 	char mask_str[ODP_CPUMASK_STR_SIZE];
@@ -118,18 +116,20 @@ static int odp_init_dpdk(const char *cmdline)
 		return -1;
 	}
 
-	/* masklen includes the terminating null as well */
-	full_cmdline = calloc(1, strlen("odpdpdk -c ") + masklen +
-			      strlen(" ") + strlen(cmdline));
+	cmdlen = snprintf(NULL, 0, "odpdpdk -c %s %s ", mask_str, cmdline);
+
+	char full_cmdline[cmdlen];
 
 	/* first argument is facility log, simply bind it to odpdpdk for now.*/
-	cmdlen = sprintf(full_cmdline, "odpdpdk -c %s %s", mask_str, cmdline);
+	cmdlen = snprintf(full_cmdline, cmdlen, "odpdpdk -c %s %s", mask_str,
+			  cmdline);
 
 	for (i = 0, dpdk_argc = 1; i < cmdlen; ++i) {
 		if (isspace(full_cmdline[i]))
 			++dpdk_argc;
 	}
-	dpdk_argv = malloc(dpdk_argc * sizeof(char *));
+
+	char *dpdk_argv[dpdk_argc];
 
 	dpdk_argc = rte_strsplit(full_cmdline, strlen(full_cmdline), dpdk_argv,
 				 dpdk_argc, ' ');
@@ -138,8 +138,6 @@ static int odp_init_dpdk(const char *cmdline)
 	fflush(stdout);
 
 	i = rte_eal_init(dpdk_argc, dpdk_argv);
-	free(dpdk_argv);
-	free(full_cmdline);
 	if (i < 0) {
 		ODP_ERR("Cannot init the Intel DPDK EAL!\n");
 		return -1;
