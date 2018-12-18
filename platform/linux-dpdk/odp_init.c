@@ -147,6 +147,9 @@ static int odp_init_dpdk(const char *cmdline)
 	}
 	ODP_DBG("rte_eal_init OK\n");
 
+	/* Reset to 0 to force getopt() internal initialization routine */
+	optind = 0;
+
 	i = pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t),
 				   &original_cpuset);
 	if (i)
