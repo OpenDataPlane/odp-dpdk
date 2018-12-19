@@ -10,7 +10,7 @@ NUM_RX_PORT=3
 RETVAL=0
 
 PCAP_IN=`find . ${TEST_DIR} $(dirname $0) -name udp64.pcap -print -quit`
-PCAP_EMPTY="empty.pcap"
+PCAP_EMPTY=`find . ${TEST_DIR} $(dirname $0) -name empty.pcap -print -quit`
 
 echo "Switch test using PCAP_IN = ${PCAP_IN}"
 
