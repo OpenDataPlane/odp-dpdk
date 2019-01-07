@@ -24,20 +24,60 @@ extern const schedule_api_t schedule_scalable_api;
 
 const schedule_fn_t *sched_fn;
 const schedule_api_t *sched_api;
+int _odp_schedule_configured;
 
 uint64_t odp_schedule_wait_time(uint64_t ns)
 {
 	return sched_api->schedule_wait_time(ns);
 }
 
+int odp_schedule_capability(odp_schedule_capability_t *capa)
+{
+	return sched_api->schedule_capability(capa);
+}
+
+void odp_schedule_config_init(odp_schedule_config_t *config)
+{
+	memset(config, 0, sizeof(*config));
+
+	sched_api->schedule_config_init(config);
+}
+
+int odp_schedule_config(const odp_schedule_config_t *config)
+{
+	int ret;
+	odp_schedule_config_t defconfig;
+
+	if (_odp_schedule_configured) {
+		ODP_ERR("Scheduler has been configured already\n");
+		return -1;
+	}
+
+	if (!config) {
+		odp_schedule_config_init(&defconfig);
+		config = &defconfig;
+	}
+
+	ret = sched_api->schedule_config(config);
+
+	if (ret >= 0)
+		_odp_schedule_configured = 1;
+
+	return ret;
+}
+
 odp_event_t odp_schedule(odp_queue_t *from, uint64_t wait)
 {
+	ODP_ASSERT(_odp_schedule_configured);
+
 	return sched_api->schedule(from, wait);
 }
 
 int odp_schedule_multi(odp_queue_t *from, uint64_t wait, odp_event_t events[],
 		       int num)
 {
+	ODP_ASSERT(_odp_schedule_configured);
+
 	return sched_api->schedule_multi(from, wait, events, num);
 }
 

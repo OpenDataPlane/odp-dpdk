@@ -597,6 +597,11 @@ static int schedule_init_queue(uint32_t queue_index,
 	int i;
 	int prio = prio_level_from_api(sched_param->prio);
 
+	if (_odp_schedule_configured == 0) {
+		ODP_ERR("Scheduler has not been configured\n");
+		return -1;
+	}
+
 	pri_set_queue(queue_index, prio);
 	sched->queue[queue_index].grp  = sched_param->group;
 	sched->queue[queue_index].prio = prio;
@@ -793,6 +798,19 @@ static int schedule_term_local(void)
 		schedule_release_atomic();
 	else if (sched_local.sync_ctx == ODP_SCHED_SYNC_ORDERED)
 		schedule_release_ordered();
+
+	return 0;
+}
+
+static void schedule_config_init(odp_schedule_config_t *config)
+{
+	config->num_queues = ODP_CONFIG_QUEUES - NUM_INTERNAL_QUEUES;
+	config->queue_size = queue_glb->config.max_queue_size;
+}
+
+static int schedule_config(const odp_schedule_config_t *config)
+{
+	(void)config;
 
 	return 0;
 }
@@ -1547,9 +1565,23 @@ static int schedule_num_grps(void)
 	return NUM_SCHED_GRPS;
 }
 
-static void schedule_config(schedule_config_t *config)
+static void schedule_get_config(schedule_config_t *config)
 {
 	*config = *(&sched->config_if);
+};
+
+static int schedule_capability(odp_schedule_capability_t *capa)
+{
+	memset(capa, 0, sizeof(odp_schedule_capability_t));
+
+	capa->max_ordered_locks = schedule_max_ordered_locks();
+	capa->max_groups = schedule_num_grps();
+	capa->max_prios = schedule_num_prio();
+	capa->max_queues = ODP_CONFIG_QUEUES - NUM_INTERNAL_QUEUES;
+	capa->max_queue_size = queue_glb->config.max_queue_size;
+	capa->max_flow_id = BUF_HDR_MAX_FLOW_ID;
+
+	return 0;
 }
 
 /* Fill in scheduler interface */
@@ -1569,12 +1601,15 @@ const schedule_fn_t schedule_basic_fn = {
 	.order_lock = order_lock,
 	.order_unlock = order_unlock,
 	.max_ordered_locks = schedule_max_ordered_locks,
-	.config = schedule_config
+	.get_config = schedule_get_config
 };
 
 /* Fill in scheduler API calls */
 const schedule_api_t schedule_basic_api = {
 	.schedule_wait_time       = schedule_wait_time,
+	.schedule_capability      = schedule_capability,
+	.schedule_config_init     = schedule_config_init,
+	.schedule_config          = schedule_config,
 	.schedule                 = schedule,
 	.schedule_multi           = schedule_multi,
 	.schedule_multi_wait      = schedule_multi_wait,

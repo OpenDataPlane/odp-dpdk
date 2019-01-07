@@ -30,8 +30,6 @@
 #include <odp/api/plat/queue_inline_types.h>
 #include <odp_global_data.h>
 
-#define NUM_INTERNAL_QUEUES 64
-
 #include <odp/api/plat/ticketlock_inlines.h>
 #define LOCK(queue_ptr)      odp_ticketlock_lock(&((queue_ptr)->s.lock))
 #define UNLOCK(queue_ptr)    odp_ticketlock_unlock(&((queue_ptr)->s.lock))
@@ -49,7 +47,7 @@ static int queue_init(queue_entry_t *queue, const char *name,
 queue_global_t *queue_glb;
 extern _odp_queue_inline_offset_t _odp_queue_inline_offset;
 
-static int queue_capa(odp_queue_capability_t *capa, int sched)
+static int queue_capa(odp_queue_capability_t *capa, int sched ODP_UNUSED)
 {
 	memset(capa, 0, sizeof(odp_queue_capability_t));
 
@@ -59,6 +57,7 @@ static int queue_capa(odp_queue_capability_t *capa, int sched)
 	capa->plain.max_size    = queue_glb->config.max_queue_size;
 	capa->plain.lockfree.max_num  = queue_glb->queue_lf_num;
 	capa->plain.lockfree.max_size = queue_glb->queue_lf_size;
+#if ODP_DEPRECATED_API
 	capa->sched.max_num     = capa->max_queues;
 	capa->sched.max_size    = queue_glb->config.max_queue_size;
 
@@ -67,6 +66,7 @@ static int queue_capa(odp_queue_capability_t *capa, int sched)
 		capa->max_sched_groups  = sched_fn->num_grps();
 		capa->sched_prios       = odp_schedule_num_prio();
 	}
+#endif
 
 	return 0;
 }

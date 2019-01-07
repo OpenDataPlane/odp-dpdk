@@ -14,6 +14,8 @@
 #define ODP_API_SPEC_SCHEDULE_TYPES_H_
 #include <odp/visibility_begin.h>
 
+#include <odp/api/support.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -76,6 +78,9 @@ extern "C" {
  * requests another event from the scheduler, which implicitly releases the
  * context. User may allow the scheduler to release the context earlier than
  * that by calling odp_schedule_release_atomic().
+ * When scheduler is enabled as flow-aware, the event flow id value affects
+ * scheduling of the event and synchronization is maintained per flow within
+ * each queue.
  */
 
 /**
@@ -102,6 +107,9 @@ extern "C" {
  * (e.g. freed or stored) within the context are considered missing from
  * reordering and are skipped at this time (but can be ordered again within
  * another context).
+ * When scheduler is enabled as flow-aware, the event flow id value affects
+ * scheduling of the event and synchronization is maintained per flow within
+ * each queue.
  */
 
 /**
@@ -164,6 +172,85 @@ typedef	struct odp_schedule_param_t {
 	  * Default value is 0. */
 	uint32_t lock_count;
 } odp_schedule_param_t;
+
+/**
+ * Scheduler capabilities
+ */
+typedef struct odp_schedule_capability_t {
+	/** Maximum number of ordered locks per queue */
+	uint32_t max_ordered_locks;
+
+	/** Maximum number of scheduling groups */
+	uint32_t max_groups;
+
+	/** Number of scheduling priorities */
+	uint32_t max_prios;
+
+	/** Maximum number of scheduled (ODP_BLOCKING) queues of the default
+	 * size. */
+	uint32_t max_queues;
+
+	/** Maximum number of events a scheduled (ODP_BLOCKING) queue can store
+	 * simultaneously. The value of zero means that scheduled queues do not
+	 * have a size limit, but a single queue can store all available
+	 * events. */
+	uint32_t max_queue_size;
+
+	/** Maximum flow ID per queue
+	 *
+	 *  Valid flow ID range in flow aware mode of scheduling is from 0 to
+	 *  this maximum value. So, maximum number of flows per queue is this
+	 *  value plus one. A value of 0 indicates that flow aware mode is not
+	 *  supported. */
+	uint32_t max_flow_id;
+
+	/** Lock-free (ODP_NONBLOCKING_LF) queues support.
+	 * The specification is the same as for the blocking implementation. */
+	odp_support_t lockfree_queues;
+
+	/** Wait-free (ODP_NONBLOCKING_WF) queues support.
+	 * The specification is the same as for the blocking implementation. */
+	odp_support_t waitfree_queues;
+
+} odp_schedule_capability_t;
+
+/**
+ * Schedule configuration
+ */
+typedef struct odp_schedule_config_t {
+	/** Maximum number of scheduled queues to be supported.
+	 *
+	 * @see odp_schedule_capability_t
+	 */
+	uint32_t num_queues;
+
+	/** Maximum number of events required to be stored simultaneously in
+	 * scheduled queue. This number must not exceed 'max_queue_size'
+	 * capability.  A value of 0 configures default queue size supported by
+	 * the implementation.
+	 */
+	uint32_t queue_size;
+
+	/** Maximum flow ID per queue
+	 *
+	 *  This value must not exceed 'max_flow_id' capability. Flow aware
+	 *  mode of scheduling is enabled when the value is greater than 0.
+	 *  The default value is 0.
+	 *
+	 *  Application can assign events to specific flows by calling
+	 *  odp_event_flow_id_set() before enqueuing events into a scheduled
+	 *  queue. When in flow aware mode, the event flow id value affects
+	 *  scheduling of the event and synchronization is maintained per flow
+	 *  within each queue.
+	 *
+	 *  Depeding on implementation, there may be much more flows supported
+	 *  than queues, as flows are lightweight entities.
+	 *
+	 *  @see odp_schedule_capability_t, odp_event_flow_id()
+	 */
+	uint32_t max_flow_id;
+
+} odp_schedule_config_t;
 
 /**
  * @}

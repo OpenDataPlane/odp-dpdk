@@ -127,20 +127,15 @@ static void queue_test_capa(void)
 	odp_queue_param_t qparams;
 	char name[ODP_QUEUE_NAME_LEN];
 	odp_queue_t queue[MAX_QUEUES];
-	uint32_t num_queues, min, i, j;
+	uint32_t num_queues, min, i;
 
 	memset(&capa, 0, sizeof(odp_queue_capability_t));
 	CU_ASSERT(odp_queue_capability(&capa) == 0);
 
 	CU_ASSERT(capa.max_queues != 0);
-	CU_ASSERT(capa.max_sched_groups != 0);
-	CU_ASSERT(capa.sched_prios != 0);
 	CU_ASSERT(capa.plain.max_num != 0);
-	CU_ASSERT(capa.sched.max_num != 0);
 
 	min = capa.plain.max_num;
-	if (min > capa.sched.max_num)
-		min = capa.sched.max_num;
 
 	CU_ASSERT(capa.max_queues >= min);
 
@@ -152,33 +147,26 @@ static void queue_test_capa(void)
 	odp_queue_param_init(&qparams);
 	CU_ASSERT(qparams.nonblocking == ODP_BLOCKING);
 
-	for (j = 0; j < 2; j++) {
-		if (j == 0) {
-			num_queues = capa.plain.max_num;
-		} else {
-			num_queues = capa.sched.max_num;
-			qparams.type = ODP_QUEUE_TYPE_SCHED;
+	num_queues = capa.plain.max_num;
+
+	if (num_queues > MAX_QUEUES)
+		num_queues = MAX_QUEUES;
+
+	for (i = 0; i < num_queues; i++) {
+		generate_name(name, i);
+		queue[i] = odp_queue_create(name, &qparams);
+
+		if (queue[i] == ODP_QUEUE_INVALID) {
+			CU_FAIL("Queue create failed");
+			num_queues = i;
+			break;
 		}
 
-		if (num_queues > MAX_QUEUES)
-			num_queues = MAX_QUEUES;
-
-		for (i = 0; i < num_queues; i++) {
-			generate_name(name, i);
-			queue[i] = odp_queue_create(name, &qparams);
-
-			if (queue[i] == ODP_QUEUE_INVALID) {
-				CU_FAIL("Queue create failed");
-				num_queues = i;
-				break;
-			}
-
-			CU_ASSERT(odp_queue_lookup(name) != ODP_QUEUE_INVALID);
-		}
-
-		for (i = 0; i < num_queues; i++)
-			CU_ASSERT(odp_queue_destroy(queue[i]) == 0);
+		CU_ASSERT(odp_queue_lookup(name) != ODP_QUEUE_INVALID);
 	}
+
+	for (i = 0; i < num_queues; i++)
+		CU_ASSERT(odp_queue_destroy(queue[i]) == 0);
 }
 
 static void queue_test_mode(void)
@@ -715,6 +703,7 @@ static void queue_test_info(void)
 	odp_queue_info_t info;
 	odp_queue_param_t param;
 	odp_queue_capability_t capability;
+	odp_schedule_capability_t sched_capa;
 	char q_plain_ctx[] = "test_q_plain context data";
 	char q_order_ctx[] = "test_q_order context data";
 	uint32_t lock_count;
@@ -729,13 +718,14 @@ static void queue_test_info(void)
 
 	memset(&capability, 0, sizeof(odp_queue_capability_t));
 	CU_ASSERT(odp_queue_capability(&capability) == 0);
+	CU_ASSERT(odp_schedule_capability(&sched_capa) == 0);
 	/* Create a scheduled ordered queue with explicitly set params */
 	odp_queue_param_init(&param);
 	param.type       = ODP_QUEUE_TYPE_SCHED;
 	param.sched.prio = odp_schedule_default_prio();
 	param.sched.sync = ODP_SCHED_SYNC_ORDERED;
 	param.sched.group = ODP_SCHED_GROUP_ALL;
-	param.sched.lock_count = capability.max_ordered_locks;
+	param.sched.lock_count = sched_capa.max_ordered_locks;
 	if (param.sched.lock_count == 0)
 		printf("\n    Ordered locks NOT supported\n");
 	param.context = q_order_ctx;

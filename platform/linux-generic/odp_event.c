@@ -59,6 +59,16 @@ int odp_event_type_multi(const odp_event_t event[], int num,
 	return i;
 }
 
+uint32_t odp_event_flow_id(odp_event_t event)
+{
+	return event_flow_id(event);
+}
+
+void odp_event_flow_id_set(odp_event_t event, uint32_t flow_id)
+{
+	event_flow_id_set(event, flow_id);
+}
+
 void odp_event_free(odp_event_t event)
 {
 	switch (odp_event_type(event)) {

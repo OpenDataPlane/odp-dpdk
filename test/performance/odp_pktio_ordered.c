@@ -1061,7 +1061,8 @@ int main(int argc, char *argv[])
 	odp_pool_t pool;
 	odp_pool_param_t params;
 	odp_shm_t shm;
-	odp_queue_capability_t queue_capa;
+	odp_schedule_capability_t schedule_capa;
+	odp_schedule_config_t schedule_config;
 	odp_pool_capability_t pool_capa;
 	odph_ethaddr_t new_addr;
 	odph_helper_options_t helper_options;
@@ -1098,9 +1099,9 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 
-	if (odp_queue_capability(&queue_capa)) {
-		LOG_ERR("Error: Queue capa failed\n");
-		exit(EXIT_FAILURE);
+	if (odp_schedule_capability(&schedule_capa)) {
+		printf("Error: Schedule capa failed.\n");
+		return -1;
 	}
 
 	if (odp_pool_capability(&pool_capa)) {
@@ -1129,9 +1130,11 @@ int main(int argc, char *argv[])
 	/* Parse and store the application arguments */
 	parse_args(argc, argv, &gbl_args->appl);
 
+	odp_schedule_config(NULL);
+
 	if (gbl_args->appl.in_mode == SCHED_ORDERED) {
 		/* At least one ordered lock required  */
-		if (queue_capa.max_ordered_locks < 1) {
+		if (schedule_capa.max_ordered_locks < 1) {
 			LOG_ERR("Error: Ordered locks not available.\n");
 			exit(EXIT_FAILURE);
 		}
@@ -1158,9 +1161,9 @@ int main(int argc, char *argv[])
 		pool_size = pool_capa.pkt.max_num;
 
 	queue_size = MAX_NUM_PKT;
-	if (queue_capa.sched.max_size &&
-	    queue_capa.sched.max_size < MAX_NUM_PKT)
-		queue_size = queue_capa.sched.max_size;
+	if (schedule_config.queue_size &&
+	    schedule_config.queue_size < MAX_NUM_PKT)
+		queue_size = schedule_config.queue_size;
 
 	/* Pool should not be larger than queue, otherwise queue enqueues at
 	 * packet input may fail. */

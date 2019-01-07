@@ -257,6 +257,19 @@ static int term_local(void)
 	return 0;
 }
 
+static void schedule_config_init(odp_schedule_config_t *config)
+{
+	config->num_queues = ODP_CONFIG_QUEUES - NUM_INTERNAL_QUEUES;
+	config->queue_size = queue_glb->config.max_queue_size;
+}
+
+static int schedule_config(const odp_schedule_config_t *config)
+{
+	(void)config;
+
+	return 0;
+}
+
 static uint32_t max_ordered_locks(void)
 {
 	return NUM_ORDERED_LOCKS;
@@ -361,6 +374,11 @@ static int init_queue(uint32_t qi, const odp_schedule_param_t *sched_param)
 	sched_group_t *sched_group = &sched_global->sched_group;
 	odp_schedule_group_t group = sched_param->group;
 	int prio = 0;
+
+	if (_odp_schedule_configured == 0) {
+		ODP_ERR("Scheduler has not been configured\n");
+		return -1;
+	}
 
 	if (group < 0 || group >= NUM_GROUP)
 		return -1;
@@ -925,6 +943,19 @@ static void order_unlock(void)
 {
 }
 
+static int schedule_capability(odp_schedule_capability_t *capa)
+{
+	memset(capa, 0, sizeof(odp_schedule_capability_t));
+
+	capa->max_ordered_locks = max_ordered_locks();
+	capa->max_groups = num_grps();
+	capa->max_prios = schedule_num_prio();
+	capa->max_queues = ODP_CONFIG_QUEUES - NUM_INTERNAL_QUEUES;
+	capa->max_queue_size = queue_glb->config.max_queue_size;
+
+	return 0;
+}
+
 /* Fill in scheduler interface */
 const schedule_fn_t schedule_sp_fn = {
 	.pktio_start   = pktio_start,
@@ -947,6 +978,9 @@ const schedule_fn_t schedule_sp_fn = {
 /* Fill in scheduler API calls */
 const schedule_api_t schedule_sp_api = {
 	.schedule_wait_time       = schedule_wait_time,
+	.schedule_capability      = schedule_capability,
+	.schedule_config_init     = schedule_config_init,
+	.schedule_config          = schedule_config,
 	.schedule                 = schedule,
 	.schedule_multi           = schedule_multi,
 	.schedule_multi_wait      = schedule_multi_wait,

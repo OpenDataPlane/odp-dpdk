@@ -53,7 +53,7 @@ typedef void (*schedule_order_unlock_lock_fn_t)(void);
 typedef void (*schedule_order_lock_start_fn_t)(void);
 typedef void (*schedule_order_lock_wait_fn_t)(void);
 typedef uint32_t (*schedule_max_ordered_locks_fn_t)(void);
-typedef void (*schedule_config_fn_t)(schedule_config_t *config);
+typedef void (*schedule_get_config_fn_t)(schedule_config_t *config);
 
 typedef struct schedule_fn_t {
 	schedule_pktio_start_fn_t   pktio_start;
@@ -74,7 +74,7 @@ typedef struct schedule_fn_t {
 	schedule_order_lock_wait_fn_t	wait_order_lock;
 	schedule_order_unlock_lock_fn_t  order_unlock_lock;
 	schedule_max_ordered_locks_fn_t max_ordered_locks;
-	schedule_config_fn_t        config;
+	schedule_get_config_fn_t        get_config;
 
 } schedule_fn_t;
 
@@ -87,9 +87,17 @@ int sched_cb_pktin_poll(int pktio_index, int pktin_index,
 int sched_cb_pktin_poll_one(int pktio_index, int rx_queue, odp_event_t evts[]);
 void sched_cb_pktio_stop_finalize(int pktio_index);
 
+/* For debugging */
+#ifdef ODP_DEBUG
+extern int _odp_schedule_configured;
+#endif
+
 /* API functions */
 typedef struct {
 	uint64_t (*schedule_wait_time)(uint64_t ns);
+	int (*schedule_capability)(odp_schedule_capability_t *capa);
+	void (*schedule_config_init)(odp_schedule_config_t *config);
+	int (*schedule_config)(const odp_schedule_config_t *config);
 	odp_event_t (*schedule)(odp_queue_t *from, uint64_t wait);
 	int (*schedule_multi)(odp_queue_t *from, uint64_t wait,
 			      odp_event_t events[], int num);

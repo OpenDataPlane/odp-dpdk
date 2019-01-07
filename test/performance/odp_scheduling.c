@@ -813,6 +813,7 @@ int main(int argc, char *argv[])
 	odph_odpthread_params_t thr_params;
 	odp_queue_capability_t capa;
 	odp_pool_capability_t pool_capa;
+	odp_schedule_config_t schedule_config;
 	uint32_t num_queues, num_buf;
 
 	printf("\nODP example starts\n\n");
@@ -908,10 +909,15 @@ int main(int argc, char *argv[])
 		return -1;
 	}
 
+	odp_schedule_config_init(&schedule_config);
+	odp_schedule_config(&schedule_config);
+
 	globals->queues_per_prio = QUEUES_PER_PRIO;
 	num_queues = globals->queues_per_prio * NUM_PRIOS;
-	if (num_queues > capa.sched.max_num)
-		globals->queues_per_prio = capa.sched.max_num / NUM_PRIOS;
+	if (schedule_config.num_queues &&
+	    num_queues > schedule_config.num_queues)
+		globals->queues_per_prio = schedule_config.num_queues /
+			NUM_PRIOS;
 
 	/* One plain queue is also used */
 	num_queues = (globals->queues_per_prio *  NUM_PRIOS) + 1;

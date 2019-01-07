@@ -238,6 +238,7 @@ int main(void)
 	odp_queue_capability_t queue_capa;
 	odp_timer_capability_t timer_capa;
 	odp_crypto_capability_t crypto_capa;
+	odp_schedule_capability_t schedule_capa;
 	uint64_t huge_page[MAX_HUGE_PAGES];
 	char ava_mask_str[ODP_CPUMASK_STR_SIZE];
 	char work_mask_str[ODP_CPUMASK_STR_SIZE];
@@ -290,6 +291,11 @@ int main(void)
 
 	if (odp_queue_capability(&queue_capa)) {
 		printf("queue capability failed\n");
+		return -1;
+	}
+
+	if (odp_schedule_capability(&schedule_capa)) {
+		printf("schedule capability failed\n");
 		return -1;
 	}
 
@@ -393,21 +399,17 @@ int main(void)
 	printf("\n");
 	printf("  SCHEDULER\n");
 	printf("    max ordered locks:    %" PRIu32 "\n",
-	       queue_capa.max_ordered_locks);
-	printf("    max groups:           %u\n", queue_capa.max_sched_groups);
-	printf("    priorities:           %u\n", queue_capa.sched_prios);
-	printf("    sched.max_num:        %" PRIu32 "\n",
-	       queue_capa.sched.max_num);
-	printf("    sched.max_size:       %" PRIu32 "\n",
-	       queue_capa.sched.max_size);
-	printf("    sched.lf.max_num:     %" PRIu32 "\n",
-	       queue_capa.sched.lockfree.max_num);
-	printf("    sched.lf.max_size:    %" PRIu32 "\n",
-	       queue_capa.sched.lockfree.max_size);
-	printf("    sched.wf.max_num:     %" PRIu32 "\n",
-	       queue_capa.sched.waitfree.max_num);
-	printf("    sched.wf.max_size:    %" PRIu32 "\n",
-	       queue_capa.sched.waitfree.max_size);
+	       schedule_capa.max_ordered_locks);
+	printf("    max groups:           %u\n", schedule_capa.max_groups);
+	printf("    priorities:           %u\n", schedule_capa.max_prios);
+	printf("    sched.max_queues:     %" PRIu32 "\n",
+	       schedule_capa.max_queues);
+	printf("    sched.max_queue_size: %" PRIu32 "\n",
+	       schedule_capa.max_queue_size);
+	printf("    sched.lf_queues:      %ssupported\n",
+	       schedule_capa.lockfree_queues ? "" : "not ");
+	printf("    sched.wf_queues:      %ssupported\n",
+	       schedule_capa.waitfree_queues ? "" : "not ");
 
 	printf("\n");
 	printf("  TIMER\n");
