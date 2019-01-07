@@ -45,6 +45,9 @@ ODP_STATIC_ASSERT(CONFIG_PACKET_SEG_LEN_MIN >= 256,
 ODP_STATIC_ASSERT(CONFIG_PACKET_MAX_SEGS < 256,
 		  "Maximum of 255 segments supported");
 
+/* Type size limits number of flow IDs supported */
+#define BUF_HDR_MAX_FLOW_ID 255
+
 struct odp_buffer_hdr_t {
 	/* Underlying DPDK rte_mbuf */
 	struct rte_mbuf mb;
@@ -60,6 +63,9 @@ struct odp_buffer_hdr_t {
 
 	/* Event type. Maybe different than pool type (crypto compl event) */
 	int8_t    event_type;
+
+	/* Event flow id */
+	uint8_t   flow_id;
 
 	/* --- Mostly read only data --- */
 	const void *user_ptr;
@@ -116,6 +122,20 @@ static inline odp_event_type_t _odp_buffer_event_type(odp_buffer_t buf)
 static inline void _odp_buffer_event_type_set(odp_buffer_t buf, int ev)
 {
 	buf_hdl_to_hdr(buf)->event_type = ev;
+}
+
+static inline uint32_t event_flow_id(odp_event_t ev)
+{
+	odp_buffer_hdr_t *buf_hdr = (odp_buffer_hdr_t *)(uintptr_t)ev;
+
+	return buf_hdr->flow_id;
+}
+
+static inline void event_flow_id_set(odp_event_t ev, uint32_t flow_id)
+{
+	odp_buffer_hdr_t *buf_hdr = (odp_buffer_hdr_t *)(uintptr_t)ev;
+
+	buf_hdr->flow_id = flow_id;
 }
 
 #ifdef __cplusplus
