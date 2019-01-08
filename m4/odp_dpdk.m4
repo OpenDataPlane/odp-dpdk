@@ -106,11 +106,11 @@ AC_CHECK_HEADERS([rte_config.h], [],
 		 [dpdk_check_ok=no])
 
 DPDK_LIBS=""
-_ODP_DPDK_CHECK_LIB([$2])
+_ODP_DPDK_CHECK_LIB([$2], [-lm])
 AS_IF([test "x$DPDK_LIBS" = "x"],
-      [_ODP_DPDK_CHECK_LIB([$2], [-ldl -lpthread])])
+      [_ODP_DPDK_CHECK_LIB([$2], [-lm -ldl -lpthread])])
 AS_IF([test "x$DPDK_LIBS" = "x"],
-      [_ODP_DPDK_CHECK_LIB([$2], [-ldl -lpthread -lnuma])])
+      [_ODP_DPDK_CHECK_LIB([$2], [-lm -ldl -lpthread -lnuma])])
 AS_IF([test "x$DPDK_LIBS" = "x"],
       [dpdk_check_ok=no])
 AS_IF([test "x$dpdk_check_ok" != "xno"],
