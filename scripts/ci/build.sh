@@ -13,10 +13,17 @@ make -j $(nproc)
 make install
 
 pushd ${HOME}
+
+# Fix build on CentOS
+PKG_CONFIG="${TARGET_ARCH}-pkg-config"
+if ! [ -x "$(command -v ${PKG_CONFIG})" ]; then
+        PKG_CONFIG="pkg-config"
+fi
+
 CC="${CC:-${TARGET_ARCH}-gcc}"
 ${CC} ${CFLAGS} ${OLDPWD}/example/hello/odp_hello.c -o odp_hello_inst_dynamic \
-	`PKG_CONFIG_PATH=/opt/odp/lib/pkgconfig ${TARGET_ARCH}-pkg-config --cflags --libs libodp-linux` \
-	`${TARGET_ARCH}-pkg-config --cflags --libs libdpdk`
+	`PKG_CONFIG_PATH=/opt/odp/lib/pkgconfig ${PKG_CONFIG} --cflags --libs libodp-linux` \
+	`${PKG_CONFIG} --cflags --libs libdpdk`
 
 sysctl vm.nr_hugepages=1000
 mkdir -p /mnt/huge
