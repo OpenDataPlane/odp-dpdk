@@ -29,7 +29,7 @@ sysctl vm.nr_hugepages=1000
 mkdir -p /mnt/huge
 mount -t hugetlbfs nodev /mnt/huge
 
-if [ -z "$TARGET_ARCH" ]
+if [ "$TARGET_ARCH" = "x86_64-linux-gnu" ]
 then
 	LD_LIBRARY_PATH="/opt/odp/lib:$LD_LIBRARY_PATH" ./odp_hello_inst_dynamic
 fi
