@@ -29,6 +29,7 @@
 #include <rte_config.h>
 #include <rte_crypto.h>
 #include <rte_cryptodev.h>
+#include <rte_version.h>
 
 #include <string.h>
 #include <math.h>
@@ -337,7 +338,11 @@ int odp_crypto_init_global(void)
 	}
 
 	for (cdev_id = 0; cdev_id < rte_cryptodev_count(); cdev_id++) {
+#if RTE_VERSION < RTE_VERSION_NUM(18, 5, 0, 0)
 		sess_sz = rte_cryptodev_get_private_session_size(cdev_id);
+#else
+		sess_sz = rte_cryptodev_sym_get_private_session_size(cdev_id);
+#endif
 		if (sess_sz > max_sess_sz)
 			max_sess_sz = sess_sz;
 	}
