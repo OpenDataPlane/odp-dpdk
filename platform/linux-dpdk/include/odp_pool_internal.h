@@ -86,7 +86,7 @@ static inline void buffer_free_multi(odp_buffer_hdr_t *buf_hdr[], int num)
 	int i;
 
 	for (i = 0; i < num; i++)
-		rte_ctrlmbuf_free((struct rte_mbuf *)(uintptr_t)buf_hdr[i]);
+		rte_mbuf_raw_free((struct rte_mbuf *)(uintptr_t)buf_hdr[i]);
 }
 
 #ifdef __cplusplus

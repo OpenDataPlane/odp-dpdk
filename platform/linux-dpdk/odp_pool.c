@@ -598,7 +598,7 @@ static inline int buffer_alloc_multi(pool_t *pool, odp_buffer_hdr_t *buf_hdr[],
 	for (i = 0; i < num; i++) {
 		struct rte_mbuf *mbuf;
 
-		mbuf = rte_ctrlmbuf_alloc(mp);
+		mbuf = rte_mbuf_raw_alloc(mp);
 		if (odp_unlikely(mbuf == NULL))
 			return i;
 
@@ -638,7 +638,7 @@ int odp_buffer_alloc_multi(odp_pool_t pool_hdl, odp_buffer_t buf[], int num)
 
 void odp_buffer_free(odp_buffer_t buf)
 {
-	rte_ctrlmbuf_free(buf_to_mbuf(buf));
+	rte_mbuf_raw_free(buf_to_mbuf(buf));
 }
 
 void odp_buffer_free_multi(const odp_buffer_t buf[], int num)
