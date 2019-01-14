@@ -715,33 +715,14 @@ static void _odp_pktio_send_completion(pktio_entry_t *pktio_entry)
 	}
 }
 
-static int recv_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
-			 odp_packet_t pkt_table[], int num)
+int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int num)
 {
-	uint16_t nb_rx, i;
-	odp_packet_t *saved_pkt_table;
-	pkt_dpdk_t * const pkt_dpdk = pkt_priv(pktio_entry);
+	uint16_t i;
 	odp_pktin_config_opt_t pktin_cfg = pktio_entry->s.config.pktin;
 	odp_proto_layer_t parse_layer = pktio_entry->s.config.parser.layer;
 	odp_pktio_t input = pktio_entry->s.handle;
-	uint8_t min = pkt_dpdk->min_rx_burst;
 	odp_time_t ts_val;
 	odp_time_t *ts = NULL;
-
-	if (odp_unlikely(min > num)) {
-		ODP_DBG("PMD requires >%d buffers burst. "
-			"Current %d, dropped %d\n", min, num, min - num);
-		saved_pkt_table = pkt_table;
-		pkt_table = malloc(min * sizeof(odp_packet_t));
-	}
-
-	if (!pkt_dpdk->lockless_rx)
-		odp_ticketlock_lock(&pkt_dpdk->rx_lock[index]);
-
-	nb_rx = rte_eth_rx_burst(pkt_dpdk->port_id,
-				 (uint16_t)index,
-				 (struct rte_mbuf **)pkt_table,
-				 (uint16_t)RTE_MAX(num, min));
 
 	if (pktio_entry->s.config.pktin.bit.ts_all ||
 	    pktio_entry->s.config.pktin.bit.ts_ptp) {
@@ -749,18 +730,7 @@ static int recv_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 		ts = &ts_val;
 	}
 
-	if (nb_rx == 0 && !pkt_dpdk->lockless_tx) {
-		pool_t *pool = pool_entry_from_hdl(pktio_entry->s.pool);
-		struct rte_mempool *rte_mempool = pool->rte_mempool;
-
-		if (rte_mempool_avail_count(rte_mempool) == 0)
-			_odp_pktio_send_completion(pktio_entry);
-	}
-
-	if (!pkt_dpdk->lockless_rx)
-		odp_ticketlock_unlock(&pkt_dpdk->rx_lock[index]);
-
-	for (i = 0; i < nb_rx; ++i) {
+	for (i = 0; i < num; ++i) {
 		odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt_table[i]);
 		struct rte_mbuf *mbuf = pkt_to_mbuf(pkt_table[i]);
 
@@ -779,21 +749,10 @@ static int recv_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 		packet_set_ts(pkt_hdr, ts);
 	}
 
-	if (odp_unlikely(min > num)) {
-		memcpy(saved_pkt_table, pkt_table,
-		       num * sizeof(odp_packet_t));
-		for (i = num; i < nb_rx; i++)
-			odp_packet_free(pkt_table[i]);
-		nb_rx = RTE_MIN(num, nb_rx);
-		free(pkt_table);
-		pktio_entry->s.stats.in_discards += min - num;
-		pkt_table = saved_pkt_table;
-	}
-
 	if (pktio_cls_enabled(pktio_entry)) {
 		int failed = 0, success = 0;
 
-		for (i = 0; i < nb_rx; i++) {
+		for (i = 0; i < num; i++) {
 			odp_packet_t new_pkt;
 			odp_packet_t pkt = pkt_table[i];
 			odp_pool_t new_pool;
@@ -840,11 +799,63 @@ static int recv_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 			++success;
 		}
 		pktio_entry->s.stats.in_errors += failed;
-		pktio_entry->s.stats.in_ucast_pkts += nb_rx - failed;
-		nb_rx = success;
+		pktio_entry->s.stats.in_ucast_pkts += num - failed;
+		num = success;
 	}
 
-	return nb_rx;
+	return num;
+}
+
+static int recv_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
+			 odp_packet_t pkt_table[], int num)
+{
+	uint16_t nb_rx, i;
+	odp_packet_t *saved_pkt_table;
+	pkt_dpdk_t * const pkt_dpdk = pkt_priv(pktio_entry);
+	uint8_t min = pkt_dpdk->min_rx_burst;
+
+	if (odp_unlikely(min > num)) {
+		ODP_DBG("PMD requires >%d buffers burst. "
+			"Current %d, dropped %d\n", min, num, min - num);
+		saved_pkt_table = pkt_table;
+		pkt_table = malloc(min * sizeof(odp_packet_t));
+	}
+
+	if (!pkt_dpdk->lockless_rx)
+		odp_ticketlock_lock(&pkt_dpdk->rx_lock[index]);
+
+	nb_rx = rte_eth_rx_burst(pkt_dpdk->port_id,
+				 (uint16_t)index,
+				 (struct rte_mbuf **)pkt_table,
+				 (uint16_t)RTE_MAX(num, min));
+
+	if (nb_rx == 0 && !pkt_dpdk->lockless_tx) {
+		pool_t *pool = pool_entry_from_hdl(pktio_entry->s.pool);
+		struct rte_mempool *rte_mempool = pool->rte_mempool;
+
+		if (rte_mempool_avail_count(rte_mempool) == 0)
+			_odp_pktio_send_completion(pktio_entry);
+	}
+
+	if (!pkt_dpdk->lockless_rx)
+		odp_ticketlock_unlock(&pkt_dpdk->rx_lock[index]);
+
+	if (odp_unlikely(min > num)) {
+		memcpy(saved_pkt_table, pkt_table,
+		       num * sizeof(odp_packet_t));
+		for (i = num; i < nb_rx; i++)
+			odp_packet_free(pkt_table[i]);
+		nb_rx = RTE_MIN(num, nb_rx);
+		free(pkt_table);
+		pktio_entry->s.stats.in_discards += min - num;
+		pkt_table = saved_pkt_table;
+	}
+
+	/* Packets may also me received through eventdev, so don't add any
+	 * processing here. Instead, perform all processing in input_pkts()
+	 * which is also called by eventdev. */
+
+	return input_pkts(pktio_entry, pkt_table, nb_rx);
 }
 
 static inline int check_proto(void *l3_hdr, odp_bool_t *l3_proto_v4,
