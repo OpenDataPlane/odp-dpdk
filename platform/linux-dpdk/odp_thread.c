@@ -143,7 +143,6 @@ int odp_thread_init_local(odp_thread_type_t type)
 {
 	int id;
 	int cpu;
-	struct rte_config *cfg = rte_eal_get_configuration();
 	int group_all, group_worker, group_control;
 
 	group_all = 1;
@@ -179,9 +178,6 @@ int odp_thread_init_local(odp_thread_type_t type)
 	thread_globals->thr[id].cpu  = cpu;
 	thread_globals->thr[id].type = type;
 	RTE_PER_LCORE(_lcore_id) = cpu;
-	if (cfg->lcore_role[cpu] == ROLE_RTE)
-		ODP_ERR("There is a thread already running on core %d\n", cpu);
-	cfg->lcore_role[cpu] = ROLE_RTE;
 
 	_odp_this_thread = &thread_globals->thr[id];
 
