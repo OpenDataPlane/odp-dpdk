@@ -84,10 +84,6 @@ static int odp_init_dpdk(const char *cmdline)
 {
 	int dpdk_argc;
 	int i, cmdlen;
-	odp_cpumask_t mask;
-	char mask_str[ODP_CPUMASK_STR_SIZE];
-	int32_t masklen;
-	cpu_set_t original_cpuset;
 
 	if (cmdline == NULL) {
 		cmdline = getenv("ODP_PLATFORM_PARAMS");
@@ -95,35 +91,12 @@ static int odp_init_dpdk(const char *cmdline)
 			cmdline = "";
 	}
 
-	CPU_ZERO(&original_cpuset);
-	i = pthread_getaffinity_np(pthread_self(),
-				   sizeof(original_cpuset), &original_cpuset);
-	if (i != 0) {
-		ODP_ERR("Failed to read thread affinity: %d\n", i);
-		return -1;
-	}
-
-	odp_cpumask_zero(&mask);
-	for (i = 0; i < CPU_SETSIZE; i++) {
-		if (CPU_ISSET(i, &original_cpuset)) {
-			odp_cpumask_set(&mask, i);
-			break;
-		}
-	}
-	masklen = odp_cpumask_to_str(&mask, mask_str, ODP_CPUMASK_STR_SIZE);
-
-	if (masklen < 0) {
-		ODP_ERR("CPU mask error: d\n", masklen);
-		return -1;
-	}
-
-	cmdlen = snprintf(NULL, 0, "odpdpdk -c %s %s ", mask_str, cmdline);
+	cmdlen = snprintf(NULL, 0, "odpdpdk %s ", cmdline);
 
 	char full_cmdline[cmdlen];
 
 	/* first argument is facility log, simply bind it to odpdpdk for now.*/
-	cmdlen = snprintf(full_cmdline, cmdlen, "odpdpdk -c %s %s", mask_str,
-			  cmdline);
+	cmdlen = snprintf(full_cmdline, cmdlen, "odpdpdk %s", cmdline);
 
 	for (i = 0, dpdk_argc = 1; i < cmdlen; ++i) {
 		if (isspace(full_cmdline[i]))
@@ -150,11 +123,6 @@ static int odp_init_dpdk(const char *cmdline)
 
 	/* Reset to 0 to force getopt() internal initialization routine */
 	optind = 0;
-
-	i = pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t),
-				   &original_cpuset);
-	if (i)
-		ODP_ERR("Failed to reset thread affinity: %d\n", i);
 
 	return 0;
 }
