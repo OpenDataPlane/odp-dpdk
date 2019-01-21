@@ -6,7 +6,7 @@ includedir=@includedir@
 Name: libodp-linux
 Description: The ODP packet processing engine
 Version: @PKGCONFIG_VERSION@
-Requires.private: libconfig
+Requires.private: libconfig@DPDK_PKG@
 Libs: -L${libdir} -lodp-linux
 Libs.private: @DPDK_LIBS@ @OPENSSL_STATIC_LIBS@ @PTHREAD_LIBS@ @TIMER_LIBS@ -lpthread @ATOMIC_LIBS@
-Cflags: -I${includedir} @DPDK_CPPFLAGS@
+Cflags: -I${includedir} @DPDK_CFLAGS@
