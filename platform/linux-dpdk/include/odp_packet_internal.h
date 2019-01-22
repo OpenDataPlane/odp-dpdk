@@ -26,6 +26,7 @@ extern "C" {
 #include <odp/api/plat/packet_inline_types.h>
 #include <odp/api/packet_io.h>
 #include <odp/api/crypto.h>
+#include <odp/api/comp.h>
 #include <odp_ipsec_internal.h>
 #include <odp/api/abi/packet.h>
 #include <protocols/eth.h>
@@ -120,8 +121,18 @@ typedef struct {
 	/* Classifier destination queue */
 	odp_queue_t dst_queue;
 
-	/* Result for crypto packet op */
-	odp_crypto_packet_result_t crypto_op_result;
+	union {
+		struct {
+			/* Result for crypto packet op */
+			odp_crypto_packet_result_t crypto_op_result;
+
+			/* Context for IPsec */
+			odp_ipsec_packet_result_t ipsec_ctx;
+		};
+
+		/* Result for comp packet op */
+		odp_comp_packet_result_t comp_op_result;
+	};
 
 	/* Temp storage for digest */
 #define PACKET_DIGEST_MAX 64
@@ -130,10 +141,6 @@ typedef struct {
 	/* Temp storage for AAD */
 #define PACKET_AAD_MAX 32
 	uint8_t crypto_aad_buf[PACKET_AAD_MAX];
-
-	/* Context for IPsec */
-	odp_ipsec_packet_result_t ipsec_ctx;
-
 } odp_packet_hdr_t __rte_cache_aligned;
 
 /**
