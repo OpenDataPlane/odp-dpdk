@@ -146,6 +146,9 @@ __LIB__libodp_linux_la_SOURCES = \
 			   ../linux-generic/odp_chksum.c \
 			   ../linux-generic/odp_classification.c \
 			   ../linux-generic/odp_comp.c \
+			   ../linux-generic/miniz/miniz.c miniz/miniz.h miniz/miniz_common.h \
+			   ../linux-generic/miniz/miniz_tdef.c miniz/miniz_tdef.h \
+			   ../linux-generic/miniz/miniz_tinfl.c miniz/miniz_tinfl.h \
 			   ../linux-generic/odp_cpumask.c \
 			   ../linux-generic/odp_cpumask_task.c \
 			   odp_crypto.c \
