@@ -11,9 +11,9 @@ AM_CPPFLAGS +=  -I$(top_srcdir)/platform/$(with_platform)/arch/@ARCH_DIR@
 AM_CPPFLAGS +=  -I$(top_srcdir)/platform/$(with_platform)/arch/default
 
 AM_CPPFLAGS +=  $(OPENSSL_CPPFLAGS)
-AM_CPPFLAGS +=  $(DPDK_CPPFLAGS)
 AM_CPPFLAGS +=  $(NETMAP_CPPFLAGS)
 
+AM_CFLAGS +=  $(DPDK_CFLAGS)
 AM_CFLAGS +=  $(LIBCONFIG_CFLAGS)
 
 DISTCLEANFILES = include/odp_libconfig_config.h
@@ -52,6 +52,7 @@ odpapiabiarchinclude_HEADERS += \
 		  include-abi/odp/api/abi/buffer.h \
 		  include-abi/odp/api/abi/byteorder.h \
 		  include-abi/odp/api/abi/classification.h \
+		  include-abi/odp/api/abi/comp.h \
 		  include-abi/odp/api/abi/cpumask.h \
 		  include-abi/odp/api/abi/crypto.h \
 		  include-abi/odp/api/abi/debug.h \
@@ -156,6 +157,10 @@ __LIB__libodp_linux_la_SOURCES = \
 			   odp_buffer.c \
 			   odp_chksum.c \
 			   odp_classification.c \
+			   odp_comp.c \
+			   miniz/miniz.c miniz/miniz.h miniz/miniz_common.h \
+			   miniz/miniz_tdef.c miniz/miniz_tdef.h \
+			   miniz/miniz_tinfl.c miniz/miniz_tinfl.h \
 			   odp_cpumask.c \
 			   odp_cpumask_task.c \
 			   odp_errno.c \
