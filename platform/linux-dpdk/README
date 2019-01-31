@@ -1,4 +1,4 @@
-Copyright (c) 2018, Linaro Limited
+Copyright (c) 2018-2019, Linaro Limited
 All rights reserved.
 
 SPDX-License-Identifier:        BSD-3-Clause
@@ -237,7 +237,7 @@ changes are in platform/linux-dpdk. That directory's Makefile.am builds our
 code and the required parts from platform/linux-generic.
 This allows us to easily pull the necessary changes from odp.git with git:
 
-git remote add odp_base https://github.com/Linaro/odp.git
+git remote add odp_base https://github.com/OpenDataPlane/odp.git
 git pull odp_base master
 
 This will result in a merge commit, and possibly some conflict resolving if
