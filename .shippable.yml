@@ -5,18 +5,14 @@ compiler:
   - clang
 
 env:
-    - CONF="--disable-test-perf --disable-test-perf-proc"
-    - CONF="--disable-abi-compat --disable-test-perf --disable-test-perf-proc"
-    # - CONF="--enable-dpdk-zero-copy"
-    # - CROSS_ARCH="arm64"
-    # - CROSS_ARCH="armhf" CFLAGS="-march=armv7-a"
-    # - CROSS_ARCH="powerpc"
-    # - CROSS_ARCH="i386"
+    - CONF="--disable-test-perf"
+    - CONF="--disable-abi-compat --disable-test-perf"
 
 build:
   ci:
+    - add-apt-repository -y ppa:lumag/odp-xenial
     - apt-get update
-    - apt-get install --no-install-recommends -yy asciidoctor autoconf automake build-essential ccache clang doxygen gcc graphviz libconfig-dev libcunit1-dev libnuma-dev libpcap-dev libssl-dev libtool mscgen xsltproc
+    - apt-get install -yy --no-install-recommends --option Acquire::Retries=10 --option Acquire::http::Timeout=300 asciidoctor autoconf automake build-essential ccache clang doxygen gcc graphviz libconfig-dev libcunit1-dev libnuma-dev libdpdk-dev libpcap-dev libssl-dev libtool mscgen xsltproc
     - mkdir -p $HOME/odp-shmdir
     - export CI=true ODP_SHM_DIR=$HOME/odp-shmdir ODP_TEST_OUT_XML=yes
     - ./bootstrap
@@ -28,8 +24,6 @@ build:
     - ./scripts/shippable-post.sh basic
     - ODP_SCHEDULER=sp make check
     - ./scripts/shippable-post.sh sp
-    - ODP_SCHEDULER=scalable make check
-    - ./scripts/shippable-post.sh scalable
     - rm -rf $HOME/odp-shmdir
 
   on_failure:
