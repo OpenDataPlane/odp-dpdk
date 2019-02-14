@@ -16,7 +16,7 @@ build:
     - mkdir -p $HOME/odp-shmdir
     - export CI=true ODP_SHM_DIR=$HOME/odp-shmdir ODP_TEST_OUT_XML=yes
     - ./bootstrap
-    - if [ "${CC#clang}" != "${CC}" ] ; then export CXX="${CC/clang/clang++}"; fi
+    - if [ "${CC#clang}" != "${CC}" ] ; then export CXX="${CC/clang/clang++}"; export EXTRA_CFLAGS="-Wno-cast-align"; fi
     - echo ./configure $CONF
     - ./configure $CONF
     - make -j $(nproc)
