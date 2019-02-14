@@ -352,7 +352,7 @@ AC_SUBST(ODP_DEPRECATED_API)
 ##########################################################################
 # Default include setup
 ##########################################################################
-CFLAGS="$CFLAGS $ODP_CFLAGS"
+CFLAGS="$CFLAGS $ODP_CFLAGS $EXTRA_CFLAGS"
 CXXFLAGS="$CXXFLAGS $ODP_CXXFLAGS"
 
 AC_CONFIG_FILES([Makefile])
