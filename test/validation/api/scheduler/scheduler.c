@@ -23,7 +23,7 @@
 #define NUM_GROUPS              2
 #define MAX_QUEUES              (64 * 1024)
 
-#define TEST_QUEUE_SIZE_NUM_EV  50
+#define DEFAULT_NUM_EV          50
 
 #define MAX_FLOWS               16
 #define FLOW_TEST_NUM_EV        (10 * MAX_FLOWS)
@@ -149,17 +149,17 @@ static void release_context(odp_schedule_sync_t sync)
 
 static void scheduler_test_capa(void)
 {
-	odp_schedule_capability_t capa;
+	odp_schedule_capability_t sched_capa;
 	odp_queue_capability_t queue_capa;
 
-	memset(&capa, 0, sizeof(odp_schedule_capability_t));
-	CU_ASSERT_FATAL(odp_schedule_capability(&capa) == 0);
+	memset(&sched_capa, 0, sizeof(odp_schedule_capability_t));
+	CU_ASSERT_FATAL(odp_schedule_capability(&sched_capa) == 0);
 	CU_ASSERT_FATAL(odp_queue_capability(&queue_capa) == 0);
 
-	CU_ASSERT(capa.max_groups != 0);
-	CU_ASSERT(capa.max_prios != 0);
-	CU_ASSERT(capa.max_queues != 0);
-	CU_ASSERT(queue_capa.max_queues >= capa.max_queues);
+	CU_ASSERT(sched_capa.max_groups != 0);
+	CU_ASSERT(sched_capa.max_prios != 0);
+	CU_ASSERT(sched_capa.max_queues != 0);
+	CU_ASSERT(queue_capa.max_queues >= sched_capa.max_queues);
 }
 
 static void scheduler_test_wait_time(void)
@@ -422,7 +422,6 @@ static void scheduler_test_wait(void)
 
 static void scheduler_test_queue_size(void)
 {
-	odp_queue_capability_t queue_capa;
 	odp_schedule_config_t default_config;
 	odp_pool_t pool;
 	odp_pool_param_t pool_param;
@@ -436,8 +435,10 @@ static void scheduler_test_queue_size(void)
 				      ODP_SCHED_SYNC_ATOMIC,
 				      ODP_SCHED_SYNC_ORDERED};
 
-	CU_ASSERT_FATAL(odp_queue_capability(&queue_capa) == 0);
-	queue_size = TEST_QUEUE_SIZE_NUM_EV;
+	queue_size = DEFAULT_NUM_EV;
+
+	/* Scheduler has been already configured. Use default config as max
+	 * queue size. */
 	odp_schedule_config_init(&default_config);
 	if (default_config.queue_size &&
 	    queue_size > default_config.queue_size)
@@ -446,7 +447,7 @@ static void scheduler_test_queue_size(void)
 	odp_pool_param_init(&pool_param);
 	pool_param.buf.size  = 100;
 	pool_param.buf.align = 0;
-	pool_param.buf.num   = TEST_QUEUE_SIZE_NUM_EV;
+	pool_param.buf.num   = DEFAULT_NUM_EV;
 	pool_param.type      = ODP_POOL_BUFFER;
 
 	pool = odp_pool_create("test_queue_size", &pool_param);
@@ -489,7 +490,7 @@ static void scheduler_test_queue_size(void)
 		}
 
 		num = 0;
-		for (j = 0; j < 100 * TEST_QUEUE_SIZE_NUM_EV; j++) {
+		for (j = 0; j < 100 * DEFAULT_NUM_EV; j++) {
 			ev = odp_schedule(&from, ODP_SCHED_NO_WAIT);
 
 			if (ev == ODP_EVENT_INVALID)
@@ -504,6 +505,120 @@ static void scheduler_test_queue_size(void)
 		CU_ASSERT_FATAL(odp_queue_destroy(queue) == 0);
 	}
 
+	CU_ASSERT_FATAL(odp_pool_destroy(pool) == 0);
+}
+
+static void scheduler_test_order_ignore(void)
+{
+	odp_queue_capability_t queue_capa;
+	odp_schedule_config_t default_config;
+	odp_pool_t pool;
+	odp_pool_param_t pool_param;
+	odp_queue_param_t queue_param;
+	odp_queue_t ordered, plain, from;
+	odp_event_t ev;
+	odp_buffer_t buf;
+	uint32_t j, queue_size, num;
+	int ret;
+
+	odp_schedule_config_init(&default_config);
+	CU_ASSERT_FATAL(odp_queue_capability(&queue_capa) == 0);
+
+	queue_size = DEFAULT_NUM_EV;
+	if (default_config.queue_size &&
+	    queue_size > default_config.queue_size)
+		queue_size = default_config.queue_size;
+
+	if (queue_capa.plain.max_size &&
+	    queue_size > queue_capa.plain.max_size)
+		queue_size = queue_capa.plain.max_size;
+
+	odp_pool_param_init(&pool_param);
+	pool_param.buf.size  = 100;
+	pool_param.buf.align = 0;
+	pool_param.buf.num   = DEFAULT_NUM_EV;
+	pool_param.type      = ODP_POOL_BUFFER;
+
+	pool = odp_pool_create("test_order_ignore", &pool_param);
+
+	CU_ASSERT_FATAL(pool != ODP_POOL_INVALID);
+
+	/* Ensure that scheduler is empty */
+	for (j = 0; j < 10;) {
+		ev = odp_schedule(NULL, ODP_SCHED_NO_WAIT);
+		CU_ASSERT(ev == ODP_EVENT_INVALID);
+
+		if (ev != ODP_EVENT_INVALID)
+			odp_event_free(ev);
+		else
+			j++;
+	}
+
+	odp_queue_param_init(&queue_param);
+	queue_param.type = ODP_QUEUE_TYPE_SCHED;
+	queue_param.sched.prio  = odp_schedule_default_prio();
+	queue_param.sched.sync  = ODP_SCHED_SYNC_ORDERED;
+	queue_param.sched.group = ODP_SCHED_GROUP_ALL;
+
+	ordered = odp_queue_create("ordered", &queue_param);
+	CU_ASSERT_FATAL(ordered != ODP_QUEUE_INVALID);
+
+	odp_queue_param_init(&queue_param);
+	queue_param.type  = ODP_QUEUE_TYPE_PLAIN;
+	queue_param.order = ODP_QUEUE_ORDER_IGNORE;
+
+	plain = odp_queue_create("plain", &queue_param);
+	CU_ASSERT_FATAL(plain != ODP_QUEUE_INVALID);
+
+	num = 0;
+	for (j = 0; j < queue_size; j++) {
+		buf = odp_buffer_alloc(pool);
+		CU_ASSERT_FATAL(buf != ODP_BUFFER_INVALID);
+
+		ev = odp_buffer_to_event(buf);
+		ret = odp_queue_enq(ordered, ev);
+
+		if (ret)
+			odp_event_free(ev);
+		else
+			num++;
+	}
+
+	CU_ASSERT(num == queue_size);
+
+	num = 0;
+	for (j = 0; j < 100 * DEFAULT_NUM_EV; j++) {
+		ev = odp_schedule(&from, ODP_SCHED_NO_WAIT);
+
+		if (ev == ODP_EVENT_INVALID)
+			continue;
+
+		CU_ASSERT(from == ordered);
+		ret = odp_queue_enq(plain, ev);
+
+		if (ret)
+			odp_event_free(ev);
+		else
+			num++;
+	}
+
+	CU_ASSERT(num == queue_size);
+
+	num = 0;
+	for (j = 0; j < 100 * DEFAULT_NUM_EV; j++) {
+		ev = odp_queue_deq(plain);
+
+		if (ev == ODP_EVENT_INVALID)
+			continue;
+
+		odp_event_free(ev);
+		num++;
+	}
+
+	CU_ASSERT(num == queue_size);
+
+	CU_ASSERT_FATAL(odp_queue_destroy(ordered) == 0);
+	CU_ASSERT_FATAL(odp_queue_destroy(plain) == 0);
 	CU_ASSERT_FATAL(odp_pool_destroy(pool) == 0);
 }
 
@@ -1665,7 +1780,7 @@ static void scheduler_test_ordered_lock(void)
 static int create_queues(test_globals_t *globals)
 {
 	int i, j, prios, rc;
-	odp_queue_capability_t capa;
+	odp_queue_capability_t queue_capa;
 	odp_schedule_capability_t sched_capa;
 	odp_schedule_config_t default_config;
 	odp_pool_t queue_ctx_pool;
@@ -1679,7 +1794,7 @@ static int create_queues(test_globals_t *globals)
 	int queues_per_prio;
 	int sched_types;
 
-	if (odp_queue_capability(&capa) < 0) {
+	if (odp_queue_capability(&queue_capa) < 0) {
 		printf("Queue capability query failed\n");
 		return -1;
 	}
@@ -1712,8 +1827,9 @@ static int create_queues(test_globals_t *globals)
 	num_sched = (prios * queues_per_prio * sched_types) + CHAOS_NUM_QUEUES;
 	num_plain = (prios * queues_per_prio);
 	while ((num_sched > default_config.num_queues ||
-		num_plain > capa.plain.max_num ||
-		num_sched + num_plain > capa.max_queues) && queues_per_prio) {
+		num_plain > queue_capa.plain.max_num ||
+		num_sched + num_plain > queue_capa.max_queues) &&
+		queues_per_prio) {
 		queues_per_prio--;
 		num_sched = (prios * queues_per_prio * sched_types) +
 				CHAOS_NUM_QUEUES;
@@ -2136,6 +2252,7 @@ odp_testinfo_t scheduler_suite[] = {
 	ODP_TEST_INFO(scheduler_test_queue_destroy),
 	ODP_TEST_INFO(scheduler_test_wait),
 	ODP_TEST_INFO(scheduler_test_queue_size),
+	ODP_TEST_INFO(scheduler_test_order_ignore),
 	ODP_TEST_INFO(scheduler_test_groups),
 	ODP_TEST_INFO(scheduler_test_pause_resume),
 	ODP_TEST_INFO(scheduler_test_ordered_lock),
