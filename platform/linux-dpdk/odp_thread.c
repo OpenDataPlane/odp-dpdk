@@ -41,6 +41,7 @@ typedef struct {
 	uint32_t       num_worker;
 	uint32_t       num_control;
 	odp_spinlock_t lock;
+	odp_shm_t      shm;
 } thread_globals_t;
 
 /* Globals */
@@ -67,6 +68,9 @@ int odp_thread_init_global(void)
 		return -1;
 
 	memset(thread_globals, 0, sizeof(thread_globals_t));
+
+	thread_globals->shm = shm;
+
 	odp_spinlock_init(&thread_globals->lock);
 
 	return 0;
@@ -76,7 +80,7 @@ int odp_thread_term_global(void)
 {
 	int ret;
 
-	ret = odp_shm_free(odp_shm_lookup("odp_thread_globals"));
+	ret = odp_shm_free(thread_globals->shm);
 	if (ret < 0)
 		ODP_ERR("shm free failed for odp_thread_globals");
 
