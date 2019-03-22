@@ -674,23 +674,24 @@ int odp_pool_info(odp_pool_t pool_hdl, odp_pool_info_t *info)
 	return 0;
 }
 
-/*
- * DPDK doesn't support pool destroy at the moment. Instead we should improve
- * odp_pool_create() to try to reuse pools
- */
 int odp_pool_destroy(odp_pool_t pool_hdl)
 {
-	pool_t *pool = pool_entry_from_hdl(pool_hdl);
-	struct rte_mempool *mp = rte_mempool_lookup(pool->name);
+	pool_t *pool;
 
-	if (mp == NULL) {
-		ODP_ERR("Can't find pool with this name!\n");
+	if (pool_hdl == ODP_POOL_INVALID) {
+		ODP_ERR("Invalid pool handle\n");
 		return -1;
 	}
 
-	rte_mempool_free(mp);
+	pool = pool_entry_from_hdl(pool_hdl);
+	if (pool->rte_mempool == NULL) {
+		ODP_ERR("No rte_mempool handle available\n");
+		return -1;
+	}
+
+	rte_mempool_free(pool->rte_mempool);
 	pool->rte_mempool = NULL;
-	/* The pktio supposed to be closed by now */
+
 	return 0;
 }
 
