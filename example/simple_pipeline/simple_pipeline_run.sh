@@ -17,7 +17,11 @@ if [ $(nproc --all) -lt 3 ]; then
   exit $TEST_SKIPPED
 fi
 
-./odp_simple_pipeline${EXEEXT} -i pcap:in=${PCAP_IN},pcap:out=pcapout.pcap -e -t 2
+export ODP_PLATFORM_PARAMS="--no-pci \
+--vdev net_pcap0,rx_pcap=${PCAP_IN},tx_pcap=/dev/null \
+--vdev net_pcap1,rx_pcap=${PCAP_IN},tx_pcap=pcapout.pcap"
+
+./odp_simple_pipeline${EXEEXT} -i 0,1 -e -t 2
 STATUS=$?
 
 if [ "$STATUS" -ne 0 ]; then
