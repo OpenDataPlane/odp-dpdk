@@ -1,4 +1,5 @@
 /* Copyright (c) 2013-2018, Linaro Limited
+ * Copyright (c) 2019, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -40,7 +41,7 @@ extern "C" {
 /* Forward declaration */
 struct pktio_if_ops;
 
-#define PKTIO_PRIVATE_SIZE 1280
+#define PKTIO_PRIVATE_SIZE 1728
 
 struct pktio_entry {
 	const struct pktio_if_ops *ops; /**< Implementation specific methods */
@@ -189,7 +190,6 @@ uint16_t dpdk_pktio_port_id(pktio_entry_t *entry);
 
 int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int num);
 
-extern const pktio_if_ops_t loopback_pktio_ops;
 extern const pktio_if_ops_t null_pktio_ops;
 extern const pktio_if_ops_t dpdk_pktio_ops;
 extern const pktio_if_ops_t * const pktio_if_ops[];

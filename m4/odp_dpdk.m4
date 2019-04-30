@@ -8,6 +8,9 @@ AC_MSG_NOTICE([Looking for DPDK PMDs at $1])
 for filename in "$1"/librte_pmd_*.a; do
 cur_driver=`basename "$filename" .a | sed -e 's/^lib//'`
 
+# Skip rte_pmd_ring to avoid multiple definition errors
+AS_IF([test "x$cur_driver" = "xrte_pmd_ring"], [continue])
+
 # Match pattern is filled to 'filename' once if no matches are found
 AS_IF([test "x$cur_driver" = "xrte_pmd_*"], [break])
 
