@@ -1,4 +1,5 @@
 /* Copyright (c) 2013-2018, Linaro Limited
+ * Copyright (c) 2019, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -45,10 +46,13 @@
 #if defined(__clang__)
 #undef RTE_TOOLCHAIN_GCC
 #endif
+#include <rte_bus_vdev.h>
 #include <rte_ethdev.h>
+#include <rte_eth_ring.h>
 #include <rte_ip_frag.h>
 #include <rte_udp.h>
 #include <rte_tcp.h>
+#include <rte_version.h>
 
 /* DPDK poll mode drivers requiring minimum RX burst size DPDK_MIN_RX_BURST */
 #define IXGBE_DRV_NAME "net_ixgbe"
@@ -56,6 +60,9 @@
 
 /* Minimum RX burst size */
 #define DPDK_MIN_RX_BURST 4
+
+/* Loopback interface ring size */
+#define LOOPBACK_RING_SIZE 512
 
 /** DPDK runtime configuration options */
 typedef struct {
@@ -71,6 +78,7 @@ typedef struct ODP_ALIGNED_CACHE {
 	uint8_t lockless_rx;		  /**< no locking for rx */
 	uint8_t lockless_tx;		  /**< no locking for tx */
 	uint8_t min_rx_burst;		  /**< minimum RX burst size */
+	uint8_t loopback;		  /**< Operate as loopback interface */
 	odp_pktin_hash_proto_t hash;	  /**< Packet input hash protocol */
 	char ifname[32];
 	/** RX queue locks */
@@ -79,10 +87,26 @@ typedef struct ODP_ALIGNED_CACHE {
 	uint8_t vdev_sysc_promisc;	/**< promiscuous mode defined with
 					    system call */
 	dpdk_opt_t opt;
+	/* RX callback functions */
+#if RTE_VERSION < RTE_VERSION_NUM(18, 05, 0, 0)
+	struct rte_eth_rxtx_callback *rx_callback[PKTIO_MAX_QUEUES];
+#else
+	const struct rte_eth_rxtx_callback *rx_callback[PKTIO_MAX_QUEUES];
+#endif
 } pkt_dpdk_t;
 
 ODP_STATIC_ASSERT(PKTIO_PRIVATE_SIZE >= sizeof(pkt_dpdk_t),
 		  "PKTIO_PRIVATE_SIZE too small");
+
+/* Global DPDK pktio data */
+typedef struct ODP_ALIGNED_CACHE {
+	odp_shm_t shm;			/* SHM handle for global data */
+	struct rte_ring *loopback_ring;	/* Loopback interface data ring */
+	uint16_t loopback_port_id;	/* Loopback interface port id */
+	uint8_t loopback_in_use;	/* Loopback interface in use */
+} dpdk_global_t;
+
+static dpdk_global_t *dpdk_glb;
 
 static inline pkt_dpdk_t *pkt_priv(pktio_entry_t *pktio_entry)
 {
@@ -94,7 +118,6 @@ static inline pkt_dpdk_t *pkt_priv(pktio_entry_t *pktio_entry)
  * will be picked.
  * Array must be NULL terminated */
 const pktio_if_ops_t * const pktio_if_ops[]  = {
-	&loopback_pktio_ops,
 	&dpdk_pktio_ops,
 	&null_pktio_ops,
 	NULL
@@ -359,20 +382,60 @@ static int dpdk_output_queues_config(pktio_entry_t *pktio_entry,
 	return 0;
 }
 
-static int term_pkt_dpdk(void)
+static int dpdk_init_global(void)
 {
-	uint16_t port_id;
+	odp_shm_t shm;
 
-	/* Eventdev takes care of closing devices */
-	if (eventdev_gbl &&
-	    eventdev_gbl->rx_adapter.status != RX_ADAPTER_INIT)
-		return 0;
+	shm = odp_shm_reserve("_odp_dpdk_gbl", sizeof(dpdk_global_t),
+			      sizeof(dpdk_global_t), 0);
+	if (shm == ODP_SHM_INVALID)
+		return -1;
 
-	RTE_ETH_FOREACH_DEV(port_id) {
-		rte_eth_dev_close(port_id);
-	}
+	dpdk_glb = odp_shm_addr(shm);
+
+	memset(dpdk_glb, 0, sizeof(dpdk_global_t));
+	dpdk_glb->shm = shm;
+	dpdk_glb->loopback_port_id = -1;
 
 	return 0;
+}
+
+static int dpdk_term_global(void)
+{
+	int ret = 0;
+
+	/* Eventdev takes care of closing pktio devices */
+	if (!eventdev_gbl ||
+	    eventdev_gbl->rx_adapter.status == RX_ADAPTER_INIT) {
+		uint16_t port_id;
+
+		if (dpdk_glb->loopback_ring) {
+			char name[RTE_ETH_NAME_MAX_LEN];
+
+			port_id = dpdk_glb->loopback_port_id;
+			if (rte_eth_dev_get_name_by_port(port_id, name)) {
+				ODP_ERR("Reading loopback interface name failed\n");
+				ret = -1;
+			} else {
+				if (rte_vdev_uninit(name)) {
+					ODP_ERR("Uninitializing loopback interface failed\n");
+					ret = -1;
+				}
+				rte_ring_free(dpdk_glb->loopback_ring);
+			}
+		}
+
+		RTE_ETH_FOREACH_DEV(port_id) {
+			rte_eth_dev_close(port_id);
+		}
+	}
+
+	if (odp_shm_free(dpdk_glb->shm)) {
+		ODP_ERR("shm free failed");
+		return -1;
+	}
+
+	return ret;
 }
 
 static int dpdk_init_capability(pktio_entry_t *pktio_entry,
@@ -405,14 +468,22 @@ static int dpdk_init_capability(pktio_entry_t *pktio_entry,
 					  PKTIO_MAX_QUEUES);
 	capa->set_op.op.promisc_mode = 1;
 
-	/* Check if setting default MAC address is supporter */
-	rte_eth_macaddr_get(pkt_dpdk->port_id, &mac_addr);
-	ret = rte_eth_dev_default_mac_addr_set(pkt_dpdk->port_id, &mac_addr);
-	if (ret == 0) {
-		capa->set_op.op.mac_addr = 1;
-	} else if (ret != -ENOTSUP) {
-		ODP_ERR("Failed to set interface default MAC\n");
-		return -1;
+	/* Ring pmd doesn't support setting MAC or enabling promisc mode */
+	if (pkt_dpdk->loopback) {
+		capa->set_op.op.mac_addr = 0;
+		capa->set_op.op.promisc_mode = 0;
+	} else {
+		/* Check if setting default MAC address is supporter */
+		rte_eth_macaddr_get(pkt_dpdk->port_id, &mac_addr);
+		ret = rte_eth_dev_default_mac_addr_set(pkt_dpdk->port_id,
+						       &mac_addr);
+		if (ret == 0) {
+			capa->set_op.op.mac_addr = 1;
+		} else if (ret != -ENOTSUP) {
+			ODP_ERR("Failed to set interface default MAC: %d\n",
+				ret);
+			return -1;
+		}
 	}
 
 	ptype_cnt = rte_eth_dev_get_supported_ptypes(pkt_dpdk->port_id,
@@ -478,6 +549,43 @@ static int dpdk_init_capability(pktio_entry_t *pktio_entry,
 	return 0;
 }
 
+static int dpdk_init_loopback(pkt_dpdk_t * const pkt_dpdk)
+{
+	struct rte_ring *ring;
+	int port_id;
+
+	if (dpdk_glb->loopback_in_use) {
+		ODP_ERR("Loopback interface reserved\n");
+		return -1;
+	}
+
+	if (!dpdk_glb->loopback_ring) {
+		ring = rte_ring_create("_odp_loopback_ring", LOOPBACK_RING_SIZE,
+				       rte_socket_id(), 0);
+		if (ring == NULL) {
+			ODP_ERR("Creating loopback ring failed\n");
+			return -1;
+		}
+
+		port_id = rte_eth_from_ring(ring);
+		if (port_id == -1) {
+			ODP_ERR("Creating loopback interface failed\n");
+			rte_ring_free(ring);
+			return -1;
+		}
+
+		dpdk_glb->loopback_ring = ring;
+		dpdk_glb->loopback_port_id = port_id;
+		pkt_dpdk->port_id = port_id;
+	} else {
+		pkt_dpdk->port_id = dpdk_glb->loopback_port_id;
+	}
+
+	pkt_dpdk->loopback = 1;
+
+	return 0;
+}
+
 static int setup_pkt_dpdk(odp_pktio_t pktio ODP_UNUSED,
 			  pktio_entry_t *pktio_entry,
 			  const char *netdev, odp_pool_t pool ODP_UNUSED)
@@ -487,12 +595,17 @@ static int setup_pkt_dpdk(odp_pktio_t pktio ODP_UNUSED,
 	pkt_dpdk_t * const pkt_dpdk = pkt_priv(pktio_entry);
 	int i;
 
-	if (!_dpdk_netdev_is_valid(netdev)) {
+	if (!strcmp(netdev, "loop")) {
+		if (dpdk_init_loopback(pkt_dpdk))
+			return -1;
+	} else if (!_dpdk_netdev_is_valid(netdev)) {
 		ODP_DBG("Interface name should only contain numbers!: %s\n",
 			netdev);
 		return -1;
+	} else {
+		pkt_dpdk->port_id = atoi(netdev);
+
 	}
-	pkt_dpdk->port_id = atoi(netdev);
 
 	if (dpdk_init_capability(pktio_entry, &dev_info)) {
 		ODP_DBG("Failed to initialize capabilities for interface: %s\n",
@@ -529,6 +642,10 @@ static int setup_pkt_dpdk(odp_pktio_t pktio ODP_UNUSED,
 		odp_ticketlock_init(&pkt_dpdk->rx_lock[i]);
 		odp_ticketlock_init(&pkt_dpdk->tx_lock[i]);
 	}
+
+	if (pkt_dpdk->loopback)
+		dpdk_glb->loopback_in_use = 1;
+
 	return 0;
 }
 
@@ -541,6 +658,9 @@ static int close_pkt_dpdk(pktio_entry_t *pktio_entry)
 		rx_adapter_port_stop(pkt_dpdk->port_id);
 	else
 		rte_eth_dev_stop(pkt_dpdk->port_id);
+
+	if (pkt_dpdk->loopback)
+		dpdk_glb->loopback_in_use = 0;
 
 	return 0;
 }
@@ -632,6 +752,23 @@ static int dpdk_setup_eth_rx(const pktio_entry_t *pktio_entry,
 	return 0;
 }
 
+/*
+ * Callback function for setting mbuf port IDs. Port ID is required by eventev
+ * RX adapter and ring pmd doesn't set it automatically.
+ */
+static uint16_t dpdk_rx_cb(uint16_t port_id, uint16_t queue ODP_UNUSED,
+			   struct rte_mbuf *pkts[], uint16_t nb_pkts,
+			   uint16_t max_pkts ODP_UNUSED,
+			   void *user_param ODP_UNUSED)
+{
+	uint16_t i;
+
+	for (i = 0; i < nb_pkts; i++)
+		pkts[i]->port = port_id;
+
+	return nb_pkts;
+}
+
 static int dpdk_start(pktio_entry_t *pktio_entry)
 {
 	struct rte_eth_dev_info dev_info;
@@ -676,6 +813,27 @@ static int dpdk_start(pktio_entry_t *pktio_entry)
 
 	rte_eth_allmulticast_enable(port_id);
 
+	/* Add callback for loopback interface */
+	if (pkt_dpdk->loopback) {
+		unsigned int i;
+
+		for (i = 0; i < pktio_entry->s.num_in_queue; i++) {
+#if RTE_VERSION < RTE_VERSION_NUM(18, 05, 0, 0)
+			struct rte_eth_rxtx_callback *callback;
+#else
+			const struct rte_eth_rxtx_callback *callback;
+#endif
+
+			callback = rte_eth_add_rx_callback(port_id, i,
+							   dpdk_rx_cb, NULL);
+			if (callback == NULL) {
+				ODP_ERR("Failed setting RX callback\n");
+				return -1;
+			}
+			pkt_dpdk->rx_callback[i] = callback;
+		}
+	}
+
 	/* Start device */
 	ret = rte_eth_dev_start(port_id);
 	if (ret < 0) {
@@ -689,14 +847,25 @@ static int dpdk_start(pktio_entry_t *pktio_entry)
 
 static int stop_pkt_dpdk(pktio_entry_t *pktio_entry)
 {
+	pkt_dpdk_t *pkt_dpdk = pkt_priv(pktio_entry);
 	unsigned int i;
-	uint16_t port_id = pkt_priv(pktio_entry)->port_id;
+	uint16_t port_id = pkt_dpdk->port_id;
 
 	for (i = 0; i < pktio_entry->s.num_in_queue; i++)
 		rte_eth_dev_rx_queue_stop(port_id, i);
 	for (i = 0; i < pktio_entry->s.num_out_queue; i++)
 		rte_eth_dev_tx_queue_stop(port_id, i);
 
+	if (!pkt_dpdk->loopback)
+		return 0;
+
+	for (i = 0; i < pktio_entry->s.num_in_queue; i++) {
+		if (rte_eth_remove_rx_callback(port_id, i,
+					       pkt_dpdk->rx_callback[i])) {
+			ODP_ERR("Failed removing RX callback\n");
+			return -1;
+		}
+	}
 	return 0;
 }
 
@@ -737,6 +906,7 @@ static void _odp_pktio_send_completion(pktio_entry_t *pktio_entry)
 
 int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int num)
 {
+	pkt_dpdk_t * const pkt_dpdk = pkt_priv(pktio_entry);
 	uint16_t i;
 	odp_pktin_config_opt_t pktin_cfg = pktio_entry->s.config.pktin;
 	odp_proto_layer_t parse_layer = pktio_entry->s.config.parser.layer;
@@ -759,11 +929,17 @@ int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int num)
 
 		if (!pktio_cls_enabled(pktio_entry) &&
 		    parse_layer != ODP_PROTO_LAYER_NONE) {
-			if (_odp_dpdk_packet_parse_layer(pkt_hdr, mbuf,
-							 parse_layer,
-							 pktin_cfg)) {
-				odp_packet_free(pkt_table[i]);
-				continue;
+			/* DPDK ring pmd doesn't support packet parsing */
+			if (pkt_dpdk->loopback) {
+				packet_parse_layer(pkt_hdr, parse_layer,
+						   pktio_entry->s.in_chksums);
+			} else {
+				if (_odp_dpdk_packet_parse_layer(pkt_hdr, mbuf,
+								 parse_layer,
+								 pktin_cfg)) {
+					odp_packet_free(pkt_table[i]);
+					continue;
+				}
 			}
 		}
 		packet_set_ts(pkt_hdr, ts);
@@ -785,17 +961,22 @@ int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int num)
 			data = odp_packet_data(pkt);
 			packet_parse_reset(&parsed_hdr);
 			packet_set_len(&parsed_hdr, pkt_len);
-			if (_odp_dpdk_packet_parse_common(&parsed_hdr.p, data,
-							  pkt_len, pkt_len,
-							  mbuf,
-							  ODP_PROTO_LAYER_ALL,
-							  pktin_cfg)) {
-				odp_packet_free(pkt);
-				continue;
+
+			if (!pkt_dpdk->loopback) {
+				int layer = ODP_PROTO_LAYER_ALL;
+
+				if (_odp_dpdk_packet_parse_common(&parsed_hdr.p,
+								  data, pkt_len,
+								  pkt_len, mbuf,
+								  layer,
+								  pktin_cfg)) {
+					odp_packet_free(pkt);
+					continue;
+				}
 			}
-			if (cls_classify_packet(pktio_entry, data,
-						pkt_len, pkt_len, &new_pool,
-						&parsed_hdr, false)) {
+			if (cls_classify_packet(pktio_entry, data, pkt_len,
+						pkt_len, &new_pool, &parsed_hdr,
+						pkt_dpdk->loopback)) {
 				failed++;
 				odp_packet_free(pkt);
 				continue;
@@ -810,6 +991,7 @@ int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int num)
 				}
 				pkt_table[i] = new_pkt;
 				pkt = new_pkt;
+				pkt_hdr = packet_hdr(pkt);
 			}
 			packet_set_ts(pkt_hdr, ts);
 			pktio_entry->s.stats.in_octets += odp_packet_len(pkt);
@@ -1170,9 +1352,14 @@ static int _dpdk_vdev_promisc_mode(uint16_t port_id)
 
 static int promisc_mode_get_pkt_dpdk(pktio_entry_t *pktio_entry)
 {
-	uint16_t port_id = pkt_priv(pktio_entry)->port_id;
+	pkt_dpdk_t * const pkt_dpdk = pkt_priv(pktio_entry);
+	uint16_t port_id = pkt_dpdk->port_id;
 
-	if (pkt_priv(pktio_entry)->vdev_sysc_promisc)
+	/* Loopback interface always in promisc mode */
+	if (pkt_dpdk->loopback)
+		return 1;
+
+	if (pkt_dpdk->vdev_sysc_promisc)
 		return _dpdk_vdev_promisc_mode(port_id);
 	else
 		return rte_eth_promiscuous_get(port_id);
@@ -1249,9 +1436,9 @@ static int stats_reset_pkt_dpdk(pktio_entry_t *pktio_entry)
 const pktio_if_ops_t dpdk_pktio_ops = {
 	.name = "odp-dpdk",
 	.print = NULL,
-	.init_global = NULL,
+	.init_global = dpdk_init_global,
 	.init_local = NULL,
-	.term = term_pkt_dpdk,
+	.term = dpdk_term_global,
 	.open = setup_pkt_dpdk,
 	.close = close_pkt_dpdk,
 	.start = dpdk_start,
