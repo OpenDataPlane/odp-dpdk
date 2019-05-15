@@ -1,14 +1,14 @@
 AC_PREREQ([2.5])
 ##########################################################################
-# Set correct API version
+# ODP API version
 ##########################################################################
 m4_define([odpapi_generation_version], [1])
 m4_define([odpapi_major_version], [21])
-m4_define([odpapi_minor_version], [1])
+m4_define([odpapi_minor_version], [4])
 m4_define([odpapi_point_version], [0])
 m4_define([odpapi_version],
     [odpapi_generation_version.odpapi_major_version.odpapi_minor_version.odpapi_point_version])
-AC_INIT([OpenDataPlane],[odpapi_version],[lng-odp@lists.linaro.org])
+AC_INIT([OpenDataPlane],[odpapi_version],[odp@lists.opendataplane.org])
 
 ODP_VERSION_API_GENERATION=odpapi_generation_version
 AC_SUBST(ODP_VERSION_API_GENERATION)
@@ -16,6 +16,24 @@ ODP_VERSION_API_MAJOR=odpapi_major_version
 AC_SUBST(ODP_VERSION_API_MAJOR)
 ODP_VERSION_API_MINOR=odpapi_minor_version
 AC_SUBST(ODP_VERSION_API_MINOR)
+
+##########################################################################
+# Helper library version
+##########################################################################
+m4_define([odph_version_generation], [1])
+m4_define([odph_version_major], [0])
+m4_define([odph_version_minor], [1])
+
+m4_define([odph_version],
+    [odph_version_generation.odph_version_major.odph_version_minor])
+
+ODPH_VERSION_GENERATION=odph_version_generation
+AC_SUBST(ODPH_VERSION_GENERATION)
+ODPH_VERSION_MAJOR=odph_version_major
+AC_SUBST(ODPH_VERSION_MAJOR)
+ODPH_VERSION_MINOR=odph_version_minor
+AC_SUBST(ODPH_VERSION_MINOR)
+
 AM_INIT_AUTOMAKE([1.9 tar-pax subdir-objects foreign nostdinc -Wall -Werror])
 AC_CONFIG_SRCDIR([include/odp/api/spec/init.h])
 AM_CONFIG_HEADER([include/config.h])
@@ -232,6 +250,7 @@ AS_IF([test "${with_platform}" = "linux-generic"],
 AC_DEFINE_UNQUOTED([ODP_IMPLEMENTATION_NAME], ["$ODP_IMPLEMENTATION_NAME"],
 		   [Define to the name of the implementation])
 
+AM_CONDITIONAL([ODP_USE_CONFIG], [test "x$odp_use_config" = "xtrue"])
 
 ##########################################################################
 # Build examples/tests dynamically
@@ -360,6 +379,8 @@ AC_CONFIG_FILES([include/Makefile
 		 include/odp/api/spec/version.h
 		 include/odp/api/spec/deprecated.h])
 
+AC_CONFIG_FILES([helper/Makefile
+		 helper/include/odp/helper/version.h])
 
 ##########################################################################
 # distribute the changed variables among the Makefiles

@@ -621,7 +621,8 @@ odp_crypto_alg_err_t auth_cmac_check(odp_packet_t pkt,
 static
 int internal_aad(EVP_CIPHER_CTX *ctx,
 		 odp_packet_t pkt,
-		 const odp_crypto_packet_op_param_t *param)
+		 const odp_crypto_packet_op_param_t *param,
+		 odp_bool_t encrypt)
 {
 	uint32_t offset = param->auth_range.offset;
 	uint32_t len   = param->auth_range.length;
@@ -635,12 +636,18 @@ int internal_aad(EVP_CIPHER_CTX *ctx,
 		void *mapaddr = odp_packet_offset(pkt, offset, &seglen, NULL);
 		uint32_t maclen = len > seglen ? seglen : len;
 
-		EVP_EncryptUpdate(ctx, NULL, &dummy_len, mapaddr, maclen);
+		if (encrypt)
+			EVP_EncryptUpdate(ctx, NULL, &dummy_len, mapaddr, maclen);
+		else
+			EVP_DecryptUpdate(ctx, NULL, &dummy_len, mapaddr, maclen);
 		offset  += maclen;
 		len     -= maclen;
 	}
 
-	ret = EVP_EncryptFinal_ex(ctx, NULL, &dummy_len);
+	if (encrypt)
+		ret = EVP_EncryptFinal_ex(ctx, NULL, &dummy_len);
+	else
+		ret = EVP_DecryptFinal_ex(ctx, NULL, &dummy_len);
 
 	return ret;
 }
@@ -1019,7 +1026,7 @@ odp_crypto_alg_err_t aes_gmac_gen(odp_packet_t pkt,
 
 	EVP_EncryptInit_ex(ctx, NULL, NULL, NULL, iv_ptr);
 
-	ret = internal_aad(ctx, pkt, param);
+	ret = internal_aad(ctx, pkt, param, true);
 
 	EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_GET_TAG,
 			    session->p.auth_digest_len, block);
@@ -1068,7 +1075,7 @@ odp_crypto_alg_err_t aes_gmac_check(odp_packet_t pkt,
 	_odp_packet_set_data(pkt, param->hash_result_offset,
 			     0, session->p.auth_digest_len);
 
-	ret = internal_aad(ctx, pkt, param);
+	ret = internal_aad(ctx, pkt, param, false);
 
 	return ret <= 0 ? ODP_CRYPTO_ALG_ERR_ICV_CHECK :
 			  ODP_CRYPTO_ALG_ERR_NONE;
@@ -1828,6 +1835,7 @@ odp_crypto_operation(odp_crypto_op_param_t *param,
 	return 0;
 }
 
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
 static void ODP_UNUSED openssl_thread_id(CRYPTO_THREADID ODP_UNUSED *id)
 {
 	CRYPTO_THREADID_set_numeric(id, odp_thread_id());
@@ -1842,6 +1850,7 @@ static void ODP_UNUSED openssl_lock(int mode, int n,
 	else
 		odp_ticketlock_unlock(&global->openssl_lock[n]);
 }
+#endif
 
 int
 odp_crypto_init_global(void)
@@ -1880,8 +1889,10 @@ odp_crypto_init_global(void)
 		for (idx = 0; idx < nlocks; idx++)
 			odp_ticketlock_init(&global->openssl_lock[idx]);
 
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
 		CRYPTO_THREADID_set_callback(openssl_thread_id);
 		CRYPTO_set_locking_callback(openssl_lock);
+#endif
 	}
 
 	return 0;
@@ -1901,8 +1912,10 @@ int odp_crypto_term_global(void)
 		rc = -1;
 	}
 
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
 	CRYPTO_set_locking_callback(NULL);
 	CRYPTO_set_id_callback(NULL);
+#endif
 
 	ret = odp_shm_free(odp_shm_lookup("_odp_crypto_pool_ssl"));
 	if (ret < 0) {
