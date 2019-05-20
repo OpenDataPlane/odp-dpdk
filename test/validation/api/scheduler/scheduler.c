@@ -1,4 +1,5 @@
 /* Copyright (c) 2014-2018, Linaro Limited
+ * Copyright (c) 2019, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -10,7 +11,6 @@
 #include "odp_cunit_common.h"
 #include <odp/helper/odph_api.h>
 
-#define MAX_WORKERS_THREADS	32
 #define MAX_ORDERED_LOCKS       2
 #define MSG_POOL_SIZE		(64 * 1024)
 #define QUEUES_PER_PRIO		16
@@ -54,7 +54,8 @@
 #define CHAOS_PTR_TO_NDX(p) ((uint64_t)(uint32_t)(uintptr_t)p)
 #define CHAOS_NDX_TO_PTR(n) ((void *)(uintptr_t)n)
 
-#define ODP_WAIT_TOLERANCE	(150 * ODP_TIME_MSEC_IN_NS)
+#define WAIT_TOLERANCE (150 * ODP_TIME_MSEC_IN_NS)
+#define WAIT_1MS_RETRIES 1000
 
 /* Test global variables */
 typedef struct {
@@ -121,24 +122,6 @@ static int drain_queues(void)
 	return ret;
 }
 
-static int exit_schedule_loop(void)
-{
-	odp_event_t ev;
-	int ret = 0;
-
-	odp_schedule_pause();
-
-	while ((ev = odp_schedule(NULL, ODP_SCHED_NO_WAIT))
-	      != ODP_EVENT_INVALID) {
-		odp_event_free(ev);
-		ret++;
-	}
-
-	odp_schedule_resume();
-
-	return ret;
-}
-
 static void release_context(odp_schedule_sync_t sync)
 {
 	if (sync == ODP_SCHED_SYNC_ATOMIC)
@@ -191,7 +174,7 @@ static void scheduler_test_wait_time(void)
 
 	diff = odp_time_diff(end_time, start_time);
 	lower_limit = ODP_TIME_NULL;
-	upper_limit = odp_time_local_from_ns(ODP_WAIT_TOLERANCE);
+	upper_limit = odp_time_local_from_ns(WAIT_TOLERANCE);
 
 	CU_ASSERT(odp_time_cmp(diff, lower_limit) >= 0);
 	CU_ASSERT(odp_time_cmp(diff, upper_limit) <= 0);
@@ -204,9 +187,9 @@ static void scheduler_test_wait_time(void)
 
 	diff = odp_time_diff(end_time, start_time);
 	lower_limit = odp_time_local_from_ns(5 * ODP_TIME_SEC_IN_NS -
-							ODP_WAIT_TOLERANCE);
+					     WAIT_TOLERANCE);
 	upper_limit = odp_time_local_from_ns(5 * ODP_TIME_SEC_IN_NS +
-							ODP_WAIT_TOLERANCE);
+					     WAIT_TOLERANCE);
 
 	if (odp_time_cmp(diff, lower_limit) <= 0) {
 		fprintf(stderr, "Exceed lower limit: "
@@ -306,6 +289,10 @@ static void scheduler_test_queue_destroy(void)
 
 		odp_buffer_free(buf);
 		release_context(qp.sched.sync);
+
+		/*  Make sure atomic/ordered context is released */
+		CU_ASSERT(drain_queues() == 0);
+
 		CU_ASSERT_FATAL(odp_queue_destroy(queue) == 0);
 	}
 
@@ -405,16 +392,7 @@ static void scheduler_test_wait(void)
 	}
 
 	/* Make sure that scheduler is empty */
-	retry = 0;
-	do {
-		ret = odp_schedule_multi_no_wait(NULL, &ev, 1);
-		CU_ASSERT(ret == 0 || ret == 1);
-
-		if (ret)
-			odp_event_free(ev);
-		else
-			retry++;
-	} while (ret || retry < num_retry);
+	drain_queues();
 
 	CU_ASSERT_FATAL(odp_queue_destroy(queue) == 0);
 	CU_ASSERT_FATAL(odp_pool_destroy(p) == 0);
@@ -502,6 +480,9 @@ static void scheduler_test_queue_size(void)
 		}
 
 		CU_ASSERT(num == queue_size);
+
+		CU_ASSERT(drain_queues() == 0);
+
 		CU_ASSERT_FATAL(odp_queue_destroy(queue) == 0);
 	}
 
@@ -617,6 +598,7 @@ static void scheduler_test_order_ignore(void)
 
 	CU_ASSERT(num == queue_size);
 
+	CU_ASSERT(drain_queues() == 0);
 	CU_ASSERT_FATAL(odp_queue_destroy(ordered) == 0);
 	CU_ASSERT_FATAL(odp_queue_destroy(plain) == 0);
 	CU_ASSERT_FATAL(odp_pool_destroy(pool) == 0);
@@ -721,6 +703,10 @@ static void scheduler_test_groups(void)
 	CU_ASSERT(rc == 0);
 	CU_ASSERT(odp_thrmask_isset(&testmask, thr_id));
 
+	/* Leave group 2 */
+	rc = odp_schedule_group_leave(mygrp2, &mymask);
+	CU_ASSERT(rc == 0);
+
 	/* Now verify scheduler adherence to groups */
 	odp_pool_param_init(&params);
 	params.buf.size  = 100;
@@ -737,7 +723,9 @@ static void scheduler_test_groups(void)
 		odp_queue_t queue, from;
 		odp_schedule_group_t mygrp[NUM_GROUPS];
 		odp_queue_t queue_grp[NUM_GROUPS];
+		uint64_t wait_time;
 		int num = NUM_GROUPS;
+		int schedule_retries;
 
 		odp_queue_param_init(&qp);
 		qp.type        = ODP_QUEUE_TYPE_SCHED;
@@ -795,21 +783,19 @@ static void scheduler_test_groups(void)
 		odp_schedule_group_leave(mygrp2, &mymask);
 		odp_schedule_group_join(mygrp1, &mymask);
 
+		wait_time = odp_schedule_wait_time(ODP_TIME_MSEC_IN_NS);
+		schedule_retries = 0;
 		while (num) {
 			queue = queue_grp[j];
-			ev    = odp_schedule(&from, ODP_SCHED_NO_WAIT);
+			ev    = odp_schedule(&from, wait_time);
 
 			if (ev == ODP_EVENT_INVALID) {
-				/* change group */
-				rc = odp_schedule_group_leave(mygrp[j],
-							      &mymask);
-				CU_ASSERT_FATAL(rc == 0);
-
-				j = (j + 1) % NUM_GROUPS;
-				rc = odp_schedule_group_join(mygrp[j],
-							     &mymask);
-				CU_ASSERT_FATAL(rc == 0);
+				CU_ASSERT_FATAL(schedule_retries <
+						WAIT_1MS_RETRIES);
+				schedule_retries++;
 				continue;
+			} else {
+				schedule_retries = 0;
 			}
 
 			CU_ASSERT_FATAL(from == queue);
@@ -826,6 +812,14 @@ static void scheduler_test_groups(void)
 
 			odp_buffer_free(buf);
 
+			/* Change group */
+			rc = odp_schedule_group_leave(mygrp[j], &mymask);
+			CU_ASSERT_FATAL(rc == 0);
+
+			j = (j + 1) % NUM_GROUPS;
+			rc = odp_schedule_group_join(mygrp[j], &mymask);
+			CU_ASSERT_FATAL(rc == 0);
+
 			/* Tell scheduler we're about to request an event.
 			 * Not needed, but a convenient place to test this API.
 			 */
@@ -837,7 +831,7 @@ static void scheduler_test_groups(void)
 		/* Release schduler context and leave groups */
 		odp_schedule_group_join(mygrp1, &mymask);
 		odp_schedule_group_join(mygrp2, &mymask);
-		CU_ASSERT(exit_schedule_loop() == 0);
+		CU_ASSERT(drain_queues() == 0);
 		odp_schedule_group_leave(mygrp1, &mymask);
 		odp_schedule_group_leave(mygrp2, &mymask);
 
@@ -907,13 +901,24 @@ static int chaos_thread(void *arg)
 		printf("Thread %d completed %d rounds...terminating\n",
 		       odp_thread_id(), CHAOS_NUM_EVENTS);
 
-	exit_schedule_loop();
-
 	end_time = odp_time_local();
 	diff = odp_time_diff(end_time, start_time);
 
 	printf("Thread %d ends, elapsed time = %" PRIu64 "us\n",
 	       odp_thread_id(), odp_time_to_ns(diff) / 1000);
+
+	/* Make sure scheduling context is released */
+	odp_schedule_pause();
+	while ((ev = odp_schedule(NULL, ODP_SCHED_NO_WAIT))
+	      != ODP_EVENT_INVALID) {
+		odp_event_free(ev);
+	}
+
+	/* Don't resume scheduling until all threads have finished */
+	odp_barrier_wait(&globals->barrier);
+	odp_schedule_resume();
+
+	drain_queues();
 
 	return 0;
 }
@@ -947,7 +952,6 @@ static void chaos_run(unsigned int qtype)
 	CU_ASSERT_PTR_NOT_NULL_FATAL(args);
 
 	args->globals = globals;
-	args->cu_thr.numthrds = globals->num_workers;
 
 	odp_queue_param_init(&qp);
 	odp_pool_param_init(&params);
@@ -993,16 +997,19 @@ static void chaos_run(unsigned int qtype)
 		CU_ASSERT_FATAL(rc == 0);
 	}
 
-	/* Run the test */
-	odp_cunit_thread_create(chaos_thread, &args->cu_thr);
-	odp_cunit_thread_exit(&args->cu_thr);
+	/* Test runs also on the main thread */
+	args->cu_thr.numthrds = globals->num_workers - 1;
+	if (args->cu_thr.numthrds > 0)
+		odp_cunit_thread_create(chaos_thread, &args->cu_thr);
+
+	chaos_thread(args);
+
+	if (args->cu_thr.numthrds > 0)
+		odp_cunit_thread_exit(&args->cu_thr);
 
 	if (CHAOS_DEBUG)
 		printf("Thread %d returning from chaos threads..cleaning up\n",
 		       odp_thread_id());
-
-	drain_queues();
-	exit_schedule_loop();
 
 	for (i = 0; i < CHAOS_NUM_QUEUES; i++) {
 		if (CHAOS_DEBUG)
@@ -1248,9 +1255,7 @@ static int schedule_common_(void *arg)
 		odp_ticketlock_unlock(&globals->lock);
 
 	/* Clear scheduler atomic / ordered context between tests */
-	num = exit_schedule_loop();
-
-	CU_ASSERT(num == 0);
+	CU_ASSERT(drain_queues() == 0);
 
 	if (num)
 		printf("\nDROPPED %i events\n\n", num);
@@ -1425,11 +1430,17 @@ static void parallel_execute(odp_schedule_sync_t sync, int num_queues,
 	fill_queues(args);
 
 	/* Create and launch worker threads */
-	args->cu_thr.numthrds = globals->num_workers;
-	odp_cunit_thread_create(schedule_common_, &args->cu_thr);
+
+	/* Test runs also on the main thread */
+	args->cu_thr.numthrds = globals->num_workers - 1;
+	if (args->cu_thr.numthrds > 0)
+		odp_cunit_thread_create(schedule_common_, &args->cu_thr);
+
+	schedule_common_(args);
 
 	/* Wait for worker threads to terminate */
-	odp_cunit_thread_exit(&args->cu_thr);
+	if (args->cu_thr.numthrds > 0)
+		odp_cunit_thread_exit(&args->cu_thr);
 
 	/* Cleanup ordered queues for next pass */
 	if (sync == ODP_SCHED_SYNC_ORDERED)
@@ -1662,10 +1673,7 @@ static void scheduler_test_pause_resume(void)
 		CU_ASSERT_FATAL(buf != ODP_BUFFER_INVALID);
 		ev = odp_buffer_to_event(buf);
 		ret = odp_queue_enq(queue, ev);
-		CU_ASSERT(ret == 0);
-
-		if (ret)
-			odp_buffer_free(buf);
+		CU_ASSERT_FATAL(ret == 0);
 	}
 
 	for (i = 0; i < NUM_BUFS_BEFORE_PAUSE; i++) {
@@ -1690,7 +1698,7 @@ static void scheduler_test_pause_resume(void)
 		local_bufs++;
 	}
 
-	CU_ASSERT(local_bufs < NUM_BUFS_PAUSE - NUM_BUFS_BEFORE_PAUSE);
+	CU_ASSERT(local_bufs <= NUM_BUFS_PAUSE - NUM_BUFS_BEFORE_PAUSE);
 
 	odp_schedule_resume();
 
@@ -1701,9 +1709,7 @@ static void scheduler_test_pause_resume(void)
 		odp_buffer_free(buf);
 	}
 
-	ret = exit_schedule_loop();
-
-	CU_ASSERT(ret == 0);
+	CU_ASSERT(drain_queues() == 0);
 }
 
 /* Basic, single threaded ordered lock API testing */
@@ -1757,6 +1763,7 @@ static void scheduler_test_ordered_lock(void)
 
 	if (lock_count < 2) {
 		printf("  ONLY ONE ORDERED LOCK. Unlock_lock not tested.\n");
+		CU_ASSERT(drain_queues() == BUFS_PER_QUEUE / 2);
 		return;
 	}
 
@@ -1772,9 +1779,7 @@ static void scheduler_test_ordered_lock(void)
 		odp_buffer_free(buf);
 	}
 
-	ret = exit_schedule_loop();
-
-	CU_ASSERT(ret == 0);
+	CU_ASSERT(drain_queues() == 0);
 }
 
 static int create_queues(test_globals_t *globals)
@@ -2010,6 +2015,11 @@ static int scheduler_suite_init(void)
 	shm = odp_shm_reserve(GLOBALS_SHM_NAME,
 			      sizeof(test_globals_t), ODP_CACHE_LINE_SIZE, 0);
 
+	if (shm == ODP_SHM_INVALID) {
+		printf("Shared memory reserve failed (globals).\n");
+		return -1;
+	}
+
 	globals = odp_shm_addr(shm);
 
 	if (!globals) {
@@ -2027,6 +2037,12 @@ static int scheduler_suite_init(void)
 
 	shm = odp_shm_reserve(SHM_THR_ARGS_NAME, sizeof(thread_args_t),
 			      ODP_CACHE_LINE_SIZE, 0);
+
+	if (shm == ODP_SHM_INVALID) {
+		printf("Shared memory reserve failed (args).\n");
+		return -1;
+	}
+
 	args = odp_shm_addr(shm);
 
 	if (!args) {

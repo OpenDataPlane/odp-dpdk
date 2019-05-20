@@ -1,3 +1,5 @@
-init_main_abort
-init_main_log
-init_main_ok
+init_defaults
+init_abort
+init_log
+init_num_thr
+init_feature

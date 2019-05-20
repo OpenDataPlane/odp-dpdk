@@ -17,7 +17,7 @@
 #include <odp_init_internal.h>
 #include <odp_libconfig_internal.h>
 #include <odp_queue_if.h>
-#include <odp_ring_internal.h>
+#include <odp_ring_u32_internal.h>
 #include <odp_timer_internal.h>
 
 #include <rte_cycles.h>
@@ -76,7 +76,7 @@ typedef struct timer_pool_s {
 	struct {
 		uint32_t ring_mask;
 
-		ring_t   ring_hdr;
+		ring_u32_t ring_hdr;
 		uint32_t ring_data[MAX_TIMER_RING_SIZE];
 
 	} free_timer;
@@ -263,7 +263,7 @@ odp_timer_pool_t odp_timer_pool_create(const char *name,
 
 	timer_pool->param = *param;
 
-	ring_init(&timer_pool->free_timer.ring_hdr);
+	ring_u32_init(&timer_pool->free_timer.ring_hdr);
 	timer_pool->free_timer.ring_mask = num_timers - 1;
 
 	odp_ticketlock_init(&timer_pool->lock);
@@ -279,8 +279,8 @@ odp_timer_pool_t odp_timer_pool_create(const char *name,
 		timer->timer_pool = timer_pool;
 		timer->timer_idx  = i;
 
-		ring_enq(&timer_pool->free_timer.ring_hdr,
-			 timer_pool->free_timer.ring_mask, i);
+		ring_u32_enq(&timer_pool->free_timer.ring_hdr,
+			     timer_pool->free_timer.ring_mask, i);
 	}
 
 	return timer_pool_to_hdl(timer_pool);
@@ -383,9 +383,9 @@ odp_timer_t odp_timer_alloc(odp_timer_pool_t tp,
 		return ODP_TIMER_INVALID;
 	}
 
-	if (ring_deq(&timer_pool->free_timer.ring_hdr,
-		     timer_pool->free_timer.ring_mask,
-		     &timer_idx) == 0)
+	if (ring_u32_deq(&timer_pool->free_timer.ring_hdr,
+			 timer_pool->free_timer.ring_mask,
+			 &timer_idx) == 0)
 		return ODP_TIMER_INVALID;
 
 	timer = &timer_pool->timer[timer_idx];
@@ -447,8 +447,8 @@ retry:
 
 	odp_ticketlock_unlock(&timer_pool->lock);
 
-	ring_enq(&timer_pool->free_timer.ring_hdr,
-		 timer_pool->free_timer.ring_mask, timer_idx);
+	ring_u32_enq(&timer_pool->free_timer.ring_hdr,
+		     timer_pool->free_timer.ring_mask, timer_idx);
 
 	return ev;
 }

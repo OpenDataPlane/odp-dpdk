@@ -356,6 +356,43 @@ static int check_params(odp_pool_param_t *params)
 	return 0;
 }
 
+static unsigned int calc_cache_size(uint32_t num)
+{
+	unsigned int cache_size = 0;
+	unsigned int i;
+	int num_threads = odp_global_ro.init_param.num_control +
+				odp_global_ro.init_param.num_worker;
+
+	if (RTE_MEMPOOL_CACHE_MAX_SIZE == 0)
+		return 0;
+
+	i = ceil((double)num / RTE_MEMPOOL_CACHE_MAX_SIZE);
+	i = RTE_MAX(i, 2UL);
+	for (; i <= (num / 2); i++)
+		if ((num % i) == 0) {
+			cache_size = num / i;
+			break;
+		}
+	if (odp_unlikely(cache_size > RTE_MEMPOOL_CACHE_MAX_SIZE ||
+			 (uint32_t)cache_size * 1.5 > num)) {
+		ODP_ERR("Cache size calculation failed: %d\n", cache_size);
+		cache_size = 0;
+	}
+
+	ODP_DBG("Cache_size: %d\n", cache_size);
+
+	if (num_threads && cache_size) {
+		unsigned int total_cache_size = num_threads * cache_size;
+
+		if (total_cache_size >= num)
+			ODP_DBG("Entire pool fits into thread local caches. "
+				"Pool starvation may occur if the pool is used "
+				"by multiple threads.\n");
+	}
+
+	return cache_size;
+}
+
 odp_pool_t odp_pool_create(const char *name, odp_pool_param_t *params)
 {
 	struct mbuf_pool_ctor_arg mbp_ctor_arg;
@@ -368,9 +405,6 @@ odp_pool_t odp_pool_create(const char *name, odp_pool_param_t *params)
 	uint32_t max_len, min_align;
 	char pool_name[ODP_POOL_NAME_LEN];
 	char *rte_name = NULL;
-#if RTE_MEMPOOL_CACHE_MAX_SIZE > 0
-	unsigned j;
-#endif
 
 	if (check_params(params))
 		return ODP_POOL_INVALID;
@@ -494,22 +528,8 @@ odp_pool_t odp_pool_create(const char *name, odp_pool_param_t *params)
 
 		ODP_DBG("Metadata size: %u, mb_size %d\n",
 			mb_ctor_arg.seg_buf_offset, mb_size);
-		cache_size = 0;
-#if RTE_MEMPOOL_CACHE_MAX_SIZE > 0
-		j = ceil((double)num / RTE_MEMPOOL_CACHE_MAX_SIZE);
-		j = RTE_MAX(j, 2UL);
-		for (; j <= (num / 2); ++j)
-			if ((num % j) == 0) {
-				cache_size = num / j;
-				break;
-			}
-		if (odp_unlikely(cache_size > RTE_MEMPOOL_CACHE_MAX_SIZE ||
-				 (uint32_t)cache_size * 1.5 > num)) {
-			ODP_ERR("cache_size calc failure: %d\n", cache_size);
-			cache_size = 0;
-		}
-#endif
-		ODP_DBG("cache_size %d\n", cache_size);
+
+		cache_size = calc_cache_size(num);
 
 		if (strlen(pool_name) > RTE_MEMPOOL_NAMESIZE - 1) {
 			ODP_ERR("Max pool name size: %u. Trimming %u long, name collision might happen!\n",

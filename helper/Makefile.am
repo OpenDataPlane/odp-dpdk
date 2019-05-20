@@ -29,7 +29,8 @@ helperinclude_HEADERS = \
 		  include/odp/helper/tcp.h\
 		  include/odp/helper/table.h\
 		  include/odp/helper/threads.h \
-		  include/odp/helper/udp.h
+		  include/odp/helper/udp.h \
+		  include/odp/helper/version.h
 
 if helper_linux
 helperinclude_HEADERS += \
@@ -53,7 +54,8 @@ __LIB__libodphelper_la_SOURCES = \
 					lineartable.c \
 					cuckootable.c \
 					iplookuptable.c \
-					threads.c
+					threads.c \
+					version.c
 
 if helper_linux
 __LIB__libodphelper_la_SOURCES += \

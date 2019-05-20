@@ -1,4 +1,5 @@
-/* Copyright (c) 2013-2018, Linaro Limited
+/* Copyright (c) 2019, Nokia
+ * Copyright (c) 2013-2018, Linaro Limited
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -22,22 +23,25 @@ extern "C" {
 
 #include <odp_buffer_internal.h>
 #include <odp_config_internal.h>
-#include <odp_ring_internal.h>
+#include <odp_ring_ptr_internal.h>
 #include <odp/api/plat/strong_types.h>
 
 typedef struct ODP_ALIGNED_CACHE pool_cache_t {
-	uint32_t num;
-	uint32_t buf_index[CONFIG_POOL_CACHE_SIZE];
+	uint32_t size; /* Size of cache */
+	uint32_t burst_size; /* Cache burst size */
+	uint32_t num; /* Number of buffers in cache */
+	/* Cached buffers */
+	odp_buffer_hdr_t *buf_hdr[CONFIG_POOL_CACHE_MAX_SIZE];
 
 } pool_cache_t;
 
 /* Buffer header ring */
 typedef struct ODP_ALIGNED_CACHE {
 	/* Ring header */
-	ring_t   hdr;
+	ring_ptr_t hdr;
 
 	/* Ring data: buffer handles */
-	uint32_t buf[CONFIG_POOL_MAX_NUM + 1];
+	odp_buffer_hdr_t *buf_hdr[CONFIG_POOL_MAX_NUM + 1];
 
 } pool_ring_t;
 
@@ -91,6 +95,8 @@ typedef struct pool_table_t {
 
 	struct {
 		uint32_t pkt_max_num;
+		uint32_t local_cache_size;
+		uint32_t burst_size;
 	} config;
 
 } pool_table_t;
