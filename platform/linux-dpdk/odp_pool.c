@@ -1,4 +1,5 @@
 /* Copyright (c) 2013-2018, Linaro Limited
+ * Copyright (c) 2019, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -42,6 +43,9 @@
 #define UNLOCK(a)    odp_spinlock_unlock(a)
 #define LOCK_INIT(a) odp_spinlock_init(a)
 #endif
+
+/* Pool name format */
+#define POOL_NAME_FORMAT "%" PRIu64 "-%d-%s"
 
 /* Define a practical limit for contiguous memory allocations */
 #define MAX_SIZE   (10 * 1024 * 1024)
@@ -374,12 +378,24 @@ static unsigned int calc_cache_size(uint32_t num)
 	return cache_size;
 }
 
+static void format_pool_name(const char *name, char *rte_name)
+{
+	int i = 0;
+
+	/* Use pid and counter to make name unique */
+	do {
+		snprintf(rte_name, RTE_MEMPOOL_NAMESIZE, POOL_NAME_FORMAT,
+			 (odp_instance_t)odp_global_ro.main_pid, i++, name);
+		rte_name[RTE_MEMPOOL_NAMESIZE - 1] = 0;
+	} while (rte_mempool_lookup(rte_name) != NULL);
+}
+
 odp_pool_t odp_pool_create(const char *name, odp_pool_param_t *params)
 {
 	struct rte_pktmbuf_pool_private mbp_ctor_arg;
 	struct mbuf_ctor_arg mb_ctor_arg;
 	odp_pool_t pool_hdl = ODP_POOL_INVALID;
-	unsigned mb_size, i, cache_size;
+	unsigned int mb_size, i, cache_size;
 	size_t hdr_size;
 	pool_t *pool;
 	uint32_t buf_align, blk_size, headroom, tailroom, min_seg_len;
@@ -512,11 +528,7 @@ odp_pool_t odp_pool_create(const char *name, odp_pool_param_t *params)
 
 		cache_size = calc_cache_size(num);
 
-		if (strlen(pool_name) > RTE_MEMPOOL_NAMESIZE - 1)
-			ODP_ERR("Max pool name size: %u. Trimming %u long, name collision might happen!\n",
-				RTE_MEMPOOL_NAMESIZE - 1, strlen(pool_name));
-
-		snprintf(rte_name, RTE_MEMPOOL_NAMESIZE, "%s", pool_name);
+		format_pool_name(pool_name, rte_name);
 
 		if (params->type == ODP_POOL_PACKET) {
 			uint16_t data_room_size, priv_size;
@@ -572,26 +584,22 @@ odp_pool_t odp_pool_create(const char *name, odp_pool_param_t *params)
 
 odp_pool_t odp_pool_lookup(const char *name)
 {
-	struct rte_mempool *mp = NULL;
-	odp_pool_t pool_hdl = ODP_POOL_INVALID;
-	int i;
-
-	mp = rte_mempool_lookup(name);
-	if (mp == NULL)
-		return ODP_POOL_INVALID;
+	uint32_t i;
+	pool_t *pool;
 
 	for (i = 0; i < ODP_CONFIG_POOLS; i++) {
-		pool_t *pool = pool_entry(i);
+		pool = pool_entry(i);
 
 		LOCK(&pool->lock);
-		if (pool->rte_mempool != mp) {
+		if (strcmp(name, pool->name) == 0) {
+			/* Found it */
 			UNLOCK(&pool->lock);
-			continue;
+			return pool->pool_hdl;
 		}
 		UNLOCK(&pool->lock);
-		pool_hdl = pool->pool_hdl;
 	}
-	return pool_hdl;
+
+	return ODP_POOL_INVALID;
 }
 
 static inline int buffer_alloc_multi(pool_t *pool, odp_buffer_hdr_t *buf_hdr[],
