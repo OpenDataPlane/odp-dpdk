@@ -54,6 +54,14 @@
 #include <rte_tcp.h>
 #include <rte_version.h>
 
+#if RTE_VERSION < RTE_VERSION_NUM(19, 8, 0, 0)
+#define rte_ether_addr ether_addr
+#define rte_ipv4_hdr ipv4_hdr
+#define rte_ipv6_hdr ipv6_hdr
+#define rte_tcp_hdr tcp_hdr
+#define rte_udp_hdr udp_hdr
+#endif
+
 /* DPDK poll mode drivers requiring minimum RX burst size DPDK_MIN_RX_BURST */
 #define IXGBE_DRV_NAME "net_ixgbe"
 #define I40E_DRV_NAME "net_i40e"
@@ -269,7 +277,7 @@ static int dpdk_setup_eth_dev(pktio_entry_t *pktio_entry,
 
 static void _dpdk_print_port_mac(uint16_t port_id)
 {
-	struct ether_addr eth_addr;
+	struct rte_ether_addr eth_addr;
 
 	memset(&eth_addr, 0, sizeof(eth_addr));
 	rte_eth_macaddr_get(port_id, &eth_addr);
@@ -443,7 +451,7 @@ static int dpdk_init_capability(pktio_entry_t *pktio_entry,
 {
 	pkt_dpdk_t *pkt_dpdk = pkt_priv(pktio_entry);
 	odp_pktio_capability_t *capa = &pktio_entry->s.capa;
-	struct ether_addr mac_addr;
+	struct rte_ether_addr mac_addr;
 	int ret;
 	int ptype_cnt;
 	int ptype_l3_ipv4 = 0;
@@ -1066,7 +1074,7 @@ static inline int check_proto(void *l3_hdr, odp_bool_t *l3_proto_v4,
 	uint8_t l3_proto_ver = _ODP_IPV4HDR_VER(*(uint8_t *)l3_hdr);
 
 	if (l3_proto_ver == _ODP_IPV4) {
-		struct ipv4_hdr *ip = (struct ipv4_hdr *)l3_hdr;
+		struct rte_ipv4_hdr *ip = (struct rte_ipv4_hdr *)l3_hdr;
 
 		*l3_proto_v4 = 1;
 		if (!rte_ipv4_frag_pkt_is_fragmented(ip))
@@ -1076,7 +1084,7 @@ static inline int check_proto(void *l3_hdr, odp_bool_t *l3_proto_v4,
 
 		return 0;
 	} else if (l3_proto_ver == _ODP_IPV6) {
-		struct ipv6_hdr *ipv6 = (struct ipv6_hdr *)l3_hdr;
+		struct rte_ipv6_hdr *ipv6 = (struct rte_ipv6_hdr *)l3_hdr;
 
 		*l3_proto_v4 = 0;
 		*l4_proto = ipv6->proto;
@@ -1147,7 +1155,7 @@ static inline void pkt_set_ol_tx(odp_pktout_config_opt_t *pktout_cfg,
 	if (ipv4_chksum_pkt) {
 		mbuf->ol_flags |=  PKT_TX_IP_CKSUM;
 
-		((struct ipv4_hdr *)l3_hdr)->hdr_checksum = 0;
+		((struct rte_ipv4_hdr *)l3_hdr)->hdr_checksum = 0;
 		mbuf->l3_len = _ODP_IPV4HDR_IHL(*(uint8_t *)l3_hdr) * 4;
 	}
 
@@ -1161,12 +1169,12 @@ static inline void pkt_set_ol_tx(odp_pktout_config_opt_t *pktout_cfg,
 	if (udp_chksum_pkt) {
 		mbuf->ol_flags |= PKT_TX_UDP_CKSUM;
 
-		((struct udp_hdr *)l4_hdr)->dgram_cksum =
+		((struct rte_udp_hdr *)l4_hdr)->dgram_cksum =
 			phdr_csum(l3_proto_v4, l3_hdr, mbuf->ol_flags);
 	} else if (tcp_chksum_pkt) {
 		mbuf->ol_flags |= PKT_TX_TCP_CKSUM;
 
-		((struct tcp_hdr *)l4_hdr)->cksum =
+		((struct rte_tcp_hdr *)l4_hdr)->cksum =
 			phdr_csum(l3_proto_v4, l3_hdr, mbuf->ol_flags);
 	}
 }
@@ -1368,13 +1376,13 @@ static int promisc_mode_get_pkt_dpdk(pktio_entry_t *pktio_entry)
 static int mac_get_pkt_dpdk(pktio_entry_t *pktio_entry, void *mac_addr)
 {
 	rte_eth_macaddr_get(pkt_priv(pktio_entry)->port_id,
-			    (struct ether_addr *)mac_addr);
+			    (struct rte_ether_addr *)mac_addr);
 	return ETH_ALEN;
 }
 
 static int mac_set_pkt_dpdk(pktio_entry_t *pktio_entry, const void *mac_addr)
 {
-	struct ether_addr addr = *(const struct ether_addr *)mac_addr;
+	struct rte_ether_addr addr = *(const struct rte_ether_addr *)mac_addr;
 
 	return rte_eth_dev_default_mac_addr_set(pkt_priv(pktio_entry)->port_id,
 						&addr);
