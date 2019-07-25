@@ -361,6 +361,7 @@ int odp_crypto_init_global(void)
 
 	for (cdev_id = cdev_count - 1; cdev_id >= 0; cdev_id--) {
 		struct rte_cryptodev_info dev_info;
+		struct rte_mempool *mp;
 
 		rte_cryptodev_info_get(cdev_id, &dev_info);
 		nb_queue_pairs = odp_cpu_count();
@@ -377,7 +378,6 @@ int odp_crypto_init_global(void)
 
 		if (global->session_mempool[socket_id] == NULL) {
 			char mp_name[RTE_MEMPOOL_NAMESIZE];
-			struct rte_mempool *sess_mp;
 
 			snprintf(mp_name, RTE_MEMPOOL_NAMESIZE,
 				 "sess_mp_%u", socket_id);
@@ -386,15 +386,19 @@ int odp_crypto_init_global(void)
 			 * Create enough objects for session headers and
 			 * device private data
 			 */
-			sess_mp = rte_mempool_create(mp_name,
-						     NB_MBUF,
-						     max_sess_sz,
-						     cache_size,
-						     0, NULL, NULL, NULL,
-						     NULL, socket_id,
-						     0);
-
-			if (sess_mp == NULL) {
+#if RTE_VERSION < RTE_VERSION_NUM(19, 2, 0, 0)
+			mp = rte_mempool_create(mp_name, NB_MBUF, max_sess_sz,
+						cache_size, 0, NULL, NULL, NULL,
+						NULL, socket_id, 0);
+#else
+			mp = rte_cryptodev_sym_session_pool_create(mp_name,
+								   NB_MBUF,
+								   max_sess_sz,
+								   cache_size,
+								   0,
+								   socket_id);
+#endif
+			if (mp == NULL) {
 				ODP_ERR("Cannot create session pool on socket %d\n",
 					socket_id);
 				return -1;
@@ -402,8 +406,9 @@ int odp_crypto_init_global(void)
 
 			printf("Allocated session pool on socket %d\n",
 			       socket_id);
-			global->session_mempool[socket_id] = sess_mp;
+			global->session_mempool[socket_id] = mp;
 		}
+		mp = global->session_mempool[socket_id];
 
 		rc = rte_cryptodev_configure(cdev_id, &conf);
 		if (rc < 0) {
@@ -415,13 +420,17 @@ int odp_crypto_init_global(void)
 
 		for (queue_pair = 0; queue_pair < nb_queue_pairs;
 							queue_pair++) {
-			struct rte_mempool *crypto_pool =
-				global->session_mempool[socket_id];
-			rc = rte_cryptodev_queue_pair_setup(cdev_id,
-							    queue_pair,
+#if RTE_VERSION < RTE_VERSION_NUM(19, 2, 0, 0)
+			rc = rte_cryptodev_queue_pair_setup(cdev_id, queue_pair,
+							    &qp_conf, socket_id,
+							    mp);
+#else
+			qp_conf.mp_session = mp;
+			qp_conf.mp_session_private = mp;
+			rc = rte_cryptodev_queue_pair_setup(cdev_id, queue_pair,
 							    &qp_conf,
-							    socket_id,
-							    crypto_pool);
+							    socket_id);
+#endif
 			if (rc < 0) {
 				ODP_ERR("Fail to setup queue pair %u on dev %u",
 					queue_pair, cdev_id);
@@ -1192,8 +1201,13 @@ check_finish:
 	return -1;
 }
 
+#if RTE_VERSION < RTE_VERSION_NUM(19, 2, 0, 0)
 static int crypto_init_key(uint8_t **data, uint16_t *length,
 			   odp_crypto_key_t *key, const char *type)
+#else
+static int crypto_init_key(const uint8_t **data, uint16_t *length,
+			   odp_crypto_key_t *key, const char *type)
+#endif
 {
 	uint8_t *p = NULL;
 
