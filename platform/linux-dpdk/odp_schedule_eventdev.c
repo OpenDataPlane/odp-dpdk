@@ -1002,7 +1002,7 @@ static int schedule_capability(odp_schedule_capability_t *capa)
 	max_sched = RTE_MAX(RTE_MAX(eventdev_gbl->event_queue.num_atomic,
 				    eventdev_gbl->event_queue.num_ordered),
 			    eventdev_gbl->event_queue.num_parallel);
-	capa->max_queues        = RTE_MIN(ODP_CONFIG_QUEUES, max_sched);
+	capa->max_queues        = RTE_MIN(CONFIG_MAX_SCHED_QUEUES, max_sched);
 	capa->max_queue_size    = eventdev_gbl->config.nb_events_limit;
 	capa->max_ordered_locks = schedule_max_ordered_locks();
 	capa->max_groups        = schedule_num_grps();

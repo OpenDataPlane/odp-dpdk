@@ -51,7 +51,7 @@ ODP_STATIC_ASSERT(MAX_SCHED_BURST <= UINT16_MAX,
 ODP_STATIC_ASSERT(sizeof(((struct rte_event *)0)->queue_id) == sizeof(uint8_t),
 		  "eventdev queue ID size changed");
 
-ODP_STATIC_ASSERT(ODP_CONFIG_QUEUES >= RTE_EVENT_MAX_QUEUES_PER_DEV,
+ODP_STATIC_ASSERT(CONFIG_MAX_QUEUES >= RTE_EVENT_MAX_QUEUES_PER_DEV,
 		  "unable to map all eventdev queues");
 
 struct queue_entry_s {
@@ -85,7 +85,7 @@ union queue_entry_u {
 
 /* Eventdev global data */
 typedef struct {
-	queue_entry_t   queue[ODP_CONFIG_QUEUES];
+	queue_entry_t   queue[CONFIG_MAX_QUEUES];
 	odp_shm_t       shm;
 	struct rte_event_dev_config config;
 	struct {

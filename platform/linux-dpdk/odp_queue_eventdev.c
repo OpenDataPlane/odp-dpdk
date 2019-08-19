@@ -130,9 +130,8 @@ static int queue_capa(odp_queue_capability_t *capa, int sched ODP_UNUSED)
 	memset(capa, 0, sizeof(odp_queue_capability_t));
 
 	/* Reserve some queues for internal use */
-	capa->max_queues        = ODP_CONFIG_QUEUES;
-	capa->plain.max_num     = ODP_CONFIG_QUEUES -
-					RTE_EVENT_MAX_QUEUES_PER_DEV;
+	capa->max_queues        = CONFIG_MAX_QUEUES;
+	capa->plain.max_num     = CONFIG_MAX_PLAIN_QUEUES;
 	capa->plain.max_size    = eventdev_gbl->plain_config.max_queue_size - 1;
 	capa->plain.lockfree.max_num  = 0;
 	capa->plain.lockfree.max_size = 0;
@@ -143,7 +142,7 @@ static int queue_capa(odp_queue_capability_t *capa, int sched ODP_UNUSED)
 	max_sched = RTE_MAX(RTE_MAX(eventdev_gbl->event_queue.num_atomic,
 				    eventdev_gbl->event_queue.num_ordered),
 			    eventdev_gbl->event_queue.num_parallel);
-	capa->sched.max_num     = RTE_MIN(ODP_CONFIG_QUEUES, max_sched);
+	capa->sched.max_num     = RTE_MIN(CONFIG_MAX_SCHED_QUEUES, max_sched);
 	capa->sched.max_size    = eventdev_gbl->config.nb_events_limit;
 
 	if (sched) {
@@ -546,7 +545,7 @@ static int queue_init_global(void)
 	if (init_event_dev())
 		return -1;
 
-	for (i = 0; i < ODP_CONFIG_QUEUES; i++) {
+	for (i = 0; i < CONFIG_MAX_QUEUES; i++) {
 		/* init locks */
 		queue_entry_t *queue = qentry_from_index(i);
 
@@ -595,7 +594,7 @@ static int queue_term_global(void)
 	queue_entry_t *queue;
 	int i;
 
-	for (i = 0; i < ODP_CONFIG_QUEUES; i++) {
+	for (i = 0; i < CONFIG_MAX_QUEUES; i++) {
 		queue = qentry_from_index(i);
 		LOCK(queue);
 		if (queue->s.status != QUEUE_STATUS_FREE) {
@@ -663,6 +662,7 @@ static odp_queue_t queue_create(const char *name,
 				const odp_queue_param_t *param)
 {
 	uint32_t i;
+	uint32_t max_idx;
 	queue_entry_t *queue;
 	odp_queue_type_t type;
 	odp_queue_param_t default_param;
@@ -694,22 +694,26 @@ static odp_queue_t queue_create(const char *name,
 
 	/* First RTE_EVENT_MAX_QUEUES_PER_DEV IDs are mapped directly
 	 * to eventdev queue IDs */
-	i = (type == ODP_QUEUE_TYPE_SCHED) ? 0 : RTE_EVENT_MAX_QUEUES_PER_DEV;
+	if (type == ODP_QUEUE_TYPE_SCHED) {
+		/* Start scheduled queue indices from zero to enable direct
+		 * mapping to scheduler implementation indices. */
+		i = 0;
+		max_idx = RTE_EVENT_MAX_QUEUES_PER_DEV;
+	} else {
+		i = RTE_EVENT_MAX_QUEUES_PER_DEV;
+		/* All internal queues are of type plain */
+		max_idx = CONFIG_MAX_QUEUES;
+	}
 
-	for (; i < ODP_CONFIG_QUEUES; i++) {
+	for (; i < max_idx; i++) {
 		queue = qentry_from_index(i);
 
 		if (queue->s.status != QUEUE_STATUS_FREE)
 			continue;
 
-		if (type == ODP_QUEUE_TYPE_SCHED) {
-			if (i >= RTE_EVENT_MAX_QUEUES_PER_DEV) {
-				ODP_ERR("No free eventdev queues\n");
-				return ODP_QUEUE_INVALID;
-			}
-			if (queue->s.sync != param->sched.sync)
-				continue;
-		}
+		if (type == ODP_QUEUE_TYPE_SCHED &&
+		    queue->s.sync != param->sched.sync)
+			continue;
 
 		LOCK(queue);
 		if (queue->s.status == QUEUE_STATUS_FREE) {
@@ -730,8 +734,10 @@ static odp_queue_t queue_create(const char *name,
 		UNLOCK(queue);
 	}
 
-	if (handle == ODP_QUEUE_INVALID)
+	if (handle == ODP_QUEUE_INVALID) {
+		ODP_ERR("No free queues left\n");
 		return ODP_QUEUE_INVALID;
+	}
 
 	if (type == ODP_QUEUE_TYPE_SCHED) {
 		if (sched_fn->init_queue(queue->s.index,
@@ -799,7 +805,7 @@ static odp_queue_t queue_lookup(const char *name)
 {
 	uint32_t i;
 
-	for (i = 0; i < ODP_CONFIG_QUEUES; i++) {
+	for (i = 0; i < CONFIG_MAX_QUEUES; i++) {
 		queue_entry_t *queue = qentry_from_index(i);
 
 		if (queue->s.status == QUEUE_STATUS_FREE)
@@ -952,7 +958,7 @@ static int queue_info(odp_queue_t handle, odp_queue_info_t *info)
 
 	queue_id = queue_to_index(handle);
 
-	if (odp_unlikely(queue_id >= ODP_CONFIG_QUEUES)) {
+	if (odp_unlikely(queue_id >= CONFIG_MAX_QUEUES)) {
 		ODP_ERR("Invalid queue handle: 0x%" PRIx64 "\n",
 			odp_queue_to_u64(handle));
 		return -1;
