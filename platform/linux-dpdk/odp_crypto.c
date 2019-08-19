@@ -226,6 +226,9 @@ static int auth_alg_odp_to_rte(odp_auth_alg_t auth_alg,
 	case ODP_AUTH_ALG_SHA1_HMAC:
 		auth_xform->auth.algo = RTE_CRYPTO_AUTH_SHA1_HMAC;
 		break;
+	case ODP_AUTH_ALG_SHA224_HMAC:
+		auth_xform->auth.algo = RTE_CRYPTO_AUTH_SHA224_HMAC;
+		break;
 	case ODP_AUTH_ALG_SHA384_HMAC:
 		auth_xform->auth.algo = RTE_CRYPTO_AUTH_SHA384_HMAC;
 		break;
@@ -517,6 +520,8 @@ static void capability_process(struct rte_cryptodev_info *dev_info,
 			}
 			if (cap_auth_algo == RTE_CRYPTO_AUTH_SHA1_HMAC)
 				auths->bit.sha1_hmac = 1;
+			if (cap_auth_algo == RTE_CRYPTO_AUTH_SHA224_HMAC)
+				auths->bit.sha224_hmac = 1;
 			if (cap_auth_algo == RTE_CRYPTO_AUTH_SHA384_HMAC)
 				auths->bit.sha384_hmac = 1;
 			if (cap_auth_algo == RTE_CRYPTO_AUTH_SHA512_HMAC)
@@ -958,6 +963,9 @@ static int auth_capability(odp_auth_alg_t auth,
 		break;
 	case ODP_AUTH_ALG_SHA1_HMAC:
 		key_size_override = 20;
+		break;
+	case ODP_AUTH_ALG_SHA224_HMAC:
+		key_size_override = 28;
 		break;
 	case ODP_AUTH_ALG_SHA256_HMAC:
 		key_size_override = 32;
