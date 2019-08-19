@@ -130,8 +130,10 @@ int odp_timer_init_global(const odp_init_t *params)
 	 * created. */
 	odp_global_rw->inline_timers = false;
 
-	if (params && params->not_used.feat.timer)
+	if (params && params->not_used.feat.timer) {
+		timer_global = NULL;
 		return 0;
+	}
 
 	shm = odp_shm_reserve("timer_global", sizeof(timer_global_t),
 			      ODP_CACHE_LINE_SIZE, 0);
@@ -163,10 +165,11 @@ int odp_timer_init_global(const odp_init_t *params)
 
 int odp_timer_term_global(void)
 {
-	if (timer_global == NULL)
-		return 0;
+	if (timer_global && odp_shm_free(timer_global->shm)) {
+		ODP_ERR("Shm free failed for odp_timer\n");
+		return -1;
+	}
 
-	odp_shm_free(timer_global->shm);
 	return 0;
 }
 
