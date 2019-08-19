@@ -197,6 +197,9 @@ static int cipher_alg_odp_to_rte(odp_cipher_alg_t cipher_alg,
 	case ODP_CIPHER_ALG_AES_ECB:
 		cipher_xform->cipher.algo = RTE_CRYPTO_CIPHER_AES_ECB;
 		break;
+	case ODP_CIPHER_ALG_AES_XTS:
+		cipher_xform->cipher.algo = RTE_CRYPTO_CIPHER_AES_XTS;
+		break;
 	default:
 		rc = -1;
 	}
@@ -505,6 +508,8 @@ static void capability_process(struct rte_cryptodev_info *dev_info,
 				ciphers->bit.aes_ctr = 1;
 			if (cap_cipher_algo == RTE_CRYPTO_CIPHER_AES_ECB)
 				ciphers->bit.aes_ecb = 1;
+			if (cap_cipher_algo == RTE_CRYPTO_CIPHER_AES_XTS)
+				ciphers->bit.aes_xts = 1;
 		}
 
 		if (cap->sym.xform_type == RTE_CRYPTO_SYM_XFORM_AUTH) {
