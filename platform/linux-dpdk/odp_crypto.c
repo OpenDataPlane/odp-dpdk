@@ -182,6 +182,9 @@ static int cipher_alg_odp_to_rte(odp_cipher_alg_t cipher_alg,
 	case ODP_CIPHER_ALG_3DES_CBC:
 		cipher_xform->cipher.algo = RTE_CRYPTO_CIPHER_3DES_CBC;
 		break;
+	case ODP_CIPHER_ALG_3DES_ECB:
+		cipher_xform->cipher.algo = RTE_CRYPTO_CIPHER_3DES_ECB;
+		break;
 	case ODP_CIPHER_ALG_AES_CBC:
 #if ODP_DEPRECATED_API
 	case ODP_CIPHER_ALG_AES128_CBC:
@@ -479,6 +482,11 @@ static void capability_process(struct rte_cryptodev_info *dev_info,
 			cap_cipher_algo = cap->sym.cipher.algo;
 			if (cap_cipher_algo == RTE_CRYPTO_CIPHER_3DES_CBC) {
 				ciphers->bit.trides_cbc = 1;
+				ciphers->bit.des = 1;
+			}
+			cap_cipher_algo = cap->sym.cipher.algo;
+			if (cap_cipher_algo == RTE_CRYPTO_CIPHER_3DES_ECB) {
+				ciphers->bit.trides_ecb = 1;
 				ciphers->bit.des = 1;
 			}
 			if (cap_cipher_algo == RTE_CRYPTO_CIPHER_AES_CBC) {
