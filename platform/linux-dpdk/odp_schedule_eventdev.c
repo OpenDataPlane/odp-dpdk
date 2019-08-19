@@ -360,8 +360,8 @@ static inline  int schedule_default_prio(void)
 	return schedule_max_prio() / 2;
 }
 
-static int schedule_init_queue(uint32_t qi,
-			       const odp_schedule_param_t *sched_param)
+static int schedule_create_queue(uint32_t qi,
+				 const odp_schedule_param_t *sched_param)
 {
 	queue_entry_t *queue = qentry_from_index(qi);
 	odp_thrmask_t mask;
@@ -1037,7 +1037,7 @@ const schedule_fn_t schedule_eventdev_fn = {
 	.thr_add = schedule_thr_add,
 	.thr_rem = schedule_thr_rem,
 	.num_grps = schedule_num_grps,
-	.init_queue = schedule_init_queue,
+	.create_queue = schedule_create_queue,
 	.destroy_queue = schedule_destroy_queue,
 	.sched_queue = NULL,
 	.ord_enq_multi = NULL,
