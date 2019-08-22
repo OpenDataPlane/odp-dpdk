@@ -1,4 +1,5 @@
 /* Copyright (c) 2013-2018, Linaro Limited
+ * Copyright (c) 2019, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -95,6 +96,13 @@ int odp_pktio_init_global(void)
 					pktio_if);
 				return -1;
 			}
+	}
+
+	if (_ODP_PCAPNG) {
+		if (_odp_pcapng_init_global()) {
+			ODP_ERR("Failed to initialize pcapng\n");
+			return -1;
+		}
 	}
 
 	return 0;
@@ -522,8 +530,8 @@ int odp_pktio_start(odp_pktio_t hdl)
 		entry->s.name, entry->s.num_in_queue, entry->s.num_out_queue);
 
 	if (_ODP_PCAPNG) {
-		if (pcapng_prepare(entry))
-			ODP_ERR("pcap init failed, won't capture\n");
+		if (_odp_pcapng_start(entry))
+			ODP_ERR("pcapng start failed, won't capture\n");
 	}
 
 	return res;
@@ -551,7 +559,7 @@ static int _pktio_stop(pktio_entry_t *entry)
 		entry->s.state = PKTIO_STATE_STOPPED;
 
 	if (_ODP_PCAPNG)
-		pcapng_destroy(entry);
+		_odp_pcapng_stop(entry);
 
 	return res;
 }
@@ -1277,6 +1285,12 @@ int odp_pktio_term_global(void)
 					  pktio_if);
 	}
 
+	if (_ODP_PCAPNG) {
+		ret = _odp_pcapng_term_global();
+		if (ret)
+			ODP_ERR("Failed to terminate pcapng\n");
+	}
+
 	ret = odp_shm_free(odp_shm_lookup("_odp_pktio_entries"));
 	if (ret != 0)
 		ODP_ERR("shm free failed for _odp_pktio_entries");
@@ -1628,6 +1642,11 @@ int odp_pktin_event_queue(odp_pktio_t pktio, odp_queue_t queues[], int num)
 		return -1;
 	}
 
+	if (num < 0) {
+		ODP_DBG("Bad param: num %i\n", num);
+		return -1;
+	}
+
 	mode = entry->s.param.in_mode;
 
 	if (mode == ODP_PKTIN_MODE_DISABLED)
@@ -1639,8 +1658,11 @@ int odp_pktin_event_queue(odp_pktio_t pktio, odp_queue_t queues[], int num)
 
 	num_queues = entry->s.num_in_queue;
 
-	if (queues && num > 0) {
-		for (i = 0; i < num && i < num_queues; i++)
+	if (queues) {
+		if (num_queues < num)
+			num = num_queues;
+
+		for (i = 0; i < num; i++)
 			queues[i] = entry->s.in_queue[i].queue;
 	}
 
@@ -1660,6 +1682,11 @@ int odp_pktin_queue(odp_pktio_t pktio, odp_pktin_queue_t queues[], int num)
 		return -1;
 	}
 
+	if (num < 0) {
+		ODP_DBG("Bad param: num %i\n", num);
+		return -1;
+	}
+
 	mode = entry->s.param.in_mode;
 
 	if (mode == ODP_PKTIN_MODE_DISABLED)
@@ -1670,8 +1697,11 @@ int odp_pktin_queue(odp_pktio_t pktio, odp_pktin_queue_t queues[], int num)
 
 	num_queues = entry->s.num_in_queue;
 
-	if (queues && num > 0) {
-		for (i = 0; i < num && i < num_queues; i++)
+	if (queues) {
+		if (num_queues < num)
+			num = num_queues;
+
+		for (i = 0; i < num; i++)
 			queues[i] = entry->s.in_queue[i].pktin;
 	}
 
@@ -1744,7 +1774,7 @@ static inline void _odp_dump_pcapng_pkts(pktio_entry_t *entry, int qidx,
 					 const odp_packet_t packets[], int num)
 {
 	if (odp_unlikely(entry->s.pcapng.state[qidx] == PCAPNG_WR_PKT))
-		write_pcapng_pkts(entry, qidx, packets, num);
+		_odp_pcapng_write_pkts(entry, qidx, packets, num);
 }
 
 int odp_pktin_recv(odp_pktin_queue_t queue, odp_packet_t packets[], int num)

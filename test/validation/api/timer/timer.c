@@ -31,9 +31,7 @@
 #define EXTRA_TIMERS 256
 
 #define NAME "timer_pool"
-#define RES (10 * ODP_TIME_MSEC_IN_NS / 3)
-#define MIN_TMO (10 * ODP_TIME_MSEC_IN_NS / 3)
-#define MAX_TMO (1000000 * ODP_TIME_MSEC_IN_NS)
+#define THREE_POINT_THREE_MSEC (10 * ODP_TIME_MSEC_IN_NS / 3)
 #define USER_PTR ((void *)0xdead)
 #define TICK_INVALID (~(uint64_t)0)
 
@@ -46,19 +44,32 @@ struct test_timer {
 };
 
 typedef struct {
+	/* Default resolution / timeout parameters */
+	struct {
+		uint64_t res_ns;
+		uint64_t min_tmo;
+		uint64_t max_tmo;
+	} param;
+
 	/* Timeout pool handle used by all threads */
 	odp_pool_t tbp;
+
 	/* Timer pool handle used by all threads */
 	odp_timer_pool_t tp;
+
 	/* Barrier for thread synchronization */
 	odp_barrier_t test_barrier;
+
 	/* Count of timeouts delivered too late */
 	odp_atomic_u32_t ndelivtoolate;
+
 	/* Sum of all allocated timers from all threads. Thread-local
 	 * caches may make this number lower than the capacity of the pool */
 	odp_atomic_u32_t timers_allocated;
+
 	/* Number of timers allocated per thread */
 	uint32_t timers_per_thread;
+
 } global_shared_mem_t;
 
 static global_shared_mem_t *global_mem;
@@ -68,6 +79,10 @@ static int timer_global_init(odp_instance_t *inst)
 	odp_shm_t global_shm;
 	odp_init_t init_param;
 	odph_helper_options_t helper_options;
+	odp_timer_capability_t capa;
+	odp_timer_res_capability_t res_capa;
+	uint64_t res_ns, min_tmo, max_tmo;
+	unsigned int range;
 
 	if (odph_options(&helper_options)) {
 		fprintf(stderr, "error: odph_options() failed.\n");
@@ -100,6 +115,46 @@ static int timer_global_init(odp_instance_t *inst)
 	/* Configure scheduler */
 	odp_schedule_config(NULL);
 
+	memset(&capa, 0, sizeof(capa));
+	if (odp_timer_capability(ODP_CLOCK_CPU, &capa)) {
+		fprintf(stderr, "Timer capability failed\n");
+		return -1;
+	}
+
+	/* By default 20 msec resolution */
+	res_ns = 20 * ODP_TIME_MSEC_IN_NS;
+	if (res_ns < capa.max_res.res_ns)
+		res_ns = capa.max_res.res_ns;
+
+	memset(&res_capa, 0, sizeof(res_capa));
+	res_capa.res_ns = res_ns;
+
+	if (odp_timer_res_capability(ODP_CLOCK_CPU, &res_capa)) {
+		fprintf(stderr, "Timer resolution capability failed\n");
+		return -1;
+	}
+
+	/* Try to keep min timeout error margin within +-20% */
+	min_tmo = 5 * res_ns;
+	if (min_tmo < res_capa.min_tmo)
+		min_tmo = res_capa.min_tmo;
+
+	/* Max 1 hour */
+	max_tmo = 3600 * ODP_TIME_SEC_IN_NS;
+	if (max_tmo > res_capa.max_tmo)
+		max_tmo = res_capa.max_tmo;
+
+	range = (RANGE_MS * 1000) + THREE_POINT_THREE_MSEC;
+	if ((max_tmo - min_tmo) < range) {
+		fprintf(stderr, "Validation test needs %u msec range\n", range);
+		return -1;
+	}
+
+	/* Default parameters for test cases */
+	global_mem->param.res_ns  = res_ns;
+	global_mem->param.min_tmo = min_tmo;
+	global_mem->param.max_tmo = max_tmo;
+
 	return 0;
 }
 
@@ -124,6 +179,43 @@ static int timer_global_term(odp_instance_t inst)
 	}
 
 	return 0;
+}
+
+static void timer_test_capa(void)
+{
+	odp_timer_capability_t capa;
+	odp_timer_res_capability_t res_capa;
+	int ret;
+
+	memset(&capa, 0, sizeof(capa));
+	ret = odp_timer_capability(ODP_CLOCK_CPU, &capa);
+	CU_ASSERT_FATAL(ret == 0);
+
+	CU_ASSERT(capa.highest_res_ns == capa.max_res.res_ns);
+	CU_ASSERT(capa.max_res.res_ns  < capa.max_res.max_tmo);
+	CU_ASSERT(capa.max_res.min_tmo < capa.max_res.max_tmo);
+	CU_ASSERT(capa.max_tmo.res_ns  < capa.max_tmo.max_tmo);
+	CU_ASSERT(capa.max_tmo.min_tmo < capa.max_tmo.max_tmo);
+
+	/* Set max resolution */
+	memset(&res_capa, 0, sizeof(res_capa));
+	res_capa.res_ns = capa.max_res.res_ns;
+
+	ret = odp_timer_res_capability(ODP_CLOCK_CPU, &res_capa);
+	CU_ASSERT_FATAL(ret == 0);
+	CU_ASSERT(res_capa.res_ns  == capa.max_res.res_ns);
+	CU_ASSERT(res_capa.min_tmo == capa.max_res.min_tmo);
+	CU_ASSERT(res_capa.max_tmo == capa.max_res.max_tmo);
+
+	/* Set max timeout */
+	memset(&res_capa, 0, sizeof(res_capa));
+	res_capa.max_tmo = capa.max_tmo.max_tmo;
+
+	ret = odp_timer_res_capability(ODP_CLOCK_CPU, &res_capa);
+	CU_ASSERT_FATAL(ret == 0);
+	CU_ASSERT(res_capa.max_tmo == capa.max_tmo.max_tmo);
+	CU_ASSERT(res_capa.min_tmo == capa.max_tmo.min_tmo);
+	CU_ASSERT(res_capa.res_ns  == capa.max_tmo.res_ns);
 }
 
 static void timer_test_timeout_pool_alloc(void)
@@ -213,25 +305,19 @@ static void timer_test_timeout_pool_free(void)
 
 static void timer_pool_create_destroy(void)
 {
-	odp_timer_capability_t timer_capa;
 	odp_timer_pool_param_t tparam;
 	odp_timer_pool_info_t info;
 	odp_timer_pool_t tp[2];
 	odp_timer_t tim;
 	odp_queue_t queue;
-	uint64_t res_ns;
 
 	queue = odp_queue_create("timer_queue", NULL);
 	CU_ASSERT_FATAL(queue != ODP_QUEUE_INVALID);
 
-	CU_ASSERT_FATAL(odp_timer_capability(ODP_CLOCK_CPU, &timer_capa) == 0);
-
-	res_ns = 10 * timer_capa.highest_res_ns;
-
 	memset(&tparam, 0, sizeof(odp_timer_pool_param_t));
-	tparam.res_ns     = res_ns;
-	tparam.min_tmo    = 5 * res_ns;
-	tparam.max_tmo    = 10000 * tparam.min_tmo;
+	tparam.res_ns     = global_mem->param.res_ns;
+	tparam.min_tmo    = global_mem->param.min_tmo;
+	tparam.max_tmo    = global_mem->param.max_tmo;
 	tparam.num_timers = 100;
 	tparam.priv       = 0;
 	tparam.clk_src    = ODP_CLOCK_CPU;
@@ -284,6 +370,175 @@ static void timer_pool_create_destroy(void)
 	CU_ASSERT(odp_queue_destroy(queue) == 0);
 }
 
+static void timer_test_event_type(odp_queue_type_t queue_type,
+				  odp_event_type_t event_type)
+{
+	odp_pool_t pool;
+	odp_pool_param_t pool_param;
+	odp_queue_param_t queue_param;
+	odp_timer_pool_param_t timer_param;
+	odp_timer_pool_t timer_pool;
+	odp_queue_t queue;
+	odp_timeout_t tmo;
+	odp_buffer_t buf;
+	odp_packet_t pkt;
+	odp_event_t ev;
+	odp_time_t t1, t2;
+	uint64_t period_ns, period_tick, duration_ns;
+	int i, ret, num_tmo;
+	int num = 5;
+	odp_timer_t timer[num];
+
+	memset(&timer_param, 0, sizeof(timer_param));
+	timer_param.res_ns     = global_mem->param.res_ns;
+	timer_param.min_tmo    = global_mem->param.min_tmo;
+	period_ns              = 2 * global_mem->param.min_tmo;
+	timer_param.max_tmo    = global_mem->param.max_tmo;
+	timer_param.num_timers = num;
+	timer_param.clk_src    = ODP_CLOCK_CPU;
+
+	timer_pool = odp_timer_pool_create("timer_pool", &timer_param);
+	if (timer_pool == ODP_TIMER_POOL_INVALID)
+		CU_FAIL_FATAL("Timer pool create failed");
+
+	odp_timer_pool_start();
+
+	odp_pool_param_init(&pool_param);
+
+	if (event_type == ODP_EVENT_BUFFER) {
+		pool_param.type    = ODP_POOL_BUFFER;
+		pool_param.buf.num = num;
+	} else if (event_type == ODP_EVENT_PACKET) {
+		pool_param.type    = ODP_POOL_PACKET;
+		pool_param.pkt.num = num;
+	} else if (event_type == ODP_EVENT_TIMEOUT) {
+		pool_param.type    = ODP_POOL_TIMEOUT;
+		pool_param.tmo.num = num;
+	} else {
+		CU_FAIL("Bad event_type");
+		return;
+	}
+
+	pool = odp_pool_create("timeout_pool", &pool_param);
+	CU_ASSERT_FATAL(pool != ODP_POOL_INVALID);
+
+	odp_queue_param_init(&queue_param);
+	if (queue_type == ODP_QUEUE_TYPE_SCHED) {
+		queue_param.type       = ODP_QUEUE_TYPE_SCHED;
+		queue_param.sched.sync = ODP_SCHED_SYNC_ATOMIC;
+	}
+
+	queue = odp_queue_create("timeout_queue", &queue_param);
+	if (queue == ODP_QUEUE_INVALID)
+		CU_FAIL_FATAL("Queue create failed");
+
+	period_tick = odp_timer_ns_to_tick(timer_pool, period_ns);
+	duration_ns = num * period_ns;
+
+	LOG_DBG("\nTimer pool parameters:\n");
+	LOG_DBG("  res_ns  %" PRIu64 "\n", timer_param.res_ns);
+	LOG_DBG("  min_tmo %" PRIu64 "\n", timer_param.min_tmo);
+	LOG_DBG("  max_tmo %" PRIu64 "\n", timer_param.max_tmo);
+	LOG_DBG("  period_ns %" PRIu64 "\n", period_ns);
+	LOG_DBG("  period_tick %" PRIu64 "\n", period_tick);
+	LOG_DBG("  duration_ns %" PRIu64 "\n\n", duration_ns);
+
+	for (i = 0; i < num; i++) {
+		if (event_type == ODP_EVENT_BUFFER) {
+			buf = odp_buffer_alloc(pool);
+			ev  = odp_buffer_to_event(buf);
+		} else if (event_type == ODP_EVENT_PACKET) {
+			pkt = odp_packet_alloc(pool, 10);
+			ev  = odp_packet_to_event(pkt);
+		} else {
+			tmo = odp_timeout_alloc(pool);
+			ev  = odp_timeout_to_event(tmo);
+		}
+
+		CU_ASSERT(ev != ODP_EVENT_INVALID);
+
+		timer[i] = odp_timer_alloc(timer_pool, queue, NULL);
+		CU_ASSERT_FATAL(timer[i] != ODP_TIMER_INVALID);
+
+		ret = odp_timer_set_rel(timer[i], (i + 1) * period_tick, &ev);
+
+		if (ret == ODP_TIMER_TOOEARLY)
+			LOG_DBG("Too early %i\n", i);
+		else if (ret == ODP_TIMER_TOOLATE)
+			LOG_DBG("Too late %i\n", i);
+		else if (ret == ODP_TIMER_NOEVENT)
+			LOG_DBG("No event %i\n", i);
+
+		CU_ASSERT(ret == ODP_TIMER_SUCCESS);
+	}
+
+	ev = ODP_EVENT_INVALID;
+	num_tmo = 0;
+	t1 = odp_time_local();
+
+	/* Wait for timers. Make sure that scheduler context is not hold when
+	 * exiting the loop. */
+	do {
+		if (queue_type == ODP_QUEUE_TYPE_SCHED)
+			ev = odp_schedule(NULL, ODP_SCHED_NO_WAIT);
+		else
+			ev = odp_queue_deq(queue);
+
+		if (ev == ODP_EVENT_INVALID) {
+			t2 = odp_time_local();
+			if (odp_time_diff_ns(t2, t1) > (10 * duration_ns))
+				break;
+
+			continue;
+		}
+
+		CU_ASSERT(odp_event_type(ev) == event_type);
+
+		odp_event_free(ev);
+		num_tmo++;
+
+	} while (num_tmo < num || ev != ODP_EVENT_INVALID);
+
+	CU_ASSERT(num_tmo == num);
+
+	for (i = 0; i < num; i++)
+		CU_ASSERT(odp_timer_free(timer[i]) == ODP_EVENT_INVALID);
+
+	odp_timer_pool_destroy(timer_pool);
+	CU_ASSERT(odp_queue_destroy(queue) == 0);
+	CU_ASSERT(odp_pool_destroy(pool) == 0);
+}
+
+static void timer_test_tmo_event_plain(void)
+{
+	timer_test_event_type(ODP_QUEUE_TYPE_PLAIN, ODP_EVENT_TIMEOUT);
+}
+
+static void timer_test_tmo_event_sched(void)
+{
+	timer_test_event_type(ODP_QUEUE_TYPE_SCHED, ODP_EVENT_TIMEOUT);
+}
+
+static void timer_test_buf_event_plain(void)
+{
+	timer_test_event_type(ODP_QUEUE_TYPE_PLAIN, ODP_EVENT_BUFFER);
+}
+
+static void timer_test_buf_event_sched(void)
+{
+	timer_test_event_type(ODP_QUEUE_TYPE_SCHED, ODP_EVENT_BUFFER);
+}
+
+static void timer_test_pkt_event_plain(void)
+{
+	timer_test_event_type(ODP_QUEUE_TYPE_PLAIN, ODP_EVENT_PACKET);
+}
+
+static void timer_test_pkt_event_sched(void)
+{
+	timer_test_event_type(ODP_QUEUE_TYPE_SCHED, ODP_EVENT_PACKET);
+}
+
 static void timer_test_queue_type(odp_queue_type_t queue_type)
 {
 	odp_pool_t pool;
@@ -300,7 +555,6 @@ static void timer_test_queue_type(odp_queue_type_t queue_type)
 	uint64_t res_ns, period_ns, period_tick, test_period;
 	uint64_t diff_period, diff_test;
 	odp_pool_param_t params;
-	odp_timer_capability_t timer_capa;
 	odp_time_t t0, t1, t2;
 
 	odp_pool_param_init(&params);
@@ -310,17 +564,11 @@ static void timer_test_queue_type(odp_queue_type_t queue_type)
 	pool = odp_pool_create("timeout_pool", &params);
 	CU_ASSERT_FATAL(pool != ODP_POOL_INVALID);
 
-	if (odp_timer_capability(ODP_CLOCK_CPU, &timer_capa))
-		CU_FAIL_FATAL("Timer capability failed")
+	res_ns = global_mem->param.res_ns;
 
-	res_ns = 20 * ODP_TIME_MSEC_IN_NS;
-
-	if (timer_capa.highest_res_ns > res_ns)
-		res_ns = timer_capa.highest_res_ns;
-
-	tparam.res_ns     = res_ns;
-	tparam.min_tmo    = 5 * res_ns;
-	tparam.max_tmo    = 10000 * tparam.min_tmo;
+	tparam.res_ns     = global_mem->param.res_ns;
+	tparam.min_tmo    = global_mem->param.min_tmo;
+	tparam.max_tmo    = global_mem->param.max_tmo;
 	tparam.num_timers = num + 1;
 	tparam.priv       = 0;
 	tparam.clk_src    = ODP_CLOCK_CPU;
@@ -451,7 +699,7 @@ static void timer_test_sched_queue(void)
 	timer_test_queue_type(ODP_QUEUE_TYPE_SCHED);
 }
 
-static void timer_test_odp_timer_cancel(void)
+static void timer_test_cancel(void)
 {
 	odp_pool_t pool;
 	odp_pool_param_t params;
@@ -463,7 +711,6 @@ static void timer_test_odp_timer_cancel(void)
 	odp_timeout_t tmo;
 	odp_timer_set_t rc;
 	uint64_t tick;
-	odp_timer_capability_t timer_capa;
 
 	odp_pool_param_init(&params);
 	params.type    = ODP_POOL_TIMEOUT;
@@ -474,13 +721,9 @@ static void timer_test_odp_timer_cancel(void)
 	if (pool == ODP_POOL_INVALID)
 		CU_FAIL_FATAL("Timeout pool create failed");
 
-	if (odp_timer_capability(ODP_CLOCK_CPU, &timer_capa))
-		CU_FAIL_FATAL("Get timer capability failed")
-
-	tparam.res_ns	  = MAX(100 * ODP_TIME_MSEC_IN_NS,
-				timer_capa.highest_res_ns);
-	tparam.min_tmo    = 1   * ODP_TIME_SEC_IN_NS;
-	tparam.max_tmo    = 10  * ODP_TIME_SEC_IN_NS;
+	tparam.res_ns	  = global_mem->param.res_ns;
+	tparam.min_tmo    = global_mem->param.min_tmo;
+	tparam.max_tmo    = global_mem->param.max_tmo;
 	tparam.num_timers = 1;
 	tparam.priv       = 0;
 	tparam.clk_src    = ODP_CLOCK_CPU;
@@ -504,7 +747,7 @@ static void timer_test_odp_timer_cancel(void)
 	if (ev == ODP_EVENT_INVALID)
 		CU_FAIL_FATAL("Failed to allocate timeout");
 
-	tick = odp_timer_ns_to_tick(tp, 2 * ODP_TIME_SEC_IN_NS);
+	tick = odp_timer_ns_to_tick(tp, tparam.max_tmo / 2);
 
 	rc = odp_timer_set_rel(tim, tick, &ev);
 	if (rc != ODP_TIMER_SUCCESS)
@@ -541,6 +784,213 @@ static void timer_test_odp_timer_cancel(void)
 
 	if (odp_pool_destroy(pool) != 0)
 		CU_FAIL_FATAL("Failed to destroy pool");
+}
+
+static void timer_test_tmo_limit(odp_queue_type_t queue_type,
+				 int max_res, int min)
+{
+	odp_timer_capability_t timer_capa;
+	odp_pool_t pool;
+	odp_pool_param_t pool_param;
+	odp_queue_param_t queue_param;
+	odp_timer_pool_param_t timer_param;
+	odp_timer_pool_t timer_pool;
+	odp_queue_t queue;
+	odp_timeout_t tmo;
+	odp_event_t ev;
+	odp_time_t t1, t2;
+	uint64_t res_ns, min_tmo, max_tmo;
+	uint64_t tmo_ns, tmo_tick, diff_ns, max_wait;
+	int i, ret, num_tmo;
+	int num = 5;
+	odp_timer_t timer[num];
+
+	memset(&timer_capa, 0, sizeof(timer_capa));
+	ret = odp_timer_capability(ODP_CLOCK_CPU, &timer_capa);
+	CU_ASSERT_FATAL(ret == 0);
+
+	if (max_res) {
+		/* Maximum resolution parameters */
+		res_ns  = timer_capa.max_res.res_ns;
+		min_tmo = timer_capa.max_res.min_tmo;
+		max_tmo = timer_capa.max_res.max_tmo;
+	} else {
+		/* Maximum timeout parameters */
+		res_ns  = timer_capa.max_tmo.res_ns;
+		min_tmo = timer_capa.max_tmo.min_tmo;
+		max_tmo = timer_capa.max_tmo.max_tmo;
+	}
+
+	memset(&timer_param, 0, sizeof(timer_param));
+	timer_param.res_ns     = res_ns;
+	timer_param.min_tmo    = min_tmo;
+	timer_param.max_tmo    = max_tmo;
+	timer_param.num_timers = num;
+	timer_param.clk_src    = ODP_CLOCK_CPU;
+
+	timer_pool = odp_timer_pool_create("timer_pool", &timer_param);
+	if (timer_pool == ODP_TIMER_POOL_INVALID)
+		CU_FAIL_FATAL("Timer pool create failed");
+
+	odp_timer_pool_start();
+
+	odp_pool_param_init(&pool_param);
+	pool_param.type    = ODP_POOL_TIMEOUT;
+	pool_param.tmo.num = num;
+
+	pool = odp_pool_create("timeout_pool", &pool_param);
+	CU_ASSERT_FATAL(pool != ODP_POOL_INVALID);
+
+	odp_queue_param_init(&queue_param);
+	if (queue_type == ODP_QUEUE_TYPE_SCHED) {
+		queue_param.type       = ODP_QUEUE_TYPE_SCHED;
+		queue_param.sched.sync = ODP_SCHED_SYNC_ATOMIC;
+	}
+
+	queue = odp_queue_create("timeout_queue", &queue_param);
+	if (queue == ODP_QUEUE_INVALID)
+		CU_FAIL_FATAL("Queue create failed");
+
+	if (min)
+		tmo_ns = min_tmo;
+	else
+		tmo_ns = max_tmo;
+
+	tmo_tick    = odp_timer_ns_to_tick(timer_pool, tmo_ns);
+	/* Min_tmo maybe zero. Wait min timeouts at least 20ms + resolution */
+	max_wait    = (20 * ODP_TIME_MSEC_IN_NS + res_ns + 10 * tmo_ns);
+
+	LOG_DBG("\nTimer pool parameters:\n");
+	LOG_DBG("  res_ns      %" PRIu64 "\n",   timer_param.res_ns);
+	LOG_DBG("  min_tmo     %" PRIu64 "\n",   timer_param.min_tmo);
+	LOG_DBG("  max_tmo     %" PRIu64 "\n",   timer_param.max_tmo);
+	LOG_DBG("  tmo_ns      %" PRIu64 "\n",   tmo_ns);
+	LOG_DBG("  tmo_tick    %" PRIu64 "\n\n", tmo_tick);
+
+	for (i = 0; i < num; i++) {
+		timer[i] = odp_timer_alloc(timer_pool, queue, NULL);
+		CU_ASSERT_FATAL(timer[i] != ODP_TIMER_INVALID);
+	}
+
+	num_tmo = 0;
+
+	for (i = 0; i < num; i++) {
+		tmo = odp_timeout_alloc(pool);
+		ev  = odp_timeout_to_event(tmo);
+
+		CU_ASSERT(ev != ODP_EVENT_INVALID);
+
+		t1  = odp_time_local();
+		ret = odp_timer_set_rel(timer[i], tmo_tick, &ev);
+
+		if (ret == ODP_TIMER_TOOEARLY)
+			LOG_DBG("Too early %i\n", i);
+		else if (ret == ODP_TIMER_TOOLATE)
+			LOG_DBG("Too late %i\n", i);
+		else if (ret == ODP_TIMER_NOEVENT)
+			LOG_DBG("No event %i\n", i);
+
+		CU_ASSERT(ret == ODP_TIMER_SUCCESS);
+
+		if (min) {
+			/* Min timeout - wait for events */
+			int break_loop = 0;
+
+			while (1) {
+				if (queue_type == ODP_QUEUE_TYPE_SCHED)
+					ev = odp_schedule(NULL,
+							  ODP_SCHED_NO_WAIT);
+				else
+					ev = odp_queue_deq(queue);
+
+				t2 = odp_time_local();
+				diff_ns = odp_time_diff_ns(t2, t1);
+
+				if (ev != ODP_EVENT_INVALID) {
+					odp_event_free(ev);
+					num_tmo++;
+					break_loop = 1;
+					LOG_DBG("Timeout [%i]: %" PRIu64
+						" nsec\n", i, diff_ns);
+					continue;
+				}
+
+				/* Ensure that schedule context is free */
+				if (break_loop)
+					break;
+
+				/* Give up after waiting max wait time */
+				if (diff_ns > max_wait)
+					break;
+			}
+		} else {
+			/* Max timeout - cancel events */
+			ev = ODP_EVENT_INVALID;
+
+			ret = odp_timer_cancel(timer[i], &ev);
+			t2 = odp_time_local();
+			diff_ns = odp_time_diff_ns(t2, t1);
+
+			CU_ASSERT(ret == 0);
+			CU_ASSERT(ev != ODP_EVENT_INVALID);
+
+			if (ev != ODP_EVENT_INVALID)
+				odp_event_free(ev);
+
+			LOG_DBG("Cancelled [%i]: %" PRIu64
+				" nsec\n", i, diff_ns);
+		}
+	}
+
+	if (min)
+		CU_ASSERT(num_tmo == num);
+
+	for (i = 0; i < num; i++)
+		CU_ASSERT(odp_timer_free(timer[i]) == ODP_EVENT_INVALID);
+
+	odp_timer_pool_destroy(timer_pool);
+	CU_ASSERT(odp_queue_destroy(queue) == 0);
+	CU_ASSERT(odp_pool_destroy(pool) == 0);
+}
+
+static void timer_test_max_res_min_tmo_plain(void)
+{
+	timer_test_tmo_limit(ODP_QUEUE_TYPE_PLAIN, 1, 1);
+}
+
+static void timer_test_max_res_min_tmo_sched(void)
+{
+	timer_test_tmo_limit(ODP_QUEUE_TYPE_SCHED, 1, 1);
+}
+
+static void timer_test_max_res_max_tmo_plain(void)
+{
+	timer_test_tmo_limit(ODP_QUEUE_TYPE_PLAIN, 1, 0);
+}
+
+static void timer_test_max_res_max_tmo_sched(void)
+{
+	timer_test_tmo_limit(ODP_QUEUE_TYPE_SCHED, 1, 0);
+}
+
+static void timer_test_max_tmo_min_tmo_plain(void)
+{
+	timer_test_tmo_limit(ODP_QUEUE_TYPE_PLAIN, 0, 1);
+}
+
+static void timer_test_max_tmo_min_tmo_sched(void)
+{
+	timer_test_tmo_limit(ODP_QUEUE_TYPE_SCHED, 0, 1);
+}
+
+static void timer_test_max_tmo_max_tmo_plain(void)
+{
+	timer_test_tmo_limit(ODP_QUEUE_TYPE_PLAIN, 0, 0);
+}
+
+static void timer_test_max_tmo_max_tmo_sched(void)
+{
+	timer_test_tmo_limit(ODP_QUEUE_TYPE_SCHED, 0, 0);
 }
 
 /* Handle a received (timeout) event */
@@ -648,6 +1098,7 @@ static int worker_entrypoint(void *arg TEST_UNUSED)
 	odp_timer_pool_t tp = global_mem->tp;
 	odp_pool_t tbp = global_mem->tbp;
 	uint32_t num_timers = global_mem->timers_per_thread;
+	uint64_t min_tmo = global_mem->param.min_tmo;
 
 	queue = odp_queue_create("timer_queue", NULL);
 	if (queue == ODP_QUEUE_INVALID)
@@ -685,7 +1136,8 @@ static int worker_entrypoint(void *arg TEST_UNUSED)
 	/* Initial set all timers with a random expiration time */
 	nset = 0;
 	for (i = 0; i < allocated; i++) {
-		nsec = MIN_TMO + (rand_r(&seed) % RANGE_MS) * 1000000ULL;
+		nsec = min_tmo + THREE_POINT_THREE_MSEC +
+		       (rand_r(&seed) % RANGE_MS) * 1000000ULL;
 		tck = odp_timer_current_tick(tp) +
 		      odp_timer_ns_to_tick(tp, nsec);
 		timer_rc = odp_timer_set_abs(tt[i].tim, tck, &tt[i].ev);
@@ -740,7 +1192,7 @@ static int worker_entrypoint(void *arg TEST_UNUSED)
 				/* Timer active => reset */
 				nreset++;
 
-			nsec = MIN_TMO +
+			nsec = min_tmo + THREE_POINT_THREE_MSEC +
 			       (rand_r(&seed) % RANGE_MS) * 1000000ULL;
 			tck  = odp_timer_ns_to_tick(tp, nsec);
 
@@ -831,8 +1283,7 @@ static int worker_entrypoint(void *arg TEST_UNUSED)
 	return CU_get_number_of_failures();
 }
 
-/* Timer test case entrypoint */
-static void timer_test_odp_timer_all(void)
+static void timer_test_all(void)
 {
 	int rc;
 	odp_pool_param_t params;
@@ -840,7 +1291,7 @@ static void timer_test_odp_timer_all(void)
 	odp_cpumask_t unused;
 	odp_timer_pool_info_t tpinfo;
 	uint64_t ns, tick, ns2;
-	uint64_t resolution_ns;
+	uint64_t res_ns, min_tmo, max_tmo;
 	uint32_t timers_allocated;
 	pthrd_arg thrdarg;
 	odp_pool_capability_t pool_capa;
@@ -887,10 +1338,13 @@ static void timer_test_odp_timer_all(void)
 	tbp = global_mem->tbp;
 
 	/* Create a timer pool */
-	resolution_ns = MAX(RES, timer_capa.highest_res_ns);
-	tparam.res_ns = resolution_ns;
-	tparam.min_tmo = MIN_TMO;
-	tparam.max_tmo = MAX_TMO;
+	res_ns  = global_mem->param.res_ns;
+	max_tmo = global_mem->param.max_tmo;
+	min_tmo = global_mem->param.min_tmo;
+
+	tparam.res_ns  = res_ns;
+	tparam.min_tmo = min_tmo;
+	tparam.max_tmo = max_tmo;
 	tparam.num_timers = num_timers;
 	tparam.priv = 0;
 	tparam.clk_src = ODP_CLOCK_CPU;
@@ -905,10 +1359,9 @@ static void timer_test_odp_timer_all(void)
 	if (odp_timer_pool_info(tp, &tpinfo) != 0)
 		CU_FAIL("odp_timer_pool_info");
 	CU_ASSERT(strcmp(tpinfo.name, NAME) == 0);
-	CU_ASSERT(tpinfo.param.res_ns == MAX(RES,
-					     timer_capa.highest_res_ns));
-	CU_ASSERT(tpinfo.param.min_tmo == MIN_TMO);
-	CU_ASSERT(tpinfo.param.max_tmo == MAX_TMO);
+	CU_ASSERT(tpinfo.param.res_ns  == res_ns);
+	CU_ASSERT(tpinfo.param.min_tmo == min_tmo);
+	CU_ASSERT(tpinfo.param.max_tmo == max_tmo);
 	CU_ASSERT(strcmp(tpinfo.name, NAME) == 0);
 
 	LOG_DBG("Timer pool handle: %" PRIu64 "\n", odp_timer_pool_to_u64(tp));
@@ -928,17 +1381,17 @@ static void timer_test_odp_timer_all(void)
 	ns2  = odp_timer_tick_to_ns(tp, tick);
 	CU_ASSERT(ns2 == 0);
 
-	for (ns = resolution_ns; ns < MAX_TMO; ns += resolution_ns) {
+	for (ns = res_ns; ns < max_tmo; ns += res_ns) {
 		tick = odp_timer_ns_to_tick(tp, ns);
 		ns2  = odp_timer_tick_to_ns(tp, tick);
 
-		if (ns2 < ns - resolution_ns) {
+		if (ns2 < ns - res_ns) {
 			LOG_DBG("FAIL ns:%" PRIu64 " tick:%" PRIu64 " ns2:%"
 				PRIu64 "\n", ns, tick, ns2);
 			CU_FAIL("tick conversion: nsec too small\n");
 		}
 
-		if (ns2 > ns + resolution_ns) {
+		if (ns2 > ns + res_ns) {
 			LOG_DBG("FAIL ns:%" PRIu64 " tick:%" PRIu64 " ns2:%"
 				PRIu64 "\n", ns, tick, ns2);
 			CU_FAIL("tick conversion: nsec too large\n");
@@ -983,13 +1436,28 @@ static void timer_test_odp_timer_all(void)
 }
 
 odp_testinfo_t timer_suite[] = {
+	ODP_TEST_INFO(timer_test_capa),
 	ODP_TEST_INFO(timer_test_timeout_pool_alloc),
 	ODP_TEST_INFO(timer_test_timeout_pool_free),
 	ODP_TEST_INFO(timer_pool_create_destroy),
+	ODP_TEST_INFO(timer_test_tmo_event_plain),
+	ODP_TEST_INFO(timer_test_tmo_event_sched),
+	ODP_TEST_INFO(timer_test_buf_event_plain),
+	ODP_TEST_INFO(timer_test_buf_event_sched),
+	ODP_TEST_INFO(timer_test_pkt_event_plain),
+	ODP_TEST_INFO(timer_test_pkt_event_sched),
+	ODP_TEST_INFO(timer_test_cancel),
+	ODP_TEST_INFO(timer_test_max_res_min_tmo_plain),
+	ODP_TEST_INFO(timer_test_max_res_min_tmo_sched),
+	ODP_TEST_INFO(timer_test_max_res_max_tmo_plain),
+	ODP_TEST_INFO(timer_test_max_res_max_tmo_sched),
+	ODP_TEST_INFO(timer_test_max_tmo_min_tmo_plain),
+	ODP_TEST_INFO(timer_test_max_tmo_min_tmo_sched),
+	ODP_TEST_INFO(timer_test_max_tmo_max_tmo_plain),
+	ODP_TEST_INFO(timer_test_max_tmo_max_tmo_sched),
 	ODP_TEST_INFO(timer_test_plain_queue),
 	ODP_TEST_INFO(timer_test_sched_queue),
-	ODP_TEST_INFO(timer_test_odp_timer_cancel),
-	ODP_TEST_INFO(timer_test_odp_timer_all),
+	ODP_TEST_INFO(timer_test_all),
 	ODP_TEST_INFO_NULL,
 };
 

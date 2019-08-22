@@ -171,6 +171,8 @@ static args_t *gbl_args;
 
 static void sig_handler(int signo ODP_UNUSED)
 {
+	if (gbl_args == NULL)
+		return;
 	gbl_args->exit_thread = 1;
 }
 
@@ -519,6 +521,10 @@ static int bench_packet_alloc_free_multi(void)
 		pkts = odp_packet_alloc_multi(gbl_args->pool, gbl_args->pkt.len,
 					      gbl_args->pkt_tbl,
 					      gbl_args->appl.burst_size);
+
+		if (pkts < 0)
+			LOG_ABORT("Packet alloc failed\n");
+
 		odp_packet_free_multi(gbl_args->pkt_tbl, pkts);
 	}
 	return i;
@@ -1657,6 +1663,8 @@ int main(int argc, char *argv[])
 		LOG_ERR("Error: pool destroy\n");
 		exit(EXIT_FAILURE);
 	}
+	gbl_args = NULL;
+	odp_mb_full();
 
 	if (odp_shm_free(shm)) {
 		LOG_ERR("Error: shm free\n");

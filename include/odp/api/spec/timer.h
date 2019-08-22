@@ -1,4 +1,6 @@
 /* Copyright (c) 2013-2018, Linaro Limited
+ * Copyright (c) 2019, Nokia
+ *
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -67,26 +69,29 @@ typedef enum {
  * Return values of timer set calls.
  */
 typedef enum {
-/**
- * Timer set operation succeeded
- */
+	/**
+	 * Timer set operation succeeded
+	 */
 	ODP_TIMER_SUCCESS = 0,
-/**
- * Timer set operation failed, expiration too early.
- * Either retry with a later expiration time or process the timeout
- * immediately. */
+
+	/**
+	 * Timer set operation failed, expiration too early.
+	 * Either retry with a later expiration time or process the timeout
+	 * immediately. */
 	ODP_TIMER_TOOEARLY = -1,
 
-/**
- * Timer set operation failed, expiration too late.
- * Truncate the expiration time against the maximum timeout for the
- * timer pool. */
+	/**
+	 * Timer set operation failed, expiration too late.
+	 * Truncate the expiration time against the maximum timeout for the
+	 * timer pool. */
 	ODP_TIMER_TOOLATE = -2,
-/**
- * Timer set operation failed because no timeout event specified and no
- * timeout event present in the timer (timer inactive/expired).
- */
+
+	/**
+	 * Timer set operation failed because no event specified and no event
+	 * present in the timer (timer inactive/expired).
+	 */
 	ODP_TIMER_NOEVENT = -3
+
 } odp_timer_set_t;
 
 /**
@@ -94,8 +99,8 @@ typedef enum {
  * Maximum timer pool name length in chars including null char
  */
 
-/** Timer pool parameters
- * Timer pool parameters are used when creating and querying timer pools.
+/**
+ * Timer pool parameters
  */
 typedef struct {
 	/** Timeout resolution in nanoseconds. Timer pool must serve timeouts
@@ -131,6 +136,21 @@ typedef struct {
 } odp_timer_pool_param_t;
 
 /**
+ * Timer resolution capability
+ */
+typedef struct {
+	/** Timeout resolution in nanoseconds */
+	uint64_t res_ns;
+
+	/** Minimum relative timeout in nanoseconds */
+	uint64_t min_tmo;
+
+	/** Maximum relative timeout in nanoseconds */
+	uint64_t max_tmo;
+
+} odp_timer_res_capability_t;
+
+/**
  * Timer capability
  */
 typedef struct {
@@ -155,8 +175,35 @@ typedef struct {
 	 *  This defines the highest resolution supported by a timer.
 	 *  It's the minimum valid value for 'res_ns' timer pool
 	 *  parameter.
+	 *
+	 *  This value is equal to 'max_res.res_ns' capability.
 	 */
 	uint64_t highest_res_ns;
+
+	/**
+	 * Maximum resolution
+	 *
+	 * This defines the highest resolution supported by a timer, with
+	 * limits to min/max timeout values. The highest resolution for a timer
+	 * pool is defined by 'max_res.res_ns', therefore it's the minimum value
+	 * for 'res_ns' timer pool parameter. When this resolution is used:
+	 * - 'min_tmo' parameter value must be in minimum 'max_res.min_tmo'
+	 * - 'max_tmo' parameter value must be in maximum 'max_res.max_tmo'
+	 */
+	odp_timer_res_capability_t max_res;
+
+	/**
+	 * Maximum timeout length
+	 *
+	 * This defines the maximum relative timeout value supported by a timer,
+	 * with limits to min timeout and max resolution values. The maximum
+	 * value for 'max_tmo' timer pool parameter is defined by
+	 * 'max_tmo.max_tmo'. When this max timeout value is used:
+	 * - 'min_tmo' parameter value must be in minimum 'max_tmo.min_tmo'
+	 * - 'res_ns'  parameter value must be in minimum 'max_tmo.res_ns'
+	 */
+	odp_timer_res_capability_t max_tmo;
+
 } odp_timer_capability_t;
 
 /**
@@ -174,6 +221,28 @@ int odp_timer_capability(odp_timer_clk_src_t clk_src,
 			 odp_timer_capability_t *capa);
 
 /**
+ * Timer resolution capability
+ *
+ * This function fills in capability limits for timer pool resolution and
+ * min/max timeout values, based on either resolution or maximum timeout.
+ * Set the required value to 'res_ns' or 'max_tmo', and set other fields to
+ * zero. A successful call fills in the other two fields. The call returns
+ * a failure, if the user defined value ('res_ns' or 'max_tmo)' exceeds
+ * capability limits. Outputted values are minimums for 'res_ns' and 'min_tmo',
+ * and a maximum for 'max_tmo'.
+ *
+ * @param         clk_src  Clock source for timers
+ * @param[in,out] res_capa Resolution capability pointer for input/output.
+ *                         Set either 'res_ns' or 'max_tmo', a successful call
+ *                         fills in other fields.
+ *
+ * @retval 0 on success
+ * @retval <0 on failure
+ */
+int odp_timer_res_capability(odp_timer_clk_src_t clk_src,
+			     odp_timer_res_capability_t *res_capa);
+
+/**
  * Create a timer pool
  *
  * The use of pool name is optional. Unique names are not required.
@@ -185,9 +254,8 @@ int odp_timer_capability(odp_timer_clk_src_t clk_src,
  * @return Timer pool handle on success
  * @retval ODP_TIMER_POOL_INVALID on failure and errno set
  */
-odp_timer_pool_t
-odp_timer_pool_create(const char *name,
-		      const odp_timer_pool_param_t *params);
+odp_timer_pool_t odp_timer_pool_create(const char *name,
+				       const odp_timer_pool_param_t *params);
 
 /**
  * Start a timer pool
@@ -205,60 +273,67 @@ void odp_timer_pool_start(void);
  * Destroy a timer pool, freeing all resources.
  * All timers must have been freed.
  *
- * @param tpid  Timer pool identifier
+ * @param timer_pool  Timer pool
  */
-void odp_timer_pool_destroy(odp_timer_pool_t tpid);
+void odp_timer_pool_destroy(odp_timer_pool_t timer_pool);
 
 /**
  * Convert timer ticks to nanoseconds
  *
- * @param tpid  Timer pool identifier
- * @param ticks Timer ticks
+ * @param timer_pool  Timer pool
+ * @param ticks       Timer ticks
  *
  * @return Nanoseconds
  */
-uint64_t odp_timer_tick_to_ns(odp_timer_pool_t tpid, uint64_t ticks);
+uint64_t odp_timer_tick_to_ns(odp_timer_pool_t timer_pool, uint64_t ticks);
 
 /**
  * Convert nanoseconds to timer ticks
  *
- * @param tpid  Timer pool identifier
- * @param ns    Nanoseconds
+ * @param timer_pool  Timer pool
+ * @param ns          Nanoseconds
  *
  * @return Timer ticks
  */
-uint64_t odp_timer_ns_to_tick(odp_timer_pool_t tpid, uint64_t ns);
+uint64_t odp_timer_ns_to_tick(odp_timer_pool_t timer_pool, uint64_t ns);
 
 /**
  * Current tick value
  *
- * @param tpid Timer pool identifier
+ * @param timer_pool  Timer pool
  *
  * @return Current time in timer ticks
  */
-uint64_t odp_timer_current_tick(odp_timer_pool_t tpid);
+uint64_t odp_timer_current_tick(odp_timer_pool_t timer_pool);
 
 /**
  * ODP timer pool information and configuration
  */
-
 typedef struct {
-	odp_timer_pool_param_t param; /**< Parameters specified at creation */
-	uint32_t cur_timers; /**< Number of currently allocated timers */
-	uint32_t hwm_timers; /**< High watermark of allocated timers */
-	const char *name; /**< Name of timer pool */
+	/** Parameters specified at creation */
+	odp_timer_pool_param_t param;
+
+	/** Number of currently allocated timers */
+	uint32_t cur_timers;
+
+	/** High watermark of allocated timers */
+	uint32_t hwm_timers;
+
+	/** Name of timer pool */
+	const char *name;
+
 } odp_timer_pool_info_t;
 
 /**
  * Query timer pool configuration and current state
  *
- * @param tpid Timer pool identifier
- * @param[out] info Pointer to information buffer
+ * @param      timer_pool  Timer pool
+ * @param[out] info        Pointer to information buffer
  *
  * @retval 0 on success
  * @retval <0 on failure. Info could not be retrieved.
  */
-int odp_timer_pool_info(odp_timer_pool_t tpid,
+int odp_timer_pool_info(odp_timer_pool_t timer_pool,
 			odp_timer_pool_info_t *info);
 
 /**
@@ -268,15 +343,14 @@ int odp_timer_pool_info(odp_timer_pool_t tpid,
  * the timer pool. The user_ptr is copied to timeouts and can be retrieved
  * using the odp_timeout_user_ptr() call.
  *
- * @param tpid     Timer pool identifier
- * @param queue    Destination queue for timeout notifications
- * @param user_ptr User defined pointer or NULL to be copied to timeouts
+ * @param timer_pool  Timer pool
+ * @param queue       Destination queue for timeout notifications
+ * @param user_ptr    User defined pointer or NULL to be copied to timeouts
  *
  * @return Timer handle on success
  * @retval ODP_TIMER_INVALID on failure and errno set.
  */
-odp_timer_t odp_timer_alloc(odp_timer_pool_t tpid,
-			    odp_queue_t queue,
+odp_timer_t odp_timer_alloc(odp_timer_pool_t timer_pool, odp_queue_t queue,
 			    void *user_ptr);
 
 /**
@@ -287,80 +361,95 @@ odp_timer_t odp_timer_alloc(odp_timer_pool_t tpid,
  * The timeout event for an expired timer will not be returned. It is the
  * responsibility of the application to handle this timeout when it is received.
  *
- * @param tim      Timer handle
+ * @param timer      Timer
+ *
  * @return Event handle of timeout event
  * @retval ODP_EVENT_INVALID on failure
  */
-odp_event_t odp_timer_free(odp_timer_t tim);
+odp_event_t odp_timer_free(odp_timer_t timer);
 
 /**
- * Set a timer (absolute time) with a user-provided timeout event
+ * Set (or reset) a timer with absolute expiration time
  *
- * Set (arm) the timer to expire at specific time. The timeout
- * event will be enqueued when the timer expires.
+ * This function sets a timer to expire at a specific time. If the timer is
+ * already running (set and not yet expired), the function updates (resets) it
+ * with a new expiration time and optionally with a new event. A successful
+ * reset operation with a new event outputs the old event. A failed reset
+ * operation does not modify the timer.
  *
- * @param tim      Timer
- * @param abs_tck  Expiration time in absolute timer ticks
- * @param[in,out] tmo_ev  Reference to an event variable that points to
- * timeout event or NULL to reuse the existing timeout event. Any existing
- * timeout event that is replaced by a successful set operation will be
- * returned here.
+ * The user provided event can be of any event type, but only ODP_EVENT_TIMEOUT
+ * type events (odp_timeout_t) carry timeout specific metadata. Furthermore,
+ * timer performance may have been optimized for that event type. When the timer
+ * expires, the event is enqueued to the destination queue of the timer.
  *
- * @retval ODP_TIMER_SUCCESS Operation succeeded
- * @retval ODP_TIMER_TOOEARLY Operation failed because expiration tick too
- * early
- * @retval ODP_TIMER_TOOLATE Operation failed because expiration tick too
- * late
- * @retval ODP_TIMER_NOEVENT Operation failed because timeout event not
- * specified in odp_timer_set call and not present in timer
+ * @param         timer    Timer
+ * @param         abs_tick Absolute expiration time in timer ticks
+ * @param[in,out] tmo_ev   Pointer to an event handle. The event is enqueued
+ *                         when the timer expires. Use NULL when resetting the
+ *                         timer without changing the event. When resetting the
+ *                         timer with a new event, a successful operation
+ *                         outputs the old event here.
+ *
+ * @retval ODP_TIMER_SUCCESS  Success
+ * @retval ODP_TIMER_TOOEARLY Failure. Expiration time is too near to
+ *                            the current time.
+ * @retval ODP_TIMER_TOOLATE  Failure. Expiration time is too far from
+ *                            the current time.
+ * @retval ODP_TIMER_NOEVENT  Failure. Set operation: No event provided.
+ *                            Reset operation: Too late to reset the timer.
+ *
+ * @see odp_timer_set_rel(), odp_timer_alloc(), odp_timer_cancel()
  */
-int odp_timer_set_abs(odp_timer_t tim,
-		      uint64_t abs_tck,
+int odp_timer_set_abs(odp_timer_t timer, uint64_t abs_tick,
 		      odp_event_t *tmo_ev);
 
 /**
- * Set a timer with a relative expiration time and user-provided event.
+ * Set (or reset) a timer with relative expiration time
  *
- * Set (arm) the timer to expire at a relative future time.
+ * Like odp_timer_set_abs(), but the expiration time is relative to the current
+ * time: expiration tick = odp_timer_current_tick() + 'rel_tick'.
  *
- * @param tim      Timer
- * @param rel_tck  Expiration time in timer ticks relative to current time of
- *		   the timer pool the timer belongs to
- * @param[in,out] tmo_ev  Reference to an event variable that points to
- * timeout event or NULL to reuse the existing timeout event. Any existing
- * timeout event that is replaced by a successful set operation will be
- * returned here.
+ * @param         timer    Timer
+ * @param         rel_tick Expiration time relative to current time of
+ *                         the timer pool in timer ticks
+ * @param[in,out] tmo_ev   Pointer to an event handle. The event is enqueued
+ *                         when the timer expires. Use NULL when resetting the
+ *                         timer without changing the event. When resetting the
+ *                         timer with a new event, a successful operation
+ *                         outputs the old event here.
  *
- * @retval ODP_TIMER_SUCCESS Operation succeeded
- * @retval ODP_TIMER_TOOEARLY Operation failed because expiration tick too
- * early
- * @retval ODP_TIMER_TOOLATE Operation failed because expiration tick too
- * late
- * @retval ODP_TIMER_NOEVENT Operation failed because timeout event not
- * specified in call and not present in timer
+ * @retval ODP_TIMER_SUCCESS  Success
+ * @retval ODP_TIMER_TOOEARLY Failure. Expiration time is too near to
+ *                            the current time.
+ * @retval ODP_TIMER_TOOLATE  Failure. Expiration time is too far from
+ *                            the current time.
+ * @retval ODP_TIMER_NOEVENT  Failure. Set operation: No event provided.
+ *                            Reset operation: Too late to reset the timer.
+ *
+ * @see odp_timer_set_abs(), odp_timer_alloc(), odp_timer_cancel()
  */
-int odp_timer_set_rel(odp_timer_t tim,
-		      uint64_t rel_tck,
+int odp_timer_set_rel(odp_timer_t timer, uint64_t rel_tick,
 		      odp_event_t *tmo_ev);
 
 /**
  * Cancel a timer
  *
- * Cancel a timer, preventing future expiration and delivery. Return any
- * present timeout event.
+ * Cancel a timer, preventing future expiration and event delivery. Return any
+ * present event.
  *
  * A timer that has already expired may be impossible to cancel and the timeout
  * will instead be delivered to the destination queue.
  *
- * @param tim     Timer
- * @param[out] tmo_ev Pointer to an event variable
- * @retval 0  Success, active timer cancelled, timeout returned in '*tmo_ev'
- * @retval <0 on failure (timer inactive or already expired)
+ * @param      timer  Timer
+ * @param[out] tmo_ev Pointer to an event handle for output
+ *
+ * @retval 0  Success. Active timer cancelled, timeout returned in 'tmo_ev'
+ * @retval <0 Failure. Timer inactive or already expired.
  */
-int odp_timer_cancel(odp_timer_t tim, odp_event_t *tmo_ev);
+int odp_timer_cancel(odp_timer_t timer, odp_event_t *tmo_ev);
 
 /**
- * Return timeout handle that is associated with timeout event
+ * Get timeout handle from a ODP_EVENT_TIMEOUT type event
  *
  * @param ev An event of type ODP_EVENT_TIMEOUT
  *
@@ -379,6 +468,7 @@ odp_event_t odp_timeout_to_event(odp_timeout_t tmo);
 
 /**
  * Check for fresh timeout
+ *
  * If the corresponding timer has been reset or cancelled since this timeout
  * was enqueued, the timeout is stale (not fresh).
  *
@@ -408,6 +498,7 @@ uint64_t odp_timeout_tick(odp_timeout_t tmo);
 
 /**
  * Return user pointer for the timeout
+ *
  * The user pointer was specified when the timer was allocated.
  *
  * @param tmo Timeout handle
@@ -440,41 +531,41 @@ void odp_timeout_free(odp_timeout_t tmo);
 /**
  * Get printable value for an odp_timer_pool_t
  *
- * @param hdl  odp_timer_pool_t handle to be printed
- * @return     uint64_t value that can be used to print/display this
- *             handle
+ * @param timer_pool  odp_timer_pool_t handle to be printed
+ *
+ * @return uint64_t value that can be used to print/display this handle
  *
  * @note This routine is intended to be used for diagnostic purposes
  * to enable applications to generate a printable value that represents
  * an odp_timer_pool_t handle.
  */
-uint64_t odp_timer_pool_to_u64(odp_timer_pool_t hdl);
+uint64_t odp_timer_pool_to_u64(odp_timer_pool_t timer_pool);
 
 /**
  * Get printable value for an odp_timer_t
  *
- * @param hdl  odp_timer_t handle to be printed
- * @return     uint64_t value that can be used to print/display this
- *             handle
+ * @param timer  odp_timer_t handle to be printed
+ *
+ * @return uint64_t value that can be used to print/display this handle
  *
  * @note This routine is intended to be used for diagnostic purposes
  * to enable applications to generate a printable value that represents
  * an odp_timer_t handle.
  */
-uint64_t odp_timer_to_u64(odp_timer_t hdl);
+uint64_t odp_timer_to_u64(odp_timer_t timer);
 
 /**
  * Get printable value for an odp_timeout_t
  *
- * @param hdl  odp_timeout_t handle to be printed
- * @return     uint64_t value that can be used to print/display this
- *             handle
+ * @param tmo  odp_timeout_t handle to be printed
+ *
+ * @return uint64_t value that can be used to print/display this handle
  *
  * @note This routine is intended to be used for diagnostic purposes
  * to enable applications to generate a printable value that represents
  * an odp_timeout_t handle.
  */
-uint64_t odp_timeout_to_u64(odp_timeout_t hdl);
+uint64_t odp_timeout_to_u64(odp_timeout_t tmo);
 
 /**
  * @}

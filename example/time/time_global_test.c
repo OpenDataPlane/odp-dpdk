@@ -11,6 +11,7 @@
 #include <odp/helper/odph_api.h>
 
 #define MAX_WORKERS		32
+#define MAX_NUM_BUF		8192
 #define ITERATION_NUM		2048
 #define LOG_BASE		8
 #define LOG_ENTRY_SIZE		19
@@ -83,20 +84,23 @@ static void print_log(test_globals_t *gbls)
 		printf("Number of errors: %u\n", err_num);
 }
 
-static void
-generate_next_queue(test_globals_t *gbls, odp_queue_t *queue, unsigned int id)
+static void generate_next_queue(test_globals_t *gbls, odp_queue_t *queue,
+				unsigned int id)
 {
 	int thr;
-	unsigned int rand_id;
+	uint8_t rand_u8;
 	char queue_name[sizeof(QUEUE_NAME_PREFIX) + 2];
+	unsigned int rand_id = 1;
 
 	thr = odp_thread_id();
 
 	/* generate next random id */
-	do {
-		odp_random_data((uint8_t *)&rand_id, sizeof(rand_id), 1);
-		rand_id = rand_id % gbls->thread_num + 1;
-	} while (rand_id == id);
+	if (gbls->thread_num > 1) {
+		do {
+			odp_random_data(&rand_u8, 1, ODP_RANDOM_BASIC);
+			rand_id = rand_u8 % gbls->thread_num + 1;
+		} while (rand_id == id);
+	}
 
 	sprintf(queue_name, QUEUE_NAME_PREFIX "%d", rand_id);
 	*queue = odp_queue_lookup(queue_name);
@@ -250,7 +254,8 @@ int main(int argc, char *argv[])
 	int num_workers;
 	test_globals_t *gbls;
 	odp_cpumask_t cpumask;
-	odp_pool_param_t params;
+	odp_pool_capability_t pool_capa;
+	odp_pool_param_t pool_param;
 	odp_shm_t shm_glbls = ODP_SHM_INVALID;
 	odp_shm_t shm_log = ODP_SHM_INVALID;
 	int log_size, log_enries_num;
@@ -319,12 +324,23 @@ int main(int argc, char *argv[])
 	odp_barrier_init(&gbls->end_barrier, num_workers);
 	memset(gbls->log, 0, log_size);
 
-	params.buf.size  = sizeof(timestamp_event_t);
-	params.buf.align = ODP_CACHE_LINE_SIZE;
-	params.buf.num   = num_workers;
-	params.type      = ODP_POOL_BUFFER;
+	if (odp_pool_capability(&pool_capa)) {
+		err = 1;
+		EXAMPLE_ERR("Error: pool capability failed.\n");
+		goto err;
+	}
 
-	pool = odp_pool_create("time buffers pool", &params);
+	odp_pool_param_init(&pool_param);
+
+	pool_param.buf.size  = sizeof(timestamp_event_t);
+	pool_param.buf.align = ODP_CACHE_LINE_SIZE;
+	pool_param.buf.num   = MAX_NUM_BUF;
+	pool_param.type      = ODP_POOL_BUFFER;
+
+	if (pool_capa.buf.max_num && MAX_NUM_BUF > pool_capa.buf.max_num)
+		pool_param.buf.num = pool_capa.buf.max_num;
+
+	pool = odp_pool_create("time buffers pool", &pool_param);
 	if (pool == ODP_POOL_INVALID) {
 		err = 1;
 		EXAMPLE_ERR("Pool create failed.\n");

@@ -76,11 +76,24 @@ typedef enum {
 	/** Triple DES with cipher block chaining */
 	ODP_CIPHER_ALG_3DES_CBC,
 
+	/** Triple DES with Electronic Codebook */
+	ODP_CIPHER_ALG_3DES_ECB,
+
 	/** AES with cipher block chaining */
 	ODP_CIPHER_ALG_AES_CBC,
 
 	/** AES with counter mode */
 	ODP_CIPHER_ALG_AES_CTR,
+
+	/** AES with electronic codebook */
+	ODP_CIPHER_ALG_AES_ECB,
+
+	/** AES with 128-bit cipher feedback */
+	ODP_CIPHER_ALG_AES_CFB128,
+
+	/** AES with XEX-based tweaked-codebook mode with ciphertext stealing
+	 * (XTS) */
+	ODP_CIPHER_ALG_AES_XTS,
 
 	/** AES-GCM
 	 *
@@ -112,18 +125,42 @@ typedef enum {
 	/** Confidentiality F8 algorithm (UEA1)
 	 *
 	 *  KASUMI-based F8 algorithm (also known as UEA1).
+	 *
+	 *  IV should be formatted according to the 3GPP TS 35.201:
+	 *  COUNT || BEARER || DIRECTION || 0...0
 	 */
 	ODP_CIPHER_ALG_KASUMI_F8,
 
 	/** Confidentiality UEA2 algorithm (128-EEA1)
 	 *
 	 *  SNOW 3G-based UEA2 algorithm (also known as 128-EEA1).
+	 *
+	 *  IV (128 bit) should be formatted according to the ETSI/SAGE
+	 *  UEA2 & UIA2 specification:
+	 *  COUNT || BEARER || DIRECTION || 0...0 ||
+	 *  COUNT || BEARER || DIRECTION || 0...0 ||
 	 */
 	ODP_CIPHER_ALG_SNOW3G_UEA2,
+
+	/** Confidentiality 128-EEA2 algorithm
+	 *
+	 *  AES-CTR-based 128-EEA2 algorithm.
+	 *
+	 *  IV (128 bit) should be formatted according to the ETSI/SAGE
+	 *  128-EA2 & 128-EIA2 specification:
+	 *  COUNT || BEARER ||
+	 *  DIRECTION || 0....0
+	 */
+	ODP_CIPHER_ALG_AES_EEA2,
 
 	/** Confidentiality 128-EEA3 algorithm
 	 *
 	 *  ZUC-based 128-EEA3 algorithm.
+	 *
+	 *  IV (128 bit) should be formatted according to the ETSI/SAGE
+	 *  128-EEA3 & 128-EIA3 specification:
+	 *  COUNT || BEARER || DIRECTION || 0...0 ||
+	 *  COUNT || BEARER || DIRECTION || 0...0 ||
 	 */
 	ODP_CIPHER_ALG_ZUC_EEA3,
 
@@ -153,6 +190,12 @@ typedef enum {
 	 *  SHA-1 algorithm in HMAC mode
 	 */
 	ODP_AUTH_ALG_SHA1_HMAC,
+
+	/** HMAC-SHA-224
+	 *
+	 *  SHA-224 algorithm in HMAC mode
+	 */
+	ODP_AUTH_ALG_SHA224_HMAC,
 
 	/** HMAC-SHA-256
 	 *
@@ -237,20 +280,62 @@ typedef enum {
 	 *
 	 *  IV (9 bytes) is a concatenation of COUNT (32b), FRESH (32b) and
 	 *  DIRECTION (LSB-aligned, 1b).
+	 *  IV (8 bytes) is a concatenation of COUNT (32b) and FRESH (32b)
+	 *  DIRECTION (1b) and padding should come at the end of message.
 	 */
 	ODP_AUTH_ALG_KASUMI_F9,
 
-	/** Integrity UIA2 algorithm (128-EEA1)
+	/** Integrity UIA2 algorithm (128-EIA1)
 	 *
 	 *  SNOW 3G-based UIA2 algorithm (also known as 128-EIA1).
+	 *  IV (128 bit) should be formatted according to the ETSI/SAGE
+	 *  UEA2 & UIA2 specification:
+	 *  COUNT || FRESH ||
+	 *  DIRECTION XOR COUNT0 || COUNT1 .. COUNT31 ||
+	 *  FRESH0 .. FRESH15 || FRESH16 XOR DIRECTION || FRESH17 .. FRESH31
 	 */
 	ODP_AUTH_ALG_SNOW3G_UIA2,
+
+	/** Integrity 128-EIA2 algorithm
+	 *
+	 *  AES_CMAC-based 128-EIA2 algorithm.
+	 *
+	 *  IV (128 bit) should be formatted according to the ETSI/SAGE
+	 *  128-EA2 & 128-EIA2 specification:
+	 *  COUNT || BEARER ||
+	 *  DIRECTION || 0....0
+	 */
+	ODP_AUTH_ALG_AES_EIA2,
 
 	/** Integrity 128-EIA3 algorithm
 	 *
 	 *  ZUC-based 128-EIA3 algorithm.
+	 *
+	 *  IV (128 bit) should be formatted according to the ETSI/SAGE
+	 *  128-EA3 & 128-EIA2 specification:
+	 *  COUNT || BEARER ||
+	 *  DIRECTION XOR COUNT0 || COUNT1 .. COUNT31 ||
+	 *  BEARER || 0...0 || DIRECTION || 0...0
 	 */
 	ODP_AUTH_ALG_ZUC_EIA3,
+
+	/** MD5 algorithm */
+	ODP_AUTH_ALG_MD5,
+
+	/** SHA1 algorithm */
+	ODP_AUTH_ALG_SHA1,
+
+	/** 224 bit SHA2 algorithm */
+	ODP_AUTH_ALG_SHA224,
+
+	/** 256 bit SHA2 algorithm */
+	ODP_AUTH_ALG_SHA256,
+
+	/** 384 bit SHA2 algorithm */
+	ODP_AUTH_ALG_SHA384,
+
+	/** 512 bit SHA2 algorithm */
+	ODP_AUTH_ALG_SHA512,
 
 	/** @deprecated  Use ODP_AUTH_ALG_MD5_HMAC instead */
 	ODP_DEPRECATE(ODP_AUTH_ALG_MD5_96),
@@ -278,11 +363,23 @@ typedef union odp_crypto_cipher_algos_t {
 		/** ODP_CIPHER_ALG_3DES_CBC */
 		uint32_t trides_cbc  : 1;
 
+		/** ODP_CIPHER_ALG_3DES_ECB */
+		uint32_t trides_ecb : 1;
+
 		/** ODP_CIPHER_ALG_AES_CBC */
 		uint32_t aes_cbc     : 1;
 
 		/** ODP_CIPHER_ALG_AES_CTR */
 		uint32_t aes_ctr     : 1;
+
+		/** ODP_CIPHER_ALG_AES_ECB */
+		uint32_t aes_ecb     : 1;
+
+		/** ODP_CIPHER_ALG_AES_CFB128 */
+		uint32_t aes_cfb128  : 1;
+
+		/** ODP_CIPHER_ALG_AES_XTS */
+		uint32_t aes_xts     : 1;
 
 		/** ODP_CIPHER_ALG_AES_GCM */
 		uint32_t aes_gcm     : 1;
@@ -298,6 +395,9 @@ typedef union odp_crypto_cipher_algos_t {
 
 		/** ODP_CIPHER_ALG_SNOW3G_UEA2 */
 		uint32_t snow3g_uea2 : 1;
+
+		/** ODP_CIPHER_ALG_AES_EEA2 */
+		uint32_t aes_eea2 : 1;
 
 		/** ODP_CIPHER_ALG_ZUC_EEA3 */
 		uint32_t zuc_eea3    : 1;
@@ -332,6 +432,9 @@ typedef union odp_crypto_auth_algos_t {
 		/** ODP_AUTH_ALG_SHA1_HMAC */
 		uint32_t sha1_hmac : 1;
 
+		/** ODP_AUTH_ALG_SHA224_HMAC */
+		uint32_t sha224_hmac : 1;
+
 		/** ODP_AUTH_ALG_SHA256_HMAC */
 		uint32_t sha256_hmac : 1;
 
@@ -365,8 +468,29 @@ typedef union odp_crypto_auth_algos_t {
 		/** ODP_AUTH_ALG_SNOW3G_UIA2 */
 		uint32_t snow3g_uia2 : 1;
 
+		/** ODP_AUTH_ALG_AES_EIA2 */
+		uint32_t aes_eia2 : 1;
+
 		/** ODP_AUTH_ALG_ZUC_EIA3 */
 		uint32_t zuc_eia3    : 1;
+
+		/** ODP_AUTH_ALG_MD5 */
+		uint32_t md5 : 1;
+
+		/** ODP_AUTH_ALG_SHA1 */
+		uint32_t sha1 : 1;
+
+		/** ODP_AUTH_ALG_SHA224 */
+		uint32_t sha224 : 1;
+
+		/** ODP_AUTH_ALG_SHA256 */
+		uint32_t sha256 : 1;
+
+		/** ODP_AUTH_ALG_SHA384 */
+		uint32_t sha384 : 1;
+
+		/** ODP_AUTH_ALG_SHA512 */
+		uint32_t sha512 : 1;
 
 		/** @deprecated  Use md5_hmac instead */
 		uint32_t ODP_DEPRECATE(md5_96)     : 1;
