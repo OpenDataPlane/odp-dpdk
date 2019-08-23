@@ -182,33 +182,12 @@ int odp_pool_capability(odp_pool_capability_t *capa)
 }
 
 struct mbuf_ctor_arg {
+	pool_t	*pool;
 	uint16_t seg_buf_offset; /* To skip the ODP buf/pkt/tmo header */
 	uint16_t seg_buf_size;   /* size of user data */
 	int type;
 	int pkt_uarea_size;      /* size of user area in bytes */
 };
-
-struct mbuf_pool_ctor_arg {
-	/* This has to be the first member */
-	struct rte_pktmbuf_pool_private pkt;
-	pool_t	*pool;
-};
-
-static void
-odp_dpdk_mbuf_pool_ctor(struct rte_mempool *mp,
-			void *opaque_arg)
-{
-	struct mbuf_pool_ctor_arg *mbp_priv;
-
-	if (mp->private_data_size < sizeof(struct mbuf_pool_ctor_arg)) {
-		ODP_ERR("(%s) private_data_size %d < %d",
-			mp->name, (int)mp->private_data_size,
-			(int)sizeof(struct mbuf_pool_ctor_arg));
-		return;
-	}
-	mbp_priv = rte_mempool_get_priv(mp);
-	*mbp_priv = *((struct mbuf_pool_ctor_arg *)opaque_arg);
-}
 
 /* ODP DPDK mbuf constructor.
  * This is a combination of rte_pktmbuf_init in rte_mbuf.c
@@ -223,8 +202,6 @@ odp_dpdk_mbuf_ctor(struct rte_mempool *mp,
 	struct mbuf_ctor_arg *mb_ctor_arg;
 	struct rte_mbuf *mb = raw_mbuf;
 	struct odp_buffer_hdr_t *buf_hdr;
-	struct mbuf_pool_ctor_arg *mbp_ctor_arg = rte_mempool_get_priv(mp);
-	pool_t *pool = mbp_ctor_arg->pool;
 
 	/* The rte_mbuf is at the begninning in all cases */
 	mb_ctor_arg = (struct mbuf_ctor_arg *)opaque_arg;
@@ -266,7 +243,7 @@ odp_dpdk_mbuf_ctor(struct rte_mempool *mp,
 	/* Save index, might be useful for debugging purposes */
 	buf_hdr = (struct odp_buffer_hdr_t *)raw_mbuf;
 	buf_hdr->index = i;
-	buf_hdr->pool_ptr = pool;
+	buf_hdr->pool_ptr = mb_ctor_arg->pool;
 	buf_hdr->type = mb_ctor_arg->type;
 	buf_hdr->event_type = mb_ctor_arg->type;
 }
@@ -395,7 +372,7 @@ static unsigned int calc_cache_size(uint32_t num)
 
 odp_pool_t odp_pool_create(const char *name, odp_pool_param_t *params)
 {
-	struct mbuf_pool_ctor_arg mbp_ctor_arg;
+	struct rte_pktmbuf_pool_private mbp_ctor_arg;
 	struct mbuf_ctor_arg mb_ctor_arg;
 	odp_pool_t pool_hdl = ODP_POOL_INVALID;
 	unsigned mb_size, i, cache_size;
@@ -404,7 +381,7 @@ odp_pool_t odp_pool_create(const char *name, odp_pool_param_t *params)
 	uint32_t buf_align, blk_size, headroom, tailroom, min_seg_len;
 	uint32_t max_len, min_align;
 	char pool_name[ODP_POOL_NAME_LEN];
-	char *rte_name = NULL;
+	char rte_name[RTE_MEMPOOL_NAMESIZE];
 
 	if (check_params(params))
 		return ODP_POOL_INVALID;
@@ -454,7 +431,7 @@ odp_pool_t odp_pool_create(const char *name, odp_pool_param_t *params)
 
 			hdr_size = sizeof(odp_buffer_hdr_t);
 			CHECK_U16_OVERFLOW(blk_size);
-			mbp_ctor_arg.pkt.mbuf_data_room_size = blk_size;
+			mbp_ctor_arg.mbuf_data_room_size = blk_size;
 			num = params->buf.num;
 			ODP_DBG("type: buffer name: %s num: "
 				"%u size: %u align: %u\n", pool_name, num,
@@ -494,7 +471,7 @@ odp_pool_t odp_pool_create(const char *name, odp_pool_param_t *params)
 				   params->pkt.uarea_size;
 			mb_ctor_arg.pkt_uarea_size = params->pkt.uarea_size;
 			CHECK_U16_OVERFLOW(blk_size);
-			mbp_ctor_arg.pkt.mbuf_data_room_size = blk_size;
+			mbp_ctor_arg.mbuf_data_room_size = blk_size;
 			num = params->pkt.num;
 
 			ODP_DBG("type: packet, name: %s, "
@@ -505,7 +482,7 @@ odp_pool_t odp_pool_create(const char *name, odp_pool_param_t *params)
 			break;
 		case ODP_POOL_TIMEOUT:
 			hdr_size = sizeof(odp_timeout_hdr_t);
-			mbp_ctor_arg.pkt.mbuf_data_room_size = 0;
+			mbp_ctor_arg.mbuf_data_room_size = 0;
 			num = params->tmo.num;
 			ODP_DBG("type: tmo name: %s num: %u\n",
 				pool_name, num);
@@ -519,11 +496,11 @@ odp_pool_t odp_pool_create(const char *name, odp_pool_param_t *params)
 
 		mb_ctor_arg.seg_buf_offset =
 			(uint16_t)ROUNDUP_CACHE_LINE(hdr_size);
-		mb_ctor_arg.seg_buf_size = mbp_ctor_arg.pkt.mbuf_data_room_size;
+		mb_ctor_arg.seg_buf_size = mbp_ctor_arg.mbuf_data_room_size;
 		mb_ctor_arg.type = params->type;
 		mb_size = mb_ctor_arg.seg_buf_offset + mb_ctor_arg.seg_buf_size;
-		mbp_ctor_arg.pool = pool;
-		mbp_ctor_arg.pkt.mbuf_priv_size = mb_ctor_arg.seg_buf_offset -
+		mb_ctor_arg.pool = pool;
+		mbp_ctor_arg.mbuf_priv_size = mb_ctor_arg.seg_buf_offset -
 			sizeof(struct rte_mbuf);
 
 		ODP_DBG("Metadata size: %u, mb_size %d\n",
@@ -531,34 +508,40 @@ odp_pool_t odp_pool_create(const char *name, odp_pool_param_t *params)
 
 		cache_size = calc_cache_size(num);
 
-		if (strlen(pool_name) > RTE_MEMPOOL_NAMESIZE - 1) {
+		if (strlen(pool_name) > RTE_MEMPOOL_NAMESIZE - 1)
 			ODP_ERR("Max pool name size: %u. Trimming %u long, name collision might happen!\n",
 				RTE_MEMPOOL_NAMESIZE - 1, strlen(pool_name));
-			rte_name = malloc(RTE_MEMPOOL_NAMESIZE);
-			snprintf(rte_name, RTE_MEMPOOL_NAMESIZE - 1, "%s",
-				 pool_name);
-		}
 
-		pool->rte_mempool =
-			rte_mempool_create(rte_name ? rte_name : pool_name,
-					   num,
-					   mb_size,
-					   cache_size,
-					   sizeof(struct mbuf_pool_ctor_arg),
-					   odp_dpdk_mbuf_pool_ctor,
-					   &mbp_ctor_arg,
-					   odp_dpdk_mbuf_ctor,
-					   &mb_ctor_arg,
-					   rte_socket_id(),
-					   0);
-		free(rte_name);
-		if (pool->rte_mempool == NULL) {
+		snprintf(rte_name, RTE_MEMPOOL_NAMESIZE, "%s", pool_name);
+
+		if (params->type == ODP_POOL_PACKET) {
+			uint16_t data_room_size, priv_size;
+
+			data_room_size  = mbp_ctor_arg.mbuf_data_room_size;
+			priv_size = mbp_ctor_arg.mbuf_priv_size;
+			mp = rte_pktmbuf_pool_create(rte_name, num, cache_size,
+						     priv_size, data_room_size,
+						     rte_socket_id());
+		} else {
+			unsigned int priv_size;
+
+			priv_size = sizeof(struct rte_pktmbuf_pool_private);
+			mp = rte_mempool_create(rte_name, num, mb_size,
+						cache_size, priv_size,
+						rte_pktmbuf_pool_init,
+						&mbp_ctor_arg, NULL, NULL,
+						rte_socket_id(), 0);
+		}
+		if (mp == NULL) {
 			ODP_ERR("Cannot init DPDK mbuf pool: %s\n",
 				rte_strerror(rte_errno));
 			UNLOCK(&pool->lock);
 			return ODP_POOL_INVALID;
 		}
-		/* found free pool */
+
+		/* Initialize pool objects */
+		rte_mempool_obj_iter(mp, odp_dpdk_mbuf_ctor, &mb_ctor_arg);
+
 		if (name == NULL) {
 			pool->name[0] = 0;
 		} else {
@@ -567,8 +550,8 @@ odp_pool_t odp_pool_create(const char *name, odp_pool_param_t *params)
 			pool->name[ODP_POOL_NAME_LEN - 1] = 0;
 		}
 
+		pool->rte_mempool = mp;
 		pool->params = *params;
-		mp = pool->rte_mempool;
 		ODP_DBG("Header/element/trailer size: %u/%u/%u, "
 			"total pool size: %lu\n",
 			mp->header_size, mp->elt_size, mp->trailer_size,
