@@ -182,6 +182,9 @@ static int cipher_alg_odp_to_rte(odp_cipher_alg_t cipher_alg,
 	case ODP_CIPHER_ALG_3DES_CBC:
 		cipher_xform->cipher.algo = RTE_CRYPTO_CIPHER_3DES_CBC;
 		break;
+	case ODP_CIPHER_ALG_3DES_ECB:
+		cipher_xform->cipher.algo = RTE_CRYPTO_CIPHER_3DES_ECB;
+		break;
 	case ODP_CIPHER_ALG_AES_CBC:
 #if ODP_DEPRECATED_API
 	case ODP_CIPHER_ALG_AES128_CBC:
@@ -190,6 +193,12 @@ static int cipher_alg_odp_to_rte(odp_cipher_alg_t cipher_alg,
 		break;
 	case ODP_CIPHER_ALG_AES_CTR:
 		cipher_xform->cipher.algo = RTE_CRYPTO_CIPHER_AES_CTR;
+		break;
+	case ODP_CIPHER_ALG_AES_ECB:
+		cipher_xform->cipher.algo = RTE_CRYPTO_CIPHER_AES_ECB;
+		break;
+	case ODP_CIPHER_ALG_AES_XTS:
+		cipher_xform->cipher.algo = RTE_CRYPTO_CIPHER_AES_XTS;
 		break;
 	default:
 		rc = -1;
@@ -222,6 +231,9 @@ static int auth_alg_odp_to_rte(odp_auth_alg_t auth_alg,
 		break;
 	case ODP_AUTH_ALG_SHA1_HMAC:
 		auth_xform->auth.algo = RTE_CRYPTO_AUTH_SHA1_HMAC;
+		break;
+	case ODP_AUTH_ALG_SHA224_HMAC:
+		auth_xform->auth.algo = RTE_CRYPTO_AUTH_SHA224_HMAC;
 		break;
 	case ODP_AUTH_ALG_SHA384_HMAC:
 		auth_xform->auth.algo = RTE_CRYPTO_AUTH_SHA384_HMAC;
@@ -481,6 +493,11 @@ static void capability_process(struct rte_cryptodev_info *dev_info,
 				ciphers->bit.trides_cbc = 1;
 				ciphers->bit.des = 1;
 			}
+			cap_cipher_algo = cap->sym.cipher.algo;
+			if (cap_cipher_algo == RTE_CRYPTO_CIPHER_3DES_ECB) {
+				ciphers->bit.trides_ecb = 1;
+				ciphers->bit.des = 1;
+			}
 			if (cap_cipher_algo == RTE_CRYPTO_CIPHER_AES_CBC) {
 				ciphers->bit.aes_cbc = 1;
 #if ODP_DEPRECATED_API
@@ -489,6 +506,10 @@ static void capability_process(struct rte_cryptodev_info *dev_info,
 			}
 			if (cap_cipher_algo == RTE_CRYPTO_CIPHER_AES_CTR)
 				ciphers->bit.aes_ctr = 1;
+			if (cap_cipher_algo == RTE_CRYPTO_CIPHER_AES_ECB)
+				ciphers->bit.aes_ecb = 1;
+			if (cap_cipher_algo == RTE_CRYPTO_CIPHER_AES_XTS)
+				ciphers->bit.aes_xts = 1;
 		}
 
 		if (cap->sym.xform_type == RTE_CRYPTO_SYM_XFORM_AUTH) {
@@ -509,6 +530,8 @@ static void capability_process(struct rte_cryptodev_info *dev_info,
 			}
 			if (cap_auth_algo == RTE_CRYPTO_AUTH_SHA1_HMAC)
 				auths->bit.sha1_hmac = 1;
+			if (cap_auth_algo == RTE_CRYPTO_AUTH_SHA224_HMAC)
+				auths->bit.sha224_hmac = 1;
 			if (cap_auth_algo == RTE_CRYPTO_AUTH_SHA384_HMAC)
 				auths->bit.sha384_hmac = 1;
 			if (cap_auth_algo == RTE_CRYPTO_AUTH_SHA512_HMAC)
@@ -950,6 +973,9 @@ static int auth_capability(odp_auth_alg_t auth,
 		break;
 	case ODP_AUTH_ALG_SHA1_HMAC:
 		key_size_override = 20;
+		break;
+	case ODP_AUTH_ALG_SHA224_HMAC:
+		key_size_override = 28;
 		break;
 	case ODP_AUTH_ALG_SHA256_HMAC:
 		key_size_override = 32;

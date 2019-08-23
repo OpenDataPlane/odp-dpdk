@@ -1,4 +1,5 @@
 /* Copyright (c) 2014-2018, Linaro Limited
+ * Copyright (c) 2019, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -16,7 +17,6 @@
 #include <unistd.h>
 #include <errno.h>
 #include <inttypes.h>
-#include <assert.h>
 #include <signal.h>
 
 #include <test_debug.h>
@@ -92,6 +92,7 @@ typedef struct {
 	int chksum;             /* Checksum offload */
 	int sched_mode;         /* Scheduler mode */
 	int num_groups;         /* Number of scheduling groups */
+	int burst_rx;           /* Receive burst size */
 	int verbose;		/* Verbose output */
 } appl_args_t;
 
@@ -136,8 +137,10 @@ typedef struct thread_args_t {
  * Grouping of all global data
  */
 typedef struct {
+	/* Thread table */
+	odph_thread_t thread_tbl[MAX_WORKERS];
 	/* Thread specific arguments */
-	thread_args_t thread[MAX_WORKERS];
+	thread_args_t thread_args[MAX_WORKERS];
 	/* Barriers to synchronize main and workers */
 	odp_barrier_t init_barrier;
 	odp_barrier_t term_barrier;
@@ -178,6 +181,8 @@ static args_t *gbl_args;
 
 static void sig_handler(int signo ODP_UNUSED)
 {
+	if (gbl_args == NULL)
+		return;
 	gbl_args->exit_threads = 1;
 }
 
@@ -291,6 +296,7 @@ static int run_worker_sched_mode(void *arg)
 	int dst_idx;
 	int i;
 	int pktio, num_pktio;
+	uint16_t max_burst;
 	odp_pktout_queue_t pktout[MAX_PKTIOS];
 	odp_queue_t tx_queue[MAX_PKTIOS];
 	thread_args_t *thr_args = arg;
@@ -299,6 +305,7 @@ static int run_worker_sched_mode(void *arg)
 	pktin_mode_t in_mode = gbl_args->appl.in_mode;
 
 	thr = odp_thread_id();
+	max_burst = gbl_args->appl.burst_rx;
 
 	if (gbl_args->appl.num_groups) {
 		odp_thrmask_t mask;
@@ -343,8 +350,7 @@ static int run_worker_sched_mode(void *arg)
 		unsigned tx_drops;
 		int src_idx;
 
-		pkts = odp_schedule_multi(NULL, ODP_SCHED_NO_WAIT, ev_tbl,
-					  MAX_PKT_BURST);
+		pkts = odp_schedule_multi_no_wait(NULL, ev_tbl, max_burst);
 
 		if (pkts <= 0)
 			continue;
@@ -373,7 +379,7 @@ static int run_worker_sched_mode(void *arg)
 
 		/* packets from the same queue are from the same interface */
 		src_idx = odp_packet_input_index(pkt_tbl[0]);
-		assert(src_idx >= 0);
+		ODPH_ASSERT(src_idx >= 0);
 		dst_idx = gbl_args->dst_port_from_idx[src_idx];
 		fill_eth_addrs(pkt_tbl, pkts, dst_idx);
 
@@ -428,6 +434,7 @@ static int run_worker_plain_queue_mode(void *arg)
 {
 	int thr;
 	int pkts;
+	uint16_t max_burst;
 	odp_packet_t pkt_tbl[MAX_PKT_BURST];
 	int dst_idx, num_pktio;
 	odp_queue_t queue;
@@ -440,6 +447,7 @@ static int run_worker_plain_queue_mode(void *arg)
 	int i;
 
 	thr = odp_thread_id();
+	max_burst = gbl_args->appl.burst_rx;
 
 	num_pktio = thr_args->num_pktio;
 	dst_idx   = thr_args->pktio[pktio].tx_idx;
@@ -470,7 +478,7 @@ static int run_worker_plain_queue_mode(void *arg)
 				pktio = 0;
 		}
 
-		pkts = odp_queue_deq_multi(queue, event, MAX_PKT_BURST);
+		pkts = odp_queue_deq_multi(queue, event, max_burst);
 		if (odp_unlikely(pkts <= 0))
 			continue;
 
@@ -555,6 +563,7 @@ static int run_worker_direct_mode(void *arg)
 {
 	int thr;
 	int pkts;
+	uint16_t max_burst;
 	odp_packet_t pkt_tbl[MAX_PKT_BURST];
 	int dst_idx, num_pktio;
 	odp_pktin_queue_t pktin;
@@ -566,6 +575,7 @@ static int run_worker_direct_mode(void *arg)
 	int use_event_queue = gbl_args->appl.out_mode;
 
 	thr = odp_thread_id();
+	max_burst = gbl_args->appl.burst_rx;
 
 	num_pktio = thr_args->num_pktio;
 	dst_idx   = thr_args->pktio[pktio].tx_idx;
@@ -595,7 +605,7 @@ static int run_worker_direct_mode(void *arg)
 				pktio = 0;
 		}
 
-		pkts = odp_pktin_recv(pktin, pkt_tbl, MAX_PKT_BURST);
+		pkts = odp_pktin_recv(pktin, pkt_tbl, max_burst);
 		if (odp_unlikely(pkts <= 0))
 			continue;
 
@@ -952,7 +962,7 @@ static void bind_workers(void)
 		}
 
 		for (thr = 0; thr < num_workers; thr++) {
-			thr_args = &gbl_args->thread[thr];
+			thr_args = &gbl_args->thread_args[thr];
 			thr_args->num_pktio = if_count;
 
 			/* In sched mode, pktios are not cross connected with
@@ -973,7 +983,7 @@ static void bind_workers(void)
 			thr = 0;
 
 			for (rx_idx = 0; rx_idx < if_count; rx_idx++) {
-				thr_args = &gbl_args->thread[thr];
+				thr_args = &gbl_args->thread_args[thr];
 				pktio    = thr_args->num_pktio;
 				/* Cross connect rx to tx */
 				tx_idx   = gbl_args->dst_port[rx_idx];
@@ -994,7 +1004,7 @@ static void bind_workers(void)
 			rx_idx = 0;
 
 			for (thr = 0; thr < num_workers; thr++) {
-				thr_args = &gbl_args->thread[thr];
+				thr_args = &gbl_args->thread_args[thr];
 				pktio    = thr_args->num_pktio;
 				/* Cross connect rx to tx */
 				tx_idx   = gbl_args->dst_port[rx_idx];
@@ -1027,7 +1037,7 @@ static void bind_queues(void)
 
 	for (thr = 0; thr < num_workers; thr++) {
 		int rx_idx, tx_idx;
-		thread_args_t *thr_args = &gbl_args->thread[thr];
+		thread_args_t *thr_args = &gbl_args->thread_args[thr];
 		int num = thr_args->num_pktio;
 
 		printf("worker %i\n", thr);
@@ -1143,6 +1153,8 @@ static void usage(char *progname)
 	       "  -g, --groups <num>      Number of groups to use: 0 ... num\n"
 	       "                          0: SCHED_GROUP_ALL (default)\n"
 	       "                          num: must not exceed number of interfaces or workers\n"
+	       "  -b, --burst_rx <num>    0:   Use max burst size (default)\n"
+	       "                          num: Max number of packets per receive call\n"
 	       "  -v, --verbose           Verbose output.\n"
 	       "  -h, --help              Display help and exit.\n\n"
 	       "\n", NO_PATH(progname), NO_PATH(progname), MAX_PKTIOS
@@ -1177,12 +1189,13 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 		{"error_check", required_argument, NULL, 'e'},
 		{"chksum", required_argument, NULL, 'k'},
 		{"groups", required_argument, NULL, 'g'},
+		{"burst_rx", required_argument, NULL, 'b'},
 		{"verbose", no_argument, NULL, 'v'},
 		{"help", no_argument, NULL, 'h'},
 		{NULL, 0, NULL, 0}
 	};
 
-	static const char *shortopts =  "+c:+t:+a:i:m:o:r:d:s:e:k:g:vh";
+	static const char *shortopts = "+c:t:a:i:m:o:r:d:s:e:k:g:b:vh";
 
 	appl_args->time = 0; /* loop forever if time to run is 0 */
 	appl_args->accuracy = 1; /* get and print pps stats second */
@@ -1191,6 +1204,7 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 	appl_args->src_change = 1; /* change eth src address by default */
 	appl_args->num_groups = 0; /* use default group */
 	appl_args->error_check = 0; /* don't check packet errors by default */
+	appl_args->burst_rx = 0;
 	appl_args->verbose = 0;
 	appl_args->chksum = 0; /* don't use checksum offload by default */
 
@@ -1321,6 +1335,9 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 		case 'g':
 			appl_args->num_groups = atoi(optarg);
 			break;
+		case 'b':
+			appl_args->burst_rx = atoi(optarg);
+			break;
 		case 'v':
 			appl_args->verbose = 1;
 			break;
@@ -1344,6 +1361,15 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 		usage(argv[0]);
 		exit(EXIT_FAILURE);
 	}
+
+	if (appl_args->burst_rx > MAX_PKT_BURST) {
+		printf("Error: Burst size (%i) too large. Maximum is %i.\n",
+		       appl_args->burst_rx, MAX_PKT_BURST);
+		exit(EXIT_FAILURE);
+	}
+
+	if (appl_args->burst_rx == 0)
+		appl_args->burst_rx = MAX_PKT_BURST;
 
 	appl_args->extra_check = appl_args->error_check || appl_args->chksum;
 
@@ -1380,11 +1406,13 @@ static void print_info(char *progname, appl_args_t *appl_args)
 		printf("PKTIN_SCHED_ORDERED, ");
 
 	if (appl_args->out_mode)
-		printf("PKTOUT_QUEUE");
+		printf("PKTOUT_QUEUE\n");
 	else
-		printf("PKTOUT_DIRECT");
+		printf("PKTOUT_DIRECT\n");
 
-	printf("\n\n");
+	printf("Burst size:      %i\n", appl_args->burst_rx);
+
+	printf("\n");
 	fflush(NULL);
 }
 
@@ -1426,7 +1454,6 @@ static void create_groups(int num, odp_schedule_group_t *group)
 int main(int argc, char *argv[])
 {
 	odph_helper_options_t helper_options;
-	odph_thread_t thread_tbl[MAX_WORKERS];
 	odph_thread_param_t thr_param[MAX_WORKERS];
 	odph_thread_common_param_t thr_common;
 	odp_pool_t pool;
@@ -1519,7 +1546,7 @@ int main(int argc, char *argv[])
 	gbl_args->appl.num_workers = num_workers;
 
 	for (i = 0; i < num_workers; i++)
-		gbl_args->thread[i].thr_idx    = i;
+		gbl_args->thread_args[i].thr_idx = i;
 
 	if_count = gbl_args->appl.if_count;
 
@@ -1649,7 +1676,6 @@ int main(int argc, char *argv[])
 		thr_run_func = run_worker_sched_mode;
 
 	/* Create worker threads */
-	memset(thread_tbl, 0, sizeof(thread_tbl));
 	memset(thr_param, 0, sizeof(thr_param));
 	memset(&thr_common, 0, sizeof(thr_common));
 
@@ -1661,18 +1687,18 @@ int main(int argc, char *argv[])
 
 	for (i = 0; i < num_workers; ++i) {
 		thr_param[i].start    = thr_run_func;
-		thr_param[i].arg      = &gbl_args->thread[i];
+		thr_param[i].arg      = &gbl_args->thread_args[i];
 		thr_param[i].thr_type = ODP_THREAD_WORKER;
 
 		/* Round robin threads to groups */
-		gbl_args->thread[i].num_groups = 1;
-		gbl_args->thread[i].group[0] = group[i % num_groups];
+		gbl_args->thread_args[i].num_groups = 1;
+		gbl_args->thread_args[i].group[0] = group[i % num_groups];
 
-		stats[i] = &gbl_args->thread[i].stats;
+		stats[i] = &gbl_args->thread_args[i].stats;
 	}
 
-	num_thr = odph_thread_create(thread_tbl, &thr_common, thr_param,
-				     num_workers);
+	num_thr = odph_thread_create(gbl_args->thread_tbl, &thr_common,
+				     thr_param, num_workers);
 
 	if (num_thr != num_workers) {
 		LOG_ERR("Error: worker create failed %i\n", num_thr);
@@ -1708,7 +1734,7 @@ int main(int argc, char *argv[])
 		odp_barrier_wait(&gbl_args->term_barrier);
 
 	/* Master thread waits for other threads to exit */
-	num_thr = odph_thread_join(thread_tbl, num_workers);
+	num_thr = odph_thread_join(gbl_args->thread_tbl, num_workers);
 	if (num_thr != num_workers) {
 		LOG_ERR("Error: worker join failed %i\n", num_thr);
 			exit(EXIT_FAILURE);
@@ -1724,6 +1750,8 @@ int main(int argc, char *argv[])
 
 	free(gbl_args->appl.if_names);
 	free(gbl_args->appl.if_str);
+	gbl_args = NULL;
+	odp_mb_full();
 
 	if (odp_pool_destroy(pool)) {
 		LOG_ERR("Error: pool destroy\n");

@@ -177,6 +177,8 @@ static const uint8_t test_udp_packet[] = {
 
 static void sig_handler(int signo ODP_UNUSED)
 {
+	if (gbl_args == NULL)
+		return;
 	gbl_args->exit_threads = 1;
 }
 
@@ -380,7 +382,7 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 		{NULL, 0, NULL, 0}
 	};
 
-	static const char *shortopts = "+a:+c:+l:+t:h";
+	static const char *shortopts = "+a:c:l:t:h";
 
 	appl_args->accuracy = 1; /* Get and print pps stats second */
 	appl_args->cpu_count = 1;
@@ -799,6 +801,9 @@ int main(int argc, char *argv[])
 			}
 		}
 	}
+	gbl_args = NULL;
+	odp_mb_full();
+
 	if (odp_pool_destroy(pool)) {
 		LOG_ERR("Error: pool destroy\n");
 		exit(EXIT_FAILURE);

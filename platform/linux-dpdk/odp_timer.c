@@ -44,6 +44,9 @@
 ODP_STATIC_ASSERT(MAX_TIMERS < MAX_TIMER_RING_SIZE,
 		  "MAX_TIMER_RING_SIZE too small");
 
+/* Max timeout in capability. One year in nsec (0x0070 09D3 2DA3 0000). */
+#define MAX_TMO_NS       (365 * 24 * 3600 * ODP_TIME_SEC_IN_NS)
+
 /* Actual resolution depends on application polling frequency. Promise
  * 10 usec resolution. */
 #define MAX_RES_NS       10000
@@ -127,8 +130,10 @@ int odp_timer_init_global(const odp_init_t *params)
 	 * created. */
 	odp_global_rw->inline_timers = false;
 
-	if (params && params->not_used.feat.timer)
+	if (params && params->not_used.feat.timer) {
+		timer_global = NULL;
 		return 0;
+	}
 
 	shm = odp_shm_reserve("timer_global", sizeof(timer_global_t),
 			      ODP_CACHE_LINE_SIZE, 0);
@@ -160,10 +165,11 @@ int odp_timer_init_global(const odp_init_t *params)
 
 int odp_timer_term_global(void)
 {
-	if (timer_global == NULL)
-		return 0;
+	if (timer_global && odp_shm_free(timer_global->shm)) {
+		ODP_ERR("Shm free failed for odp_timer\n");
+		return -1;
+	}
 
-	odp_shm_free(timer_global->shm);
 	return 0;
 }
 
@@ -185,9 +191,23 @@ unsigned int _timer_run(int dec)
 	return 0;
 }
 
+static inline uint64_t tmo_ticks_to_ns_round_up(uint64_t tmo_ticks)
+{
+	uint64_t tmo_ns = odp_timer_tick_to_ns(NULL, tmo_ticks);
+
+	/* Make sure the ns value will not be rounded down when converted back
+	 * to ticks. */
+	while (odp_timer_ns_to_tick(NULL, tmo_ns) < tmo_ticks)
+		tmo_ns++;
+
+	return tmo_ns;
+}
+
 int odp_timer_capability(odp_timer_clk_src_t clk_src,
 			 odp_timer_capability_t *capa)
 {
+	uint64_t min_tmo = tmo_ticks_to_ns_round_up(MIN_TMO_CYCLES);
+
 	if (clk_src != ODP_CLOCK_CPU) {
 		ODP_ERR("Clock source not supported\n");
 		return -1;
@@ -195,10 +215,42 @@ int odp_timer_capability(odp_timer_clk_src_t clk_src,
 
 	memset(capa, 0, sizeof(odp_timer_capability_t));
 
-	capa->highest_res_ns = MAX_RES_NS;
 	capa->max_pools_combined = MAX_TIMER_POOLS;
 	capa->max_pools = MAX_TIMER_POOLS;
 	capa->max_timers = MAX_TIMERS;
+	capa->highest_res_ns = MAX_RES_NS;
+	capa->max_res.res_ns  = MAX_RES_NS;
+	capa->max_res.min_tmo = min_tmo;
+	capa->max_res.max_tmo = MAX_TMO_NS;
+	capa->max_tmo.res_ns  = MAX_RES_NS;
+	capa->max_tmo.min_tmo = min_tmo;
+	capa->max_tmo.max_tmo = MAX_TMO_NS;
+
+	return 0;
+}
+
+int odp_timer_res_capability(odp_timer_clk_src_t clk_src,
+			     odp_timer_res_capability_t *res_capa)
+{
+	uint64_t min_tmo = tmo_ticks_to_ns_round_up(MIN_TMO_CYCLES);
+
+	if (clk_src != ODP_CLOCK_CPU) {
+		ODP_ERR("Only CPU clock source supported\n");
+		return -1;
+	}
+
+	if (res_capa->min_tmo) {
+		ODP_ERR("Only res_ns or max_tmo based quaries supported\n");
+		return -1;
+	}
+
+	if (res_capa->res_ns) {
+		res_capa->min_tmo = min_tmo;
+		res_capa->max_tmo = MAX_TMO_NS;
+	} else { /* max_tmo */
+		res_capa->min_tmo = min_tmo;
+		res_capa->res_ns  = MAX_RES_NS;
+	}
 
 	return 0;
 }

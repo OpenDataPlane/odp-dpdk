@@ -24,7 +24,7 @@
 #include <odp_queue_basic_internal.h>
 
 #define NUM_THREAD        ODP_THREAD_COUNT_MAX
-#define NUM_QUEUE         ODP_CONFIG_QUEUES
+#define NUM_QUEUE         CONFIG_MAX_SCHED_QUEUES
 #define NUM_PKTIO         ODP_CONFIG_PKTIO_ENTRIES
 #define NUM_ORDERED_LOCKS 1
 #define NUM_STATIC_GROUP  3
@@ -260,7 +260,7 @@ static int term_local(void)
 
 static void schedule_config_init(odp_schedule_config_t *config)
 {
-	config->num_queues = ODP_CONFIG_QUEUES - NUM_INTERNAL_QUEUES;
+	config->num_queues = CONFIG_MAX_SCHED_QUEUES;
 	config->queue_size = queue_glb->config.max_queue_size;
 }
 
@@ -296,6 +296,12 @@ static void remove_group(sched_group_t *sched_group, int thr, int group)
 	thr_group_t *thr_group = &sched_group->s.thr[thr];
 
 	num = thr_group->num_group;
+
+	/* Extra array bounds check to suppress warning on GCC 7.4 with -O3 */
+	if (num >= NUM_GROUP) {
+		ODP_ERR("Too many groups");
+		return;
+	}
 
 	for (i = 0; i < num; i++) {
 		if (thr_group->group[i] == group) {
@@ -370,7 +376,7 @@ static int num_grps(void)
 	return NUM_GROUP - NUM_STATIC_GROUP;
 }
 
-static int init_queue(uint32_t qi, const odp_schedule_param_t *sched_param)
+static int create_queue(uint32_t qi, const odp_schedule_param_t *sched_param)
 {
 	sched_group_t *sched_group = &sched_global->sched_group;
 	odp_schedule_group_t group = sched_param->group;
@@ -951,7 +957,7 @@ static int schedule_capability(odp_schedule_capability_t *capa)
 	capa->max_ordered_locks = max_ordered_locks();
 	capa->max_groups = num_grps();
 	capa->max_prios = schedule_num_prio();
-	capa->max_queues = ODP_CONFIG_QUEUES - NUM_INTERNAL_QUEUES;
+	capa->max_queues = CONFIG_MAX_SCHED_QUEUES;
 	capa->max_queue_size = queue_glb->config.max_queue_size;
 
 	return 0;
@@ -963,7 +969,7 @@ const schedule_fn_t schedule_sp_fn = {
 	.thr_add       = thr_add,
 	.thr_rem       = thr_rem,
 	.num_grps      = num_grps,
-	.init_queue    = init_queue,
+	.create_queue  = create_queue,
 	.destroy_queue = destroy_queue,
 	.sched_queue   = sched_queue,
 	.ord_enq_multi = ord_enq_multi,

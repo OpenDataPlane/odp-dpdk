@@ -35,7 +35,7 @@ export ODP_PLATFORM_PARAMS="--no-pci \
 $STDBUF ${TEST_DIR}/odp_pktio_ordered${EXEEXT} \
 	-i 0,1 \
 	-t $DURATION | tee $LOG
-ret=$?
+ret=${PIPESTATUS[0]}
 
 if [ $ret -ne 0 ]; then
 	echo "FAIL: no odp_pktio_ordered${EXEEXT}"

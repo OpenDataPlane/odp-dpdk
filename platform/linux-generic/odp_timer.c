@@ -70,6 +70,9 @@
  * for checking the freshness of received timeouts */
 #define TMO_INACTIVE ((uint64_t)0x8000000000000000)
 
+/* Max timeout in capability. One year in nsec (0x0070 09D3 2DA3 0000). */
+#define MAX_TMO_NSEC (365 * 24 * 3600 * ODP_TIME_SEC_IN_NS)
+
 /******************************************************************************
  * Mutual exclusion in the absence of CAS16
  *****************************************************************************/
@@ -192,9 +195,11 @@ typedef struct timer_pool_s {
 	odp_shm_t shm;
 	timer_t timerid;
 	int notify_overrun;
-	pthread_t timer_thread; /* pthread_t of timer thread */
-	pid_t timer_thread_id; /* gettid() for timer thread */
-	int timer_thread_exit; /* request to exit for timer thread */
+	pthread_t thr_pthread; /* pthread_t of timer thread */
+	pid_t thr_pid; /* gettid() for timer thread */
+	int thr_warm_up; /* number of warm up rounds */
+	odp_atomic_u32_t thr_ready; /* thread ready from warm up */
+	int thr_exit; /* request to exit for timer thread */
 } timer_pool_t;
 
 /* Timer pool index must fit into 8 bits with one index value reserved to
@@ -378,8 +383,8 @@ static void stop_timer_thread(timer_pool_t *tp)
 	int ret;
 
 	ODP_DBG("stop\n");
-	tp->timer_thread_exit = 1;
-	ret = pthread_join(tp->timer_thread, NULL);
+	tp->thr_exit = 1;
+	ret = pthread_join(tp->thr_pthread, NULL);
 	if (ret != 0)
 		ODP_ABORT("unable to join thread, err %d\n", ret);
 }
@@ -951,26 +956,41 @@ static void *timer_thread(void *arg)
 	int ret;
 	struct timespec tmo;
 	siginfo_t si;
+	int warm_up = tp->thr_warm_up;
+	int num = 0;
 
-	tp->timer_thread_id = (pid_t)syscall(SYS_gettid);
-
-	tmo.tv_sec = 0;
+	tmo.tv_sec  = 0;
 	tmo.tv_nsec = ODP_TIME_MSEC_IN_NS * 100;
 
+	/* Unblock sigalarm in this thread */
 	sigemptyset(&sigset);
-	/* unblock sigalarm in this thread */
 	sigprocmask(SIG_BLOCK, &sigset, NULL);
-
 	sigaddset(&sigset, SIGALRM);
+
+	/* Signal that this thread has started */
+	odp_mb_full();
+	tp->thr_pid = (pid_t)syscall(SYS_gettid);
+	odp_mb_full();
 
 	while (1) {
 		ret = sigtimedwait(&sigset, &si, &tmo);
-		if (tp->timer_thread_exit) {
-			tp->timer_thread_id = 0;
+
+		if (tp->thr_exit) {
+			tp->thr_pid = 0;
 			return NULL;
 		}
-		if (ret > 0)
-			timer_notify(tp);
+
+		if (ret <= 0)
+			continue;
+
+		timer_notify(tp);
+
+		if (num < warm_up) {
+			num++;
+
+			if (num == warm_up)
+				odp_atomic_store_rel_u32(&tp->thr_ready, 1);
+		}
 	}
 
 	return NULL;
@@ -1064,29 +1084,35 @@ static void itimer_init(timer_pool_t *tp)
 	ODP_DBG("Creating POSIX timer for timer pool %s, period %"
 		PRIu64" ns\n", tp->name, tp->param.res_ns);
 
-	tp->timer_thread_id = 0;
-	ret = pthread_create(&tp->timer_thread, NULL, timer_thread, tp);
+	res  = tp->param.res_ns;
+	sec  = res / ODP_TIME_SEC_IN_NS;
+	nsec = res - sec * ODP_TIME_SEC_IN_NS;
+
+	tp->thr_pid = 0;
+	tp->thr_warm_up = 1;
+
+	/* 20ms warm up */
+	if (res < (20 * ODP_TIME_MSEC_IN_NS))
+		tp->thr_warm_up = (20 * ODP_TIME_MSEC_IN_NS) / res;
+
+	odp_atomic_init_u32(&tp->thr_ready, 0);
+	ret = pthread_create(&tp->thr_pthread, NULL, timer_thread, tp);
 	if (ret)
 		ODP_ABORT("unable to create timer thread\n");
 
-	/* wait thread set tp->timer_thread_id */
-	do {
+	/* wait thread set tp->thr_pid */
+	while (tp->thr_pid == 0)
 		sched_yield();
-	} while (tp->timer_thread_id == 0);
 
 	memset(&sigev, 0, sizeof(sigev));
 	sigev.sigev_notify          = SIGEV_THREAD_ID;
 	sigev.sigev_value.sival_ptr = tp;
-	sigev._sigev_un._tid = tp->timer_thread_id;
+	sigev._sigev_un._tid = tp->thr_pid;
 	sigev.sigev_signo = SIGALRM;
 
 	if (timer_create(CLOCK_MONOTONIC, &sigev, &tp->timerid))
 		ODP_ABORT("timer_create() returned error %s\n",
 			  strerror(errno));
-
-	res  = tp->param.res_ns;
-	sec  = res / ODP_TIME_SEC_IN_NS;
-	nsec = res - sec * ODP_TIME_SEC_IN_NS;
 
 	memset(&ispec, 0, sizeof(ispec));
 	ispec.it_interval.tv_sec  = (time_t)sec;
@@ -1097,6 +1123,11 @@ static void itimer_init(timer_pool_t *tp)
 	if (timer_settime(tp->timerid, 0, &ispec, NULL))
 		ODP_ABORT("timer_settime() returned error %s\n",
 			  strerror(errno));
+
+	/* Wait response from timer thread that warm up signals have been
+	 * processed. Warm up helps avoiding overrun on the first timeout. */
+	while (odp_atomic_load_acq_u32(&tp->thr_ready) == 0)
+		sched_yield();
 }
 
 static void itimer_fini(timer_pool_t *tp)
@@ -1114,18 +1145,49 @@ static void itimer_fini(timer_pool_t *tp)
 int odp_timer_capability(odp_timer_clk_src_t clk_src,
 			 odp_timer_capability_t *capa)
 {
-	int ret = 0;
-
-	if (clk_src == ODP_CLOCK_CPU) {
-		capa->max_pools_combined = MAX_TIMER_POOLS;
-		capa->max_pools = MAX_TIMER_POOLS;
-		capa->max_timers = 0;
-		capa->highest_res_ns = timer_global->highest_res_ns;
-	} else {
-		ODP_ERR("ODP timer system doesn't support external clock source currently\n");
-		ret = -1;
+	if (clk_src != ODP_CLOCK_CPU) {
+		ODP_ERR("Only CPU clock source supported\n");
+		return -1;
 	}
-	return ret;
+
+	memset(capa, 0, sizeof(odp_timer_capability_t));
+
+	capa->max_pools_combined = MAX_TIMER_POOLS;
+	capa->max_pools = MAX_TIMER_POOLS;
+	capa->max_timers = 0;
+	capa->highest_res_ns  = timer_global->highest_res_ns;
+	capa->max_res.res_ns  = timer_global->highest_res_ns;
+	capa->max_res.min_tmo = 0;
+	capa->max_res.max_tmo = MAX_TMO_NSEC;
+	capa->max_tmo.res_ns  = timer_global->highest_res_ns;
+	capa->max_tmo.min_tmo = 0;
+	capa->max_tmo.max_tmo = MAX_TMO_NSEC;
+
+	return 0;
+}
+
+int odp_timer_res_capability(odp_timer_clk_src_t clk_src,
+			     odp_timer_res_capability_t *res_capa)
+{
+	if (clk_src != ODP_CLOCK_CPU) {
+		ODP_ERR("Only CPU clock source supported\n");
+		return -1;
+	}
+
+	if (res_capa->min_tmo) {
+		ODP_ERR("Only res_ns or max_tmo based quaries supported\n");
+		return -1;
+	}
+
+	if (res_capa->res_ns) {
+		res_capa->min_tmo = 0;
+		res_capa->max_tmo = MAX_TMO_NSEC;
+	} else { /* max_tmo */
+		res_capa->min_tmo = 0;
+		res_capa->res_ns  = timer_global->highest_res_ns;
+	}
+
+	return 0;
 }
 
 odp_timer_pool_t odp_timer_pool_create(const char *name,
@@ -1351,6 +1413,12 @@ int odp_timer_init_global(const odp_init_t *params)
 	const char *conf_str;
 	int val = 0;
 
+	if (params && params->not_used.feat.timer) {
+		ODP_DBG("Timers disabled\n");
+		timer_global = NULL;
+		return 0;
+	}
+
 	shm = odp_shm_reserve("_odp_timer", sizeof(timer_global_t),
 			      ODP_CACHE_LINE_SIZE, 0);
 
@@ -1390,9 +1458,6 @@ int odp_timer_init_global(const odp_init_t *params)
 	}
 	timer_global->inline_poll_interval = val;
 
-	if (params && params->not_used.feat.timer)
-		timer_global->use_inline_timers = false;
-
 	timer_global->time_per_ratelimit_period =
 		odp_time_global_from_ns(timer_global->min_res_ns / 2);
 
@@ -1406,7 +1471,7 @@ int odp_timer_init_global(const odp_init_t *params)
 
 int odp_timer_term_global(void)
 {
-	if (odp_shm_free(timer_global->shm)) {
+	if (timer_global && odp_shm_free(timer_global->shm)) {
 		ODP_ERR("Shm free failed for odp_timer\n");
 		return -1;
 	}
