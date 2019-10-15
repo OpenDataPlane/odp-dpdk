@@ -14,12 +14,11 @@
 
 #include <odp_api.h>
 
-#define START_OFFSET_NS ((uint64_t)(300 * ODP_TIME_MSEC_IN_NS))
-
 typedef struct test_global_t {
 	struct {
 		unsigned long long int period_ns;
 		unsigned long long int res_ns;
+		unsigned long long int offset_ns;
 		int num;
 		int init;
 	} opt;
@@ -39,8 +38,9 @@ static void print_usage(void)
 	       "Timer accuracy test application.\n"
 	       "\n"
 	       "OPTIONS:\n"
-	       "  -p, --period <nsec>     Timeout period. Default: 200 milliseconds\n"
-	       "  -r, --resolution <nsec> Timeout resolution. Default: period / 10\n"
+	       "  -p, --period <nsec>     Timeout period in nsec. Default: 200 msec\n"
+	       "  -r, --resolution <nsec> Timeout resolution in nsec. Default: period / 10\n"
+	       "  -f, --first <nsec>      First timer offset in nsec. Default: 300 msec\n"
 	       "  -n, --num <number>      Number of timeouts. Default: 50\n"
 	       "  -i, --init              Set global init parameters. Default: init params not set.\n"
 	       "  -h, --help              Display help and exit.\n\n");
@@ -52,16 +52,18 @@ static int parse_options(int argc, char *argv[], test_global_t *test_global)
 	const struct option longopts[] = {
 		{"period",     required_argument, NULL, 'p'},
 		{"resolution", required_argument, NULL, 'r'},
+		{"first",      required_argument, NULL, 'f'},
 		{"num",        required_argument, NULL, 'n'},
 		{"init",       no_argument,       NULL, 'i'},
 		{"help",       no_argument,       NULL, 'h'},
 		{NULL, 0, NULL, 0}
 	};
-	const char *shortopts =  "+p:r:n:ih";
+	const char *shortopts =  "+p:r:f:n:ih";
 	int ret = 0;
 
 	test_global->opt.period_ns = 200 * ODP_TIME_MSEC_IN_NS;
 	test_global->opt.res_ns    = 0;
+	test_global->opt.offset_ns = 300 * ODP_TIME_MSEC_IN_NS;
 	test_global->opt.num       = 50;
 	test_global->opt.init      = 0;
 
@@ -77,6 +79,9 @@ static int parse_options(int argc, char *argv[], test_global_t *test_global)
 			break;
 		case 'r':
 			test_global->opt.res_ns = strtoull(optarg, NULL, 0);
+			break;
+		case 'f':
+			test_global->opt.offset_ns = strtoull(optarg, NULL, 0);
 			break;
 		case 'n':
 			test_global->opt.num = atoi(optarg);
@@ -112,7 +117,7 @@ static int start_timers(test_global_t *test_global)
 	odp_queue_t queue;
 	odp_queue_param_t queue_param;
 	uint64_t tick, start_tick;
-	uint64_t period_ns, res_ns, start_ns, time_ns, res_capa;
+	uint64_t period_ns, res_ns, start_ns, nsec, res_capa, offset_ns;
 	odp_event_t event;
 	odp_timeout_t timeout;
 	odp_timer_set_t ret;
@@ -165,6 +170,7 @@ static int start_timers(test_global_t *test_global)
 
 	res_capa = timer_capa.highest_res_ns;
 
+	offset_ns = test_global->opt.offset_ns;
 	res_ns = test_global->opt.res_ns;
 
 	if (res_ns < res_capa) {
@@ -178,14 +184,14 @@ static int start_timers(test_global_t *test_global)
 	memset(&timer_param, 0, sizeof(odp_timer_pool_param_t));
 
 	timer_param.res_ns     = res_ns;
-	timer_param.min_tmo    = period_ns;
-	timer_param.max_tmo    = START_OFFSET_NS + (num * period_ns);
+	timer_param.min_tmo    = offset_ns / 2;
+	timer_param.max_tmo    = offset_ns + ((num + 1) * period_ns);
 	timer_param.num_timers = num;
 	timer_param.clk_src    = ODP_CLOCK_CPU;
 
 	printf("\nTest parameters:\n");
 	printf("  resolution capa: %" PRIu64 " nsec\n", res_capa);
-	printf("  start offset:    %" PRIu64 " nsec\n", START_OFFSET_NS);
+	printf("  start offset:    %" PRIu64 " nsec\n", offset_ns);
 	printf("  period:          %" PRIu64 " nsec\n", period_ns);
 	printf("  resolution:      %" PRIu64 " nsec\n", timer_param.res_ns);
 	printf("  min timeout:     %" PRIu64 " nsec\n", timer_param.min_tmo);
@@ -203,6 +209,9 @@ static int start_timers(test_global_t *test_global)
 
 	odp_timer_pool_start();
 
+	/* Spend some time so that current tick would not be zero */
+	odp_time_wait_ns(100 * ODP_TIME_MSEC_IN_NS);
+
 	test_global->timer_pool = timer_pool;
 
 	for (i = 0; i < num; i++) {
@@ -216,7 +225,21 @@ static int start_timers(test_global_t *test_global)
 		test_global->timer[i] = timer;
 	}
 
-	start_tick = 0;
+	/* Run scheduler few times to ensure that (software) timer is active */
+	for (i = 0; i < 1000; i++) {
+		event = odp_schedule(NULL, ODP_SCHED_NO_WAIT);
+
+		if (event != ODP_EVENT_INVALID) {
+			printf("Spurious event received\n");
+			odp_event_free(event);
+			return -1;
+		}
+	}
+
+	start_tick = odp_timer_current_tick(timer_pool);
+	time       = odp_time_local();
+	start_ns   = odp_time_to_ns(time);
+	test_global->first_ns = start_ns + offset_ns;
 
 	for (i = 0; i < num; i++) {
 		timer = test_global->timer[i];
@@ -229,15 +252,9 @@ static int start_timers(test_global_t *test_global)
 
 		event = odp_timeout_to_event(timeout);
 
-		if (i == 0) {
-			start_tick = odp_timer_current_tick(timer_pool);
-			time       = odp_time_local();
-			start_ns   = odp_time_to_ns(time);
-			test_global->first_ns = start_ns + START_OFFSET_NS;
-		}
+		nsec = offset_ns + (i * period_ns);
+		tick = start_tick + odp_timer_ns_to_tick(timer_pool, nsec);
 
-		time_ns = test_global->first_ns + (i * period_ns);
-		tick = start_tick + odp_timer_ns_to_tick(timer_pool, time_ns);
 		ret = odp_timer_set_abs(timer, tick, &event);
 
 		if (ret != ODP_TIMER_SUCCESS) {

@@ -5,8 +5,6 @@
  * SPDX-License-Identifier:     BSD-3-Clause
  */
 
-#include "config.h"
-
 #include <odp_api.h>
 #include "odp_cunit_common.h"
 #include <odp/helper/odph_api.h>
@@ -2136,6 +2134,9 @@ static int scheduler_suite_term(void)
 	shm = odp_shm_lookup(GLOBALS_SHM_NAME);
 	if (odp_shm_free(shm) != 0)
 		fprintf(stderr, "error: failed to free shm\n");
+
+	if (odp_cunit_print_inactive())
+		return -1;
 
 	return 0;
 }

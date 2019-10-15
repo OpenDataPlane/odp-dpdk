@@ -8,11 +8,10 @@ SUBDIRS = classifier \
 	  l2fwd_simple \
 	  l3fwd \
 	  packet \
+	  ping \
 	  simple_pipeline \
 	  switch \
 	  sysinfo \
 	  time \
 	  timer \
 	  traffic_mgmt
-
-noinst_HEADERS = example_debug.h

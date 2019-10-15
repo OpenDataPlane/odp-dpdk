@@ -22,7 +22,7 @@ AC_SUBST(ODP_VERSION_API_MINOR)
 ##########################################################################
 m4_define([odph_version_generation], [1])
 m4_define([odph_version_major], [0])
-m4_define([odph_version_minor], [2])
+m4_define([odph_version_minor], [3])
 
 m4_define([odph_version],
     [odph_version_generation.odph_version_major.odph_version_minor])
@@ -43,7 +43,7 @@ AS_IF([test "$ac_cv_env_CFLAGS_set" = ""], [user_cflags=0], [user_cflags=1])
 # Initialize automake
 AM_INIT_AUTOMAKE([1.9 tar-pax subdir-objects foreign nostdinc -Wall -Werror])
 AC_CONFIG_SRCDIR([include/odp/api/spec/init.h])
-AM_CONFIG_HEADER([include/config.h])
+AM_CONFIG_HEADER([include/odp/autoheader_build.h include/odp/autoheader_external.h include/odp/autoheader_internal.h])
 
 AC_USE_SYSTEM_EXTENSIONS
 AC_SYS_LARGEFILE
@@ -112,6 +112,7 @@ AC_TYPE_UINT64_T
 ODP_CFLAGS="$ODP_CFLAGS -W -Wall -Werror"
 ODP_CXXFLAGS="$ODP_CXXFLAGS -W -Wall -Werror"
 
+# Additional warnings:
 ODP_CHECK_CFLAG([-Wstrict-prototypes])
 ODP_CHECK_CFLAG([-Wmissing-prototypes])
 ODP_CHECK_CFLAG([-Wmissing-declarations])
@@ -126,6 +127,11 @@ ODP_CHECK_CFLAG([-Wundef])
 ODP_CHECK_CFLAG([-Wwrite-strings])
 ODP_CHECK_CFLAG([-Wformat-truncation=0])
 ODP_CHECK_CFLAG([-Wformat-overflow=0])
+
+# Suppressed warnings:
+# GCC-9 warns about taking pointers to packed structure fields (e.g. protocol
+# header structures). Generate only warnings on those, not errors.
+ODP_CHECK_CFLAG([-Wno-error=address-of-packed-member])
 
 ODP_CFLAGS="$ODP_CFLAGS -std=c99"
 ODP_CXXFLAGS="$ODP_CXXFLAGS -std=c++11 -Wno-deprecated-register"
@@ -276,7 +282,7 @@ AS_IF([test "${with_platform}" = "linux-generic"],
       [m4_include([./platform/linux-dpdk/m4/configure.m4])],
       [AC_MSG_ERROR([UNSUPPORTED PLATFORM: ${with_platform}])])
 
-AC_DEFINE_UNQUOTED([ODP_IMPLEMENTATION_NAME], ["$ODP_IMPLEMENTATION_NAME"],
+AC_DEFINE_UNQUOTED([_ODP_IMPLEMENTATION_NAME], ["$ODP_IMPLEMENTATION_NAME"],
 		   [Define to the name of the implementation])
 
 AM_CONDITIONAL([ODP_USE_CONFIG], [test "x$odp_use_config" = "xtrue"])

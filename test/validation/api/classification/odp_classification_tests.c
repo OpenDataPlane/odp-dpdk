@@ -4,8 +4,6 @@
  * SPDX-License-Identifier:	BSD-3-Clause
  */
 
-#include "config.h"
-
 #include "odp_classification_testsuites.h"
 #include "classification.h"
 #include <odp_cunit_common.h>
@@ -138,6 +136,9 @@ int classification_suite_term(void)
 		if (pool_list[i] != ODP_POOL_INVALID)
 			odp_pool_destroy(pool_list[i]);
 	}
+
+	if (odp_cunit_print_inactive())
+		retcode = -1;
 
 	return retcode;
 }

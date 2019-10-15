@@ -4,8 +4,6 @@
  * SPDX-License-Identifier:     BSD-3-Clause
  */
 
-#include "config.h"
-
 #include "ipsec.h"
 
 #include "test_vectors.h"
@@ -44,9 +42,11 @@ static void test_in_ipv4_ah_sha256(void)
 
 static void test_in_ipv4_ah_sha256_tun_ipv4(void)
 {
-	odp_ipsec_tunnel_param_t tunnel = {};
+	odp_ipsec_tunnel_param_t tunnel;
 	odp_ipsec_sa_param_t param;
 	odp_ipsec_sa_t sa;
+
+	memset(&tunnel, 0, sizeof(odp_ipsec_tunnel_param_t));
 
 	ipsec_sa_param_fill(&param,
 			    true, true, 123, &tunnel,
@@ -77,9 +77,11 @@ static void test_in_ipv4_ah_sha256_tun_ipv4(void)
 
 static void test_in_ipv4_ah_sha256_tun_ipv6(void)
 {
-	odp_ipsec_tunnel_param_t tunnel = {};
+	odp_ipsec_tunnel_param_t tunnel;
 	odp_ipsec_sa_param_t param;
 	odp_ipsec_sa_t sa;
+
+	memset(&tunnel, 0, sizeof(odp_ipsec_tunnel_param_t));
 
 	ipsec_sa_param_fill(&param,
 			    true, true, 123, &tunnel,
@@ -337,9 +339,11 @@ static void test_in_ipv4_esp_null_sha256_lookup(void)
 
 static void test_in_ipv4_esp_null_sha256_tun_ipv4(void)
 {
-	odp_ipsec_tunnel_param_t tunnel = {};
+	odp_ipsec_tunnel_param_t tunnel;
 	odp_ipsec_sa_param_t param;
 	odp_ipsec_sa_t sa;
+
+	memset(&tunnel, 0, sizeof(odp_ipsec_tunnel_param_t));
 
 	ipsec_sa_param_fill(&param,
 			    true, false, 123, &tunnel,
@@ -370,9 +374,11 @@ static void test_in_ipv4_esp_null_sha256_tun_ipv4(void)
 
 static void test_in_ipv4_esp_null_sha256_tun_ipv6(void)
 {
-	odp_ipsec_tunnel_param_t tunnel = {};
+	odp_ipsec_tunnel_param_t tunnel;
 	odp_ipsec_sa_param_t param;
 	odp_ipsec_sa_t sa;
+
+	memset(&tunnel, 0, sizeof(odp_ipsec_tunnel_param_t));
 
 	ipsec_sa_param_fill(&param,
 			    true, false, 123, &tunnel,
@@ -968,9 +974,11 @@ static void test_in_ipv4_rfc3602_6_esp(void)
 
 static void test_in_ipv4_rfc3602_7_esp(void)
 {
-	odp_ipsec_tunnel_param_t tunnel = {};
+	odp_ipsec_tunnel_param_t tunnel;
 	odp_ipsec_sa_param_t param;
 	odp_ipsec_sa_t sa;
+
+	memset(&tunnel, 0, sizeof(odp_ipsec_tunnel_param_t));
 
 	ipsec_sa_param_fill(&param,
 			    true, false, 0x8765, &tunnel,
@@ -1001,9 +1009,11 @@ static void test_in_ipv4_rfc3602_7_esp(void)
 
 static void test_in_ipv4_rfc3602_8_esp(void)
 {
-	odp_ipsec_tunnel_param_t tunnel = {};
+	odp_ipsec_tunnel_param_t tunnel;
 	odp_ipsec_sa_param_t param;
 	odp_ipsec_sa_t sa;
+
+	memset(&tunnel, 0, sizeof(odp_ipsec_tunnel_param_t));
 
 	ipsec_sa_param_fill(&param,
 			    true, false, 0x8765, &tunnel,
@@ -1034,9 +1044,11 @@ static void test_in_ipv4_rfc3602_8_esp(void)
 
 static void test_in_ipv4_mcgrew_gcm_2_esp(void)
 {
-	odp_ipsec_tunnel_param_t tunnel = {};
+	odp_ipsec_tunnel_param_t tunnel;
 	odp_ipsec_sa_param_t param;
 	odp_ipsec_sa_t sa;
+
+	memset(&tunnel, 0, sizeof(odp_ipsec_tunnel_param_t));
 
 	ipsec_sa_param_fill(&param,
 			    true, false, 0xa5f8, &tunnel,
@@ -1067,9 +1079,11 @@ static void test_in_ipv4_mcgrew_gcm_2_esp(void)
 
 static void test_in_ipv4_mcgrew_gcm_3_esp(void)
 {
-	odp_ipsec_tunnel_param_t tunnel = {};
+	odp_ipsec_tunnel_param_t tunnel;
 	odp_ipsec_sa_param_t param;
 	odp_ipsec_sa_t sa;
+
+	memset(&tunnel, 0, sizeof(odp_ipsec_tunnel_param_t));
 
 	ipsec_sa_param_fill(&param,
 			    true, false, 0x4a2cbfe3, &tunnel,
@@ -1100,9 +1114,11 @@ static void test_in_ipv4_mcgrew_gcm_3_esp(void)
 
 static void test_in_ipv4_mcgrew_gcm_4_esp(void)
 {
-	odp_ipsec_tunnel_param_t tunnel = {};
+	odp_ipsec_tunnel_param_t tunnel;
 	odp_ipsec_sa_param_t param;
 	odp_ipsec_sa_t sa;
+
+	memset(&tunnel, 0, sizeof(odp_ipsec_tunnel_param_t));
 
 	ipsec_sa_param_fill(&param,
 			    true, false, 0x00000000, &tunnel,
@@ -1133,9 +1149,11 @@ static void test_in_ipv4_mcgrew_gcm_4_esp(void)
 
 static void test_in_ipv4_mcgrew_gcm_12_esp(void)
 {
-	odp_ipsec_tunnel_param_t tunnel = {};
+	odp_ipsec_tunnel_param_t tunnel;
 	odp_ipsec_sa_param_t param;
 	odp_ipsec_sa_t sa;
+
+	memset(&tunnel, 0, sizeof(odp_ipsec_tunnel_param_t));
 
 	/* This test will not work properly inbound inline mode.
 	 * Packet might be dropped and we will not check for that. */
@@ -1203,9 +1221,11 @@ static void test_in_ipv4_mcgrew_gcm_12_esp_notun(void)
 
 static void test_in_ipv4_mcgrew_gcm_15_esp(void)
 {
-	odp_ipsec_tunnel_param_t tunnel = {};
+	odp_ipsec_tunnel_param_t tunnel;
 	odp_ipsec_sa_param_t param;
 	odp_ipsec_sa_t sa;
+
+	memset(&tunnel, 0, sizeof(odp_ipsec_tunnel_param_t));
 
 	ipsec_sa_param_fill(&param,
 			    true, false, 0x00004321, &tunnel,
@@ -1236,9 +1256,11 @@ static void test_in_ipv4_mcgrew_gcm_15_esp(void)
 
 static void test_in_ipv4_rfc7634_chacha(void)
 {
-	odp_ipsec_tunnel_param_t tunnel = {};
+	odp_ipsec_tunnel_param_t tunnel;
 	odp_ipsec_sa_param_t param;
 	odp_ipsec_sa_t sa;
+
+	memset(&tunnel, 0, sizeof(odp_ipsec_tunnel_param_t));
 
 	ipsec_sa_param_fill(&param,
 			    true, false, 0x01020304, &tunnel,
@@ -1365,9 +1387,11 @@ static void test_in_ipv6_ah_sha256(void)
 
 static void test_in_ipv6_ah_sha256_tun_ipv4(void)
 {
-	odp_ipsec_tunnel_param_t tunnel = {};
+	odp_ipsec_tunnel_param_t tunnel;
 	odp_ipsec_sa_param_t param;
 	odp_ipsec_sa_t sa;
+
+	memset(&tunnel, 0, sizeof(odp_ipsec_tunnel_param_t));
 
 	ipsec_sa_param_fill(&param,
 			    true, true, 123, &tunnel,
@@ -1398,9 +1422,11 @@ static void test_in_ipv6_ah_sha256_tun_ipv4(void)
 
 static void test_in_ipv6_ah_sha256_tun_ipv6(void)
 {
-	odp_ipsec_tunnel_param_t tunnel = {};
+	odp_ipsec_tunnel_param_t tunnel;
 	odp_ipsec_sa_param_t param;
 	odp_ipsec_sa_t sa;
+
+	memset(&tunnel, 0, sizeof(odp_ipsec_tunnel_param_t));
 
 	ipsec_sa_param_fill(&param,
 			    true, true, 123, &tunnel,
@@ -1463,9 +1489,11 @@ static void test_in_ipv6_esp_null_sha256(void)
 
 static void test_in_ipv6_esp_null_sha256_tun_ipv4(void)
 {
-	odp_ipsec_tunnel_param_t tunnel = {};
+	odp_ipsec_tunnel_param_t tunnel;
 	odp_ipsec_sa_param_t param;
 	odp_ipsec_sa_t sa;
+
+	memset(&tunnel, 0, sizeof(odp_ipsec_tunnel_param_t));
 
 	ipsec_sa_param_fill(&param,
 			    true, false, 123, &tunnel,
@@ -1496,9 +1524,11 @@ static void test_in_ipv6_esp_null_sha256_tun_ipv4(void)
 
 static void test_in_ipv6_esp_null_sha256_tun_ipv6(void)
 {
-	odp_ipsec_tunnel_param_t tunnel = {};
+	odp_ipsec_tunnel_param_t tunnel;
 	odp_ipsec_sa_param_t param;
 	odp_ipsec_sa_t sa;
+
+	memset(&tunnel, 0, sizeof(odp_ipsec_tunnel_param_t));
 
 	ipsec_sa_param_fill(&param,
 			    true, false, 123, &tunnel,

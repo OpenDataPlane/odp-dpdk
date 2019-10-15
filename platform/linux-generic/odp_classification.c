@@ -1,10 +1,9 @@
 /* Copyright (c) 2014-2018, Linaro Limited
+ * Copyright (c) 2019, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
  */
-
-#include "config.h"
 
 #include <odp/api/classification.h>
 #include <odp/api/align.h>
@@ -123,7 +122,7 @@ int odp_classification_init_global(void)
 int odp_classification_term_global(void)
 {
 	if (cls_global && odp_shm_free(cls_global->shm)) {
-		ODP_ERR("shm free failed");
+		ODP_ERR("shm free failed\n");
 		return -1;
 	}
 
@@ -157,6 +156,12 @@ int odp_cls_capability(odp_cls_capability_t *capability)
 	capability->max_cos = CLS_COS_MAX_ENTRY;
 	capability->pmr_range_supported = false;
 	capability->supported_terms.all_bits = 0;
+	capability->supported_terms.bit.len = 1;
+	capability->supported_terms.bit.ethtype_0 = 1;
+	capability->supported_terms.bit.ethtype_x = 1;
+	capability->supported_terms.bit.vlan_id_0 = 1;
+	capability->supported_terms.bit.vlan_id_x = 1;
+	capability->supported_terms.bit.dmac = 1;
 	capability->supported_terms.bit.ip_proto = 1;
 	capability->supported_terms.bit.udp_dport = 1;
 	capability->supported_terms.bit.udp_sport = 1;
@@ -164,6 +169,8 @@ int odp_cls_capability(odp_cls_capability_t *capability)
 	capability->supported_terms.bit.tcp_sport = 1;
 	capability->supported_terms.bit.sip_addr = 1;
 	capability->supported_terms.bit.dip_addr = 1;
+	capability->supported_terms.bit.sip6_addr = 1;
+	capability->supported_terms.bit.dip6_addr = 1;
 	capability->random_early_detection = ODP_SUPPORT_NO;
 	capability->back_pressure = ODP_SUPPORT_NO;
 	capability->threshold_red.all_bits = 0;
@@ -262,7 +269,7 @@ odp_cos_t odp_cls_cos_create(const char *name, odp_cls_cos_param_t *param)
 		UNLOCK(&cos->s.lock);
 	}
 
-	ODP_ERR("CLS_COS_MAX_ENTRY reached");
+	ODP_ERR("CLS_COS_MAX_ENTRY reached\n");
 	return ODP_COS_INVALID;
 }
 
@@ -286,7 +293,7 @@ odp_pmr_t alloc_pmr(pmr_t **pmr)
 		}
 		UNLOCK(&pmr_tbl->pmr[i].s.lock);
 	}
-	ODP_ERR("CLS_PMR_MAX_ENTRY reached");
+	ODP_ERR("CLS_PMR_MAX_ENTRY reached\n");
 	return ODP_PMR_INVALID;
 }
 
@@ -320,7 +327,7 @@ int odp_cos_destroy(odp_cos_t cos_id)
 	cos_t *cos = get_cos_entry(cos_id);
 
 	if (NULL == cos) {
-		ODP_ERR("Invalid odp_cos_t handle");
+		ODP_ERR("Invalid odp_cos_t handle\n");
 		return -1;
 	}
 
@@ -333,12 +340,12 @@ int odp_cos_queue_set(odp_cos_t cos_id, odp_queue_t queue_id)
 	cos_t *cos = get_cos_entry(cos_id);
 
 	if (cos == NULL) {
-		ODP_ERR("Invalid odp_cos_t handle");
+		ODP_ERR("Invalid odp_cos_t handle\n");
 		return -1;
 	}
 
 	if (cos->s.num_queue != 1) {
-		ODP_ERR("Hashing enabled, cannot set queue");
+		ODP_ERR("Hashing enabled, cannot set queue\n");
 		return -1;
 	}
 
@@ -353,7 +360,7 @@ odp_queue_t odp_cos_queue(odp_cos_t cos_id)
 	cos_t *cos = get_cos_entry(cos_id);
 
 	if (!cos) {
-		ODP_ERR("Invalid odp_cos_t handle");
+		ODP_ERR("Invalid odp_cos_t handle\n");
 		return ODP_QUEUE_INVALID;
 	}
 
@@ -365,7 +372,7 @@ uint32_t odp_cls_cos_num_queue(odp_cos_t cos_id)
 	cos_t *cos = get_cos_entry(cos_id);
 
 	if (!cos) {
-		ODP_ERR("Invalid odp_cos_t handle");
+		ODP_ERR("Invalid odp_cos_t handle\n");
 		return 0;
 	}
 
@@ -382,7 +389,7 @@ uint32_t odp_cls_cos_queues(odp_cos_t cos_id, odp_queue_t queue[],
 
 	cos  = get_cos_entry(cos_id);
 	if (!cos) {
-		ODP_ERR("Invalid odp_cos_t handle");
+		ODP_ERR("Invalid odp_cos_t handle\n");
 		return 0;
 	}
 
@@ -411,7 +418,7 @@ int odp_cos_drop_set(odp_cos_t cos_id, odp_cls_drop_t drop_policy)
 	cos_t *cos = get_cos_entry(cos_id);
 
 	if (!cos) {
-		ODP_ERR("Invalid odp_cos_t handle");
+		ODP_ERR("Invalid odp_cos_t handle\n");
 		return -1;
 	}
 
@@ -425,7 +432,7 @@ odp_cls_drop_t odp_cos_drop(odp_cos_t cos_id)
 	cos_t *cos = get_cos_entry(cos_id);
 
 	if (!cos) {
-		ODP_ERR("Invalid odp_cos_t handle");
+		ODP_ERR("Invalid odp_cos_t handle\n");
 		return -1;
 	}
 
@@ -439,12 +446,12 @@ int odp_pktio_default_cos_set(odp_pktio_t pktio_in, odp_cos_t default_cos)
 
 	entry = get_pktio_entry(pktio_in);
 	if (entry == NULL) {
-		ODP_ERR("Invalid odp_pktio_t handle");
+		ODP_ERR("Invalid odp_pktio_t handle\n");
 		return -1;
 	}
 	cos = get_cos_entry(default_cos);
 	if (cos == NULL) {
-		ODP_ERR("Invalid odp_cos_t handle");
+		ODP_ERR("Invalid odp_cos_t handle\n");
 		return -1;
 	}
 
@@ -459,13 +466,13 @@ int odp_pktio_error_cos_set(odp_pktio_t pktio_in, odp_cos_t error_cos)
 
 	entry = get_pktio_entry(pktio_in);
 	if (entry == NULL) {
-		ODP_ERR("Invalid odp_pktio_t handle");
+		ODP_ERR("Invalid odp_pktio_t handle\n");
 		return -1;
 	}
 
 	cos = get_cos_entry(error_cos);
 	if (cos == NULL) {
-		ODP_ERR("Invalid odp_cos_t handle");
+		ODP_ERR("Invalid odp_cos_t handle\n");
 		return -1;
 	}
 
@@ -478,7 +485,7 @@ int odp_pktio_skip_set(odp_pktio_t pktio_in, uint32_t offset)
 	pktio_entry_t *entry = get_pktio_entry(pktio_in);
 
 	if (entry == NULL) {
-		ODP_ERR("Invalid odp_cos_t handle");
+		ODP_ERR("Invalid odp_pktio_t handle\n");
 		return -1;
 	}
 
@@ -491,7 +498,7 @@ int odp_pktio_headroom_set(odp_pktio_t pktio_in, uint32_t headroom)
 	pktio_entry_t *entry = get_pktio_entry(pktio_in);
 
 	if (entry == NULL) {
-		ODP_ERR("Invalid odp_pktio_t handle");
+		ODP_ERR("Invalid odp_pktio_t handle\n");
 		return -1;
 	}
 	entry->s.cls.headroom = headroom;
@@ -509,7 +516,7 @@ int odp_cos_with_l2_priority(odp_pktio_t pktio_in,
 	pktio_entry_t *entry = get_pktio_entry(pktio_in);
 
 	if (entry == NULL) {
-		ODP_ERR("Invalid odp_pktio_t handle");
+		ODP_ERR("Invalid odp_pktio_t handle\n");
 		return -1;
 	}
 	l2_cos = &entry->s.cls.l2_cos_table;
@@ -539,7 +546,7 @@ int odp_cos_with_l3_qos(odp_pktio_t pktio_in,
 	cos_t *cos;
 
 	if (entry == NULL) {
-		ODP_ERR("Invalid odp_pktio_t handle");
+		ODP_ERR("Invalid odp_pktio_t handle\n");
 		return -1;
 	}
 
@@ -652,12 +659,12 @@ odp_pmr_t odp_cls_pmr_create(const odp_pmr_param_t *terms, int num_terms,
 	cos_t *cos_dst = get_cos_entry(dst_cos);
 
 	if (NULL == cos_src || NULL == cos_dst) {
-		ODP_ERR("Invalid input handle");
+		ODP_ERR("Invalid odp_cos_t handle\n");
 		return ODP_PMR_INVALID;
 	}
 
 	if (num_terms > CLS_PMRTERM_MAX) {
-		ODP_ERR("no of terms greater than supported CLS_PMRTERM_MAX");
+		ODP_ERR("no of terms greater than supported CLS_PMRTERM_MAX\n");
 		return ODP_PMR_INVALID;
 	}
 
@@ -698,7 +705,7 @@ int odp_cls_cos_pool_set(odp_cos_t cos_id, odp_pool_t pool)
 
 	cos = get_cos_entry(cos_id);
 	if (cos == NULL) {
-		ODP_ERR("Invalid odp_cos_t handle");
+		ODP_ERR("Invalid odp_cos_t handle\n");
 		return -1;
 	}
 
@@ -713,7 +720,7 @@ odp_pool_t odp_cls_cos_pool(odp_cos_t cos_id)
 
 	cos = get_cos_entry(cos_id);
 	if (cos == NULL) {
-		ODP_ERR("Invalid odp_cos_t handle");
+		ODP_ERR("Invalid odp_cos_t handle\n");
 		return ODP_POOL_INVALID;
 	}
 
@@ -833,6 +840,9 @@ int verify_pmr(pmr_t *pmr, const uint8_t *pkt_addr, odp_packet_hdr_t *pkt_hdr)
 				pmr_failure = 1;
 			break;
 		case ODP_PMR_INNER_HDR_OFF:
+			break;
+		default:
+			pmr_failure = 1;
 			break;
 		}
 

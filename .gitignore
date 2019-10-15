@@ -38,9 +38,11 @@ depcomp
 doc/output
 dpdk/
 install-sh
-include/config.h.in
-include/config.h
-include/stamp-h1
+include/odp/autoheader_build.h.in
+include/odp/autoheader_build.h
+include/odp/autoheader_external.h
+include/odp/autoheader_internal.h
+include/odp/stamp-h*
 lib/
 libtool
 ltmain.sh

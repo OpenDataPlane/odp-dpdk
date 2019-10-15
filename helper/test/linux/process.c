@@ -4,8 +4,6 @@
  * SPDX-License-Identifier:     BSD-3-Clause
  */
 
-#include "config.h"
-
 #include <odp_api.h>
 #include <odp/helper/odph_api.h>
 #include <odp/helper/linux/pthread.h>
@@ -15,7 +13,7 @@
 
 #define NUMBER_WORKERS 16 /* 0 = max */
 
-static void *worker_fn(void *arg ODPH_UNUSED)
+static void *worker_fn(void *arg ODP_UNUSED)
 {
 	/* depend on the odp helper to call odp_init_local */
 	printf("Worker thread on CPU %d\n", odp_cpu_id());
@@ -24,7 +22,7 @@ static void *worker_fn(void *arg ODPH_UNUSED)
 }
 
 /* Create additional dataplane processes */
-int main(int argc ODPH_UNUSED, char *argv[] ODPH_UNUSED)
+int main(int argc ODP_UNUSED, char *argv[] ODP_UNUSED)
 {
 	odp_cpumask_t cpu_mask;
 	int num_workers;

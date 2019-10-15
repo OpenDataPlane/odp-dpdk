@@ -4,8 +4,6 @@
  * SPDX-License-Identifier:	BSD-3-Clause
  */
 
-#include "config.h"
-
 #include <odp_api.h>
 #include <odp/helper/odph_api.h>
 #include <CUnit/Basic.h>
@@ -2666,24 +2664,6 @@ odp_testinfo_t crypto_suite[] = {
 	ODP_TEST_INFO_NULL,
 };
 
-static int crypto_suite_term(void)
-{
-	int i;
-	int first = 1;
-
-	for (i = 0; crypto_suite[i].name; i++) {
-		if (crypto_suite[i].check_active &&
-		    crypto_suite[i].check_active() == ODP_TEST_INACTIVE) {
-			if (first) {
-				first = 0;
-				printf("\n\n  Inactive tests:\n");
-			}
-			printf("    %s\n", crypto_suite[i].name);
-		}
-	}
-	return 0;
-}
-
 /* Suite names */
 #define ODP_CRYPTO_SYNC_INP         "odp_crypto_sync_inp"
 #define ODP_CRYPTO_ASYNC_INP        "odp_crypto_async_inp"
@@ -2692,13 +2672,13 @@ static int crypto_suite_term(void)
 
 odp_suiteinfo_t crypto_suites[] = {
 	{ODP_CRYPTO_SYNC_INP, crypto_suite_sync_init,
-	 crypto_suite_term, crypto_suite},
+	 NULL, crypto_suite},
 	{ODP_CRYPTO_ASYNC_INP, crypto_suite_async_init,
-	 crypto_suite_term, crypto_suite},
+	 NULL, crypto_suite},
 	{ODP_CRYPTO_PACKET_SYNC_INP, crypto_suite_packet_sync_init,
-	 crypto_suite_term, crypto_suite},
+	 NULL, crypto_suite},
 	{ODP_CRYPTO_PACKET_ASYNC_INP, crypto_suite_packet_async_init,
-	 crypto_suite_term, crypto_suite},
+	 NULL, crypto_suite},
 	ODP_SUITE_INFO_NULL,
 };
 

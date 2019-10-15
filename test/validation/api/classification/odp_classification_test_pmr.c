@@ -1,10 +1,9 @@
 /* Copyright (c) 2015-2018, Linaro Limited
+ * Copyright (c) 2019, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:	BSD-3-Clause
  */
-
-#include "config.h"
 
 #include "odp_classification_testsuites.h"
 #include "classification.h"
@@ -15,9 +14,17 @@ static odp_pool_t pkt_pool;
 odp_atomic_u32_t seq;
 
 static cls_packet_info_t default_pkt_info;
+static odp_cls_capability_t cls_capa;
 
 int classification_suite_pmr_init(void)
 {
+	memset(&cls_capa, 0, sizeof(odp_cls_capability_t));
+
+	if (odp_cls_capability(&cls_capa)) {
+		fprintf(stderr, "Classifier capability call failed.\n");
+		return -1;
+	}
+
 	pkt_pool = pool_create("classification_pmr_pool");
 	if (ODP_POOL_INVALID == pkt_pool) {
 		fprintf(stderr, "Packet pool creation failed.\n");
@@ -78,14 +85,17 @@ void configure_default_cos(odp_pktio_t pktio, odp_cos_t *cos,
 
 int classification_suite_pmr_term(void)
 {
-	int retcode = 0;
+	int ret = 0;
 
 	if (0 != odp_pool_destroy(pkt_pool)) {
 		fprintf(stderr, "pkt_pool destroy failed.\n");
-		retcode = -1;
+		ret += -1;
 	}
 
-	return retcode;
+	if (odp_cunit_print_inactive())
+		ret += -1;
+
+	return ret;
 }
 
 static void classification_test_pktin_classifier_flag(void)
@@ -1671,7 +1681,7 @@ static void classification_test_pmr_queue_set(void)
 	odp_pktio_close(pktio);
 }
 
-static void classification_test_pmr_term_daddr(void)
+static void test_pmr_term_ipv4_addr(int dst)
 {
 	odp_packet_t pkt;
 	uint32_t seqno;
@@ -1685,13 +1695,14 @@ static void classification_test_pmr_term_daddr(void)
 	odp_pmr_t pmr;
 	odp_cos_t cos;
 	odp_cos_t default_cos;
-	uint32_t addr;
-	uint32_t mask;
+	uint32_t dst_addr, src_addr;
+	uint32_t dst_mask, src_mask;
 	char cosname[ODP_QUEUE_NAME_LEN];
 	odp_pmr_param_t pmr_param;
 	odp_cls_cos_param_t cls_param;
 	odph_ipv4hdr_t *ip;
-	const char *dst_addr = "10.0.0.99/32";
+	const char *src_str = "10.0.0.88/32";
+	const char *dst_str = "10.0.0.99/32";
 	odph_ethhdr_t *eth;
 
 	pktio = create_pktio(ODP_QUEUE_TYPE_SCHED, pkt_pool, true);
@@ -1701,13 +1712,13 @@ static void classification_test_pmr_term_daddr(void)
 	configure_default_cos(pktio, &default_cos,
 			      &default_queue, &default_pool);
 
-	queue = queue_create("daddr", true);
+	queue = queue_create("ipv4 addr", true);
 	CU_ASSERT_FATAL(queue != ODP_QUEUE_INVALID);
 
-	pool = pool_create("daddr");
+	pool = pool_create("ipv4 addr");
 	CU_ASSERT_FATAL(pool != ODP_POOL_INVALID);
 
-	sprintf(cosname, "daddr");
+	sprintf(cosname, "ipv4 addr");
 	odp_cls_cos_param_init(&cls_param);
 	cls_param.pool = pool;
 	cls_param.queue = queue;
@@ -1716,25 +1727,36 @@ static void classification_test_pmr_term_daddr(void)
 	cos = odp_cls_cos_create(cosname, &cls_param);
 	CU_ASSERT_FATAL(cos != ODP_COS_INVALID);
 
-	parse_ipv4_string(dst_addr, &addr, &mask);
+	parse_ipv4_string(src_str, &src_addr, &src_mask);
+	parse_ipv4_string(dst_str, &dst_addr, &dst_mask);
+
 	odp_cls_pmr_param_init(&pmr_param);
-	pmr_param.term = ODP_PMR_DIP_ADDR;
-	pmr_param.match.value = &addr;
-	pmr_param.match.mask = &mask;
-	pmr_param.val_sz = sizeof(addr);
+
+	if (dst) {
+		pmr_param.term = ODP_PMR_DIP_ADDR;
+		pmr_param.match.value = &dst_addr;
+		pmr_param.match.mask = &dst_mask;
+		pmr_param.val_sz = sizeof(dst_addr);
+	} else {
+		pmr_param.term = ODP_PMR_SIP_ADDR;
+		pmr_param.match.value = &src_addr;
+		pmr_param.match.mask = &src_mask;
+		pmr_param.val_sz = sizeof(src_addr);
+	}
 
 	pmr = odp_cls_pmr_create(&pmr_param, 1, default_cos, cos);
 	CU_ASSERT_FATAL(pmr != ODP_PMR_INVALID);
 
-	/* packet with dst ip address matching PMR rule to be
-	received in the CoS queue*/
+	/* packet with IP address matching PMR rule to be
+	 * received in the CoS queue */
 	pkt = create_packet(default_pkt_info);
 	CU_ASSERT_FATAL(pkt != ODP_PACKET_INVALID);
 	eth = (odph_ethhdr_t *)odp_packet_l2_ptr(pkt, NULL);
 	odp_pktio_mac_addr(pktio, eth->src.addr, ODPH_ETHADDR_LEN);
 	odp_pktio_mac_addr(pktio, eth->dst.addr, ODPH_ETHADDR_LEN);
 	ip = (odph_ipv4hdr_t *)odp_packet_l3_ptr(pkt, NULL);
-	ip->dst_addr = odp_cpu_to_be_32(addr);
+	ip->src_addr = odp_cpu_to_be_32(src_addr);
+	ip->dst_addr = odp_cpu_to_be_32(dst_addr);
 	odph_ipv4_csum_update(pkt);
 
 	seqno = cls_pkt_get_seq(pkt);
@@ -1774,6 +1796,16 @@ static void classification_test_pmr_term_daddr(void)
 	odp_queue_destroy(queue);
 	odp_queue_destroy(default_queue);
 	odp_pktio_close(pktio);
+}
+
+static void classification_test_pmr_term_ipv4_saddr(void)
+{
+	test_pmr_term_ipv4_addr(0);
+}
+
+static void classification_test_pmr_term_ipv4_daddr(void)
+{
+	test_pmr_term_ipv4_addr(1);
 }
 
 static void classification_test_pmr_term_ipv6daddr(void)
@@ -2008,23 +2040,114 @@ static void classification_test_pmr_term_tcp_dport_multi(void)
 	_classification_test_pmr_term_tcp_dport(SHM_PKT_NUM_BUFS / 4);
 }
 
+static int check_capa_tcp_dport(void)
+{
+	return cls_capa.supported_terms.bit.tcp_dport;
+}
+
+static int check_capa_tcp_sport(void)
+{
+	return cls_capa.supported_terms.bit.tcp_sport;
+}
+
+static int check_capa_udp_dport(void)
+{
+	return cls_capa.supported_terms.bit.udp_dport;
+}
+
+static int check_capa_udp_sport(void)
+{
+	return cls_capa.supported_terms.bit.udp_sport;
+}
+
+static int check_capa_ip_proto(void)
+{
+	return cls_capa.supported_terms.bit.ip_proto;
+}
+
+static int check_capa_dmac(void)
+{
+	return cls_capa.supported_terms.bit.dmac;
+}
+
+static int check_capa_ipv4_saddr(void)
+{
+	return cls_capa.supported_terms.bit.sip_addr;
+}
+
+static int check_capa_ipv4_daddr(void)
+{
+	return cls_capa.supported_terms.bit.dip_addr;
+}
+
+static int check_capa_ipv6_saddr(void)
+{
+	return cls_capa.supported_terms.bit.sip6_addr;
+}
+
+static int check_capa_ipv6_daddr(void)
+{
+	return cls_capa.supported_terms.bit.dip6_addr;
+}
+
+static int check_capa_packet_len(void)
+{
+	return cls_capa.supported_terms.bit.len;
+}
+
+static int check_capa_vlan_id_0(void)
+{
+	return cls_capa.supported_terms.bit.vlan_id_0;
+}
+
+static int check_capa_vlan_id_x(void)
+{
+	return cls_capa.supported_terms.bit.vlan_id_x;
+}
+
+static int check_capa_ethtype_0(void)
+{
+	return cls_capa.supported_terms.bit.ethtype_0;
+}
+
+static int check_capa_ethtype_x(void)
+{
+	return cls_capa.supported_terms.bit.ethtype_x;
+}
+
 odp_testinfo_t classification_suite_pmr[] = {
-	ODP_TEST_INFO(classification_test_pmr_term_tcp_dport),
-	ODP_TEST_INFO(classification_test_pmr_term_tcp_sport),
-	ODP_TEST_INFO(classification_test_pmr_term_udp_dport),
-	ODP_TEST_INFO(classification_test_pmr_term_udp_sport),
-	ODP_TEST_INFO(classification_test_pmr_term_ipproto),
-	ODP_TEST_INFO(classification_test_pmr_term_dmac),
+	ODP_TEST_INFO_CONDITIONAL(classification_test_pmr_term_tcp_dport,
+				  check_capa_tcp_dport),
+	ODP_TEST_INFO_CONDITIONAL(classification_test_pmr_term_tcp_sport,
+				  check_capa_tcp_sport),
+	ODP_TEST_INFO_CONDITIONAL(classification_test_pmr_term_udp_dport,
+				  check_capa_udp_dport),
+	ODP_TEST_INFO_CONDITIONAL(classification_test_pmr_term_udp_sport,
+				  check_capa_udp_sport),
+	ODP_TEST_INFO_CONDITIONAL(classification_test_pmr_term_ipproto,
+				  check_capa_ip_proto),
+	ODP_TEST_INFO_CONDITIONAL(classification_test_pmr_term_dmac,
+				  check_capa_dmac),
 	ODP_TEST_INFO(classification_test_pmr_pool_set),
 	ODP_TEST_INFO(classification_test_pmr_queue_set),
-	ODP_TEST_INFO(classification_test_pmr_term_daddr),
-	ODP_TEST_INFO(classification_test_pmr_term_ipv6saddr),
-	ODP_TEST_INFO(classification_test_pmr_term_ipv6daddr),
-	ODP_TEST_INFO(classification_test_pmr_term_packet_len),
-	ODP_TEST_INFO(classification_test_pmr_term_vlan_id_0),
-	ODP_TEST_INFO(classification_test_pmr_term_vlan_id_x),
-	ODP_TEST_INFO(classification_test_pmr_term_eth_type_0),
-	ODP_TEST_INFO(classification_test_pmr_term_eth_type_x),
+	ODP_TEST_INFO_CONDITIONAL(classification_test_pmr_term_ipv4_saddr,
+				  check_capa_ipv4_saddr),
+	ODP_TEST_INFO_CONDITIONAL(classification_test_pmr_term_ipv4_daddr,
+				  check_capa_ipv4_daddr),
+	ODP_TEST_INFO_CONDITIONAL(classification_test_pmr_term_ipv6saddr,
+				  check_capa_ipv6_saddr),
+	ODP_TEST_INFO_CONDITIONAL(classification_test_pmr_term_ipv6daddr,
+				  check_capa_ipv6_daddr),
+	ODP_TEST_INFO_CONDITIONAL(classification_test_pmr_term_packet_len,
+				  check_capa_packet_len),
+	ODP_TEST_INFO_CONDITIONAL(classification_test_pmr_term_vlan_id_0,
+				  check_capa_vlan_id_0),
+	ODP_TEST_INFO_CONDITIONAL(classification_test_pmr_term_vlan_id_x,
+				  check_capa_vlan_id_x),
+	ODP_TEST_INFO_CONDITIONAL(classification_test_pmr_term_eth_type_0,
+				  check_capa_ethtype_0),
+	ODP_TEST_INFO_CONDITIONAL(classification_test_pmr_term_eth_type_x,
+				  check_capa_ethtype_x),
 	ODP_TEST_INFO(classification_test_pktin_classifier_flag),
 	ODP_TEST_INFO(classification_test_pmr_term_tcp_dport_multi),
 	ODP_TEST_INFO_NULL,

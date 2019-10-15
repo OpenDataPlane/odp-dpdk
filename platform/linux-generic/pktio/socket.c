@@ -5,8 +5,6 @@
  * SPDX-License-Identifier:     BSD-3-Clause
  */
 
-#include "config.h"
-
 #include <odp_posix_extensions.h>
 
 #include <sys/socket.h>
@@ -35,7 +33,6 @@
 #include <linux/sockios.h>
 
 #include <odp_api.h>
-#include <odp_packet_socket.h>
 #include <odp_socket_common.h>
 #include <odp_packet_internal.h>
 #include <odp_packet_io_internal.h>

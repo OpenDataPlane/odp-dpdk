@@ -4,7 +4,7 @@
  * SPDX-License-Identifier:     BSD-3-Clause
  */
 
-#include "config.h"
+#include <odp/autoheader_internal.h>
 
 #include <odp_schedule_if.h>
 #include <odp_init_internal.h>
@@ -206,7 +206,7 @@ int _odp_schedule_init_global(void)
 	const char *sched = getenv("ODP_SCHEDULER");
 
 	if (sched == NULL || !strcmp(sched, "default"))
-		sched = ODP_SCHEDULE_DEFAULT;
+		sched = _ODP_SCHEDULE_DEFAULT;
 
 	ODP_PRINT("Using scheduler '%s'\n", sched);
 

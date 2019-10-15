@@ -4,8 +4,6 @@
  * SPDX-License-Identifier:     BSD-3-Clause
  */
 
-#include "config.h"
-
 #include <odp_api.h>
 #include <odp_cunit_common.h>
 
@@ -2831,6 +2829,9 @@ static int pktio_suite_term(void)
 		ret = -1;
 	}
 	default_pkt_pool = ODP_POOL_INVALID;
+
+	if (odp_cunit_print_inactive())
+		ret = -1;
 
 	return ret;
 }
