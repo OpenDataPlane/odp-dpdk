@@ -11,8 +11,6 @@
 extern "C" {
 #endif
 
-#include "config.h"
-
 #include <odp/api/queue.h>
 
 #include <odp_debug_internal.h>
