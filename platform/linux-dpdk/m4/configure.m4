@@ -47,7 +47,7 @@ esac
 DPDK_CFLAGS="${DPDK_CFLAGS} -DALLOW_EXPERIMENTAL_API"
 
 ODP_CHECK_CFLAG([-Wno-error=cast-align])
-AC_DEFINE([ODP_PKTIO_DPDK], [1])
+AC_DEFINE([_ODP_PKTIO_DPDK], [1])
 AC_CONFIG_COMMANDS_PRE([dnl
 AM_CONDITIONAL([PLATFORM_IS_LINUX_DPDK],
 	       [test "${with_platform}" = "linux-dpdk"])
