@@ -4,9 +4,7 @@
  * SPDX-License-Identifier:     BSD-3-Clause
  */
 
-#include "config.h"
-
-#include <string.h>
+#include <odp_posix_extensions.h>
 
 #include <odp/api/shared_memory.h>
 #include <odp/api/ticketlock.h>
@@ -22,6 +20,8 @@
 
 #include <rte_cycles.h>
 #include <rte_timer.h>
+
+#include <string.h>
 
 /* Timer states */
 #define NOT_TICKING 0

@@ -6,7 +6,6 @@
 #include <odp/api/hints.h>
 #include <odp_queue_basic_internal.h>
 
-#include "config.h"
 #include <odp_debug_internal.h>
 
 static inline int spsc_enq_multi(odp_queue_t handle,
