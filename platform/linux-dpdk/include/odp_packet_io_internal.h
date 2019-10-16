@@ -30,9 +30,10 @@ extern "C" {
 #include <odp_config_internal.h>
 #include <odp/api/hints.h>
 
-#define PKTIO_MAX_QUEUES 64
 #include <linux/if_ether.h>
+#include <sys/select.h>
 
+#define PKTIO_MAX_QUEUES 64
 #define PKTIO_NAME_LEN 256
 
 #define PKTIN_INVALID  ((odp_pktin_queue_t) {ODP_PKTIO_INVALID, 0})
