@@ -173,7 +173,7 @@ int odp_timer_term_global(void)
 	return 0;
 }
 
-unsigned int _timer_run(int dec)
+void _timer_run_inline(int dec)
 {
 	static __thread int timer_run_cnt = 1;
 
@@ -182,13 +182,13 @@ unsigned int _timer_run(int dec)
 	if (timer_global->inline_poll_interval > 1) {
 		timer_run_cnt -= dec;
 		if (timer_run_cnt > 0)
-			return 0;
+			return;
 		timer_run_cnt = timer_global->inline_poll_interval;
 	}
 
 	rte_timer_manage();
 
-	return 0;
+	return;
 }
 
 static inline uint64_t tmo_ticks_to_ns_round_up(uint64_t tmo_ticks)
