@@ -1199,7 +1199,7 @@ check_finish:
 	return -1;
 }
 
-#if RTE_VERSION < RTE_VERSION_NUM(19, 2, 0, 0)
+#if RTE_VERSION < RTE_VERSION_NUM(19, 8, 0, 0)
 static int crypto_init_key(uint8_t **data, uint16_t *length,
 			   odp_crypto_key_t *key, const char *type)
 #else
