@@ -138,6 +138,7 @@ noinst_HEADERS = \
 		  ${top_srcdir}/platform/linux-generic/include/odp_sorted_list_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_sysinfo_internal.h \
 		  include/odp_shm_internal.h \
+		  include/odp_thread_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_timer_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_timer_wheel_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_traffic_mngr_internal.h \
