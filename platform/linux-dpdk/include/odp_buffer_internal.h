@@ -68,7 +68,6 @@ struct odp_buffer_hdr_t {
 	uint8_t   flow_id;
 
 	/* --- Mostly read only data --- */
-	const void *user_ptr;
 
 	/* Pool pointer */
 	void *pool_ptr;
