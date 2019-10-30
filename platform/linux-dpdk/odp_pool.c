@@ -520,6 +520,7 @@ odp_pool_t odp_pool_create(const char *name, odp_pool_param_t *params)
 			mp = rte_pktmbuf_pool_create(rte_name, num, cache_size,
 						     priv_size, data_room_size,
 						     rte_socket_id());
+			pool->seg_len = data_room_size;
 		} else {
 			unsigned int priv_size;
 

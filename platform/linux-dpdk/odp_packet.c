@@ -1,4 +1,5 @@
 /* Copyright (c) 2013-2018, Linaro Limited
+ * Copyright (c) 2019, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -13,6 +14,7 @@
 #include <odp/api/plat/byteorder_inlines.h>
 #include <odp/api/packet_io.h>
 #include <odp/api/plat/pktio_inlines.h>
+#include <odp_errno_define.h>
 
 /* Inlined API functions */
 #include <odp/api/plat/event_inlines.h>
@@ -86,6 +88,21 @@ static inline odp_buffer_t packet_to_buffer(odp_packet_t pkt)
 	return (odp_buffer_t)pkt;
 }
 
+/* Calculate the number of segments */
+static inline int num_segments(uint32_t len, uint32_t seg_len)
+{
+	int num = 1;
+
+	if (odp_unlikely(len > seg_len)) {
+		num = len / seg_len;
+
+		if (odp_likely((num * seg_len) != len))
+			num += 1;
+	}
+
+	return num;
+}
+
 void packet_parse_reset(odp_packet_hdr_t *pkt_hdr)
 {
 	/* Reset parser metadata before new parse */
@@ -101,44 +118,53 @@ static odp_packet_t packet_alloc(pool_t *pool, uint32_t len)
 	odp_packet_t pkt;
 	uintmax_t totsize = RTE_PKTMBUF_HEADROOM + len;
 	odp_packet_hdr_t *pkt_hdr;
-	struct rte_mbuf *mbuf;
+	uint16_t seg_len = pool->seg_len;
+	int num_seg;
 
-	if (pool->params.type != ODP_POOL_PACKET)
-		return ODP_PACKET_INVALID;
+	num_seg = num_segments(totsize, seg_len);
 
-	mbuf = rte_pktmbuf_alloc(pool->rte_mempool);
-	if (mbuf == NULL) {
-		rte_errno = ENOMEM;
-		return ODP_PACKET_INVALID;
+	if (odp_likely(num_seg == 1)) {
+		struct rte_mbuf *mbuf = rte_pktmbuf_alloc(pool->rte_mempool);
+
+		if (odp_unlikely(mbuf == NULL)) {
+			__odp_errno = ENOMEM;
+			return ODP_PACKET_INVALID;
+		}
+		pkt_hdr = (odp_packet_hdr_t *)mbuf;
+	} else {
+		struct rte_mbuf *mbufs[num_seg];
+		struct rte_mbuf *head;
+		int ret;
+		int i;
+
+		/* Check num_seg here so rte_pktmbuf_chain() always succeeds */
+		if (odp_unlikely(num_seg > RTE_MBUF_MAX_NB_SEGS)) {
+			__odp_errno = EOVERFLOW;
+			return ODP_PACKET_INVALID;
+		}
+
+		ret = rte_pktmbuf_alloc_bulk(pool->rte_mempool, mbufs, num_seg);
+		if (odp_unlikely(ret)) {
+			__odp_errno = ENOMEM;
+			return ODP_PACKET_INVALID;
+		}
+
+		head = mbufs[0];
+		pkt_hdr = (odp_packet_hdr_t *)head;
+
+		for (i = 1; i < num_seg; i++) {
+			struct rte_mbuf *nextseg = mbufs[i];
+
+			nextseg->data_off = 0;
+
+			rte_pktmbuf_chain(head, nextseg);
+		}
 	}
-	pkt_hdr = (odp_packet_hdr_t *)mbuf;
-	pkt_hdr->buf_hdr.totsize = mbuf->buf_len;
 
-	if (mbuf->buf_len < totsize) {
-		intmax_t needed = totsize - mbuf->buf_len;
-		struct rte_mbuf *curseg = mbuf;
+	pkt_hdr->buf_hdr.totsize = seg_len * num_seg;
 
-		do {
-			struct rte_mbuf *nextseg =
-				rte_pktmbuf_alloc(pool->rte_mempool);
-
-			if (nextseg == NULL) {
-				rte_pktmbuf_free(mbuf);
-				return ODP_PACKET_INVALID;
-			}
-
-			curseg->next = nextseg;
-			curseg = nextseg;
-			curseg->data_off = 0;
-			pkt_hdr->buf_hdr.totsize += curseg->buf_len;
-			needed -= curseg->buf_len;
-		} while (needed > 0);
-	}
-
-	pkt = (odp_packet_t)mbuf;
-
-	if (odp_packet_reset(pkt, len) != 0)
-		return ODP_PACKET_INVALID;
+	pkt = packet_handle(pkt_hdr);
+	odp_packet_reset(pkt, len);
 
 	return pkt;
 }
@@ -146,6 +172,11 @@ static odp_packet_t packet_alloc(pool_t *pool, uint32_t len)
 odp_packet_t odp_packet_alloc(odp_pool_t pool_hdl, uint32_t len)
 {
 	pool_t *pool = pool_entry_from_hdl(pool_hdl);
+
+	if (odp_unlikely(pool->params.type != ODP_POOL_PACKET)) {
+		__odp_errno = EINVAL;
+		return ODP_PACKET_INVALID;
+	}
 
 	return packet_alloc(pool, len);
 }
@@ -156,10 +187,15 @@ int odp_packet_alloc_multi(odp_pool_t pool_hdl, uint32_t len,
 	int i;
 	pool_t *pool = pool_entry_from_hdl(pool_hdl);
 
+	if (odp_unlikely(pool->params.type != ODP_POOL_PACKET)) {
+		__odp_errno = EINVAL;
+		return -1;
+	}
+
 	for (i = 0; i < num; i++) {
 		pkt[i] = packet_alloc(pool, len);
-		if (pkt[i] == ODP_PACKET_INVALID)
-			return rte_errno == ENOMEM ? i : -EINVAL;
+		if (odp_unlikely(pkt[i] == ODP_PACKET_INVALID))
+			return (i == 0 && __odp_errno != ENOMEM) ? -1 : i;
 	}
 	return i;
 }
