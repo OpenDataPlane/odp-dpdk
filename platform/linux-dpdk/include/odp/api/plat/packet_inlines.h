@@ -1,4 +1,5 @@
 /* Copyright (c) 2016-2018, Linaro Limited
+ * Copyright (c) 2019, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier: BSD-3-Clause
@@ -78,6 +79,9 @@ extern "C" {
 	#define odp_packet_from_event_multi __odp_packet_from_event_multi
 	#define odp_packet_to_event_multi __odp_packet_to_event_multi
 	#define odp_packet_subtype __odp_packet_subtype
+	#define odp_packet_free __odp_packet_free
+	#define odp_packet_free_multi __odp_packet_free_multi
+	#define odp_packet_free_sp __odp_packet_free_sp
 #else
 	#undef _ODP_INLINE
 	#define _ODP_INLINE
@@ -408,6 +412,24 @@ _ODP_INLINE void odp_packet_to_event_multi(const odp_packet_t pkt[],
 _ODP_INLINE odp_event_subtype_t odp_packet_subtype(odp_packet_t pkt)
 {
 	return (odp_event_subtype_t)_odp_pkt_get(pkt, int8_t, subtype);
+}
+
+_ODP_INLINE void odp_packet_free(odp_packet_t pkt)
+{
+	rte_pktmbuf_free((struct rte_mbuf *)pkt);
+}
+
+_ODP_INLINE void odp_packet_free_multi(const odp_packet_t pkt[], int num)
+{
+	int i;
+
+	for (i = 0; i < num; i++)
+		rte_pktmbuf_free((struct rte_mbuf *)pkt[i]);
+}
+
+_ODP_INLINE void odp_packet_free_sp(const odp_packet_t pkt[], int num)
+{
+	odp_packet_free_multi(pkt, num);
 }
 
 #ifdef __cplusplus
