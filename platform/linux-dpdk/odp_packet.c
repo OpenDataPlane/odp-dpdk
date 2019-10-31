@@ -131,6 +131,9 @@ static odp_packet_t packet_alloc(pool_t *pool, uint32_t len)
 			return ODP_PACKET_INVALID;
 		}
 		pkt_hdr = (odp_packet_hdr_t *)mbuf;
+		odp_prefetch((uint8_t *)mbuf + sizeof(struct rte_mbuf));
+		odp_prefetch((uint8_t *)mbuf + sizeof(struct rte_mbuf) +
+			     ODP_CACHE_LINE_SIZE);
 	} else {
 		struct rte_mbuf *mbufs[num_seg];
 		struct rte_mbuf *head;
@@ -151,6 +154,9 @@ static odp_packet_t packet_alloc(pool_t *pool, uint32_t len)
 
 		head = mbufs[0];
 		pkt_hdr = (odp_packet_hdr_t *)head;
+		odp_prefetch((uint8_t *)head + sizeof(struct rte_mbuf));
+		odp_prefetch((uint8_t *)head + sizeof(struct rte_mbuf) +
+			     ODP_CACHE_LINE_SIZE);
 
 		for (i = 1; i < num_seg; i++) {
 			struct rte_mbuf *nextseg = mbufs[i];
