@@ -91,7 +91,6 @@ noinst_HEADERS = \
 		  include/odp_config_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_debug_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_classification_datamodel.h \
-		  ${top_srcdir}/platform/linux-generic/include/odp_classification_inlines.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_classification_internal.h \
 		  include/odp_eventdev_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_forward_typedefs_internal.h \
