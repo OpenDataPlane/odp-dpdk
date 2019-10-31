@@ -653,24 +653,6 @@ void odp_packet_ts_set(odp_packet_t pkt, odp_time_t timestamp)
 
 /*
  *
- * Segment level
- * ********************************************************
- *
- */
-
-void *odp_packet_seg_data(odp_packet_t pkt ODP_UNUSED, odp_packet_seg_t seg)
-{
-	return odp_packet_data((odp_packet_t)(uintptr_t)seg);
-}
-
-uint32_t odp_packet_seg_data_len(odp_packet_t pkt ODP_UNUSED,
-				 odp_packet_seg_t seg)
-{
-	return odp_packet_seg_len((odp_packet_t)(uintptr_t)seg);
-}
-
-/*
- *
  * Manipulation
  * ********************************************************
  *

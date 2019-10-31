@@ -82,6 +82,8 @@ extern "C" {
 	#define odp_packet_free __odp_packet_free
 	#define odp_packet_free_multi __odp_packet_free_multi
 	#define odp_packet_free_sp __odp_packet_free_sp
+	#define odp_packet_seg_data __odp_packet_seg_data
+	#define odp_packet_seg_data_len __odp_packet_seg_data_len
 #else
 	#undef _ODP_INLINE
 	#define _ODP_INLINE
@@ -430,6 +432,18 @@ _ODP_INLINE void odp_packet_free_multi(const odp_packet_t pkt[], int num)
 _ODP_INLINE void odp_packet_free_sp(const odp_packet_t pkt[], int num)
 {
 	odp_packet_free_multi(pkt, num);
+}
+
+_ODP_INLINE void *odp_packet_seg_data(odp_packet_t pkt ODP_UNUSED,
+				      odp_packet_seg_t seg)
+{
+	return odp_packet_data((odp_packet_t)seg);
+}
+
+_ODP_INLINE uint32_t odp_packet_seg_data_len(odp_packet_t pkt ODP_UNUSED,
+					     odp_packet_seg_t seg)
+{
+	return odp_packet_seg_len((odp_packet_t)seg);
 }
 
 #ifdef __cplusplus
