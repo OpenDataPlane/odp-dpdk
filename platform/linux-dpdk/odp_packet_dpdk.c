@@ -86,6 +86,8 @@ typedef struct ODP_ALIGNED_CACHE {
 	uint8_t min_rx_burst;		  /**< minimum RX burst size */
 	uint8_t loopback;		  /**< Operate as loopback interface */
 	odp_pktin_hash_proto_t hash;	  /**< Packet input hash protocol */
+	/* Supported RTE_PTYPE_XXX flags in a mask */
+	uint32_t supported_ptypes;
 	char ifname[32];
 	/** RX queue locks */
 	odp_ticketlock_t ODP_ALIGNED_CACHE rx_lock[PKTIO_MAX_QUEUES];
@@ -775,6 +777,49 @@ static uint16_t dpdk_rx_cb(uint16_t port_id, uint16_t queue ODP_UNUSED,
 	return nb_pkts;
 }
 
+static void dpdk_ptype_support_set(pktio_entry_t *pktio_entry, uint16_t port_id)
+{
+	int max_num, num, i;
+	pkt_dpdk_t *pkt_dpdk = pkt_priv(pktio_entry);
+	uint32_t mask = RTE_PTYPE_L2_MASK | RTE_PTYPE_L3_MASK |
+			RTE_PTYPE_L4_MASK;
+
+	pkt_dpdk->supported_ptypes = 0;
+
+	max_num = rte_eth_dev_get_supported_ptypes(port_id, mask, NULL, 0);
+	if (max_num <= 0) {
+		ODP_ERR("Device does not support any ptype flags\n");
+		return;
+	}
+
+	uint32_t ptype[max_num];
+
+	num = rte_eth_dev_get_supported_ptypes(port_id, mask, ptype, max_num);
+	if (num <= 0) {
+		ODP_ERR("Device does not support any ptype flags\n");
+		return;
+	}
+
+	for (i = 0; i < num; i++) {
+		ODP_DBG("  supported ptype: 0x%x\n", ptype[i]);
+
+		if (ptype[i] == RTE_PTYPE_L2_ETHER_VLAN)
+			pkt_dpdk->supported_ptypes |= PTYPE_VLAN;
+		else if (ptype[i] == RTE_PTYPE_L2_ETHER_QINQ)
+			pkt_dpdk->supported_ptypes |= PTYPE_VLAN_QINQ;
+		else if (ptype[i] == RTE_PTYPE_L2_ETHER_ARP)
+			pkt_dpdk->supported_ptypes |= PTYPE_ARP;
+		else if (RTE_ETH_IS_IPV4_HDR(ptype[i]))
+			pkt_dpdk->supported_ptypes |= PTYPE_IPV4;
+		else if (RTE_ETH_IS_IPV6_HDR(ptype[i]))
+			pkt_dpdk->supported_ptypes |= PTYPE_IPV6;
+		else if (ptype[i] == RTE_PTYPE_L4_UDP)
+			pkt_dpdk->supported_ptypes |= PTYPE_UDP;
+		else if (ptype[i] == RTE_PTYPE_L4_TCP)
+			pkt_dpdk->supported_ptypes |= PTYPE_TCP;
+	}
+}
+
 static int dpdk_start(pktio_entry_t *pktio_entry)
 {
 	struct rte_eth_dev_info dev_info;
@@ -847,6 +892,9 @@ static int dpdk_start(pktio_entry_t *pktio_entry)
 			ret, port_id);
 		return -1;
 	}
+
+	/* Record supported parser ptype flags */
+	dpdk_ptype_support_set(pktio_entry, port_id);
 
 	return 0;
 }
@@ -935,6 +983,8 @@ int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int num)
 
 		if (!pktio_cls_enabled(pktio_entry) &&
 		    parse_layer != ODP_PROTO_LAYER_NONE) {
+			uint32_t ptypes = pkt_dpdk->supported_ptypes;
+
 			/* DPDK ring pmd doesn't support packet parsing */
 			if (pkt_dpdk->loopback) {
 				packet_parse_layer(pkt_hdr, parse_layer,
@@ -942,6 +992,7 @@ int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int num)
 			} else {
 				if (_odp_dpdk_packet_parse_layer(pkt_hdr, mbuf,
 								 parse_layer,
+								 ptypes,
 								 pktin_cfg)) {
 					odp_packet_free(pkt_table[i]);
 					continue;
@@ -963,6 +1014,7 @@ int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int num)
 			odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
 			struct rte_mbuf *mbuf = pkt_to_mbuf(pkt);
 			uint32_t pkt_len = odp_packet_len(pkt);
+			uint32_t ptypes = pkt_dpdk->supported_ptypes;
 
 			data = odp_packet_data(pkt);
 			packet_parse_reset(&parsed_hdr);
@@ -974,7 +1026,7 @@ int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int num)
 				if (_odp_dpdk_packet_parse_common(&parsed_hdr.p,
 								  data, pkt_len,
 								  pkt_len, mbuf,
-								  layer,
+								  layer, ptypes,
 								  pktin_cfg)) {
 					odp_packet_free(pkt);
 					continue;
