@@ -200,24 +200,6 @@ int odp_packet_alloc_multi(odp_pool_t pool_hdl, uint32_t len,
 	return i;
 }
 
-void odp_packet_free(odp_packet_t pkt)
-{
-	rte_pktmbuf_free(pkt_to_mbuf(pkt));
-}
-
-void odp_packet_free_multi(const odp_packet_t pkt[], int num)
-{
-	int i;
-
-	for (i = 0; i < num; i++)
-		rte_pktmbuf_free(pkt_to_mbuf(pkt[i]));
-}
-
-void odp_packet_free_sp(const odp_packet_t pkt[], int num)
-{
-	odp_packet_free_multi(pkt, num);
-}
-
 int odp_packet_reset(odp_packet_t pkt, uint32_t len)
 {
 	odp_packet_hdr_t *const pkt_hdr = packet_hdr(pkt);
