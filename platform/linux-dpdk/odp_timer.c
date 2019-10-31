@@ -120,7 +120,7 @@ static inline timer_entry_t *timer_from_hdl(odp_timer_t timer_hdl)
 	return (timer_entry_t *)(uintptr_t)timer_hdl;
 }
 
-int odp_timer_init_global(const odp_init_t *params)
+int _odp_timer_init_global(const odp_init_t *params)
 {
 	odp_shm_t shm;
 	const char *conf_str;
@@ -163,7 +163,7 @@ int odp_timer_init_global(const odp_init_t *params)
 	return 0;
 }
 
-int odp_timer_term_global(void)
+int _odp_timer_term_global(void)
 {
 	if (timer_global && odp_shm_free(timer_global->shm)) {
 		ODP_ERR("Shm free failed for odp_timer\n");

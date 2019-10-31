@@ -284,7 +284,7 @@ static inline odp_bool_t is_dpdk_timer_cycles_support(void)
 	return false;
 }
 
-int odp_time_init_global(void)
+int _odp_time_init_global(void)
 {
 	struct timespec *timespec;
 	int ret = 0;
@@ -330,7 +330,7 @@ int odp_time_init_global(void)
 	return ret;
 }
 
-int odp_time_term_global(void)
+int _odp_time_term_global(void)
 {
 	return 0;
 }
