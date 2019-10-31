@@ -516,6 +516,13 @@ static int term_local(enum init_stage stage)
 		}
 		/* Fall through */
 
+	case POOL_INIT:
+		if (_odp_pool_term_local()) {
+			ODP_ERR("ODP buffer pool local term failed.\n");
+			rc = -1;
+		}
+		/* Fall through */
+
 	case CRYPTO_INIT:
 		if (_odp_crypto_term_local()) {
 			ODP_ERR("ODP crypto local term failed.\n");
@@ -526,13 +533,6 @@ static int term_local(enum init_stage stage)
 	case RANDOM_INIT:
 		if (_odp_random_term_local()) {
 			ODP_ERR("ODP random local term failed.\n");
-			rc = -1;
-		}
-		/* Fall through */
-
-	case POOL_INIT:
-		if (_odp_pool_term_local()) {
-			ODP_ERR("ODP buffer pool local term failed.\n");
 			rc = -1;
 		}
 		/* Fall through */
