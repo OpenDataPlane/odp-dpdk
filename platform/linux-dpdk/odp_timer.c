@@ -173,6 +173,16 @@ int _odp_timer_term_global(void)
 	return 0;
 }
 
+int _odp_timer_init_local(void)
+{
+	return 0;
+}
+
+int _odp_timer_term_local(void)
+{
+	return 0;
+}
+
 void _timer_run_inline(int dec)
 {
 	static __thread int timer_run_cnt = 1;
