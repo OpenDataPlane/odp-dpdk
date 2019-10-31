@@ -278,7 +278,7 @@ static void free_session(crypto_session_entry_t *session)
 	odp_spinlock_unlock(&global->lock);
 }
 
-int odp_crypto_init_global(void)
+int _odp_crypto_init_global(void)
 {
 	size_t mem_size;
 	int idx;
@@ -1510,7 +1510,7 @@ int odp_crypto_session_destroy(odp_crypto_session_t _session)
 	return 0;
 }
 
-int odp_crypto_term_global(void)
+int _odp_crypto_term_global(void)
 {
 	int rc = 0;
 	int ret;
