@@ -96,7 +96,7 @@ extern const _odp_pool_inline_offset_t _odp_pool_inline;
 _ODP_INLINE void *odp_packet_offset(odp_packet_t pkt, uint32_t offset,
 				    uint32_t *len, odp_packet_seg_t *seg)
 {
-	struct rte_mbuf *mb = &_odp_pkt_get(pkt, struct rte_mbuf, mb);
+	struct rte_mbuf *mb = (struct rte_mbuf *)pkt;
 
 	if (odp_unlikely(offset == ODP_PACKET_OFFSET_INVALID))
 		goto err;
@@ -150,12 +150,12 @@ _ODP_INLINE void *odp_packet_data_seg_len(odp_packet_t pkt,
 
 _ODP_INLINE uint32_t odp_packet_headroom(odp_packet_t pkt)
 {
-	return rte_pktmbuf_headroom(&_odp_pkt_get(pkt, struct rte_mbuf, mb));
+	return rte_pktmbuf_headroom((struct rte_mbuf *)pkt);
 }
 
 _ODP_INLINE uint32_t odp_packet_tailroom(odp_packet_t pkt)
 {
-	struct rte_mbuf *mb = &_odp_pkt_get(pkt, struct rte_mbuf, mb);
+	struct rte_mbuf *mb = (struct rte_mbuf *)pkt;
 
 	return rte_pktmbuf_tailroom(rte_pktmbuf_lastseg(mb));
 }
@@ -268,9 +268,7 @@ _ODP_INLINE void *odp_packet_head(odp_packet_t pkt)
 
 _ODP_INLINE int odp_packet_is_segmented(odp_packet_t pkt)
 {
-	struct rte_mbuf *mb = &_odp_pkt_get(pkt, struct rte_mbuf, mb);
-
-	return !rte_pktmbuf_is_contiguous(mb);
+	return !rte_pktmbuf_is_contiguous((struct rte_mbuf *)pkt);
 }
 
 _ODP_INLINE odp_packet_seg_t odp_packet_first_seg(odp_packet_t pkt)
@@ -280,7 +278,7 @@ _ODP_INLINE odp_packet_seg_t odp_packet_first_seg(odp_packet_t pkt)
 
 _ODP_INLINE odp_packet_seg_t odp_packet_last_seg(odp_packet_t pkt)
 {
-	struct rte_mbuf *mb = &_odp_pkt_get(pkt, struct rte_mbuf, mb);
+	struct rte_mbuf *mb = (struct rte_mbuf *)pkt;
 
 	return (odp_packet_seg_t)(uintptr_t)rte_pktmbuf_lastseg(mb);
 }
