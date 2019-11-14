@@ -19,17 +19,11 @@
 /* Fill in buffer header field offsets for inline functions */
 const _odp_buffer_inline_offset_t ODP_ALIGNED_CACHE
 _odp_buffer_inline_offset = {
-	.event_type = offsetof(odp_buffer_hdr_t, event_type)
+	.event_type = offsetof(odp_buffer_hdr_t, event_type),
+	.base_data  = offsetof(odp_buffer_hdr_t, mb.buf_addr)
 };
 
 #include <odp/visibility_end.h>
-
-void *odp_buffer_addr(odp_buffer_t buf)
-{
-	odp_buffer_hdr_t *hdr = buf_hdl_to_hdr(buf);
-
-	return hdr->mb.buf_addr;
-}
 
 uint32_t odp_buffer_size(odp_buffer_t buf)
 {
