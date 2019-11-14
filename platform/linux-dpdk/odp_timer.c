@@ -1,4 +1,5 @@
 /* Copyright (c) 2018, Linaro Limited
+ * Copyright (c) 2019, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -98,8 +99,10 @@ typedef struct {
 	odp_shm_t shm;
 	odp_ticketlock_t lock;
 	volatile uint64_t wait_counter;
+	uint64_t poll_interval_nsec;
+	odp_time_t poll_interval_time;
 	int num_timer_pools;
-	int inline_poll_interval;
+	int poll_interval;
 
 } timer_global_t;
 
@@ -156,7 +159,17 @@ int _odp_timer_init_global(const odp_init_t *params)
 		odp_shm_free(shm);
 		return -1;
 	}
-	timer_global->inline_poll_interval = val;
+	timer_global->poll_interval = val;
+
+	conf_str =  "timer.inline_poll_interval_nsec";
+	if (!_odp_libconfig_lookup_int(conf_str, &val)) {
+		ODP_ERR("Config option '%s' not found.\n", conf_str);
+		odp_shm_free(shm);
+		return -1;
+	}
+	timer_global->poll_interval_nsec = val;
+	timer_global->poll_interval_time =
+		odp_time_global_from_ns(timer_global->poll_interval_nsec);
 
 	rte_timer_subsystem_init();
 
@@ -185,17 +198,31 @@ int _odp_timer_term_local(void)
 
 void _timer_run_inline(int dec)
 {
+	static __thread odp_time_t last_timer_run;
 	static __thread int timer_run_cnt = 1;
+	int poll_interval = timer_global->poll_interval;
+	odp_time_t now;
 
 	/* Rate limit how often this thread checks the timer pools. */
 
-	if (timer_global->inline_poll_interval > 1) {
+	if (poll_interval > 1) {
 		timer_run_cnt -= dec;
 		if (timer_run_cnt > 0)
 			return;
-		timer_run_cnt = timer_global->inline_poll_interval;
+		timer_run_cnt = poll_interval;
 	}
 
+	now = odp_time_global();
+
+	if (poll_interval > 1) {
+		odp_time_t period = odp_time_diff(now, last_timer_run);
+
+		if (odp_time_cmp(period, timer_global->poll_interval_time) < 0)
+			return;
+		last_timer_run = now;
+	}
+
+	/* Check timer pools */
 	rte_timer_manage();
 }
 
@@ -269,6 +296,7 @@ odp_timer_pool_t odp_timer_pool_create(const char *name,
 	timer_pool_t *timer_pool;
 	timer_entry_t *timer;
 	uint32_t i, num_timers;
+	uint64_t res_ns, nsec_per_scan;
 
 	if (odp_global_ro.init_param.not_used.feat.timer) {
 		ODP_ERR("Trying to use disabled ODP feature.\n");
@@ -286,6 +314,13 @@ odp_timer_pool_t odp_timer_pool_create(const char *name,
 	}
 
 	num_timers = param->num_timers;
+	res_ns = param->res_ns;
+
+	/* Scan timer pool twice during resolution interval */
+	if (res_ns > ODP_TIME_USEC_IN_NS)
+		nsec_per_scan = res_ns / 2;
+	else
+		nsec_per_scan = res_ns;
 
 	/* Ring size must larger than param->num_timers */
 	if (CHECK_IS_POWER2(num_timers))
@@ -313,6 +348,13 @@ odp_timer_pool_t odp_timer_pool_create(const char *name,
 	/* Enable inline timer polling */
 	if (timer_global->num_timer_pools == 1)
 		odp_global_rw->inline_timers = true;
+
+	/* Increase poll rate to match the highest resolution */
+	if (timer_global->poll_interval_nsec > nsec_per_scan) {
+		timer_global->poll_interval_nsec = nsec_per_scan;
+		timer_global->poll_interval_time =
+			odp_time_global_from_ns(nsec_per_scan);
+	}
 
 	odp_ticketlock_unlock(&timer_global->lock);
 	if (name) {
