@@ -107,7 +107,6 @@ noinst_HEADERS = \
 		  include/odp_errno_define.h \
 		  include/odp_packet_dpdk.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_packet_io_ipc_internal.h \
-		  ${top_srcdir}/platform/linux-generic/include/odp_packet_io_ring_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_pcapng.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_pkt_queue_internal.h \
 		  include/odp_pool_internal.h \
