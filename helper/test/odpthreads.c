@@ -4,8 +4,6 @@
  * SPDX-License-Identifier:     BSD-3-Clause
  */
 
-#include "config.h"
-
 /*
  * This program tests the ability of the linux helper to create ODP threads,
  * either implemented as linux pthreads or as linux processes, depending on
@@ -26,7 +24,7 @@ static void main_exit(void);
 /* ODP application instance */
 static odp_instance_t odp_instance;
 
-static int worker_fn(void *arg ODPH_UNUSED)
+static int worker_fn(void *arg ODP_UNUSED)
 {
 	int cpu;
 	odp_cpumask_t workers;

@@ -1,10 +1,9 @@
 /* Copyright (c) 2013-2018, Linaro Limited
+ * Copyright (c) 2019, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
  */
-
-#include "config.h"
 
 #include <odp/api/buffer.h>
 #include <odp_pool_internal.h>
@@ -21,27 +20,11 @@
 /* Fill in buffer header field offsets for inline functions */
 const _odp_buffer_inline_offset_t ODP_ALIGNED_CACHE
 _odp_buffer_inline_offset = {
-	.event_type = offsetof(odp_buffer_hdr_t, event_type)
+	.event_type = offsetof(odp_buffer_hdr_t, event_type),
+	.base_data  = offsetof(odp_buffer_hdr_t, base_data)
 };
 
 #include <odp/visibility_end.h>
-
-odp_buffer_t odp_buffer_from_event(odp_event_t ev)
-{
-	return (odp_buffer_t)ev;
-}
-
-odp_event_t odp_buffer_to_event(odp_buffer_t buf)
-{
-	return (odp_event_t)buf;
-}
-
-void *odp_buffer_addr(odp_buffer_t buf)
-{
-	odp_buffer_hdr_t *hdr = buf_hdl_to_hdr(buf);
-
-	return hdr->seg[0].data;
-}
 
 uint32_t odp_buffer_size(odp_buffer_t buf)
 {
@@ -71,7 +54,7 @@ int odp_buffer_snprint(char *str, uint32_t n, odp_buffer_t buf)
 			"  pool         %" PRIu64 "\n",
 			odp_pool_to_u64(pool->pool_hdl));
 	len += snprintf(&str[len], n - len,
-			"  addr         %p\n",          hdr->seg[0].data);
+			"  addr         %p\n",          hdr->base_data);
 	len += snprintf(&str[len], n - len,
 			"  size         %" PRIu32 "\n", odp_buffer_size(buf));
 	len += snprintf(&str[len], n - len,

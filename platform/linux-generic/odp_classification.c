@@ -1,10 +1,9 @@
 /* Copyright (c) 2014-2018, Linaro Limited
+ * Copyright (c) 2019, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
  */
-
-#include "config.h"
 
 #include <odp/api/classification.h>
 #include <odp/api/align.h>
@@ -16,12 +15,14 @@
 #include <odp/api/packet_io.h>
 #include <odp_packet_io_internal.h>
 #include <odp_classification_datamodel.h>
-#include <odp_classification_inlines.h>
 #include <odp_classification_internal.h>
 #include <odp/api/shared_memory.h>
-#include <protocols/thash.h>
 #include <protocols/eth.h>
 #include <protocols/ip.h>
+#include <protocols/ipsec.h>
+#include <protocols/udp.h>
+#include <protocols/tcp.h>
+#include <protocols/thash.h>
 #include <string.h>
 #include <errno.h>
 #include <stdbool.h>
@@ -87,7 +88,7 @@ pmr_t *get_pmr_entry_internal(odp_pmr_t pmr)
 	return &pmr_tbl->pmr[_odp_pmr_to_ndx(pmr)];
 }
 
-int odp_classification_init_global(void)
+int _odp_classification_init_global(void)
 {
 	odp_shm_t shm;
 	int i;
@@ -120,10 +121,10 @@ int odp_classification_init_global(void)
 	return 0;
 }
 
-int odp_classification_term_global(void)
+int _odp_classification_term_global(void)
 {
 	if (cls_global && odp_shm_free(cls_global->shm)) {
-		ODP_ERR("shm free failed");
+		ODP_ERR("shm free failed\n");
 		return -1;
 	}
 
@@ -157,6 +158,12 @@ int odp_cls_capability(odp_cls_capability_t *capability)
 	capability->max_cos = CLS_COS_MAX_ENTRY;
 	capability->pmr_range_supported = false;
 	capability->supported_terms.all_bits = 0;
+	capability->supported_terms.bit.len = 1;
+	capability->supported_terms.bit.ethtype_0 = 1;
+	capability->supported_terms.bit.ethtype_x = 1;
+	capability->supported_terms.bit.vlan_id_0 = 1;
+	capability->supported_terms.bit.vlan_id_x = 1;
+	capability->supported_terms.bit.dmac = 1;
 	capability->supported_terms.bit.ip_proto = 1;
 	capability->supported_terms.bit.udp_dport = 1;
 	capability->supported_terms.bit.udp_sport = 1;
@@ -164,6 +171,10 @@ int odp_cls_capability(odp_cls_capability_t *capability)
 	capability->supported_terms.bit.tcp_sport = 1;
 	capability->supported_terms.bit.sip_addr = 1;
 	capability->supported_terms.bit.dip_addr = 1;
+	capability->supported_terms.bit.sip6_addr = 1;
+	capability->supported_terms.bit.dip6_addr = 1;
+	capability->supported_terms.bit.custom_frame = 1;
+	capability->supported_terms.bit.custom_l3 = 1;
 	capability->random_early_detection = ODP_SUPPORT_NO;
 	capability->back_pressure = ODP_SUPPORT_NO;
 	capability->threshold_red.all_bits = 0;
@@ -262,7 +273,7 @@ odp_cos_t odp_cls_cos_create(const char *name, odp_cls_cos_param_t *param)
 		UNLOCK(&cos->s.lock);
 	}
 
-	ODP_ERR("CLS_COS_MAX_ENTRY reached");
+	ODP_ERR("CLS_COS_MAX_ENTRY reached\n");
 	return ODP_COS_INVALID;
 }
 
@@ -286,7 +297,7 @@ odp_pmr_t alloc_pmr(pmr_t **pmr)
 		}
 		UNLOCK(&pmr_tbl->pmr[i].s.lock);
 	}
-	ODP_ERR("CLS_PMR_MAX_ENTRY reached");
+	ODP_ERR("CLS_PMR_MAX_ENTRY reached\n");
 	return ODP_PMR_INVALID;
 }
 
@@ -320,7 +331,7 @@ int odp_cos_destroy(odp_cos_t cos_id)
 	cos_t *cos = get_cos_entry(cos_id);
 
 	if (NULL == cos) {
-		ODP_ERR("Invalid odp_cos_t handle");
+		ODP_ERR("Invalid odp_cos_t handle\n");
 		return -1;
 	}
 
@@ -333,12 +344,12 @@ int odp_cos_queue_set(odp_cos_t cos_id, odp_queue_t queue_id)
 	cos_t *cos = get_cos_entry(cos_id);
 
 	if (cos == NULL) {
-		ODP_ERR("Invalid odp_cos_t handle");
+		ODP_ERR("Invalid odp_cos_t handle\n");
 		return -1;
 	}
 
 	if (cos->s.num_queue != 1) {
-		ODP_ERR("Hashing enabled, cannot set queue");
+		ODP_ERR("Hashing enabled, cannot set queue\n");
 		return -1;
 	}
 
@@ -353,7 +364,7 @@ odp_queue_t odp_cos_queue(odp_cos_t cos_id)
 	cos_t *cos = get_cos_entry(cos_id);
 
 	if (!cos) {
-		ODP_ERR("Invalid odp_cos_t handle");
+		ODP_ERR("Invalid odp_cos_t handle\n");
 		return ODP_QUEUE_INVALID;
 	}
 
@@ -365,7 +376,7 @@ uint32_t odp_cls_cos_num_queue(odp_cos_t cos_id)
 	cos_t *cos = get_cos_entry(cos_id);
 
 	if (!cos) {
-		ODP_ERR("Invalid odp_cos_t handle");
+		ODP_ERR("Invalid odp_cos_t handle\n");
 		return 0;
 	}
 
@@ -382,7 +393,7 @@ uint32_t odp_cls_cos_queues(odp_cos_t cos_id, odp_queue_t queue[],
 
 	cos  = get_cos_entry(cos_id);
 	if (!cos) {
-		ODP_ERR("Invalid odp_cos_t handle");
+		ODP_ERR("Invalid odp_cos_t handle\n");
 		return 0;
 	}
 
@@ -411,7 +422,7 @@ int odp_cos_drop_set(odp_cos_t cos_id, odp_cls_drop_t drop_policy)
 	cos_t *cos = get_cos_entry(cos_id);
 
 	if (!cos) {
-		ODP_ERR("Invalid odp_cos_t handle");
+		ODP_ERR("Invalid odp_cos_t handle\n");
 		return -1;
 	}
 
@@ -425,7 +436,7 @@ odp_cls_drop_t odp_cos_drop(odp_cos_t cos_id)
 	cos_t *cos = get_cos_entry(cos_id);
 
 	if (!cos) {
-		ODP_ERR("Invalid odp_cos_t handle");
+		ODP_ERR("Invalid odp_cos_t handle\n");
 		return -1;
 	}
 
@@ -439,12 +450,12 @@ int odp_pktio_default_cos_set(odp_pktio_t pktio_in, odp_cos_t default_cos)
 
 	entry = get_pktio_entry(pktio_in);
 	if (entry == NULL) {
-		ODP_ERR("Invalid odp_pktio_t handle");
+		ODP_ERR("Invalid odp_pktio_t handle\n");
 		return -1;
 	}
 	cos = get_cos_entry(default_cos);
 	if (cos == NULL) {
-		ODP_ERR("Invalid odp_cos_t handle");
+		ODP_ERR("Invalid odp_cos_t handle\n");
 		return -1;
 	}
 
@@ -459,13 +470,13 @@ int odp_pktio_error_cos_set(odp_pktio_t pktio_in, odp_cos_t error_cos)
 
 	entry = get_pktio_entry(pktio_in);
 	if (entry == NULL) {
-		ODP_ERR("Invalid odp_pktio_t handle");
+		ODP_ERR("Invalid odp_pktio_t handle\n");
 		return -1;
 	}
 
 	cos = get_cos_entry(error_cos);
 	if (cos == NULL) {
-		ODP_ERR("Invalid odp_cos_t handle");
+		ODP_ERR("Invalid odp_cos_t handle\n");
 		return -1;
 	}
 
@@ -478,7 +489,7 @@ int odp_pktio_skip_set(odp_pktio_t pktio_in, uint32_t offset)
 	pktio_entry_t *entry = get_pktio_entry(pktio_in);
 
 	if (entry == NULL) {
-		ODP_ERR("Invalid odp_cos_t handle");
+		ODP_ERR("Invalid odp_pktio_t handle\n");
 		return -1;
 	}
 
@@ -491,7 +502,7 @@ int odp_pktio_headroom_set(odp_pktio_t pktio_in, uint32_t headroom)
 	pktio_entry_t *entry = get_pktio_entry(pktio_in);
 
 	if (entry == NULL) {
-		ODP_ERR("Invalid odp_pktio_t handle");
+		ODP_ERR("Invalid odp_pktio_t handle\n");
 		return -1;
 	}
 	entry->s.cls.headroom = headroom;
@@ -509,7 +520,7 @@ int odp_cos_with_l2_priority(odp_pktio_t pktio_in,
 	pktio_entry_t *entry = get_pktio_entry(pktio_in);
 
 	if (entry == NULL) {
-		ODP_ERR("Invalid odp_pktio_t handle");
+		ODP_ERR("Invalid odp_pktio_t handle\n");
 		return -1;
 	}
 	l2_cos = &entry->s.cls.l2_cos_table;
@@ -539,7 +550,7 @@ int odp_cos_with_l3_qos(odp_pktio_t pktio_in,
 	cos_t *cos;
 
 	if (entry == NULL) {
-		ODP_ERR("Invalid odp_pktio_t handle");
+		ODP_ERR("Invalid odp_pktio_t handle\n");
 		return -1;
 	}
 
@@ -559,52 +570,93 @@ int odp_cos_with_l3_qos(odp_pktio_t pktio_in,
 	return 0;
 }
 
-static int odp_pmr_create_term(pmr_term_value_t *value,
-			       const odp_pmr_param_t *param)
+static int pmr_create_term(pmr_term_value_t *value,
+			   const odp_pmr_param_t *param)
 {
-	value->term = param->term;
-	value->range_term = param->range_term;
+	uint32_t size;
 	uint8_t i;
+	int custom = 0;
+	odp_cls_pmr_term_t term = param->term;
 
-	switch (value->term) {
+	if (param->range_term) {
+		ODP_ERR("PRM value range not supported\n");
+		return -1;
+	}
+
+	value->term = term;
+	value->range_term = param->range_term;
+
+	switch (term) {
+	case ODP_PMR_IPPROTO:
+		size = 1;
+		break;
+
+	case ODP_PMR_ETHTYPE_0:
+		/* Fall through */
+	case ODP_PMR_ETHTYPE_X:
+		/* Fall through */
+	case ODP_PMR_VLAN_ID_0:
+		/* Fall through */
+	case ODP_PMR_VLAN_ID_X:
+		/* Fall through */
+	case ODP_PMR_UDP_DPORT:
+		/* Fall through */
+	case ODP_PMR_TCP_DPORT:
+		/* Fall through */
+	case ODP_PMR_UDP_SPORT:
+		/* Fall through */
+	case ODP_PMR_TCP_SPORT:
+		size = 2;
+		break;
+
+	case ODP_PMR_LEN:
+		/* Fall through */
+	case ODP_PMR_SIP_ADDR:
+		/* Fall through */
+	case ODP_PMR_DIP_ADDR:
+		/* Fall through */
+	case ODP_PMR_IPSEC_SPI:
+		/* Fall through */
+	case ODP_PMR_LD_VNI:
+		size = 4;
+		break;
+
+	case ODP_PMR_DMAC:
+		size = 6;
+		break;
+
 	case ODP_PMR_SIP6_ADDR:
+		/* Fall through */
 	case ODP_PMR_DIP6_ADDR:
-	if (!value->range_term) {
-		memset(value->match_ipv6.addr.u8, 0, 16);
-		memset(value->match_ipv6.mask.u8, 0, 16);
-		memcpy(&value->match_ipv6.addr.u8, param->match.value,
-		       param->val_sz);
-		memcpy(&value->match_ipv6.mask.u8, param->match.mask,
-		       param->val_sz);
-		for (i = 0; i < 2; i++)
-			value->match_ipv6.addr.u64[i] &=
-				value->match_ipv6.mask.u64[i];
-	} else {
-		memset(value->range_ipv6.addr_start.u8, 0, 16);
-		memset(value->range_ipv6.addr_end.u8, 0, 16);
-		memcpy(&value->range_ipv6.addr_start.u8, param->range.val_start,
-		       param->val_sz);
-		memcpy(&value->range_ipv6.addr_end.u8, param->range.val_end,
-		       param->val_sz);
+		size = 16;
+		break;
+
+	case ODP_PMR_CUSTOM_FRAME:
+		/* Fall through */
+	case ODP_PMR_CUSTOM_L3:
+		custom = 1;
+		size = MAX_PMR_TERM_SIZE;
+		break;
+
+	default:
+		ODP_ERR("Bad PRM term\n");
+		return -1;
 	}
 
-	break;
-	default:
-	if (!value->range_term) {
-		value->match.value = 0;
-		value->match.mask = 0;
-		memcpy(&value->match.value, param->match.value, param->val_sz);
-		memcpy(&value->match.mask, param->match.mask, param->val_sz);
-		value->match.value &= value->match.mask;
-	} else {
-		value->range.val_start = 0;
-		value->range.val_end = 0;
-		memcpy(&value->range.val_start, param->range.val_start,
-		       param->val_sz);
-		memcpy(&value->range.val_end, param->range.val_end,
-		       param->val_sz);
+	if ((!custom && param->val_sz != size) ||
+	    (custom && param->val_sz > size)) {
+		ODP_ERR("Bad PMR value size: %u\n", param->val_sz);
+		return -1;
 	}
-	}
+
+	memset(&value->match.value, 0, MAX_PMR_TERM_SIZE);
+	memset(&value->match.mask, 0, MAX_PMR_TERM_SIZE);
+	memcpy(&value->match.value, param->match.value, param->val_sz);
+	memcpy(&value->match.mask, param->match.mask, param->val_sz);
+
+	for (i = 0; i < param->val_sz; i++)
+		value->match.value_u8[i] &= value->match.mask_u8[i];
+
 	value->offset = param->offset;
 	value->val_sz = param->val_sz;
 	return 0;
@@ -646,18 +698,17 @@ odp_pmr_t odp_cls_pmr_create(const odp_pmr_param_t *terms, int num_terms,
 	pmr_t *pmr;
 	int i;
 	odp_pmr_t id;
-	int val_sz;
 	uint32_t loc;
 	cos_t *cos_src = get_cos_entry(src_cos);
 	cos_t *cos_dst = get_cos_entry(dst_cos);
 
 	if (NULL == cos_src || NULL == cos_dst) {
-		ODP_ERR("Invalid input handle");
+		ODP_ERR("Invalid odp_cos_t handle\n");
 		return ODP_PMR_INVALID;
 	}
 
 	if (num_terms > CLS_PMRTERM_MAX) {
-		ODP_ERR("no of terms greater than supported CLS_PMRTERM_MAX");
+		ODP_ERR("no of terms greater than supported CLS_PMRTERM_MAX\n");
 		return ODP_PMR_INVALID;
 	}
 
@@ -671,13 +722,8 @@ odp_pmr_t odp_cls_pmr_create(const odp_pmr_param_t *terms, int num_terms,
 
 	pmr->s.num_pmr = num_terms;
 	for (i = 0; i < num_terms; i++) {
-		val_sz = terms[i].val_sz;
-		if (val_sz > CLS_PMR_TERM_BYTES_MAX) {
+		if (pmr_create_term(&pmr->s.pmr_term_value[i], &terms[i])) {
 			pmr->s.valid = 0;
-			return ODP_PMR_INVALID;
-		}
-		if (0 > odp_pmr_create_term(&pmr->s.pmr_term_value[i],
-					    &terms[i])) {
 			UNLOCK(&pmr->s.lock);
 			return ODP_PMR_INVALID;
 		}
@@ -698,7 +744,7 @@ int odp_cls_cos_pool_set(odp_cos_t cos_id, odp_pool_t pool)
 
 	cos = get_cos_entry(cos_id);
 	if (cos == NULL) {
-		ODP_ERR("Invalid odp_cos_t handle");
+		ODP_ERR("Invalid odp_cos_t handle\n");
 		return -1;
 	}
 
@@ -713,19 +759,403 @@ odp_pool_t odp_cls_cos_pool(odp_cos_t cos_id)
 
 	cos = get_cos_entry(cos_id);
 	if (cos == NULL) {
-		ODP_ERR("Invalid odp_cos_t handle");
+		ODP_ERR("Invalid odp_cos_t handle\n");
 		return ODP_POOL_INVALID;
 	}
 
 	return cos->s.pool;
 }
 
+static inline int verify_pmr_packet_len(odp_packet_hdr_t *pkt_hdr,
+					pmr_term_value_t *term_value)
+{
+	if (term_value->match.value == (packet_len(pkt_hdr) &
+				     term_value->match.mask))
+		return 1;
+
+	return 0;
+}
+
+static inline int verify_pmr_ip_proto(const uint8_t *pkt_addr,
+				      odp_packet_hdr_t *pkt_hdr,
+				      pmr_term_value_t *term_value)
+{
+	const _odp_ipv4hdr_t *ip;
+	uint8_t proto;
+
+	if (!pkt_hdr->p.input_flags.ipv4)
+		return 0;
+	ip = (const _odp_ipv4hdr_t *)(pkt_addr + pkt_hdr->p.l3_offset);
+	proto = ip->proto;
+	if (term_value->match.value == (proto & term_value->match.mask))
+		return 1;
+
+	return 0;
+}
+
+static inline int verify_pmr_ipv4_saddr(const uint8_t *pkt_addr,
+					odp_packet_hdr_t *pkt_hdr,
+					pmr_term_value_t *term_value)
+{
+	const _odp_ipv4hdr_t *ip;
+	uint32_t ipaddr;
+
+	if (!pkt_hdr->p.input_flags.ipv4)
+		return 0;
+	ip = (const _odp_ipv4hdr_t *)(pkt_addr + pkt_hdr->p.l3_offset);
+	ipaddr = ip->src_addr;
+	if (term_value->match.value == (ipaddr & term_value->match.mask))
+		return 1;
+
+	return 0;
+}
+
+static inline int verify_pmr_ipv4_daddr(const uint8_t *pkt_addr,
+					odp_packet_hdr_t *pkt_hdr,
+					pmr_term_value_t *term_value)
+{
+	const _odp_ipv4hdr_t *ip;
+	uint32_t ipaddr;
+
+	if (!pkt_hdr->p.input_flags.ipv4)
+		return 0;
+	ip = (const _odp_ipv4hdr_t *)(pkt_addr + pkt_hdr->p.l3_offset);
+	ipaddr = ip->dst_addr;
+	if (term_value->match.value == (ipaddr & term_value->match.mask))
+		return 1;
+
+	return 0;
+}
+
+static inline int verify_pmr_tcp_sport(const uint8_t *pkt_addr,
+				       odp_packet_hdr_t *pkt_hdr,
+				       pmr_term_value_t *term_value)
+{
+	uint16_t sport;
+	const _odp_tcphdr_t *tcp;
+
+	if (!pkt_hdr->p.input_flags.tcp)
+		return 0;
+	tcp = (const _odp_tcphdr_t *)(pkt_addr + pkt_hdr->p.l4_offset);
+	sport = tcp->src_port;
+	if (term_value->match.value == (sport & term_value->match.mask))
+		return 1;
+
+	return 0;
+}
+
+static inline int verify_pmr_tcp_dport(const uint8_t *pkt_addr,
+				       odp_packet_hdr_t *pkt_hdr,
+				       pmr_term_value_t *term_value)
+{
+	uint16_t dport;
+	const _odp_tcphdr_t *tcp;
+
+	if (!pkt_hdr->p.input_flags.tcp)
+		return 0;
+	tcp = (const _odp_tcphdr_t *)(pkt_addr + pkt_hdr->p.l4_offset);
+	dport = tcp->dst_port;
+	if (term_value->match.value == (dport & term_value->match.mask))
+		return 1;
+
+	return 0;
+}
+
+static inline int verify_pmr_udp_dport(const uint8_t *pkt_addr,
+				       odp_packet_hdr_t *pkt_hdr,
+				       pmr_term_value_t *term_value)
+{
+	uint16_t dport;
+	const _odp_udphdr_t *udp;
+
+	if (!pkt_hdr->p.input_flags.udp)
+		return 0;
+	udp = (const _odp_udphdr_t *)(pkt_addr + pkt_hdr->p.l4_offset);
+	dport = udp->dst_port;
+	if (term_value->match.value == (dport & term_value->match.mask))
+		return 1;
+
+	return 0;
+}
+
+static inline int verify_pmr_udp_sport(const uint8_t *pkt_addr,
+				       odp_packet_hdr_t *pkt_hdr,
+				       pmr_term_value_t *term_value)
+{
+	uint16_t sport;
+	const _odp_udphdr_t *udp;
+
+	if (!pkt_hdr->p.input_flags.udp)
+		return 0;
+	udp = (const _odp_udphdr_t *)(pkt_addr + pkt_hdr->p.l4_offset);
+	sport = udp->src_port;
+	if (term_value->match.value == (sport & term_value->match.mask))
+		return 1;
+
+	return 0;
+}
+
+static inline int verify_pmr_dmac(const uint8_t *pkt_addr,
+				  odp_packet_hdr_t *pkt_hdr,
+				  pmr_term_value_t *term_value)
+{
+	const _odp_ethhdr_t *eth;
+	uint16_t dmac[3];
+	uint16_t *mask  = (uint16_t *)&term_value->match.mask;
+	uint16_t *value = (uint16_t *)&term_value->match.value;
+
+	if (!packet_hdr_has_eth(pkt_hdr))
+		return 0;
+
+	eth = (const _odp_ethhdr_t *)(pkt_addr + pkt_hdr->p.l2_offset);
+	memcpy(dmac, eth->dst.addr, _ODP_ETHADDR_LEN);
+	dmac[0] &= mask[0];
+	dmac[1] &= mask[1];
+	dmac[2] &= mask[2];
+
+	if (value[0] == dmac[0] && value[1] == dmac[1] && value[2] == dmac[2])
+		return 1;
+
+	return 0;
+}
+
+static inline int verify_pmr_ipv6_saddr(const uint8_t *pkt_addr,
+					odp_packet_hdr_t *pkt_hdr,
+					pmr_term_value_t *term_value)
+{
+	const _odp_ipv6hdr_t *ipv6;
+	uint64_t addr[2];
+
+	if (!packet_hdr_has_ipv6(pkt_hdr))
+		return 0;
+
+	ipv6 = (const _odp_ipv6hdr_t *)(pkt_addr + pkt_hdr->p.l3_offset);
+	memcpy(addr, ipv6->src_addr.u64, _ODP_IPV6ADDR_LEN);
+
+	addr[0] = addr[0] & term_value->match.mask_u64[0];
+	addr[1] = addr[1] & term_value->match.mask_u64[1];
+
+	if (addr[0] == term_value->match.value_u64[0] &&
+	    addr[1] == term_value->match.value_u64[1])
+		return 1;
+
+	return 0;
+}
+
+static inline int verify_pmr_ipv6_daddr(const uint8_t *pkt_addr,
+					odp_packet_hdr_t *pkt_hdr,
+					pmr_term_value_t *term_value)
+{
+	const _odp_ipv6hdr_t *ipv6;
+	uint64_t addr[2];
+
+	if (!packet_hdr_has_ipv6(pkt_hdr))
+		return 0;
+
+	ipv6 = (const _odp_ipv6hdr_t *)(pkt_addr + pkt_hdr->p.l3_offset);
+	memcpy(addr, ipv6->dst_addr.u64, _ODP_IPV6ADDR_LEN);
+
+	addr[0] = addr[0] & term_value->match.mask_u64[0];
+	addr[1] = addr[1] & term_value->match.mask_u64[1];
+
+	if (addr[0] == term_value->match.value_u64[0] &&
+	    addr[1] == term_value->match.value_u64[1])
+		return 1;
+
+	return 0;
+}
+
+static inline int verify_pmr_vlan_id_0(const uint8_t *pkt_addr,
+				       odp_packet_hdr_t *pkt_hdr,
+				       pmr_term_value_t *term_value)
+{
+	const _odp_ethhdr_t *eth;
+	const _odp_vlanhdr_t *vlan;
+	uint16_t tci;
+	uint16_t vlan_id;
+
+	if (!packet_hdr_has_eth(pkt_hdr) || !pkt_hdr->p.input_flags.vlan)
+		return 0;
+
+	eth = (const _odp_ethhdr_t *)(pkt_addr + pkt_hdr->p.l2_offset);
+	vlan = (const _odp_vlanhdr_t *)(eth + 1);
+	tci = vlan->tci;
+	vlan_id = tci & odp_cpu_to_be_16(0x0fff);
+
+	if (term_value->match.value == (vlan_id & term_value->match.mask))
+		return 1;
+
+	return 0;
+}
+
+static inline int verify_pmr_vlan_id_x(const uint8_t *pkt_addr,
+				       odp_packet_hdr_t *pkt_hdr,
+				       pmr_term_value_t *term_value)
+{
+	const _odp_ethhdr_t *eth;
+	const _odp_vlanhdr_t *vlan;
+	uint16_t tci;
+	uint16_t vlan_id;
+
+	if (!pkt_hdr->p.input_flags.vlan && !pkt_hdr->p.input_flags.vlan_qinq)
+		return 0;
+
+	eth = (const _odp_ethhdr_t *)(pkt_addr + pkt_hdr->p.l2_offset);
+	vlan = (const _odp_vlanhdr_t *)(eth + 1);
+
+	if (pkt_hdr->p.input_flags.vlan_qinq)
+		vlan++;
+
+	tci = vlan->tci;
+	vlan_id = tci & odp_cpu_to_be_16(0x0fff);
+
+	if (term_value->match.value == (vlan_id & term_value->match.mask))
+		return 1;
+
+	return 0;
+}
+
+static inline int verify_pmr_ipsec_spi(const uint8_t *pkt_addr,
+				       odp_packet_hdr_t *pkt_hdr,
+				       pmr_term_value_t *term_value)
+{
+	uint32_t spi;
+
+	pkt_addr += pkt_hdr->p.l4_offset;
+
+	if (pkt_hdr->p.input_flags.ipsec_ah) {
+		const _odp_ahhdr_t *ahhdr = (const _odp_ahhdr_t *)pkt_addr;
+
+		spi = odp_be_to_cpu_32(ahhdr->spi);
+	} else if (pkt_hdr->p.input_flags.ipsec_esp) {
+		const _odp_esphdr_t *esphdr = (const _odp_esphdr_t *)pkt_addr;
+
+		spi = odp_be_to_cpu_32(esphdr->spi);
+	} else {
+		return 0;
+	}
+
+	if (term_value->match.value == (spi & term_value->match.mask))
+		return 1;
+
+	return 0;
+}
+
+static inline int verify_pmr_ld_vni(const uint8_t *pkt_addr ODP_UNUSED,
+				    odp_packet_hdr_t *pkt_hdr ODP_UNUSED,
+				    pmr_term_value_t *term_value ODP_UNUSED)
+{
+	ODP_UNIMPLEMENTED();
+	return 0;
+}
+
+static inline int verify_pmr_custom_frame(const uint8_t *pkt_addr,
+					  odp_packet_hdr_t *pkt_hdr,
+					  pmr_term_value_t *term_value)
+{
+	uint32_t i;
+	uint8_t val;
+	uint32_t offset = term_value->offset;
+	uint32_t val_sz = term_value->val_sz;
+
+	ODP_ASSERT(val_sz <= MAX_PMR_TERM_SIZE);
+
+	if (packet_len(pkt_hdr) <= offset + val_sz)
+		return 0;
+
+	pkt_addr += offset;
+
+	for (i = 0; i < val_sz; i++) {
+		val = pkt_addr[i] & term_value->match.mask_u8[i];
+
+		if (val != term_value->match.value_u8[i])
+			return 0;
+	}
+
+	return 1;
+}
+
+static inline int verify_pmr_custom_l3(const uint8_t *pkt_addr,
+				       odp_packet_hdr_t *pkt_hdr,
+				       pmr_term_value_t *term_value)
+{
+	uint32_t i;
+	uint8_t val;
+	uint32_t l3_offset = pkt_hdr->p.l3_offset;
+	uint32_t offset = l3_offset + term_value->offset;
+	uint32_t val_sz = term_value->val_sz;
+
+	ODP_ASSERT(val_sz <= MAX_PMR_TERM_SIZE);
+
+	if (pkt_hdr->p.input_flags.l2 == 0 ||
+	    l3_offset == ODP_PACKET_OFFSET_INVALID)
+		return 0;
+
+	if (packet_len(pkt_hdr) <= offset + val_sz)
+		return 0;
+
+	pkt_addr += offset;
+
+	for (i = 0; i < val_sz; i++) {
+		val = pkt_addr[i] & term_value->match.mask_u8[i];
+
+		if (val != term_value->match.value_u8[i])
+			return 0;
+	}
+
+	return 1;
+}
+
+static inline int verify_pmr_eth_type_0(const uint8_t *pkt_addr,
+					odp_packet_hdr_t *pkt_hdr,
+					pmr_term_value_t *term_value)
+{
+	const _odp_ethhdr_t *eth;
+	uint16_t ethtype;
+
+	if (!packet_hdr_has_eth(pkt_hdr))
+		return 0;
+
+	eth = (const _odp_ethhdr_t *)(pkt_addr + pkt_hdr->p.l2_offset);
+	ethtype = eth->type;
+
+	if (term_value->match.value == (ethtype & term_value->match.mask))
+		return 1;
+
+	return 0;
+}
+
+static inline int verify_pmr_eth_type_x(const uint8_t *pkt_addr,
+					odp_packet_hdr_t *pkt_hdr,
+					pmr_term_value_t *term_value)
+{
+	const _odp_ethhdr_t *eth;
+	uint16_t ethtype;
+	const _odp_vlanhdr_t *vlan;
+
+	if (!pkt_hdr->p.input_flags.vlan && !pkt_hdr->p.input_flags.vlan_qinq)
+		return 0;
+
+	eth = (const _odp_ethhdr_t *)(pkt_addr + pkt_hdr->p.l2_offset);
+	vlan = (const _odp_vlanhdr_t *)(eth + 1);
+
+	if (pkt_hdr->p.input_flags.vlan_qinq)
+		vlan++;
+
+	ethtype = vlan->type;
+
+	if (term_value->match.value == (ethtype & term_value->match.mask))
+		return 1;
+
+	return 0;
+}
+
 /*
  * This function goes through each PMR_TERM value in pmr_t structure and calls
  * verification function for each term.Returns 1 if PMR matches or 0 otherwise.
  */
-static
-int verify_pmr(pmr_t *pmr, const uint8_t *pkt_addr, odp_packet_hdr_t *pkt_hdr)
+static int verify_pmr(pmr_t *pmr, const uint8_t *pkt_addr,
+		      odp_packet_hdr_t *pkt_hdr)
 {
 	int pmr_failure = 0;
 	int num_pmr;
@@ -832,15 +1262,23 @@ int verify_pmr(pmr_t *pmr, const uint8_t *pkt_addr, odp_packet_hdr_t *pkt_hdr)
 						     term_value))
 				pmr_failure = 1;
 			break;
+		case ODP_PMR_CUSTOM_L3:
+			if (!verify_pmr_custom_l3(pkt_addr, pkt_hdr,
+						  term_value))
+				pmr_failure = 1;
+			break;
 		case ODP_PMR_INNER_HDR_OFF:
+			break;
+		default:
+			pmr_failure = 1;
 			break;
 		}
 
 		if (pmr_failure)
-			return false;
+			return 0;
 	}
 	odp_atomic_inc_u32(&pmr->s.count);
-	return true;
+	return 1;
 }
 
 /*
@@ -848,14 +1286,10 @@ int verify_pmr(pmr_t *pmr, const uint8_t *pkt_addr, odp_packet_hdr_t *pkt_hdr)
  * This function gets called recursively to check the chained PMR Term value
  * with the packet.
  */
-static
-cos_t *match_pmr_cos(cos_t *cos, const uint8_t *pkt_addr, pmr_t *pmr,
-		     odp_packet_hdr_t *hdr)
+static cos_t *match_pmr_cos(cos_t *cos, const uint8_t *pkt_addr, pmr_t *pmr,
+			    odp_packet_hdr_t *hdr)
 {
-	cos_t *retcos;
-	uint32_t i;
-
-	retcos  = NULL;
+	uint32_t i, num_rule;
 
 	if (cos == NULL || pmr == NULL)
 		return NULL;
@@ -864,19 +1298,29 @@ cos_t *match_pmr_cos(cos_t *cos, const uint8_t *pkt_addr, pmr_t *pmr,
 		return NULL;
 
 	if (verify_pmr(pmr, pkt_addr, hdr)) {
-		/** This gets called recursively to check all the PMRs in
-		 * a PMR chain */
-		if (0 == odp_atomic_load_u32(&cos->s.num_rule))
+		/* This gets called recursively. First matching leaf or branch
+		 * is returned. */
+		num_rule = odp_atomic_load_u32(&cos->s.num_rule);
+
+		/* No more rules. This is the best match. */
+		if (num_rule == 0)
 			return cos;
 
-		for (i = 0; i < odp_atomic_load_u32(&cos->s.num_rule); i++) {
-			retcos = match_pmr_cos(cos->s.linked_cos[i], pkt_addr,
-					       cos->s.pmr[i], hdr);
-			if (!retcos)
-				return cos;
+		for (i = 0; i < num_rule; i++) {
+			cos_t *retcos = match_pmr_cos(cos->s.linked_cos[i],
+						      pkt_addr, cos->s.pmr[i],
+						      hdr);
+
+			/* Found a matching leaf */
+			if (retcos)
+				return retcos;
 		}
+
+		/* Current CoS was the best match */
+		return cos;
 	}
-	return retcos;
+
+	return NULL;
 }
 
 int pktio_classifier_init(pktio_entry_t *entry)

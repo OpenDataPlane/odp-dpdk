@@ -1,11 +1,9 @@
-/* Copyright (c) 2019, Nokia
- * Copyright (c) 2013-2018, Linaro Limited
+/* Copyright (c) 2013-2018, Linaro Limited
+ * Copyright (c) 2019, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
  */
-
-#include "config.h"
 
 #include <odp/api/pool.h>
 #include <odp/api/shared_memory.h>
@@ -210,7 +208,7 @@ static int read_config_file(pool_table_t *pool_tbl)
 	return 0;
 }
 
-int odp_pool_init_global(void)
+int _odp_pool_init_global(void)
 {
 	uint32_t i;
 	odp_shm_t shm;
@@ -248,7 +246,7 @@ int odp_pool_init_global(void)
 	return 0;
 }
 
-int odp_pool_term_global(void)
+int _odp_pool_term_global(void)
 {
 	int i;
 	pool_t *pool;
@@ -275,7 +273,7 @@ int odp_pool_term_global(void)
 	return rc;
 }
 
-int odp_pool_init_local(void)
+int _odp_pool_init_local(void)
 {
 	pool_t *pool;
 	int i;
@@ -293,7 +291,7 @@ int odp_pool_init_local(void)
 	return 0;
 }
 
-int odp_pool_term_local(void)
+int _odp_pool_term_local(void)
 {
 	int i;
 
@@ -412,20 +410,19 @@ static void init_buffers(pool_t *pool)
 		buf_hdr->event_type = type;
 		buf_hdr->pool_ptr = pool;
 		buf_hdr->uarea_addr = uarea;
-		buf_hdr->segcount = 1;
-		buf_hdr->num_seg  = 1;
-		buf_hdr->next_seg = NULL;
-		buf_hdr->last_seg = buf_hdr;
 
-		/* Pointer to data start (of the first segment) */
-		buf_hdr->seg[0].hdr       = buf_hdr;
-		buf_hdr->seg[0].data      = &data[offset];
-		buf_hdr->seg[0].len       = pool->seg_len;
+		/* Initialize segmentation metadata */
+		if (type == ODP_POOL_PACKET) {
+			pkt_hdr->seg_data = &data[offset];
+			pkt_hdr->seg_len  = pool->seg_len;
+			pkt_hdr->seg_count = 1;
+			pkt_hdr->seg_next = NULL;
+		}
 
 		odp_atomic_init_u32(&buf_hdr->ref_cnt, 0);
 
 		/* Store base values for fast init */
-		buf_hdr->base_data = buf_hdr->seg[0].data;
+		buf_hdr->base_data = &data[offset];
 		buf_hdr->buf_end   = &data[offset + pool->seg_len +
 				     pool->tailroom];
 
@@ -514,9 +511,8 @@ static odp_pool_t pool_create(const char *name, odp_pool_param_t *params,
 		 * pool. */
 		if (params->pkt.max_len != 0)
 			max_len = params->pkt.max_len;
-		if ((max_len + seg_len - 1) / seg_len > CONFIG_PACKET_MAX_SEGS)
-			seg_len = (max_len + CONFIG_PACKET_MAX_SEGS - 1) /
-				CONFIG_PACKET_MAX_SEGS;
+		if ((max_len + seg_len - 1) / seg_len > PKT_MAX_SEGS)
+			seg_len = (max_len + PKT_MAX_SEGS - 1) / PKT_MAX_SEGS;
 		if (seg_len > CONFIG_PACKET_MAX_SEG_LEN) {
 			ODP_ERR("Pool unable to store 'max_len' packet");
 			return ODP_POOL_INVALID;
@@ -1070,7 +1066,7 @@ int odp_pool_capability(odp_pool_capability_t *capa)
 	capa->pkt.min_headroom     = CONFIG_PACKET_HEADROOM;
 	capa->pkt.max_headroom     = CONFIG_PACKET_HEADROOM;
 	capa->pkt.min_tailroom     = CONFIG_PACKET_TAILROOM;
-	capa->pkt.max_segs_per_pkt = CONFIG_PACKET_MAX_SEGS;
+	capa->pkt.max_segs_per_pkt = PKT_MAX_SEGS;
 	capa->pkt.min_seg_len      = CONFIG_PACKET_SEG_LEN_MIN;
 	capa->pkt.max_seg_len      = max_seg_len;
 	capa->pkt.max_uarea_size   = MAX_SIZE;

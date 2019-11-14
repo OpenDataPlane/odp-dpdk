@@ -4,8 +4,6 @@
  * SPDX-License-Identifier:     BSD-3-Clause
  */
 
-#include "config.h"
-
 #include "ipsec.h"
 
 #include "test_vectors.h"
@@ -44,9 +42,11 @@ static void test_in_ipv4_ah_sha256(void)
 
 static void test_in_ipv4_ah_sha256_tun_ipv4(void)
 {
-	odp_ipsec_tunnel_param_t tunnel = {};
+	odp_ipsec_tunnel_param_t tunnel;
 	odp_ipsec_sa_param_t param;
 	odp_ipsec_sa_t sa;
+
+	memset(&tunnel, 0, sizeof(odp_ipsec_tunnel_param_t));
 
 	ipsec_sa_param_fill(&param,
 			    true, true, 123, &tunnel,
@@ -77,9 +77,11 @@ static void test_in_ipv4_ah_sha256_tun_ipv4(void)
 
 static void test_in_ipv4_ah_sha256_tun_ipv6(void)
 {
-	odp_ipsec_tunnel_param_t tunnel = {};
+	odp_ipsec_tunnel_param_t tunnel;
 	odp_ipsec_sa_param_t param;
 	odp_ipsec_sa_t sa;
+
+	memset(&tunnel, 0, sizeof(odp_ipsec_tunnel_param_t));
 
 	ipsec_sa_param_fill(&param,
 			    true, true, 123, &tunnel,
@@ -337,9 +339,11 @@ static void test_in_ipv4_esp_null_sha256_lookup(void)
 
 static void test_in_ipv4_esp_null_sha256_tun_ipv4(void)
 {
-	odp_ipsec_tunnel_param_t tunnel = {};
+	odp_ipsec_tunnel_param_t tunnel;
 	odp_ipsec_sa_param_t param;
 	odp_ipsec_sa_t sa;
+
+	memset(&tunnel, 0, sizeof(odp_ipsec_tunnel_param_t));
 
 	ipsec_sa_param_fill(&param,
 			    true, false, 123, &tunnel,
@@ -370,9 +374,11 @@ static void test_in_ipv4_esp_null_sha256_tun_ipv4(void)
 
 static void test_in_ipv4_esp_null_sha256_tun_ipv6(void)
 {
-	odp_ipsec_tunnel_param_t tunnel = {};
+	odp_ipsec_tunnel_param_t tunnel;
 	odp_ipsec_sa_param_t param;
 	odp_ipsec_sa_t sa;
+
+	memset(&tunnel, 0, sizeof(odp_ipsec_tunnel_param_t));
 
 	ipsec_sa_param_fill(&param,
 			    true, false, 123, &tunnel,
@@ -520,6 +526,9 @@ static void test_in_ipv4_ah_sha256_replay(void)
 {
 	odp_ipsec_sa_param_t param;
 	odp_ipsec_sa_t sa;
+	ipsec_test_part test_repl;
+
+	memset(&test_repl, 0, sizeof(ipsec_test_part));
 
 	ipsec_sa_param_fill(&param,
 			    true, true, 123, NULL,
@@ -544,15 +553,9 @@ static void test_in_ipv4_ah_sha256_replay(void)
 		},
 	};
 
-	ipsec_test_part test_repl = {
-		.pkt_in = &pkt_ipv4_icmp_0_ah_sha256_1,
-		.out_pkt = 1,
-		.out = {
-			{ .status.warn.all = 0,
-			  .status.error.antireplay = 1,
-			  .pkt_out = NULL },
-		},
-	};
+	test_repl.pkt_in = &pkt_ipv4_icmp_0_ah_sha256_1;
+	test_repl.out_pkt = 1;
+	test_repl.out[0].status.error.antireplay = 1;
 
 	ipsec_test_part test_1235 = {
 		.pkt_in = &pkt_ipv4_icmp_0_ah_sha256_1235,
@@ -626,6 +629,9 @@ static void test_in_ipv4_esp_null_sha256_replay(void)
 {
 	odp_ipsec_sa_param_t param;
 	odp_ipsec_sa_t sa;
+	ipsec_test_part test_repl;
+
+	memset(&test_repl, 0, sizeof(ipsec_test_part));
 
 	ipsec_sa_param_fill(&param,
 			    true, false, 123, NULL,
@@ -650,15 +656,9 @@ static void test_in_ipv4_esp_null_sha256_replay(void)
 		},
 	};
 
-	ipsec_test_part test_repl = {
-		.pkt_in = &pkt_ipv4_icmp_0_esp_null_sha256_1,
-		.out_pkt = 1,
-		.out = {
-			{ .status.warn.all = 0,
-			  .status.error.antireplay = 1,
-			  .pkt_out = NULL },
-		},
-	};
+	test_repl.pkt_in = &pkt_ipv4_icmp_0_esp_null_sha256_1;
+	test_repl.out_pkt = 1;
+	test_repl.out[0].status.error.antireplay = 1;
 
 	ipsec_test_part test_1235 = {
 		.pkt_in = &pkt_ipv4_icmp_0_esp_null_sha256_1235,
@@ -684,6 +684,9 @@ static void test_in_ipv4_ah_esp_pkt(void)
 {
 	odp_ipsec_sa_param_t param;
 	odp_ipsec_sa_t sa;
+	ipsec_test_part test;
+
+	memset(&test, 0, sizeof(ipsec_test_part));
 
 	/* This test will not work properly inbound inline mode.
 	 * test_in_ipv4_ah_esp_pkt_lookup will be used instead. */
@@ -700,15 +703,9 @@ static void test_in_ipv4_ah_esp_pkt(void)
 
 	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
 
-	ipsec_test_part test = {
-		.pkt_in = &pkt_ipv4_icmp_0_esp_null_sha256_1,
-		.out_pkt = 1,
-		.out = {
-			{ .status.warn.all = 0,
-			  .status.error.proto = 1,
-			  .pkt_out =  NULL },
-		},
-	};
+	test.pkt_in = &pkt_ipv4_icmp_0_esp_null_sha256_1;
+	test.out_pkt = 1;
+	test.out[0].status.error.proto = 1;
 
 	ipsec_check_in_one(&test, sa);
 
@@ -719,6 +716,9 @@ static void test_in_ipv4_esp_ah_pkt(void)
 {
 	odp_ipsec_sa_param_t param;
 	odp_ipsec_sa_t sa;
+	ipsec_test_part test;
+
+	memset(&test, 0, sizeof(ipsec_test_part));
 
 	/* This test will not work properly inbound inline mode.
 	 * test_in_ipv4_esp_ah_pkt_lookup will be used instead. */
@@ -735,15 +735,9 @@ static void test_in_ipv4_esp_ah_pkt(void)
 
 	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
 
-	ipsec_test_part test = {
-		.pkt_in = &pkt_ipv4_icmp_0_ah_sha256_1,
-		.out_pkt = 1,
-		.out = {
-			{ .status.warn.all = 0,
-			  .status.error.proto = 1,
-			  .pkt_out = NULL },
-		},
-	};
+	test.pkt_in = &pkt_ipv4_icmp_0_ah_sha256_1;
+	test.out_pkt = 1;
+	test.out[0].status.error.proto = 1;
 
 	ipsec_check_in_one(&test, sa);
 
@@ -754,6 +748,9 @@ static void test_in_ipv4_ah_esp_pkt_lookup(void)
 {
 	odp_ipsec_sa_param_t param;
 	odp_ipsec_sa_t sa;
+	ipsec_test_part test;
+
+	memset(&test, 0, sizeof(ipsec_test_part));
 
 	ipsec_sa_param_fill(&param,
 			    true, true, 123, NULL,
@@ -765,16 +762,10 @@ static void test_in_ipv4_ah_esp_pkt_lookup(void)
 
 	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
 
-	ipsec_test_part test = {
-		.pkt_in = &pkt_ipv4_icmp_0_esp_null_sha256_1,
-		.lookup = 1,
-		.out_pkt = 1,
-		.out = {
-			{ .status.warn.all = 0,
-			  .status.error.sa_lookup = 1,
-			  .pkt_out =  NULL },
-		},
-	};
+	test.pkt_in = &pkt_ipv4_icmp_0_esp_null_sha256_1;
+	test.lookup = 1;
+	test.out_pkt = 1;
+	test.out[0].status.error.sa_lookup = 1;
 
 	ipsec_check_in_one(&test, ODP_IPSEC_SA_INVALID);
 
@@ -785,6 +776,9 @@ static void test_in_ipv4_esp_ah_pkt_lookup(void)
 {
 	odp_ipsec_sa_param_t param;
 	odp_ipsec_sa_t sa;
+	ipsec_test_part test;
+
+	memset(&test, 0, sizeof(ipsec_test_part));
 
 	ipsec_sa_param_fill(&param,
 			    true, false, 123, NULL,
@@ -796,16 +790,10 @@ static void test_in_ipv4_esp_ah_pkt_lookup(void)
 
 	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
 
-	ipsec_test_part test = {
-		.pkt_in = &pkt_ipv4_icmp_0_ah_sha256_1,
-		.lookup = 1,
-		.out_pkt = 1,
-		.out = {
-			{ .status.warn.all = 0,
-			  .status.error.sa_lookup = 1,
-			  .pkt_out = NULL },
-		},
-	};
+	test.pkt_in = &pkt_ipv4_icmp_0_ah_sha256_1;
+	test.lookup = 1;
+	test.out_pkt = 1;
+	test.out[0].status.error.sa_lookup = 1;
 
 	ipsec_check_in_one(&test, ODP_IPSEC_SA_INVALID);
 
@@ -816,6 +804,9 @@ static void test_in_ipv4_ah_sha256_bad1(void)
 {
 	odp_ipsec_sa_param_t param;
 	odp_ipsec_sa_t sa;
+	ipsec_test_part test;
+
+	memset(&test, 0, sizeof(ipsec_test_part));
 
 	ipsec_sa_param_fill(&param,
 			    true, true, 123, NULL,
@@ -827,15 +818,9 @@ static void test_in_ipv4_ah_sha256_bad1(void)
 
 	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
 
-	ipsec_test_part test = {
-		.pkt_in = &pkt_ipv4_icmp_0_ah_sha256_1_bad1,
-		.out_pkt = 1,
-		.out = {
-			{ .status.warn.all = 0,
-			  .status.error.auth = 1,
-			  .pkt_out = NULL },
-		},
-	};
+	test.pkt_in = &pkt_ipv4_icmp_0_ah_sha256_1_bad1;
+	test.out_pkt = 1;
+	test.out[0].status.error.auth = 1;
 
 	ipsec_check_in_one(&test, sa);
 
@@ -846,6 +831,9 @@ static void test_in_ipv4_ah_sha256_bad2(void)
 {
 	odp_ipsec_sa_param_t param;
 	odp_ipsec_sa_t sa;
+	ipsec_test_part test;
+
+	memset(&test, 0, sizeof(ipsec_test_part));
 
 	ipsec_sa_param_fill(&param,
 			    true, true, 123, NULL,
@@ -857,15 +845,9 @@ static void test_in_ipv4_ah_sha256_bad2(void)
 
 	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
 
-	ipsec_test_part test = {
-		.pkt_in = &pkt_ipv4_icmp_0_ah_sha256_1_bad2,
-		.out_pkt = 1,
-		.out = {
-			{ .status.warn.all = 0,
-			  .status.error.auth = 1,
-			  .pkt_out = NULL },
-		},
-	};
+	test.pkt_in = &pkt_ipv4_icmp_0_ah_sha256_1_bad2;
+	test.out_pkt = 1;
+	test.out[0].status.error.auth = 1;
 
 	ipsec_check_in_one(&test, sa);
 
@@ -876,6 +858,9 @@ static void test_in_ipv4_esp_null_sha256_bad1(void)
 {
 	odp_ipsec_sa_param_t param;
 	odp_ipsec_sa_t sa;
+	ipsec_test_part test;
+
+	memset(&test, 0, sizeof(ipsec_test_part));
 
 	ipsec_sa_param_fill(&param,
 			    true, false, 123, NULL,
@@ -887,15 +872,9 @@ static void test_in_ipv4_esp_null_sha256_bad1(void)
 
 	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
 
-	ipsec_test_part test = {
-		.pkt_in = &pkt_ipv4_icmp_0_esp_null_sha256_1_bad1,
-		.out_pkt = 1,
-		.out = {
-			{ .status.warn.all = 0,
-			  .status.error.auth = 1,
-			  .pkt_out = NULL },
-		},
-	};
+	test.pkt_in = &pkt_ipv4_icmp_0_esp_null_sha256_1_bad1;
+	test.out_pkt = 1;
+	test.out[0].status.error.auth = 1;
 
 	ipsec_check_in_one(&test, sa);
 
@@ -968,9 +947,11 @@ static void test_in_ipv4_rfc3602_6_esp(void)
 
 static void test_in_ipv4_rfc3602_7_esp(void)
 {
-	odp_ipsec_tunnel_param_t tunnel = {};
+	odp_ipsec_tunnel_param_t tunnel;
 	odp_ipsec_sa_param_t param;
 	odp_ipsec_sa_t sa;
+
+	memset(&tunnel, 0, sizeof(odp_ipsec_tunnel_param_t));
 
 	ipsec_sa_param_fill(&param,
 			    true, false, 0x8765, &tunnel,
@@ -1001,9 +982,11 @@ static void test_in_ipv4_rfc3602_7_esp(void)
 
 static void test_in_ipv4_rfc3602_8_esp(void)
 {
-	odp_ipsec_tunnel_param_t tunnel = {};
+	odp_ipsec_tunnel_param_t tunnel;
 	odp_ipsec_sa_param_t param;
 	odp_ipsec_sa_t sa;
+
+	memset(&tunnel, 0, sizeof(odp_ipsec_tunnel_param_t));
 
 	ipsec_sa_param_fill(&param,
 			    true, false, 0x8765, &tunnel,
@@ -1034,9 +1017,11 @@ static void test_in_ipv4_rfc3602_8_esp(void)
 
 static void test_in_ipv4_mcgrew_gcm_2_esp(void)
 {
-	odp_ipsec_tunnel_param_t tunnel = {};
+	odp_ipsec_tunnel_param_t tunnel;
 	odp_ipsec_sa_param_t param;
 	odp_ipsec_sa_t sa;
+
+	memset(&tunnel, 0, sizeof(odp_ipsec_tunnel_param_t));
 
 	ipsec_sa_param_fill(&param,
 			    true, false, 0xa5f8, &tunnel,
@@ -1067,9 +1052,11 @@ static void test_in_ipv4_mcgrew_gcm_2_esp(void)
 
 static void test_in_ipv4_mcgrew_gcm_3_esp(void)
 {
-	odp_ipsec_tunnel_param_t tunnel = {};
+	odp_ipsec_tunnel_param_t tunnel;
 	odp_ipsec_sa_param_t param;
 	odp_ipsec_sa_t sa;
+
+	memset(&tunnel, 0, sizeof(odp_ipsec_tunnel_param_t));
 
 	ipsec_sa_param_fill(&param,
 			    true, false, 0x4a2cbfe3, &tunnel,
@@ -1100,9 +1087,11 @@ static void test_in_ipv4_mcgrew_gcm_3_esp(void)
 
 static void test_in_ipv4_mcgrew_gcm_4_esp(void)
 {
-	odp_ipsec_tunnel_param_t tunnel = {};
+	odp_ipsec_tunnel_param_t tunnel;
 	odp_ipsec_sa_param_t param;
 	odp_ipsec_sa_t sa;
+
+	memset(&tunnel, 0, sizeof(odp_ipsec_tunnel_param_t));
 
 	ipsec_sa_param_fill(&param,
 			    true, false, 0x00000000, &tunnel,
@@ -1133,9 +1122,11 @@ static void test_in_ipv4_mcgrew_gcm_4_esp(void)
 
 static void test_in_ipv4_mcgrew_gcm_12_esp(void)
 {
-	odp_ipsec_tunnel_param_t tunnel = {};
+	odp_ipsec_tunnel_param_t tunnel;
 	odp_ipsec_sa_param_t param;
 	odp_ipsec_sa_t sa;
+
+	memset(&tunnel, 0, sizeof(odp_ipsec_tunnel_param_t));
 
 	/* This test will not work properly inbound inline mode.
 	 * Packet might be dropped and we will not check for that. */
@@ -1203,9 +1194,11 @@ static void test_in_ipv4_mcgrew_gcm_12_esp_notun(void)
 
 static void test_in_ipv4_mcgrew_gcm_15_esp(void)
 {
-	odp_ipsec_tunnel_param_t tunnel = {};
+	odp_ipsec_tunnel_param_t tunnel;
 	odp_ipsec_sa_param_t param;
 	odp_ipsec_sa_t sa;
+
+	memset(&tunnel, 0, sizeof(odp_ipsec_tunnel_param_t));
 
 	ipsec_sa_param_fill(&param,
 			    true, false, 0x00004321, &tunnel,
@@ -1236,9 +1229,11 @@ static void test_in_ipv4_mcgrew_gcm_15_esp(void)
 
 static void test_in_ipv4_rfc7634_chacha(void)
 {
-	odp_ipsec_tunnel_param_t tunnel = {};
+	odp_ipsec_tunnel_param_t tunnel;
 	odp_ipsec_sa_param_t param;
 	odp_ipsec_sa_t sa;
+
+	memset(&tunnel, 0, sizeof(odp_ipsec_tunnel_param_t));
 
 	ipsec_sa_param_fill(&param,
 			    true, false, 0x01020304, &tunnel,
@@ -1365,9 +1360,11 @@ static void test_in_ipv6_ah_sha256(void)
 
 static void test_in_ipv6_ah_sha256_tun_ipv4(void)
 {
-	odp_ipsec_tunnel_param_t tunnel = {};
+	odp_ipsec_tunnel_param_t tunnel;
 	odp_ipsec_sa_param_t param;
 	odp_ipsec_sa_t sa;
+
+	memset(&tunnel, 0, sizeof(odp_ipsec_tunnel_param_t));
 
 	ipsec_sa_param_fill(&param,
 			    true, true, 123, &tunnel,
@@ -1398,9 +1395,11 @@ static void test_in_ipv6_ah_sha256_tun_ipv4(void)
 
 static void test_in_ipv6_ah_sha256_tun_ipv6(void)
 {
-	odp_ipsec_tunnel_param_t tunnel = {};
+	odp_ipsec_tunnel_param_t tunnel;
 	odp_ipsec_sa_param_t param;
 	odp_ipsec_sa_t sa;
+
+	memset(&tunnel, 0, sizeof(odp_ipsec_tunnel_param_t));
 
 	ipsec_sa_param_fill(&param,
 			    true, true, 123, &tunnel,
@@ -1463,9 +1462,11 @@ static void test_in_ipv6_esp_null_sha256(void)
 
 static void test_in_ipv6_esp_null_sha256_tun_ipv4(void)
 {
-	odp_ipsec_tunnel_param_t tunnel = {};
+	odp_ipsec_tunnel_param_t tunnel;
 	odp_ipsec_sa_param_t param;
 	odp_ipsec_sa_t sa;
+
+	memset(&tunnel, 0, sizeof(odp_ipsec_tunnel_param_t));
 
 	ipsec_sa_param_fill(&param,
 			    true, false, 123, &tunnel,
@@ -1496,9 +1497,11 @@ static void test_in_ipv6_esp_null_sha256_tun_ipv4(void)
 
 static void test_in_ipv6_esp_null_sha256_tun_ipv6(void)
 {
-	odp_ipsec_tunnel_param_t tunnel = {};
+	odp_ipsec_tunnel_param_t tunnel;
 	odp_ipsec_sa_param_t param;
 	odp_ipsec_sa_t sa;
+
+	memset(&tunnel, 0, sizeof(odp_ipsec_tunnel_param_t));
 
 	ipsec_sa_param_fill(&param,
 			    true, false, 123, &tunnel,

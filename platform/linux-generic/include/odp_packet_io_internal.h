@@ -1,4 +1,5 @@
 /* Copyright (c) 2013-2018, Linaro Limited
+ * Copyright (c) 2019, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -17,6 +18,8 @@
 extern "C" {
 #endif
 
+#include <odp/autoheader_internal.h>
+
 #include <odp/api/packet_io.h>
 #include <odp/api/plat/pktio_inlines.h>
 #include <odp/api/spinlock.h>
@@ -24,7 +27,6 @@ extern "C" {
 #include <odp_classification_datamodel.h>
 #include <odp_align_internal.h>
 #include <odp_debug_internal.h>
-#include <odp_packet_io_ring_internal.h>
 #include <odp_packet_io_stats_common.h>
 #include <odp_queue_if.h>
 
@@ -33,6 +35,7 @@ extern "C" {
 #include <string.h>
 #include <net/if.h>
 #include <linux/if_ether.h>
+#include <sys/select.h>
 
 #define PKTIO_MAX_QUEUES 64
 
@@ -50,11 +53,11 @@ extern "C" {
 /* Forward declaration */
 struct pktio_if_ops;
 
-#if defined(ODP_NETMAP)
+#if defined(_ODP_PKTIO_NETMAP)
 #define PKTIO_PRIVATE_SIZE 74752
-#elif defined(ODP_PKTIO_DPDK) && ODP_CACHE_LINE_SIZE == 128
+#elif defined(_ODP_PKTIO_DPDK) && ODP_CACHE_LINE_SIZE == 128
 #define PKTIO_PRIVATE_SIZE 10240
-#elif defined(ODP_PKTIO_DPDK)
+#elif defined(_ODP_PKTIO_DPDK)
 #define PKTIO_PRIVATE_SIZE 5632
 #else
 #define PKTIO_PRIVATE_SIZE 384
@@ -93,8 +96,10 @@ struct pktio_entry {
 	odp_proto_chksums_t in_chksums; /**< Checksums validation settings */
 	pktio_stats_type_t stats_type;
 	char name[PKTIO_NAME_LEN];	/**< name of pktio provided to
-					   pktio_open() */
-
+					     internal pktio_open() calls */
+	char full_name[PKTIO_NAME_LEN];	/**< original pktio name passed to
+					     odp_pktio_open() and returned by
+					     odp_pktio_info() */
 	odp_pool_t pool;
 	odp_pktio_param_t param;
 	odp_pktio_capability_t capa;	/**< Packet IO capabilities */
@@ -210,7 +215,7 @@ extern const pktio_if_ops_t dpdk_pktio_ops;
 extern const pktio_if_ops_t sock_mmsg_pktio_ops;
 extern const pktio_if_ops_t sock_mmap_pktio_ops;
 extern const pktio_if_ops_t loopback_pktio_ops;
-#ifdef HAVE_PCAP
+#ifdef _ODP_PKTIO_PCAP
 extern const pktio_if_ops_t pcap_pktio_ops;
 #endif
 extern const pktio_if_ops_t tap_pktio_ops;

@@ -4,8 +4,6 @@
  * SPDX-License-Identifier:BSD-3-Clause
  */
 
-#include "config.h"
-
 #include <odp_api.h>
 #include <odp/helper/odph_api.h>
 
@@ -25,7 +23,7 @@
  * value (data): MAC address of the next hop station (6 bytes).
  */
 
-int main(int argc ODPH_UNUSED, char *argv[] ODPH_UNUSED)
+int main(int argc ODP_UNUSED, char *argv[] ODP_UNUSED)
 {
 	odp_instance_t instance;
 	int ret = 0;

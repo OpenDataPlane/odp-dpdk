@@ -16,7 +16,6 @@
 #include <assert.h>
 
 #include <odp/helper/odph_api.h>
-#include <example_debug.h>
 
 #include "odp_ipfragreass_fragment.h"
 #include "odp_ipfragreass_reassemble.h"
@@ -161,7 +160,7 @@ static void init(odp_instance_t *instance, odp_pool_t *fragment_pool,
  *
  * @return Always returns zero
  */
-static int run_worker(void *arg EXAMPLE_UNUSED)
+static int run_worker(void *arg ODP_UNUSED)
 {
 	int threadno = odp_thread_id() - 1;
 	int iterations = 0;
@@ -231,7 +230,7 @@ int main(void)
 	odp_pool_t fragment_pool;
 	odp_shm_t shm;
 	odp_cpumask_t cpumask;
-	odph_odpthread_t threads[MAX_WORKERS] = {};
+	odph_odpthread_t threads[MAX_WORKERS];
 	odph_odpthread_params_t thread_params;
 	odp_packet_t dequeued_pkts[NUM_PACKETS];
 	odp_event_t ev;
@@ -243,6 +242,7 @@ int main(void)
 	int num_workers = MAX_WORKERS;
 	int reassembled;
 
+	memset(&threads, 0, sizeof(threads));
 	init(&instance, &fragment_pool, &shm, &cpumask, &num_workers);
 
 	/* Packet generation & fragmentation */

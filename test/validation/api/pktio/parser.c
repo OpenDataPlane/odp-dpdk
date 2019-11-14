@@ -4,8 +4,6 @@
  * SPDX-License-Identifier:     BSD-3-Clause
  */
 
-#include "config.h"
-
 #include <odp_api.h>
 #include <odp_cunit_common.h>
 #include <test_packet_parser.h>
@@ -578,6 +576,9 @@ int parser_suite_term(void)
 		printf("Error: failed to destroy packet pool\n");
 		ret = -1;
 	}
+
+	if (odp_cunit_print_inactive())
+		ret = -1;
 
 	return ret;
 }

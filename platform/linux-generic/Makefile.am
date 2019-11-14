@@ -28,6 +28,7 @@ odpapiplatincludedir= $(includedir)/odp/api/plat
 odpapiplatinclude_HEADERS = \
 		  include/odp/api/plat/atomic_inlines.h \
 		  include/odp/api/plat/buffer_inline_types.h \
+		  include/odp/api/plat/buffer_inlines.h \
 		  include/odp/api/plat/byteorder_inlines.h \
 		  include/odp/api/plat/cpu_inlines.h \
 		  include/odp/api/plat/event_inlines.h \
@@ -90,7 +91,6 @@ noinst_HEADERS = \
 		  include/odp_bitset.h \
 		  include/odp_buffer_internal.h \
 		  include/odp_classification_datamodel.h \
-		  include/odp_classification_inlines.h \
 		  include/odp_classification_internal.h \
 		  include/odp_config_internal.h \
 		  include/odp_debug_internal.h \
@@ -109,9 +109,6 @@ noinst_HEADERS = \
 		  include/odp_packet_dpdk.h \
 		  include/odp_packet_internal.h \
 		  include/odp_packet_io_internal.h \
-		  include/odp_packet_io_ipc_internal.h \
-		  include/odp_packet_io_ring_internal.h \
-		  include/odp_packet_socket.h \
 		  include/odp_socket_common.h \
 		  include/odp_packet_io_stats_common.h \
 		  include/odp_packet_io_stats.h \
@@ -226,7 +223,6 @@ __LIB__libodp_linux_la_SOURCES = \
 			   pktio/netmap.c \
 			   pktio/null.c \
 			   pktio/pktio_common.c \
-			   pktio/ring.c \
 			   pktio/socket.c \
 			   pktio/socket_mmap.c \
 			   pktio/tap.c
@@ -243,6 +239,7 @@ endif
 if ODP_ABI_COMPAT
 __LIB__libodp_linux_la_SOURCES += \
 			   odp_atomic_api.c \
+			   odp_buffer_api.c \
 			   odp_byteorder_api.c \
 			   odp_cpu_api.c \
 			   odp_event_api.c \

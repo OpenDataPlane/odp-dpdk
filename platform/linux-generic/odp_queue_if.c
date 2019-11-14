@@ -4,7 +4,7 @@
  * SPDX-License-Identifier:     BSD-3-Clause
  */
 
-#include "config.h"
+#include <odp/autoheader_internal.h>
 
 #include <odp_queue_if.h>
 #include <odp_init_internal.h>
@@ -101,7 +101,7 @@ int _odp_queue_init_global(void)
 	const char *sched = getenv("ODP_SCHEDULER");
 
 	if (sched == NULL || !strcmp(sched, "default"))
-		sched = ODP_SCHEDULE_DEFAULT;
+		sched = _ODP_SCHEDULE_DEFAULT;
 
 	if (!strcmp(sched, "basic") || !strcmp(sched, "sp")) {
 		queue_fn = &queue_basic_fn;

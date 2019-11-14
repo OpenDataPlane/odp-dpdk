@@ -4,8 +4,6 @@
  * SPDX-License-Identifier:     BSD-3-Clause
  */
 
-#include "config.h"
-
 #include <odp_posix_extensions.h>
 
 #include <sched.h>
@@ -50,7 +48,7 @@ __thread _odp_thread_state_t *_odp_this_thread;
 
 #include <odp/visibility_end.h>
 
-int odp_thread_init_global(void)
+int _odp_thread_init_global(void)
 {
 	odp_shm_t shm;
 
@@ -69,7 +67,7 @@ int odp_thread_init_global(void)
 	return 0;
 }
 
-int odp_thread_term_global(void)
+int _odp_thread_term_global(void)
 {
 	int ret;
 
@@ -132,7 +130,7 @@ static int free_id(int thr)
 	return thread_globals->num;
 }
 
-int odp_thread_init_local(odp_thread_type_t type)
+int _odp_thread_init_local(odp_thread_type_t type)
 {
 	int id;
 	int cpu;
@@ -185,7 +183,7 @@ int odp_thread_init_local(odp_thread_type_t type)
 	return 0;
 }
 
-int odp_thread_term_local(void)
+int _odp_thread_term_local(void)
 {
 	int num;
 	int group_all, group_worker, group_control;

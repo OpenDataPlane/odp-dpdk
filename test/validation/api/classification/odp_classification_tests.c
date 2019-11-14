@@ -4,8 +4,6 @@
  * SPDX-License-Identifier:	BSD-3-Clause
  */
 
-#include "config.h"
-
 #include "odp_classification_testsuites.h"
 #include "classification.h"
 #include <odp_cunit_common.h>
@@ -139,6 +137,9 @@ int classification_suite_term(void)
 			odp_pool_destroy(pool_list[i]);
 	}
 
+	if (odp_cunit_print_inactive())
+		retcode = -1;
+
 	return retcode;
 }
 
@@ -212,6 +213,9 @@ void configure_cls_pmr_chain(void)
 	CU_ASSERT_FATAL(cos_list[CLS_PMR_CHAIN_DST] != ODP_COS_INVALID);
 
 	parse_ipv4_string(CLS_PMR_CHAIN_SADDR, &addr, &mask);
+	addr = odp_cpu_to_be_32(addr);
+	mask = odp_cpu_to_be_32(mask);
+
 	odp_cls_pmr_param_init(&pmr_param);
 	pmr_param.term = ODP_PMR_SIP_ADDR;
 	pmr_param.match.value = &addr;
@@ -222,8 +226,8 @@ void configure_cls_pmr_chain(void)
 			   cos_list[CLS_PMR_CHAIN_SRC]);
 	CU_ASSERT_FATAL(pmr_list[CLS_PMR_CHAIN_SRC] != ODP_PMR_INVALID);
 
-	val = CLS_PMR_CHAIN_PORT;
-	maskport = 0xffff;
+	val = odp_cpu_to_be_16(CLS_PMR_CHAIN_PORT);
+	maskport = odp_cpu_to_be_16(0xffff);
 	odp_cls_pmr_param_init(&pmr_param);
 	pmr_param.term = find_first_supported_l3_pmr();
 	pmr_param.match.value = &val;
@@ -572,8 +576,8 @@ void configure_pmr_cos(void)
 	cos_list[CLS_PMR] = odp_cls_cos_create(cosname, &cls_param);
 	CU_ASSERT_FATAL(cos_list[CLS_PMR] != ODP_COS_INVALID);
 
-	val = CLS_PMR_PORT;
-	mask = 0xffff;
+	val = odp_cpu_to_be_16(CLS_PMR_PORT);
+	mask = odp_cpu_to_be_16(0xffff);
 	odp_cls_pmr_param_init(&pmr_param);
 	pmr_param.term = find_first_supported_l3_pmr();
 	pmr_param.match.value = &val;
@@ -648,14 +652,17 @@ void configure_pktio_pmr_composite(void)
 	CU_ASSERT_FATAL(cos_list[CLS_PMR_SET] != ODP_COS_INVALID);
 
 	parse_ipv4_string(CLS_PMR_SET_SADDR, &addr, &mask);
+	addr = odp_cpu_to_be_32(addr);
+	mask = odp_cpu_to_be_32(mask);
+
 	odp_cls_pmr_param_init(&pmr_params[0]);
 	pmr_params[0].term = ODP_PMR_SIP_ADDR;
 	pmr_params[0].match.value = &addr;
 	pmr_params[0].match.mask = &mask;
 	pmr_params[0].val_sz = sizeof(addr);
 
-	val = CLS_PMR_SET_PORT;
-	maskport = 0xffff;
+	val = odp_cpu_to_be_16(CLS_PMR_SET_PORT);
+	maskport = odp_cpu_to_be_16(0xffff);
 	odp_cls_pmr_param_init(&pmr_params[1]);
 	pmr_params[1].term = find_first_supported_l3_pmr();
 	pmr_params[1].match.value = &val;

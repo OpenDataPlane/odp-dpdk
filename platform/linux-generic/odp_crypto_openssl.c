@@ -4,8 +4,6 @@
  * SPDX-License-Identifier:     BSD-3-Clause
  */
 
-#include "config.h"
-
 #include <odp_posix_extensions.h>
 #include <odp/api/crypto.h>
 #include <odp_init_internal.h>
@@ -2489,8 +2487,7 @@ static void ODP_UNUSED openssl_lock(int mode, int n,
 }
 #endif
 
-int
-odp_crypto_init_global(void)
+int _odp_crypto_init_global(void)
 {
 	size_t mem_size;
 	odp_shm_t shm;
@@ -2535,7 +2532,7 @@ odp_crypto_init_global(void)
 	return 0;
 }
 
-int odp_crypto_term_global(void)
+int _odp_crypto_term_global(void)
 {
 	int rc = 0;
 	int ret;

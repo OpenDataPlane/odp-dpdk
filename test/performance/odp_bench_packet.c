@@ -4,8 +4,6 @@
  * SPDX-License-Identifier:     BSD-3-Clause
  */
 
-#include "config.h"
-
 /**
  * @file
  *
@@ -19,13 +17,10 @@
 #include <inttypes.h>
 #include <signal.h>
 
-#include <test_debug.h>
+#include <test_packet_parser.h>
 
 #include <odp_api.h>
-#include <odp/helper/threads.h>
-#include <odp/helper/eth.h>
-#include <odp/helper/ip.h>
-#include <odp/helper/udp.h>
+#include <odp/helper/odph_api.h>
 
 /** Minimum number of packet data bytes in the first segment */
 #define PKT_POOL_SEG_LEN 128
@@ -200,7 +195,7 @@ static void run_indef(args_t *args, int idx)
 			args->bench[idx].term();
 
 		if (!ret)
-			LOG_ABORT("Benchmark %s failed\n", desc);
+			ODPH_ABORT("Benchmark %s failed\n", desc);
 	}
 }
 
@@ -257,7 +252,7 @@ static int run_benchmarks(void *arg)
 				args->bench[j].term();
 
 			if (!ret) {
-				LOG_ERR("Benchmark %s failed\n", desc);
+				ODPH_ERR("Benchmark %s failed\n", desc);
 				args->bench_failed = 1;
 				return -1;
 			}
@@ -314,7 +309,7 @@ static void allocate_test_packets(uint32_t len, odp_packet_t pkt[], int num)
 		ret = odp_packet_alloc_multi(gbl_args->pool, len, &pkt[pkts],
 					     num - pkts);
 		if (ret < 0)
-			LOG_ABORT("Allocating test packets failed\n");
+			ODPH_ABORT("Allocating test packets failed\n");
 
 		pkts += ret;
 	}
@@ -351,7 +346,7 @@ static void alloc_ref_packets(void)
 	for (i = 0; i < TEST_REPEAT_COUNT; i++) {
 		ref_tbl[i] = odp_packet_ref(pkt_tbl[i], TEST_MIN_PKT_SIZE / 2);
 		if (ref_tbl[i] == ODP_PACKET_INVALID)
-			LOG_ABORT("Allocating packet reference failed\n");
+			ODPH_ABORT("Allocating packet reference failed\n");
 	}
 }
 
@@ -361,6 +356,77 @@ static void alloc_packets_twice(void)
 			      TEST_REPEAT_COUNT);
 	allocate_test_packets(gbl_args->pkt.len, gbl_args->pkt2_tbl,
 			      TEST_REPEAT_COUNT);
+}
+
+static void alloc_parse_packets(const void *pkt_data, uint32_t len)
+{
+	int i;
+
+	allocate_test_packets(len, gbl_args->pkt_tbl, TEST_REPEAT_COUNT);
+
+	for (i = 0; i < TEST_REPEAT_COUNT; i++) {
+		if (odp_packet_copy_from_mem(gbl_args->pkt_tbl[i], 0, len,
+					     pkt_data))
+			ODPH_ABORT("Copying test packet failed\n");
+	}
+}
+
+static void alloc_parse_packets_ipv4_tcp(void)
+{
+	alloc_parse_packets(test_packet_ipv4_tcp, sizeof(test_packet_ipv4_tcp));
+}
+
+static void alloc_parse_packets_ipv4_udp(void)
+{
+	alloc_parse_packets(test_packet_ipv4_udp, sizeof(test_packet_ipv4_udp));
+}
+
+static void alloc_parse_packets_ipv6_tcp(void)
+{
+	alloc_parse_packets(test_packet_ipv6_tcp, sizeof(test_packet_ipv6_tcp));
+}
+
+static void alloc_parse_packets_ipv6_udp(void)
+{
+	alloc_parse_packets(test_packet_ipv6_udp, sizeof(test_packet_ipv6_udp));
+}
+
+static void alloc_parse_packets_multi(const void *pkt_data, uint32_t len)
+{
+	int i;
+
+	allocate_test_packets(len, gbl_args->pkt_tbl,
+			      TEST_REPEAT_COUNT * gbl_args->appl.burst_size);
+
+	for (i = 0; i < TEST_REPEAT_COUNT * gbl_args->appl.burst_size; i++) {
+		if (odp_packet_copy_from_mem(gbl_args->pkt_tbl[i], 0, len,
+					     pkt_data))
+			ODPH_ABORT("Copying test packet failed\n");
+	}
+}
+
+static void alloc_parse_packets_multi_ipv4_tcp(void)
+{
+	alloc_parse_packets_multi(test_packet_ipv4_tcp,
+				  sizeof(test_packet_ipv4_tcp));
+}
+
+static void alloc_parse_packets_multi_ipv4_udp(void)
+{
+	alloc_parse_packets_multi(test_packet_ipv4_udp,
+				  sizeof(test_packet_ipv4_udp));
+}
+
+static void alloc_parse_packets_multi_ipv6_tcp(void)
+{
+	alloc_parse_packets_multi(test_packet_ipv6_tcp,
+				  sizeof(test_packet_ipv6_tcp));
+}
+
+static void alloc_parse_packets_multi_ipv6_udp(void)
+{
+	alloc_parse_packets_multi(test_packet_ipv6_udp,
+				  sizeof(test_packet_ipv6_udp));
 }
 
 static void create_packets(void)
@@ -399,7 +465,7 @@ static void create_packets(void)
 		if (odp_packet_l2_offset_set(pkt_tbl[i], TEST_L2_OFFSET) ||
 		    odp_packet_l3_offset_set(pkt_tbl[i], TEST_L3_OFFSET) ||
 		    odp_packet_l4_offset_set(pkt_tbl[i], TEST_L4_OFFSET))
-			LOG_ABORT("Setting test packet offsets failed\n");
+			ODPH_ABORT("Setting test packet offsets failed\n");
 
 		odp_packet_flow_hash_set(pkt_tbl[i], i);
 		odp_packet_ts_set(pkt_tbl[i], odp_time_local());
@@ -417,6 +483,18 @@ static void create_events(void)
 	create_packets();
 
 	for (i = 0; i < TEST_REPEAT_COUNT; i++)
+		gbl_args->event_tbl[i] = odp_packet_to_event(pkt_tbl[i]);
+}
+
+static void create_events_multi(void)
+{
+	int i;
+	odp_packet_t *pkt_tbl = gbl_args->pkt_tbl;
+
+	allocate_test_packets(gbl_args->pkt.len, gbl_args->pkt_tbl,
+			      TEST_REPEAT_COUNT * gbl_args->appl.burst_size);
+
+	for (i = 0; i < TEST_REPEAT_COUNT * gbl_args->appl.burst_size; i++)
 		gbl_args->event_tbl[i] = odp_packet_to_event(pkt_tbl[i]);
 }
 
@@ -498,6 +576,19 @@ static int bench_packet_free_multi(void)
 	return i;
 }
 
+static int bench_packet_free_sp(void)
+{
+	int i;
+
+	for (i = 0; i < TEST_REPEAT_COUNT; i++) {
+		int pkt_idx = i * gbl_args->appl.burst_size;
+
+		odp_packet_free_sp(&gbl_args->pkt_tbl[pkt_idx],
+				   gbl_args->appl.burst_size);
+	}
+	return i;
+}
+
 static int bench_packet_alloc_free(void)
 {
 	int i;
@@ -523,7 +614,7 @@ static int bench_packet_alloc_free_multi(void)
 					      gbl_args->appl.burst_size);
 
 		if (pkts < 0)
-			LOG_ABORT("Packet alloc failed\n");
+			ODPH_ABORT("Packet alloc failed\n");
 
 		odp_packet_free_multi(gbl_args->pkt_tbl, pkts);
 	}
@@ -552,6 +643,20 @@ static int bench_packet_from_event(void)
 	return i;
 }
 
+static int bench_packet_from_event_multi(void)
+{
+	int i;
+
+	for (i = 0; i < TEST_REPEAT_COUNT; i++) {
+		int idx = i * gbl_args->appl.burst_size;
+
+		odp_packet_from_event_multi(&gbl_args->pkt_tbl[idx],
+					    &gbl_args->event_tbl[idx],
+					    gbl_args->appl.burst_size);
+	}
+	return i;
+}
+
 static int bench_packet_to_event(void)
 {
 	int i;
@@ -560,6 +665,20 @@ static int bench_packet_to_event(void)
 	for (i = 0; i < TEST_REPEAT_COUNT; i++)
 		gbl_args->event_tbl[i] = odp_packet_to_event(pkt_tbl[i]);
 
+	return i;
+}
+
+static int bench_packet_to_event_multi(void)
+{
+	int i;
+
+	for (i = 0; i < TEST_REPEAT_COUNT; i++) {
+		int idx = i * gbl_args->appl.burst_size;
+
+		odp_packet_to_event_multi(&gbl_args->pkt_tbl[idx],
+					  &gbl_args->event_tbl[idx],
+					  gbl_args->appl.burst_size);
+	}
 	return i;
 }
 
@@ -591,6 +710,18 @@ static int bench_packet_data(void)
 	for (i = 0; i < TEST_REPEAT_COUNT; i++)
 		gbl_args->ptr_tbl[i] = odp_packet_data(gbl_args->pkt_tbl[i]);
 
+	return i;
+}
+
+static int bench_packet_data_seg_len(void)
+{
+	odp_packet_t *pkt_tbl = gbl_args->pkt_tbl;
+	uint32_t *output_tbl = gbl_args->output_tbl;
+	int i;
+
+	for (i = 0; i < TEST_REPEAT_COUNT; i++)
+		gbl_args->ptr_tbl[i] = odp_packet_data_seg_len(pkt_tbl[i],
+							       &output_tbl[i]);
 	return i;
 }
 
@@ -1283,6 +1414,64 @@ static int bench_packet_has_ref(void)
 	return i;
 }
 
+static int bench_packet_subtype(void)
+{
+	int i;
+	odp_packet_t *pkt_tbl = gbl_args->pkt_tbl;
+
+	for (i = 0; i < TEST_REPEAT_COUNT; i++)
+		gbl_args->output_tbl[i] = odp_packet_subtype(pkt_tbl[i]);
+
+	return i;
+}
+
+static int bench_packet_parse(void)
+{
+	odp_packet_parse_param_t param;
+	odp_packet_t *pkt_tbl = gbl_args->pkt_tbl;
+	int ret = 0;
+	int i;
+
+	memset(&param, 0, sizeof(odp_packet_parse_param_t));
+	param.proto = ODP_PROTO_ETH;
+	param.last_layer = ODP_PROTO_LAYER_ALL;
+	param.chksums.chksum.ipv4 = 1;
+	param.chksums.chksum.tcp = 1;
+	param.chksums.chksum.udp = 1;
+
+	for (i = 0; i < TEST_REPEAT_COUNT; i++)
+		ret += odp_packet_parse(pkt_tbl[i], 0, &param);
+
+	return !ret;
+}
+
+static int bench_packet_parse_multi(void)
+{
+	int burst_size = gbl_args->appl.burst_size;
+	int ret = 0;
+	int i;
+	odp_packet_parse_param_t param;
+	odp_packet_t *pkt_tbl = gbl_args->pkt_tbl;
+	uint32_t offsets[burst_size];
+
+	memset(&offsets, 0, sizeof(offsets));
+
+	memset(&param, 0, sizeof(odp_packet_parse_param_t));
+	param.proto = ODP_PROTO_ETH;
+	param.last_layer = ODP_PROTO_LAYER_ALL;
+	param.chksums.chksum.ipv4 = 1;
+	param.chksums.chksum.tcp = 1;
+	param.chksums.chksum.udp = 1;
+
+	for (i = 0; i < TEST_REPEAT_COUNT; i++) {
+		int idx = i * burst_size;
+
+		ret += odp_packet_parse_multi(&pkt_tbl[idx], offsets,
+					      burst_size, &param);
+	}
+	return (ret == TEST_REPEAT_COUNT * burst_size);
+}
+
 /**
  * Prinf usage information
  */
@@ -1378,20 +1567,28 @@ bench_info_t test_suite[] = {
 		BENCH_INFO(bench_packet_free, create_packets, NULL, NULL),
 		BENCH_INFO(bench_packet_free_multi, alloc_packets_multi, NULL,
 			   NULL),
+		BENCH_INFO(bench_packet_free_sp, alloc_packets_multi, NULL,
+			   NULL),
 		BENCH_INFO(bench_packet_alloc_free, NULL, NULL, NULL),
 		BENCH_INFO(bench_packet_alloc_free_multi, NULL, NULL, NULL),
 		BENCH_INFO(bench_packet_reset, create_packets, free_packets,
 			   NULL),
 		BENCH_INFO(bench_packet_from_event, create_events, free_packets,
 			   NULL),
+		BENCH_INFO(bench_packet_from_event_multi, create_events_multi,
+			   free_packets_multi, NULL),
 		BENCH_INFO(bench_packet_to_event, create_packets, free_packets,
 			   NULL),
+		BENCH_INFO(bench_packet_to_event_multi, alloc_packets_multi,
+			   free_packets_multi, NULL),
 		BENCH_INFO(bench_packet_head, create_packets, free_packets,
 			   NULL),
 		BENCH_INFO(bench_packet_buf_len, create_packets, free_packets,
 			   NULL),
 		BENCH_INFO(bench_packet_data, create_packets, free_packets,
 			   NULL),
+		BENCH_INFO(bench_packet_data_seg_len, create_packets,
+			   free_packets, NULL),
 		BENCH_INFO(bench_packet_seg_len, create_packets, free_packets,
 			   NULL),
 		BENCH_INFO(bench_packet_len, create_packets, free_packets,
@@ -1507,6 +1704,32 @@ bench_info_t test_suite[] = {
 			   free_packets_twice, NULL),
 		BENCH_INFO(bench_packet_has_ref, alloc_ref_packets,
 			   free_packets_twice, NULL),
+		BENCH_INFO(bench_packet_subtype, create_packets, free_packets,
+			   NULL),
+		BENCH_INFO(bench_packet_parse, alloc_parse_packets_ipv4_tcp,
+			   free_packets, "bench_packet_parse_ipv4_tcp"),
+		BENCH_INFO(bench_packet_parse, alloc_parse_packets_ipv4_udp,
+			   free_packets, "bench_packet_parse_ipv4_udp"),
+		BENCH_INFO(bench_packet_parse, alloc_parse_packets_ipv6_tcp,
+			   free_packets, "bench_packet_parse_ipv6_tcp"),
+		BENCH_INFO(bench_packet_parse, alloc_parse_packets_ipv6_udp,
+			   free_packets, "bench_packet_parse_ipv6_udp"),
+		BENCH_INFO(bench_packet_parse_multi,
+			   alloc_parse_packets_multi_ipv4_tcp,
+			   free_packets_multi,
+			   "bench_packet_parse_multi_ipv4_tcp"),
+		BENCH_INFO(bench_packet_parse_multi,
+			   alloc_parse_packets_multi_ipv4_udp,
+			   free_packets_multi,
+			   "bench_packet_parse_multi_ipv4_udp"),
+		BENCH_INFO(bench_packet_parse_multi,
+			   alloc_parse_packets_multi_ipv6_tcp,
+			   free_packets_multi,
+			   "bench_packet_parse_multi_ipv6_tcp"),
+		BENCH_INFO(bench_packet_parse_multi,
+			   alloc_parse_packets_multi_ipv6_udp,
+			   free_packets_multi,
+			   "bench_packet_parse_multi_ipv6_udp"),
 };
 
 /**
@@ -1530,7 +1753,7 @@ int main(int argc, char *argv[])
 	/* Let helper collect its own arguments (e.g. --odph_proc) */
 	argc = odph_parse_options(argc, argv);
 	if (odph_options(&helper_options)) {
-		LOG_ERR("Error: reading ODP helper options failed.\n");
+		ODPH_ERR("Error: reading ODP helper options failed.\n");
 		exit(EXIT_FAILURE);
 	}
 
@@ -1539,13 +1762,13 @@ int main(int argc, char *argv[])
 
 	/* Init ODP before calling anything else */
 	if (odp_init_global(&instance, &init_param, NULL)) {
-		LOG_ERR("Error: ODP global init failed.\n");
+		ODPH_ERR("Error: ODP global init failed.\n");
 		exit(EXIT_FAILURE);
 	}
 
 	/* Init this thread */
 	if (odp_init_local(instance, ODP_THREAD_CONTROL)) {
-		LOG_ERR("Error: ODP local init failed.\n");
+		ODPH_ERR("Error: ODP local init failed.\n");
 		exit(EXIT_FAILURE);
 	}
 
@@ -1554,14 +1777,14 @@ int main(int argc, char *argv[])
 			      ODP_CACHE_LINE_SIZE, 0);
 
 	if (shm == ODP_SHM_INVALID) {
-		LOG_ERR("Error: shared mem reserve failed.\n");
+		ODPH_ERR("Error: shared mem reserve failed.\n");
 		exit(EXIT_FAILURE);
 	}
 
 	gbl_args = odp_shm_addr(shm);
 
 	if (gbl_args == NULL) {
-		LOG_ERR("Error: shared mem alloc failed.\n");
+		ODPH_ERR("Error: shared mem alloc failed.\n");
 		exit(EXIT_FAILURE);
 	}
 
@@ -1578,7 +1801,7 @@ int main(int argc, char *argv[])
 
 	/* Get default worker cpumask */
 	if (odp_cpumask_default_worker(&cpumask, 1) != 1) {
-		LOG_ERR("Error: unable to allocate worker thread.\n");
+		ODPH_ERR("Error: unable to allocate worker thread.\n");
 		exit(EXIT_FAILURE);
 	}
 
@@ -1586,7 +1809,7 @@ int main(int argc, char *argv[])
 
 	/* Check pool capability */
 	if (odp_pool_capability(&capa)) {
-		LOG_ERR("Error: unable to query pool capability.\n");
+		ODPH_ERR("Error: unable to query pool capability.\n");
 		exit(EXIT_FAILURE);
 	}
 
@@ -1596,19 +1819,19 @@ int main(int argc, char *argv[])
 			2 * TEST_REPEAT_COUNT;
 
 	if (capa.pkt.max_num && capa.pkt.max_num < pkt_num) {
-		LOG_ERR("Error: packet pool size not supported.\n");
+		ODPH_ERR("Error: packet pool size not supported.\n");
 		printf("MAX: %" PRIu32 "\n", capa.pkt.max_num);
 		exit(EXIT_FAILURE);
 	} else if (capa.pkt.max_len && capa.pkt.max_len < TEST_MAX_PKT_SIZE) {
-		LOG_ERR("Error: packet length not supported.\n");
+		ODPH_ERR("Error: packet length not supported.\n");
 		exit(EXIT_FAILURE);
 	} else if (capa.pkt.max_seg_len &&
 		   capa.pkt.max_seg_len < PKT_POOL_SEG_LEN) {
-		LOG_ERR("Error: segment length not supported.\n");
+		ODPH_ERR("Error: segment length not supported.\n");
 		exit(EXIT_FAILURE);
 	} else if (capa.pkt.max_uarea_size &&
 		   capa.pkt.max_uarea_size < PKT_POOL_UAREA_SIZE) {
-		LOG_ERR("Error: user area size not supported.\n");
+		ODPH_ERR("Error: user area size not supported.\n");
 		exit(EXIT_FAILURE);
 	}
 
@@ -1623,7 +1846,7 @@ int main(int argc, char *argv[])
 	gbl_args->pool = odp_pool_create("packet pool", &params);
 
 	if (gbl_args->pool == ODP_POOL_INVALID) {
-		LOG_ERR("Error: packet pool create failed.\n");
+		ODPH_ERR("Error: packet pool create failed.\n");
 		exit(EXIT_FAILURE);
 	}
 
@@ -1660,24 +1883,24 @@ int main(int argc, char *argv[])
 	ret = gbl_args->bench_failed;
 
 	if (odp_pool_destroy(gbl_args->pool)) {
-		LOG_ERR("Error: pool destroy\n");
+		ODPH_ERR("Error: pool destroy\n");
 		exit(EXIT_FAILURE);
 	}
 	gbl_args = NULL;
 	odp_mb_full();
 
 	if (odp_shm_free(shm)) {
-		LOG_ERR("Error: shm free\n");
+		ODPH_ERR("Error: shm free\n");
 		exit(EXIT_FAILURE);
 	}
 
 	if (odp_term_local()) {
-		LOG_ERR("Error: term local\n");
+		ODPH_ERR("Error: term local\n");
 		exit(EXIT_FAILURE);
 	}
 
 	if (odp_term_global(instance)) {
-		LOG_ERR("Error: term global\n");
+		ODPH_ERR("Error: term global\n");
 		exit(EXIT_FAILURE);
 	}
 

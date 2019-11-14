@@ -4,8 +4,7 @@
  * SPDX-License-Identifier:     BSD-3-Clause
  */
 
-#include "config.h"
-
+#include <odp/autoheader_internal.h>
 #include <odp_packet_io_internal.h>
 
 /* Ops for all implementation of pktio.
@@ -14,13 +13,13 @@
  * Array must be NULL terminated */
 const pktio_if_ops_t * const pktio_if_ops[]  = {
 	&loopback_pktio_ops,
-#ifdef ODP_PKTIO_DPDK
+#ifdef _ODP_PKTIO_DPDK
 	&dpdk_pktio_ops,
 #endif
-#ifdef ODP_NETMAP
+#ifdef _ODP_PKTIO_NETMAP
 	&netmap_pktio_ops,
 #endif
-#ifdef HAVE_PCAP
+#ifdef _ODP_PKTIO_PCAP
 	&pcap_pktio_ops,
 #endif
 	&ipc_pktio_ops,
