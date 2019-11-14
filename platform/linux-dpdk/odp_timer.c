@@ -22,6 +22,7 @@
 #include <rte_cycles.h>
 #include <rte_timer.h>
 
+#include <inttypes.h>
 #include <string.h>
 
 /* Timer states */
@@ -106,7 +107,17 @@ typedef struct {
 
 } timer_global_t;
 
+typedef struct timer_local_t {
+	odp_time_t last_run;
+	int        run_cnt;
+
+} timer_local_t;
+
+/* Points to timer global data */
 timer_global_t *timer_global;
+
+/* Timer thread local data */
+static __thread timer_local_t timer_local;
 
 static inline timer_pool_t *timer_pool_from_hdl(odp_timer_pool_t hdl)
 {
@@ -188,6 +199,9 @@ int _odp_timer_term_global(void)
 
 int _odp_timer_init_local(void)
 {
+	timer_local.last_run = odp_time_global_from_ns(0);
+	timer_local.run_cnt = 1;
+
 	return 0;
 }
 
@@ -198,28 +212,26 @@ int _odp_timer_term_local(void)
 
 void _timer_run_inline(int dec)
 {
-	static __thread odp_time_t last_timer_run;
-	static __thread int timer_run_cnt = 1;
 	int poll_interval = timer_global->poll_interval;
 	odp_time_t now;
 
 	/* Rate limit how often this thread checks the timer pools. */
 
 	if (poll_interval > 1) {
-		timer_run_cnt -= dec;
-		if (timer_run_cnt > 0)
+		timer_local.run_cnt -= dec;
+		if (timer_local.run_cnt > 0)
 			return;
-		timer_run_cnt = poll_interval;
+		timer_local.run_cnt = poll_interval;
 	}
 
 	now = odp_time_global();
 
 	if (poll_interval > 1) {
-		odp_time_t period = odp_time_diff(now, last_timer_run);
+		odp_time_t period = odp_time_diff(now, timer_local.last_run);
 
 		if (odp_time_cmp(period, timer_global->poll_interval_time) < 0)
 			return;
-		last_timer_run = now;
+		timer_local.last_run = now;
 	}
 
 	/* Check timer pools */
