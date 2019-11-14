@@ -26,6 +26,7 @@ odpapiplatincludedir= $(includedir)/odp/api/plat
 odpapiplatinclude_HEADERS = \
 		  include/odp/api/plat/atomic_inlines.h \
 		  include/odp/api/plat/buffer_inline_types.h \
+		  include/odp/api/plat/buffer_inlines.h \
 		  include/odp/api/plat/byteorder_inlines.h \
 		  include/odp/api/plat/cpu_inlines.h \
 		  include/odp/api/plat/event_inlines.h \
@@ -212,6 +213,7 @@ endif
 if ODP_ABI_COMPAT
 __LIB__libodp_linux_la_SOURCES += \
 			   ../linux-generic/odp_atomic_api.c \
+			   ../linux-generic/odp_buffer_api.c \
 			   ../linux-generic/odp_byteorder_api.c \
 			   ../linux-generic/odp_cpu_api.c \
 			   ../linux-generic/odp_event_api.c \
