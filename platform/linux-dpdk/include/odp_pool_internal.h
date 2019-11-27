@@ -60,7 +60,7 @@ typedef struct ODP_ALIGNED_CACHE {
 
 } pool_t;
 
-typedef struct pool_table_t {
+typedef struct pool_global_t {
 	pool_t		pool[ODP_CONFIG_POOLS];
 	odp_shm_t	shm;
 
@@ -68,18 +68,18 @@ typedef struct pool_table_t {
 		uint32_t pkt_max_num;
 	} config;
 
-} pool_table_t;
+} pool_global_t;
 
-extern pool_table_t *pool_tbl;
+extern pool_global_t *_odp_pool_glb;
 
 static inline pool_t *pool_entry(uint32_t pool_idx)
 {
-	return &pool_tbl->pool[pool_idx];
+	return &_odp_pool_glb->pool[pool_idx];
 }
 
 static inline pool_t *pool_entry_from_hdl(odp_pool_t pool_hdl)
 {
-	return &pool_tbl->pool[_odp_typeval(pool_hdl) - 1];
+	return &_odp_pool_glb->pool[_odp_typeval(pool_hdl) - 1];
 }
 
 static inline void buffer_free_multi(odp_buffer_hdr_t *buf_hdr[], int num)
