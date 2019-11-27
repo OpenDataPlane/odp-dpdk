@@ -114,10 +114,13 @@ typedef union {
 	uint8_t pad[ROUNDUP_CACHE_LINE(sizeof(struct pktio_entry))];
 } pktio_entry_t;
 
+/* Global variables */
 typedef struct {
 	odp_spinlock_t lock;
-	pktio_entry_t entries[ODP_CONFIG_PKTIO_ENTRIES];
-} pktio_table_t;
+	odp_shm_t      shm;
+
+	pktio_entry_t  entries[ODP_CONFIG_PKTIO_ENTRIES];
+} pktio_global_t;
 
 typedef struct pktio_if_ops {
 	const char *name;
