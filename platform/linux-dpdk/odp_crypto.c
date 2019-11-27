@@ -326,7 +326,6 @@ int _odp_crypto_init_global(void)
 	global->enabled_crypto_devs = 0;
 	odp_spinlock_init(&global->lock);
 
-	odp_spinlock_lock(&global->lock);
 	if (global->is_crypto_dev_initialized)
 		return 0;
 
@@ -470,7 +469,6 @@ int _odp_crypto_init_global(void)
 	}
 
 	global->is_crypto_dev_initialized = 1;
-	odp_spinlock_unlock(&global->lock);
 
 	return 0;
 }
@@ -1540,7 +1538,6 @@ int _odp_crypto_term_global(void)
 	if (odp_global_ro.disable.crypto || global == NULL)
 		return 0;
 
-	odp_spinlock_lock(&global->lock);
 	for (session = global->free; session != NULL; session = session->next)
 		count++;
 	if (count != MAX_SESSIONS) {
@@ -1550,8 +1547,6 @@ int _odp_crypto_term_global(void)
 
 	if (global->crypto_op_pool != NULL)
 		rte_mempool_free(global->crypto_op_pool);
-
-	odp_spinlock_unlock(&global->lock);
 
 	ret = odp_shm_free(global->shm);
 	if (ret < 0) {
@@ -1849,12 +1844,12 @@ int odp_crypto_int(odp_packet_t pkt_in,
 	odp_spinlock_lock(&global->lock);
 	op = rte_crypto_op_alloc(global->crypto_op_pool,
 				 RTE_CRYPTO_OP_TYPE_SYMMETRIC);
+	odp_spinlock_unlock(&global->lock);
+
 	if (op == NULL) {
 		ODP_ERR("Failed to allocate crypto operation");
 		goto err;
 	}
-
-	odp_spinlock_unlock(&global->lock);
 
 	if (cipher_is_aead(session->p.cipher_alg))
 		crypto_fill_aead_param(session, out_pkt, param, op,
