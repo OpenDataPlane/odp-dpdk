@@ -19,6 +19,7 @@
 #include <odp/api/time.h>
 #include <odp/api/plat/time_inlines.h>
 #include <odp_packet_internal.h>
+#include <odp_global_data.h>
 
 /* Inlined API functions */
 #include <odp/api/plat/event_inlines.h>
@@ -287,6 +288,11 @@ int _odp_crypto_init_global(void)
 	unsigned int cache_size = 0;
 	unsigned int nb_queue_pairs = 0, queue_pair;
 	uint32_t max_sess_sz = 0, sess_sz;
+
+	if (odp_global_ro.disable.crypto) {
+		ODP_PRINT("\nODP crypto is DISABLED\n");
+		return 0;
+	}
 
 	/* Calculate the memory size we need */
 	mem_size  = sizeof(*global);
@@ -577,6 +583,11 @@ static void capability_process(struct rte_cryptodev_info *dev_info,
 int odp_crypto_capability(odp_crypto_capability_t *capability)
 {
 	uint8_t cdev_id, cdev_count;
+
+	if (odp_global_ro.disable.crypto) {
+		ODP_ERR("Crypto is disabled\n");
+		return -1;
+	}
 
 	if (NULL == capability)
 		return -1;
@@ -1343,6 +1354,15 @@ int odp_crypto_session_create(odp_crypto_session_param_t *param,
 	struct rte_mempool *sess_mp;
 	crypto_session_entry_t *session = NULL;
 
+	if (odp_global_ro.disable.crypto) {
+		ODP_ERR("Crypto is disabled\n");
+		/* Dummy output to avoid compiler warning about uninitialized
+		 * variables */
+		*status = ODP_CRYPTO_SES_CREATE_ERR_ENOMEM;
+		*session_out = ODP_CRYPTO_SESSION_INVALID;
+		return -1;
+	}
+
 	if (rte_cryptodev_count() == 0) {
 		ODP_ERR("No crypto devices available\n");
 		*status = ODP_CRYPTO_SES_CREATE_ERR_ENOMEM;
@@ -1517,7 +1537,9 @@ int _odp_crypto_term_global(void)
 	int count = 0;
 	crypto_session_entry_t *session;
 
-	odp_spinlock_init(&global->lock);
+	if (odp_global_ro.disable.crypto)
+		return 0;
+
 	odp_spinlock_lock(&global->lock);
 	for (session = global->free; session != NULL; session = session->next)
 		count++;
