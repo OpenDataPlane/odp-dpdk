@@ -70,10 +70,10 @@ typedef struct crypto_global_s {
 	int is_crypto_dev_initialized;
 	struct rte_mempool *crypto_op_pool;
 	struct rte_mempool *session_mempool[RTE_MAX_NUMA_NODES];
+	odp_shm_t shm;
 } crypto_global_t;
 
 static crypto_global_t *global;
-static odp_shm_t crypto_global_shm;
 
 static inline int is_valid_size(uint16_t length,
 				const struct rte_crypto_param_range *range)
@@ -288,6 +288,7 @@ int _odp_crypto_init_global(void)
 	unsigned int cache_size = 0;
 	unsigned int nb_queue_pairs = 0, queue_pair;
 	uint32_t max_sess_sz = 0, sess_sz;
+	odp_shm_t shm;
 
 	if (odp_global_ro.disable.crypto) {
 		ODP_PRINT("\nODP crypto is DISABLED\n");
@@ -299,12 +300,10 @@ int _odp_crypto_init_global(void)
 	mem_size += (MAX_SESSIONS * sizeof(crypto_session_entry_t));
 
 	/* Allocate our globally shared memory */
-	crypto_global_shm = odp_shm_reserve("crypto_pool", mem_size,
-					    ODP_CACHE_LINE_SIZE, 0);
-
-	if (crypto_global_shm != ODP_SHM_INVALID) {
-		global = odp_shm_addr(crypto_global_shm);
-
+	shm = odp_shm_reserve("_odp_crypto_glb", mem_size,
+			      ODP_CACHE_LINE_SIZE, 0);
+	if (shm != ODP_SHM_INVALID) {
+		global = odp_shm_addr(shm);
 		if (global == NULL) {
 			ODP_ERR("Failed to find the reserved shm block");
 			return -1;
@@ -316,6 +315,7 @@ int _odp_crypto_init_global(void)
 
 	/* Clear it out */
 	memset(global, 0, mem_size);
+	global->shm = shm;
 
 	/* Initialize free list and lock */
 	for (idx = 0; idx < MAX_SESSIONS; idx++) {
@@ -1537,7 +1537,7 @@ int _odp_crypto_term_global(void)
 	int count = 0;
 	crypto_session_entry_t *session;
 
-	if (odp_global_ro.disable.crypto)
+	if (odp_global_ro.disable.crypto || global == NULL)
 		return 0;
 
 	odp_spinlock_lock(&global->lock);
@@ -1553,7 +1553,7 @@ int _odp_crypto_term_global(void)
 
 	odp_spinlock_unlock(&global->lock);
 
-	ret = odp_shm_free(crypto_global_shm);
+	ret = odp_shm_free(global->shm);
 	if (ret < 0) {
 		ODP_ERR("shm free failed for crypto_pool\n");
 		rc = -1;
