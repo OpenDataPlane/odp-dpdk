@@ -138,7 +138,7 @@ int _odp_pool_term_global(void)
 
 	ret = odp_shm_free(pool_tbl->shm);
 	if (ret < 0)
-		ODP_ERR("shm free failed");
+		ODP_ERR("SHM free failed\n");
 
 	return ret;
 }
@@ -248,7 +248,7 @@ odp_dpdk_mbuf_ctor(struct rte_mempool *mp,
 
 #define CHECK_U16_OVERFLOW(X)	do {			\
 	if (odp_unlikely(X > UINT16_MAX)) {		\
-		ODP_ERR("Invalid size: %d", X);		\
+		ODP_ERR("Invalid size: %d\n", X);	\
 		UNLOCK(&pool->lock);			\
 		return ODP_POOL_INVALID;		\
 	}						\
@@ -310,7 +310,7 @@ static int check_params(odp_pool_param_t *params)
 		}
 
 		if (params->pkt.headroom > CONFIG_PACKET_HEADROOM) {
-			ODP_ERR("Packet headroom size not supported.");
+			ODP_ERR("Packet headroom size not supported\n");
 			return -1;
 		}
 
