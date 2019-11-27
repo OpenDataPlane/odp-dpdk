@@ -103,16 +103,6 @@ static inline int num_segments(uint32_t len, uint32_t seg_len)
 	return num;
 }
 
-void packet_parse_reset(odp_packet_hdr_t *pkt_hdr)
-{
-	/* Reset parser metadata before new parse */
-	pkt_hdr->p.input_flags.all  = 0;
-	pkt_hdr->p.flags.all.error  = 0;
-	pkt_hdr->p.l2_offset        = ODP_PACKET_OFFSET_INVALID;
-	pkt_hdr->p.l3_offset        = ODP_PACKET_OFFSET_INVALID;
-	pkt_hdr->p.l4_offset        = ODP_PACKET_OFFSET_INVALID;
-}
-
 static odp_packet_t packet_alloc(pool_t *pool, uint32_t len)
 {
 	odp_packet_t pkt;
@@ -2066,7 +2056,8 @@ int odp_packet_parse(odp_packet_t pkt, uint32_t offset,
 	if (data == NULL)
 		return -1;
 
-	packet_parse_reset(pkt_hdr);
+	/* Reset parser flags, keep other flags */
+	packet_parse_reset(pkt_hdr, 0);
 
 	if (proto == ODP_PROTO_ETH) {
 		/* Assume valid L2 header, no CRC/FCS check in SW */
