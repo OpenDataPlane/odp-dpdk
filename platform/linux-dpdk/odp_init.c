@@ -52,8 +52,8 @@ enum init_stage {
 	ALL_INIT      /* All init stages completed */
 };
 
-struct odp_global_data_ro_t odp_global_ro;
-struct odp_global_data_rw_t *odp_global_rw;
+odp_global_data_ro_t odp_global_ro;
+odp_global_data_rw_t *odp_global_rw;
 
 static int _odp_init_dpdk(const char *cmdline)
 {
@@ -112,7 +112,7 @@ static int global_rw_data_init(void)
 	odp_shm_t shm;
 
 	shm = odp_shm_reserve("_odp_global_rw_data",
-			      sizeof(struct odp_global_data_rw_t),
+			      sizeof(odp_global_data_rw_t),
 			      ODP_CACHE_LINE_SIZE, 0);
 
 	odp_global_rw = odp_shm_addr(shm);
@@ -121,7 +121,7 @@ static int global_rw_data_init(void)
 		return -1;
 	}
 
-	memset(odp_global_rw, 0, sizeof(struct odp_global_data_rw_t));
+	memset(odp_global_rw, 0, sizeof(odp_global_data_rw_t));
 
 	return 0;
 }
@@ -317,7 +317,7 @@ int odp_init_global(odp_instance_t *instance,
 {
 	enum init_stage stage = NO_INIT;
 
-	memset(&odp_global_ro, 0, sizeof(struct odp_global_data_ro_t));
+	memset(&odp_global_ro, 0, sizeof(odp_global_data_ro_t));
 	odp_global_ro.main_pid = getpid();
 
 	odp_global_ro.log_fn = odp_override_log;
