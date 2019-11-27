@@ -108,6 +108,7 @@ int _odp_pool_init_global(void)
 
 	if (read_config_file(_odp_pool_glb)) {
 		odp_shm_free(shm);
+		 _odp_pool_glb = NULL;
 		return -1;
 	}
 
@@ -134,6 +135,9 @@ int _odp_pool_init_local(void)
 int _odp_pool_term_global(void)
 {
 	int ret;
+
+	if (_odp_pool_glb == NULL)
+		return 0;
 
 	ret = odp_shm_free(_odp_pool_glb->shm);
 	if (ret < 0)
