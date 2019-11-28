@@ -24,7 +24,6 @@
 
 #include <odp/api/cpu.h>
 #include <odp/api/hints.h>
-
 #include <odp/api/system_info.h>
 #include <odp_debug_internal.h>
 #include <odp_errno_define.h>
@@ -36,6 +35,7 @@
 #include <odp/api/plat/time_inlines.h>
 #include <odp_packet_dpdk.h>
 #include <odp_eventdev_internal.h>
+#include <protocols/eth.h>
 
 #include <net/if.h>
 #include <protocols/udp.h>
@@ -923,41 +923,6 @@ static int stop_pkt_dpdk(pktio_entry_t *pktio_entry)
 	return 0;
 }
 
-/* This function can't be called if pkt_dpdk->lockless_tx is true */
-static void _odp_pktio_send_completion(pktio_entry_t *pktio_entry)
-{
-	int i;
-	unsigned j;
-	pool_t *pool = pool_entry_from_hdl(pktio_entry->s.pool);
-	struct rte_mempool *rte_mempool = pool->rte_mempool;
-	uint16_t port_id = pkt_priv(pktio_entry)->port_id;
-
-	for (j = 0; j < pktio_entry->s.num_out_queue; j++)
-		rte_eth_tx_done_cleanup(port_id, j, 0);
-
-	for (i = 0; i < ODP_CONFIG_PKTIO_ENTRIES; ++i) {
-		pktio_entry_t *entry = pktio_entry_ptr[i];
-
-		port_id = pkt_priv(entry)->port_id;
-
-		if (rte_mempool_avail_count(rte_mempool) != 0)
-			return;
-
-		if (entry == pktio_entry)
-			continue;
-
-		if (odp_ticketlock_trylock(&entry->s.txl)) {
-			if (entry->s.state != PKTIO_STATE_FREE &&
-			    entry->s.ops == &dpdk_pktio_ops) {
-				for (j = 0; j < pktio_entry->s.num_out_queue;
-				     j++)
-					rte_eth_tx_done_cleanup(port_id, j, 0);
-			}
-			odp_ticketlock_unlock(&entry->s.txl);
-		}
-	}
-}
-
 int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int num)
 {
 	pkt_dpdk_t * const pkt_dpdk = pkt_priv(pktio_entry);
@@ -1088,14 +1053,6 @@ static int recv_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 				 (uint16_t)index,
 				 (struct rte_mbuf **)pkt_table,
 				 (uint16_t)RTE_MAX(num, min));
-
-	if (nb_rx == 0 && !pkt_dpdk->lockless_tx) {
-		pool_t *pool = pool_entry_from_hdl(pktio_entry->s.pool);
-		struct rte_mempool *rte_mempool = pool->rte_mempool;
-
-		if (rte_mempool_avail_count(rte_mempool) == 0)
-			_odp_pktio_send_completion(pktio_entry);
-	}
 
 	if (!pkt_dpdk->lockless_rx)
 		odp_ticketlock_unlock(&pkt_dpdk->rx_lock[index]);
