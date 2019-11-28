@@ -153,18 +153,21 @@ int _odp_pool_term_local(void)
 
 int odp_pool_capability(odp_pool_capability_t *capa)
 {
+	unsigned int max_pools;
+
 	memset(capa, 0, sizeof(odp_pool_capability_t));
 
-	capa->max_pools = ODP_CONFIG_POOLS;
+	/* Reserve one pool for internal usage */
+	max_pools = ODP_CONFIG_POOLS - 1;
 
 	/* Buffer pools */
-	capa->buf.max_pools = ODP_CONFIG_POOLS;
+	capa->buf.max_pools = max_pools;
 	capa->buf.max_align = ODP_CONFIG_BUFFER_ALIGN_MAX;
 	capa->buf.max_size  = MAX_SIZE;
 	capa->buf.max_num   = CONFIG_POOL_MAX_NUM;
 
 	/* Packet pools */
-	capa->pkt.max_pools        = ODP_CONFIG_POOLS;
+	capa->pkt.max_pools        = max_pools;
 	capa->pkt.max_len          = 0;
 	capa->pkt.max_num	   = _odp_pool_glb->config.pkt_max_num;
 	capa->pkt.min_headroom     = CONFIG_PACKET_HEADROOM;
@@ -176,7 +179,7 @@ int odp_pool_capability(odp_pool_capability_t *capa)
 	capa->pkt.max_uarea_size   = MAX_SIZE;
 
 	/* Timeout pools */
-	capa->tmo.max_pools = ODP_CONFIG_POOLS;
+	capa->tmo.max_pools = max_pools;
 	capa->tmo.max_num   = CONFIG_POOL_MAX_NUM;
 
 	return 0;
