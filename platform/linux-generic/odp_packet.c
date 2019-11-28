@@ -160,14 +160,6 @@ static inline void push_head(odp_packet_hdr_t *pkt_hdr, uint32_t len)
 	pkt_hdr->seg_len  += len;
 }
 
-static inline void pull_head(odp_packet_hdr_t *pkt_hdr, uint32_t len)
-{
-	pkt_hdr->headroom  += len;
-	pkt_hdr->frame_len -= len;
-	pkt_hdr->seg_data += len;
-	pkt_hdr->seg_len  -= len;
-}
-
 static inline void push_tail(odp_packet_hdr_t *pkt_hdr, uint32_t len)
 {
 	odp_packet_hdr_t *last_seg = packet_last_seg(pkt_hdr);
@@ -307,16 +299,6 @@ int _odp_packet_copy_to_mem_seg(odp_packet_t pkt, uint32_t offset,
 }
 
 #include <odp/visibility_end.h>
-
-void packet_parse_reset(odp_packet_hdr_t *pkt_hdr)
-{
-	/* Reset parser metadata before new parse */
-	pkt_hdr->p.input_flags.all  = 0;
-	pkt_hdr->p.flags.all.error  = 0;
-	pkt_hdr->p.l2_offset        = ODP_PACKET_OFFSET_INVALID;
-	pkt_hdr->p.l3_offset        = ODP_PACKET_OFFSET_INVALID;
-	pkt_hdr->p.l4_offset        = ODP_PACKET_OFFSET_INVALID;
-}
 
 static inline void link_segments(odp_packet_hdr_t *pkt_hdr[], int num)
 {
@@ -1101,6 +1083,13 @@ void odp_packet_user_ptr_set(odp_packet_t pkt, const void *ptr)
 
 	pkt_hdr->buf_hdr.user_ptr     = ptr;
 	pkt_hdr->p.flags.user_ptr_set = 1;
+}
+
+void odp_packet_input_set(odp_packet_t pkt, odp_pktio_t pktio)
+{
+	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
+
+	pkt_hdr->input = pktio;
 }
 
 int odp_packet_l2_offset_set(odp_packet_t pkt, uint32_t offset)
@@ -2633,7 +2622,8 @@ int odp_packet_parse(odp_packet_t pkt, uint32_t offset,
 	if (data == NULL)
 		return -1;
 
-	packet_parse_reset(pkt_hdr);
+	/* Reset parser flags, keep other flags */
+	packet_parse_reset(pkt_hdr, 0);
 
 	if (proto == ODP_PROTO_ETH) {
 		/* Assume valid L2 header, no CRC/FCS check in SW */

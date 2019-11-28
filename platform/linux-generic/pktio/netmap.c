@@ -790,12 +790,14 @@ static inline int netmap_pkt_to_odp(pktio_entry_t *pktio_entry,
 	odp_packet_hdr_t parsed_hdr;
 	int i;
 	int num;
-	int alloc_len;
+	uint32_t max_len;
+	uint16_t frame_offset = pktio_entry->s.pktin_frame_offset;
 
 	/* Allocate maximum sized packets */
-	alloc_len = pkt_priv(pktio_entry)->mtu;
+	max_len = pkt_priv(pktio_entry)->mtu;
 
-	num = packet_alloc_multi(pool, alloc_len, pkt_tbl, slot_num);
+	num = packet_alloc_multi(pool, max_len + frame_offset,
+				 pkt_tbl, slot_num);
 
 	for (i = 0; i < num; i++) {
 		netmap_slot_t slot;
@@ -815,10 +817,10 @@ static inline int netmap_pkt_to_odp(pktio_entry_t *pktio_entry,
 
 		pkt = pkt_tbl[i];
 		pkt_hdr = packet_hdr(pkt);
-		pull_tail(pkt_hdr, alloc_len - len);
+		pull_tail(pkt_hdr, max_len - len);
+		if (frame_offset)
+			pull_head(pkt_hdr, frame_offset);
 
-		/* For now copy the data in the mbuf,
-		   worry about zero-copy later */
 		if (odp_packet_copy_from_mem(pkt, 0, len, slot.buf) != 0)
 			goto fail;
 
@@ -906,9 +908,6 @@ static int netmap_fd_set(pktio_entry_t *pktio_entry, int index, fd_set *readfds)
 	int i;
 	int max_fd = 0;
 
-	if (odp_unlikely(pktio_entry->s.state != PKTIO_STATE_STARTED))
-		return 0;
-
 	if (!pkt_nm->lockless_rx)
 		odp_ticketlock_lock(&pkt_nm->rx_desc_ring[index].s.lock);
 
@@ -946,9 +945,6 @@ static int netmap_recv(pktio_entry_t *pktio_entry, int index,
 	int num_rx = 0;
 	int max_fd = 0;
 	fd_set empty_rings;
-
-	if (odp_unlikely(pktio_entry->s.state != PKTIO_STATE_STARTED))
-		return 0;
 
 	FD_ZERO(&empty_rings);
 
@@ -1071,9 +1067,6 @@ static int netmap_send(pktio_entry_t *pktio_entry, int index,
 	uint32_t pkt_len;
 	unsigned slot_id;
 	char *buf;
-
-	if (odp_unlikely(pktio_entry->s.state != PKTIO_STATE_STARTED))
-		return 0;
 
 	/* Only one netmap tx ring per pktout queue */
 	desc_id = pkt_nm->tx_desc_ring[index].s.cur;

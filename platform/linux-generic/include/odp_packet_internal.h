@@ -235,6 +235,14 @@ static inline void copy_packet_cls_metadata(odp_packet_hdr_t *src_hdr,
 	dst_hdr->timestamp = src_hdr->timestamp;
 }
 
+static inline void pull_head(odp_packet_hdr_t *pkt_hdr, uint32_t len)
+{
+	pkt_hdr->headroom  += len;
+	pkt_hdr->frame_len -= len;
+	pkt_hdr->seg_data  += len;
+	pkt_hdr->seg_len   -= len;
+}
+
 static inline void pull_tail(odp_packet_hdr_t *pkt_hdr, uint32_t len)
 {
 	odp_packet_hdr_t *last = packet_last_seg(pkt_hdr);
@@ -267,7 +275,18 @@ int packet_parse_layer(odp_packet_hdr_t *pkt_hdr,
 		       odp_proto_chksums_t chksums);
 
 /* Reset parser metadata for a new parse */
-void packet_parse_reset(odp_packet_hdr_t *pkt_hdr);
+static inline void packet_parse_reset(odp_packet_hdr_t *pkt_hdr, int all)
+{
+	pkt_hdr->p.input_flags.all  = 0;
+	pkt_hdr->p.l2_offset        = ODP_PACKET_OFFSET_INVALID;
+	pkt_hdr->p.l3_offset        = ODP_PACKET_OFFSET_INVALID;
+	pkt_hdr->p.l4_offset        = ODP_PACKET_OFFSET_INVALID;
+
+	if (all)
+		pkt_hdr->p.flags.all_flags = 0;
+	else /* Keep user ptr and pktout flags */
+		pkt_hdr->p.flags.all.error = 0;
+}
 
 static inline int packet_hdr_has_l2(odp_packet_hdr_t *pkt_hdr)
 {

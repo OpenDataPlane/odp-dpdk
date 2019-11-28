@@ -538,19 +538,21 @@ static inline int mbuf_to_pkt(pktio_entry_t *pktio_entry,
 	uint16_t pkt_len;
 	struct rte_mbuf *mbuf;
 	void *data;
-	int i, j;
-	int alloc_len, num;
+	int i, j, num;
+	uint32_t max_len;
 	int nb_pkts = 0;
 	pkt_dpdk_t *pkt_dpdk = pkt_priv(pktio_entry);
 	odp_pool_t pool = pkt_dpdk->pool;
 	odp_pktin_config_opt_t pktin_cfg = pktio_entry->s.config.pktin;
 	odp_proto_layer_t parse_layer = pktio_entry->s.config.parser.layer;
 	odp_pktio_t input = pktio_entry->s.handle;
+	uint16_t frame_offset = pktio_entry->s.pktin_frame_offset;
 
 	/* Allocate maximum sized packets */
-	alloc_len = pkt_dpdk->data_room;
+	max_len = pkt_dpdk->data_room;
 
-	num = packet_alloc_multi(pool, alloc_len, pkt_table, mbuf_num);
+	num = packet_alloc_multi(pool, max_len + frame_offset,
+				 pkt_table, mbuf_num);
 	if (num != mbuf_num) {
 		ODP_DBG("packet_alloc_multi() unable to allocate all packets: "
 			"%d/%" PRIu16 " allocated\n", num, mbuf_num);
@@ -575,7 +577,7 @@ static inline int mbuf_to_pkt(pktio_entry_t *pktio_entry,
 		if (pktio_cls_enabled(pktio_entry)) {
 			uint32_t supported_ptypes = pkt_dpdk->supported_ptypes;
 
-			packet_parse_reset(&parsed_hdr);
+			packet_parse_reset(&parsed_hdr, 1);
 			packet_set_len(&parsed_hdr, pkt_len);
 			if (_odp_dpdk_packet_parse_common(&parsed_hdr.p, data,
 							  pkt_len, pkt_len,
@@ -596,7 +598,9 @@ static inline int mbuf_to_pkt(pktio_entry_t *pktio_entry,
 
 		pkt     = pkt_table[i];
 		pkt_hdr = packet_hdr(pkt);
-		pull_tail(pkt_hdr, alloc_len - pkt_len);
+		pull_tail(pkt_hdr, max_len - pkt_len);
+		if (frame_offset)
+			pull_head(pkt_hdr, frame_offset);
 
 		if (odp_packet_copy_from_mem(pkt, 0, pkt_len, data) != 0)
 			goto fail;
@@ -859,7 +863,7 @@ static inline int mbuf_to_pkt_zero(pktio_entry_t *pktio_entry,
 		if (pktio_cls_enabled(pktio_entry)) {
 			uint32_t supported_ptypes = pkt_dpdk->supported_ptypes;
 
-			packet_parse_reset(&parsed_hdr);
+			packet_parse_reset(&parsed_hdr, 1);
 			packet_set_len(&parsed_hdr, pkt_len);
 			if (_odp_dpdk_packet_parse_common(&parsed_hdr.p, data,
 							  pkt_len, pkt_len,
@@ -1621,6 +1625,9 @@ static int dpdk_open(odp_pktio_t id ODP_UNUSED,
 			RTE_PKTMBUF_HEADROOM;
 	pkt_dpdk->data_room = RTE_MIN(pool_entry->seg_len, data_room);
 
+	/* Reserve room for packet input offset */
+	pkt_dpdk->data_room -= pktio_entry->s.pktin_frame_offset;
+
 	/* Mbuf chaining not yet supported */
 	 pkt_dpdk->mtu = RTE_MIN(pkt_dpdk->mtu, pkt_dpdk->data_room);
 
@@ -1826,9 +1833,6 @@ static int dpdk_recv(pktio_entry_t *pktio_entry, int index,
 	int i;
 	unsigned cache_idx;
 
-	if (odp_unlikely(pktio_entry->s.state != PKTIO_STATE_STARTED))
-		return 0;
-
 	if (!pkt_dpdk->lockless_rx)
 		odp_ticketlock_lock(&pkt_dpdk->rx_lock[index]);
 	/**
@@ -1897,9 +1901,6 @@ static int dpdk_send(pktio_entry_t *pktio_entry, int index,
 	int tx_pkts;
 	int i;
 	int mbufs;
-
-	if (odp_unlikely(pktio_entry->s.state != PKTIO_STATE_STARTED))
-		return 0;
 
 	if (_ODP_DPDK_ZERO_COPY)
 		mbufs = pkt_to_mbuf_zero(pktio_entry, tx_mbufs, pkt_table, num,
