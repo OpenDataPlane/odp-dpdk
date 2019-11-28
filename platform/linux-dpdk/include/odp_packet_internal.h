@@ -179,7 +179,7 @@ static inline void packet_subtype_set(odp_packet_t pkt, int ev)
 /**
  * Initialize ODP headers
  */
-static inline void packet_init(odp_packet_hdr_t *pkt_hdr)
+static inline void packet_init(odp_packet_hdr_t *pkt_hdr, odp_pktio_t input)
 {
 	pkt_hdr->p.input_flags.all  = 0;
 	pkt_hdr->p.flags.all_flags  = 0;
@@ -191,7 +191,7 @@ static inline void packet_init(odp_packet_hdr_t *pkt_hdr)
 	if (odp_unlikely(pkt_hdr->subtype != ODP_EVENT_PACKET_BASIC))
 		pkt_hdr->subtype = ODP_EVENT_PACKET_BASIC;
 
-	pkt_hdr->input = ODP_PKTIO_INVALID;
+	pkt_hdr->input = input;
 }
 
 static inline void copy_packet_parser_metadata(odp_packet_hdr_t *src_hdr,
