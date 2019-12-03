@@ -51,6 +51,7 @@ struct pktio_entry {
 	odp_ticketlock_t txl;		/**< TX ticketlock */
 	uint8_t cls_enabled;            /**< classifier enabled */
 	uint8_t chksum_insert_ena;      /**< pktout checksum offload enabled */
+	uint16_t pktin_frame_offset;
 	odp_pktio_t handle;		/**< pktio handle */
 	unsigned char ODP_ALIGNED_CACHE pkt_priv[PKTIO_PRIVATE_SIZE];
 	enum {
@@ -114,10 +115,18 @@ typedef union {
 	uint8_t pad[ROUNDUP_CACHE_LINE(sizeof(struct pktio_entry))];
 } pktio_entry_t;
 
+/* Global variables */
 typedef struct {
 	odp_spinlock_t lock;
-	pktio_entry_t entries[ODP_CONFIG_PKTIO_ENTRIES];
-} pktio_table_t;
+	odp_shm_t      shm;
+
+	struct {
+		/* Frame start offset from base pointer at packet input */
+		uint16_t pktin_frame_offset;
+	} config;
+
+	pktio_entry_t  entries[ODP_CONFIG_PKTIO_ENTRIES];
+} pktio_global_t;
 
 typedef struct pktio_if_ops {
 	const char *name;

@@ -19,6 +19,7 @@
 #include <odp/api/time.h>
 #include <odp/api/plat/time_inlines.h>
 #include <odp_packet_internal.h>
+#include <odp_global_data.h>
 
 /* Inlined API functions */
 #include <odp/api/plat/event_inlines.h>
@@ -69,10 +70,10 @@ typedef struct crypto_global_s {
 	int is_crypto_dev_initialized;
 	struct rte_mempool *crypto_op_pool;
 	struct rte_mempool *session_mempool[RTE_MAX_NUMA_NODES];
+	odp_shm_t shm;
 } crypto_global_t;
 
 static crypto_global_t *global;
-static odp_shm_t crypto_global_shm;
 
 static inline int is_valid_size(uint16_t length,
 				const struct rte_crypto_param_range *range)
@@ -287,18 +288,22 @@ int _odp_crypto_init_global(void)
 	unsigned int cache_size = 0;
 	unsigned int nb_queue_pairs = 0, queue_pair;
 	uint32_t max_sess_sz = 0, sess_sz;
+	odp_shm_t shm;
+
+	if (odp_global_ro.disable.crypto) {
+		ODP_PRINT("\nODP crypto is DISABLED\n");
+		return 0;
+	}
 
 	/* Calculate the memory size we need */
 	mem_size  = sizeof(*global);
 	mem_size += (MAX_SESSIONS * sizeof(crypto_session_entry_t));
 
 	/* Allocate our globally shared memory */
-	crypto_global_shm = odp_shm_reserve("crypto_pool", mem_size,
-					    ODP_CACHE_LINE_SIZE, 0);
-
-	if (crypto_global_shm != ODP_SHM_INVALID) {
-		global = odp_shm_addr(crypto_global_shm);
-
+	shm = odp_shm_reserve("_odp_crypto_glb", mem_size,
+			      ODP_CACHE_LINE_SIZE, 0);
+	if (shm != ODP_SHM_INVALID) {
+		global = odp_shm_addr(shm);
 		if (global == NULL) {
 			ODP_ERR("Failed to find the reserved shm block");
 			return -1;
@@ -310,6 +315,7 @@ int _odp_crypto_init_global(void)
 
 	/* Clear it out */
 	memset(global, 0, mem_size);
+	global->shm = shm;
 
 	/* Initialize free list and lock */
 	for (idx = 0; idx < MAX_SESSIONS; idx++) {
@@ -320,7 +326,6 @@ int _odp_crypto_init_global(void)
 	global->enabled_crypto_devs = 0;
 	odp_spinlock_init(&global->lock);
 
-	odp_spinlock_lock(&global->lock);
 	if (global->is_crypto_dev_initialized)
 		return 0;
 
@@ -464,7 +469,6 @@ int _odp_crypto_init_global(void)
 	}
 
 	global->is_crypto_dev_initialized = 1;
-	odp_spinlock_unlock(&global->lock);
 
 	return 0;
 }
@@ -577,6 +581,11 @@ static void capability_process(struct rte_cryptodev_info *dev_info,
 int odp_crypto_capability(odp_crypto_capability_t *capability)
 {
 	uint8_t cdev_id, cdev_count;
+
+	if (odp_global_ro.disable.crypto) {
+		ODP_ERR("Crypto is disabled\n");
+		return -1;
+	}
 
 	if (NULL == capability)
 		return -1;
@@ -1343,6 +1352,15 @@ int odp_crypto_session_create(odp_crypto_session_param_t *param,
 	struct rte_mempool *sess_mp;
 	crypto_session_entry_t *session = NULL;
 
+	if (odp_global_ro.disable.crypto) {
+		ODP_ERR("Crypto is disabled\n");
+		/* Dummy output to avoid compiler warning about uninitialized
+		 * variables */
+		*status = ODP_CRYPTO_SES_CREATE_ERR_ENOMEM;
+		*session_out = ODP_CRYPTO_SESSION_INVALID;
+		return -1;
+	}
+
 	if (rte_cryptodev_count() == 0) {
 		ODP_ERR("No crypto devices available\n");
 		*status = ODP_CRYPTO_SES_CREATE_ERR_ENOMEM;
@@ -1517,8 +1535,9 @@ int _odp_crypto_term_global(void)
 	int count = 0;
 	crypto_session_entry_t *session;
 
-	odp_spinlock_init(&global->lock);
-	odp_spinlock_lock(&global->lock);
+	if (odp_global_ro.disable.crypto || global == NULL)
+		return 0;
+
 	for (session = global->free; session != NULL; session = session->next)
 		count++;
 	if (count != MAX_SESSIONS) {
@@ -1529,9 +1548,7 @@ int _odp_crypto_term_global(void)
 	if (global->crypto_op_pool != NULL)
 		rte_mempool_free(global->crypto_op_pool);
 
-	odp_spinlock_unlock(&global->lock);
-
-	ret = odp_shm_free(crypto_global_shm);
+	ret = odp_shm_free(global->shm);
 	if (ret < 0) {
 		ODP_ERR("shm free failed for crypto_pool\n");
 		rc = -1;
@@ -1827,12 +1844,12 @@ int odp_crypto_int(odp_packet_t pkt_in,
 	odp_spinlock_lock(&global->lock);
 	op = rte_crypto_op_alloc(global->crypto_op_pool,
 				 RTE_CRYPTO_OP_TYPE_SYMMETRIC);
+	odp_spinlock_unlock(&global->lock);
+
 	if (op == NULL) {
 		ODP_ERR("Failed to allocate crypto operation");
 		goto err;
 	}
-
-	odp_spinlock_unlock(&global->lock);
 
 	if (cipher_is_aead(session->p.cipher_alg))
 		crypto_fill_aead_param(session, out_pkt, param, op,

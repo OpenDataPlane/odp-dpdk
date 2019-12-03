@@ -1017,7 +1017,7 @@ int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int num)
 			uint32_t ptypes = pkt_dpdk->supported_ptypes;
 
 			data = odp_packet_data(pkt);
-			packet_parse_reset(&parsed_hdr);
+			packet_parse_reset(&parsed_hdr, 1);
 			packet_set_len(&parsed_hdr, pkt_len);
 
 			if (!pkt_dpdk->loopback) {

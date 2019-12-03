@@ -17,6 +17,7 @@
 #include <odp/api/plat/byteorder_inlines.h>
 #include <odp_queue_if.h>
 #include <odp/api/plat/queue_inlines.h>
+#include <odp_global_data.h>
 
 #include <protocols/eth.h>
 #include <protocols/ip.h>
@@ -121,7 +122,7 @@ static int loopback_recv(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 		pkt_len = odp_packet_len(pkt);
 		pkt_hdr = packet_hdr(pkt);
 
-		packet_parse_reset(pkt_hdr);
+		packet_parse_reset(pkt_hdr, 1);
 		if (pktio_cls_enabled(pktio_entry)) {
 			odp_packet_t new_pkt;
 			odp_pool_t new_pool;
@@ -161,7 +162,9 @@ static int loopback_recv(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 					failed++;
 					continue;
 				}
+
 				pkt = new_pkt;
+				pkt_hdr = packet_hdr(new_pkt);
 			}
 		} else {
 			packet_parse_layer(pkt_hdr,
@@ -388,8 +391,11 @@ static int loopback_init_capability(pktio_entry_t *pktio_entry)
 	capa->config.pktout.bit.tcp_chksum = 1;
 	capa->config.pktout.bit.udp_chksum = 1;
 	capa->config.pktout.bit.sctp_chksum = 1;
-	capa->config.inbound_ipsec = 1;
-	capa->config.outbound_ipsec = 1;
+
+	if (odp_global_ro.disable.ipsec == 0) {
+		capa->config.inbound_ipsec = 1;
+		capa->config.outbound_ipsec = 1;
+	}
 
 	capa->config.pktout.bit.ipv4_chksum_ena =
 		capa->config.pktout.bit.ipv4_chksum;

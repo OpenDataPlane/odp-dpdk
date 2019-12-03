@@ -52,8 +52,28 @@ enum init_stage {
 	ALL_INIT      /* All init stages completed */
 };
 
-struct odp_global_data_ro_t odp_global_ro;
-struct odp_global_data_rw_t *odp_global_rw;
+odp_global_data_ro_t odp_global_ro;
+odp_global_data_rw_t *odp_global_rw;
+
+static void disable_features(odp_global_data_ro_t *global_ro,
+			     const odp_init_t *init_param)
+{
+	int disable_ipsec, disable_crypto;
+
+	if (init_param == NULL)
+		return;
+
+	disable_ipsec = init_param->not_used.feat.ipsec;
+	global_ro->disable.ipsec = disable_ipsec;
+
+	disable_crypto = init_param->not_used.feat.crypto;
+	/* Crypto can be disabled only if IPSec is disabled */
+	if (disable_ipsec && disable_crypto)
+		global_ro->disable.crypto = 1;
+
+	global_ro->disable.traffic_mngr = init_param->not_used.feat.tm;
+	global_ro->disable.compress = init_param->not_used.feat.compress;
+}
 
 static int _odp_init_dpdk(const char *cmdline)
 {
@@ -112,7 +132,7 @@ static int global_rw_data_init(void)
 	odp_shm_t shm;
 
 	shm = odp_shm_reserve("_odp_global_rw_data",
-			      sizeof(struct odp_global_data_rw_t),
+			      sizeof(odp_global_data_rw_t),
 			      ODP_CACHE_LINE_SIZE, 0);
 
 	odp_global_rw = odp_shm_addr(shm);
@@ -121,7 +141,7 @@ static int global_rw_data_init(void)
 		return -1;
 	}
 
-	memset(odp_global_rw, 0, sizeof(struct odp_global_data_rw_t));
+	memset(odp_global_rw, 0, sizeof(odp_global_data_rw_t));
 
 	return 0;
 }
@@ -317,7 +337,7 @@ int odp_init_global(odp_instance_t *instance,
 {
 	enum init_stage stage = NO_INIT;
 
-	memset(&odp_global_ro, 0, sizeof(struct odp_global_data_ro_t));
+	memset(&odp_global_ro, 0, sizeof(odp_global_data_ro_t));
 	odp_global_ro.main_pid = getpid();
 
 	odp_global_ro.log_fn = odp_override_log;
@@ -340,6 +360,8 @@ int odp_init_global(odp_instance_t *instance,
 		goto init_failed;
 	}
 	stage = LIBCONFIG_INIT;
+
+	disable_features(&odp_global_ro, params);
 
 	if (_odp_cpumask_init_global(params)) {
 		ODP_ERR("ODP cpumask init failed.\n");

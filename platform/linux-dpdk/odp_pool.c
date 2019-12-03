@@ -1,4 +1,5 @@
 /* Copyright (c) 2013-2018, Linaro Limited
+ * Copyright (c) 2019, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -43,11 +44,14 @@
 #define LOCK_INIT(a) odp_spinlock_init(a)
 #endif
 
+/* Pool name format */
+#define POOL_NAME_FORMAT "%" PRIu64 "-%d-%s"
+
 /* Define a practical limit for contiguous memory allocations */
 #define MAX_SIZE   (10 * 1024 * 1024)
 
 /* The pool table ptr - resides in shared memory */
-pool_table_t *pool_tbl;
+pool_global_t *_odp_pool_glb;
 
 #include <odp/visibility_begin.h>
 
@@ -64,7 +68,7 @@ static inline odp_pool_t pool_index_to_handle(uint32_t pool_idx)
 	return _odp_cast_scalar(odp_pool_t, pool_idx + 1);
 }
 
-static int read_config_file(pool_table_t *pool_tbl)
+static int read_config_file(pool_global_t *pool_gbl)
 {
 	const char *str;
 	int val = 0;
@@ -82,7 +86,7 @@ static int read_config_file(pool_table_t *pool_tbl)
 		return -1;
 	}
 
-	pool_tbl->config.pkt_max_num = val;
+	pool_gbl->config.pkt_max_num = val;
 	ODP_PRINT("  %s: %i\n", str, val);
 
 	ODP_PRINT("\n");
@@ -95,20 +99,20 @@ int _odp_pool_init_global(void)
 	uint32_t i;
 	odp_shm_t shm;
 
-	shm = odp_shm_reserve("_odp_pool_table",
-			      sizeof(pool_table_t),
+	shm = odp_shm_reserve("_odp_pool_glb", sizeof(pool_global_t),
 			      ODP_CACHE_LINE_SIZE, 0);
 
-	pool_tbl = odp_shm_addr(shm);
+	_odp_pool_glb = odp_shm_addr(shm);
 
-	if (pool_tbl == NULL)
+	if (_odp_pool_glb == NULL)
 		return -1;
 
-	memset(pool_tbl, 0, sizeof(pool_table_t));
-	pool_tbl->shm = shm;
+	memset(_odp_pool_glb, 0, sizeof(pool_global_t));
+	_odp_pool_glb->shm = shm;
 
-	if (read_config_file(pool_tbl)) {
+	if (read_config_file(_odp_pool_glb)) {
 		odp_shm_free(shm);
+		 _odp_pool_glb = NULL;
 		return -1;
 	}
 
@@ -136,9 +140,12 @@ int _odp_pool_term_global(void)
 {
 	int ret;
 
-	ret = odp_shm_free(pool_tbl->shm);
+	if (_odp_pool_glb == NULL)
+		return 0;
+
+	ret = odp_shm_free(_odp_pool_glb->shm);
 	if (ret < 0)
-		ODP_ERR("shm free failed");
+		ODP_ERR("SHM free failed\n");
 
 	return ret;
 }
@@ -150,20 +157,23 @@ int _odp_pool_term_local(void)
 
 int odp_pool_capability(odp_pool_capability_t *capa)
 {
+	unsigned int max_pools;
+
 	memset(capa, 0, sizeof(odp_pool_capability_t));
 
-	capa->max_pools = ODP_CONFIG_POOLS;
+	/* Reserve one pool for internal usage */
+	max_pools = ODP_CONFIG_POOLS - 1;
 
 	/* Buffer pools */
-	capa->buf.max_pools = ODP_CONFIG_POOLS;
+	capa->buf.max_pools = max_pools;
 	capa->buf.max_align = ODP_CONFIG_BUFFER_ALIGN_MAX;
 	capa->buf.max_size  = MAX_SIZE;
 	capa->buf.max_num   = CONFIG_POOL_MAX_NUM;
 
 	/* Packet pools */
-	capa->pkt.max_pools        = ODP_CONFIG_POOLS;
+	capa->pkt.max_pools        = max_pools;
 	capa->pkt.max_len          = 0;
-	capa->pkt.max_num	   = pool_tbl->config.pkt_max_num;
+	capa->pkt.max_num	   = _odp_pool_glb->config.pkt_max_num;
 	capa->pkt.min_headroom     = CONFIG_PACKET_HEADROOM;
 	capa->pkt.max_headroom     = CONFIG_PACKET_HEADROOM;
 	capa->pkt.min_tailroom     = CONFIG_PACKET_TAILROOM;
@@ -173,7 +183,7 @@ int odp_pool_capability(odp_pool_capability_t *capa)
 	capa->pkt.max_uarea_size   = MAX_SIZE;
 
 	/* Timeout pools */
-	capa->tmo.max_pools = ODP_CONFIG_POOLS;
+	capa->tmo.max_pools = max_pools;
 	capa->tmo.max_num   = CONFIG_POOL_MAX_NUM;
 
 	return 0;
@@ -248,7 +258,7 @@ odp_dpdk_mbuf_ctor(struct rte_mempool *mp,
 
 #define CHECK_U16_OVERFLOW(X)	do {			\
 	if (odp_unlikely(X > UINT16_MAX)) {		\
-		ODP_ERR("Invalid size: %d", X);		\
+		ODP_ERR("Invalid size: %d\n", X);	\
 		UNLOCK(&pool->lock);			\
 		return ODP_POOL_INVALID;		\
 	}						\
@@ -310,7 +320,7 @@ static int check_params(odp_pool_param_t *params)
 		}
 
 		if (params->pkt.headroom > CONFIG_PACKET_HEADROOM) {
-			ODP_ERR("Packet headroom size not supported.");
+			ODP_ERR("Packet headroom size not supported\n");
 			return -1;
 		}
 
@@ -368,12 +378,24 @@ static unsigned int calc_cache_size(uint32_t num)
 	return cache_size;
 }
 
+static void format_pool_name(const char *name, char *rte_name)
+{
+	int i = 0;
+
+	/* Use pid and counter to make name unique */
+	do {
+		snprintf(rte_name, RTE_MEMPOOL_NAMESIZE, POOL_NAME_FORMAT,
+			 (odp_instance_t)odp_global_ro.main_pid, i++, name);
+		rte_name[RTE_MEMPOOL_NAMESIZE - 1] = 0;
+	} while (rte_mempool_lookup(rte_name) != NULL);
+}
+
 odp_pool_t odp_pool_create(const char *name, odp_pool_param_t *params)
 {
 	struct rte_pktmbuf_pool_private mbp_ctor_arg;
 	struct mbuf_ctor_arg mb_ctor_arg;
 	odp_pool_t pool_hdl = ODP_POOL_INVALID;
-	unsigned mb_size, i, cache_size;
+	unsigned int mb_size, i, cache_size;
 	size_t hdr_size;
 	pool_t *pool;
 	uint32_t buf_align, blk_size, headroom, tailroom, min_seg_len;
@@ -506,11 +528,7 @@ odp_pool_t odp_pool_create(const char *name, odp_pool_param_t *params)
 
 		cache_size = calc_cache_size(num);
 
-		if (strlen(pool_name) > RTE_MEMPOOL_NAMESIZE - 1)
-			ODP_ERR("Max pool name size: %u. Trimming %u long, name collision might happen!\n",
-				RTE_MEMPOOL_NAMESIZE - 1, strlen(pool_name));
-
-		snprintf(rte_name, RTE_MEMPOOL_NAMESIZE, "%s", pool_name);
+		format_pool_name(pool_name, rte_name);
 
 		if (params->type == ODP_POOL_PACKET) {
 			uint16_t data_room_size, priv_size;
@@ -566,26 +584,22 @@ odp_pool_t odp_pool_create(const char *name, odp_pool_param_t *params)
 
 odp_pool_t odp_pool_lookup(const char *name)
 {
-	struct rte_mempool *mp = NULL;
-	odp_pool_t pool_hdl = ODP_POOL_INVALID;
-	int i;
-
-	mp = rte_mempool_lookup(name);
-	if (mp == NULL)
-		return ODP_POOL_INVALID;
+	uint32_t i;
+	pool_t *pool;
 
 	for (i = 0; i < ODP_CONFIG_POOLS; i++) {
-		pool_t *pool = pool_entry(i);
+		pool = pool_entry(i);
 
 		LOCK(&pool->lock);
-		if (pool->rte_mempool != mp) {
+		if (strcmp(name, pool->name) == 0) {
+			/* Found it */
 			UNLOCK(&pool->lock);
-			continue;
+			return pool->pool_hdl;
 		}
 		UNLOCK(&pool->lock);
-		pool_hdl = pool->pool_hdl;
 	}
-	return pool_hdl;
+
+	return ODP_POOL_INVALID;
 }
 
 static inline int buffer_alloc_multi(pool_t *pool, odp_buffer_hdr_t *buf_hdr[],
