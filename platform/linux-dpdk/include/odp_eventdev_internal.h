@@ -63,6 +63,10 @@ struct queue_entry_s {
 	uint32_t          index;
 	odp_queue_type_t  type;
 
+	struct {
+		uint8_t prio;
+	} eventdev;
+
 	ring_mpmc_t       ring_mpmc;
 
 	odp_ticketlock_t  lock;

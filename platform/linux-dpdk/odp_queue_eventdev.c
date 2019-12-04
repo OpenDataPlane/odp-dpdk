@@ -1006,7 +1006,7 @@ static inline int _sched_queue_enq_multi(odp_queue_t handle,
 
 	sched = event_schedule_type(queue->s.param.sched.sync);
 	queue_id = queue->s.index;
-	priority = queue->s.param.sched.prio;
+	priority = queue->s.eventdev.prio;
 
 	UNLOCK(queue);
 
@@ -1067,6 +1067,10 @@ static int queue_init(queue_entry_t *queue, const char *name,
 	memcpy(&queue->s.param, param, sizeof(odp_queue_param_t));
 	if (queue->s.param.sched.lock_count > sched_fn->max_ordered_locks())
 		return -1;
+
+	/* Convert ODP priority to eventdev priority:
+	 *     ODP_SCHED_PRIO_HIGHEST == RTE_EVENT_DEV_PRIORITY_LOWEST */
+	queue->s.eventdev.prio = odp_schedule_max_prio() - param->sched.prio;
 
 	if (queue_type == ODP_QUEUE_TYPE_SCHED)
 		queue->s.param.deq_mode = ODP_QUEUE_OP_DISABLED;
