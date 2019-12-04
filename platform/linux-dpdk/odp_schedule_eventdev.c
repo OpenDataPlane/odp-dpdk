@@ -136,7 +136,7 @@ static int resume_scheduling(uint8_t dev_id, uint8_t port_id)
 				continue;
 
 			queue_ids[nb_links] = queue->s.index;
-			priorities[nb_links] = queue->s.param.sched.prio;
+			priorities[nb_links] = queue->s.eventdev.prio;
 			nb_links++;
 		}
 	}
@@ -176,7 +176,7 @@ static int link_group(int group, const odp_thrmask_t *mask, odp_bool_t unlink)
 			continue;
 
 		queue_ids[nb_links] = queue->s.index;
-		priorities[nb_links] = queue->s.param.sched.prio;
+		priorities[nb_links] = queue->s.eventdev.prio;
 		nb_links++;
 	}
 
@@ -254,9 +254,8 @@ static int rx_adapter_add_queues(uint8_t rx_adapter_id, uint8_t port_id,
 		memset(&ev, 0, sizeof(struct rte_event));
 		ev.queue_id = queue->s.index;
 		ev.flow_id = 0;
-		ev.sched_type = queue->s.param.sched.prio;
+		ev.priority = queue->s.eventdev.prio;
 		ev.sched_type = event_schedule_type(queue->s.param.sched.sync);
-		ev.priority = 0;
 
 		memset(&qconf, 0,
 		       sizeof(struct rte_event_eth_rx_adapter_queue_conf));
