@@ -70,6 +70,9 @@
 /* Loopback interface ring size */
 #define LOOPBACK_RING_SIZE 512
 
+/* Number of packet buffers to prefetch in RX */
+#define NUM_RX_PREFETCH 4
+
 /** DPDK runtime configuration options */
 typedef struct {
 	int num_rx_desc;
@@ -923,6 +926,13 @@ static int stop_pkt_dpdk(pktio_entry_t *pktio_entry)
 	return 0;
 }
 
+static inline void prefetch_pkt(odp_packet_t pkt)
+{
+	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
+
+	odp_prefetch(&pkt_hdr->p);
+}
+
 int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int num)
 {
 	pkt_dpdk_t * const pkt_dpdk = pkt_priv(pktio_entry);
@@ -932,6 +942,10 @@ int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int num)
 	odp_pktio_t input = pktio_entry->s.handle;
 	odp_time_t ts_val;
 	odp_time_t *ts = NULL;
+	uint16_t num_prefetch = RTE_MIN(num, NUM_RX_PREFETCH);
+
+	for (i = 0; i < num_prefetch; i++)
+		prefetch_pkt(pkt_table[i]);
 
 	if (pktio_entry->s.config.pktin.bit.ts_all ||
 	    pktio_entry->s.config.pktin.bit.ts_ptp) {
@@ -942,6 +956,9 @@ int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int num)
 	for (i = 0; i < num; ++i) {
 		odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt_table[i]);
 		struct rte_mbuf *mbuf = pkt_to_mbuf(pkt_table[i]);
+
+		if (odp_likely(i + num_prefetch < num))
+			prefetch_pkt(pkt_table[i + num_prefetch]);
 
 		packet_init(pkt_hdr, input);
 
@@ -964,6 +981,8 @@ int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int num)
 			}
 		}
 		packet_set_ts(pkt_hdr, ts);
+
+		odp_prefetch(rte_pktmbuf_mtod(mbuf, char *));
 	}
 
 	if (pktio_cls_enabled(pktio_entry)) {
