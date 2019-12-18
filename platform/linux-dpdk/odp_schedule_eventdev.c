@@ -366,7 +366,7 @@ static int schedule_create_queue(uint32_t qi,
 	odp_thrmask_t mask;
 	uint8_t dev_id = eventdev_gbl->dev_id;
 	uint8_t queue_id = queue->s.index;
-	uint8_t priority = sched_param->prio;
+	uint8_t priority = queue->s.eventdev.prio;
 	int thr;
 
 	odp_ticketlock_lock(&eventdev_gbl->grp_lock);
