@@ -490,7 +490,7 @@ static int dpdk_init_capability(pktio_entry_t *pktio_entry,
 						       &mac_addr);
 		if (ret == 0) {
 			capa->set_op.op.mac_addr = 1;
-		} else if (ret != -ENOTSUP) {
+		} else if (ret != -ENOTSUP && ret != -EPERM) {
 			ODP_ERR("Failed to set interface default MAC: %d\n",
 				ret);
 			return -1;
