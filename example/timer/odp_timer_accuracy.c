@@ -54,6 +54,7 @@ typedef struct test_global_t {
 		unsigned long long int offset_ns;
 		unsigned long long int num;
 		unsigned long long int burst;
+		unsigned long long int burst_gap;
 		int mode;
 		int init;
 		int output;
@@ -72,6 +73,7 @@ typedef struct test_global_t {
 	uint64_t         start_tick;
 	uint64_t         start_ns;
 	uint64_t         period_tick;
+	odp_shm_t        log_shm;
 	test_log_t	*log;
 	FILE            *file;
 	char		 filename[MAX_FILENAME + 1];
@@ -87,8 +89,9 @@ static void print_usage(void)
 	       "  -p, --period <nsec>     Timeout period in nsec. Default: 200 msec\n"
 	       "  -r, --resolution <nsec> Timeout resolution in nsec. Default: period / 10\n"
 	       "  -f, --first <nsec>      First timer offset in nsec. Default: 300 msec\n"
-	       "  -n, --num <number>      Number of timeouts. Default: 50\n"
-	       "  -b, --burst <number>    Number of timers per timeout. Default: 1\n"
+	       "  -n, --num <number>      Number of timeout periods. Default: 50\n"
+	       "  -b, --burst <number>    Number of timers per a timeout period. Default: 1\n"
+	       "  -g, --burst_gap <nsec>  Gap (in nsec) between timers within a burst. Default: 0\n"
 	       "  -m, --mode <number>     Test mode select (default: 0):\n"
 	       "                            0: Set all timers at init phase.\n"
 	       "                            1: Set first burst of timers at init. Restart timers during test with absolute time.\n"
@@ -109,6 +112,7 @@ static int parse_options(int argc, char *argv[], test_global_t *test_global)
 		{"first",        required_argument, NULL, 'f'},
 		{"num",          required_argument, NULL, 'n'},
 		{"burst",        required_argument, NULL, 'b'},
+		{"burst_gap",    required_argument, NULL, 'g'},
 		{"mode",         required_argument, NULL, 'm'},
 		{"output",       required_argument, NULL, 'o'},
 		{"early_retry",  required_argument, NULL, 'e'},
@@ -116,7 +120,7 @@ static int parse_options(int argc, char *argv[], test_global_t *test_global)
 		{"help",         no_argument,       NULL, 'h'},
 		{NULL, 0, NULL, 0}
 	};
-	const char *shortopts =  "+p:r:f:n:b:m:o:e:ih";
+	const char *shortopts =  "+p:r:f:n:b:g:m:o:e:ih";
 	int ret = 0;
 
 	test_global->opt.period_ns = 200 * ODP_TIME_MSEC_IN_NS;
@@ -124,6 +128,7 @@ static int parse_options(int argc, char *argv[], test_global_t *test_global)
 	test_global->opt.offset_ns = 300 * ODP_TIME_MSEC_IN_NS;
 	test_global->opt.num       = 50;
 	test_global->opt.burst     = 1;
+	test_global->opt.burst_gap = 0;
 	test_global->opt.mode      = 0;
 	test_global->opt.init      = 0;
 	test_global->opt.output    = 0;
@@ -150,6 +155,9 @@ static int parse_options(int argc, char *argv[], test_global_t *test_global)
 			break;
 		case 'b':
 			test_global->opt.burst = strtoull(optarg, NULL, 0);
+			break;
+		case 'g':
+			test_global->opt.burst_gap = strtoull(optarg, NULL, 0);
 			break;
 		case 'm':
 			test_global->opt.mode = atoi(optarg);
@@ -205,7 +213,8 @@ static int start_timers(test_global_t *test_global)
 	odp_timeout_t timeout;
 	odp_timer_set_t ret;
 	odp_time_t time;
-	uint64_t i, j, idx, num_tmo, burst, tot_timers, alloc_timers;
+	uint64_t i, j, idx, num_tmo, burst, burst_gap;
+	uint64_t tot_timers, alloc_timers;
 	int mode;
 
 	mode = test_global->opt.mode;
@@ -213,6 +222,7 @@ static int start_timers(test_global_t *test_global)
 	tot_timers = test_global->tot_timers;
 	num_tmo = test_global->opt.num;
 	burst = test_global->opt.burst;
+	burst_gap = test_global->opt.burst_gap;
 	period_ns = test_global->opt.period_ns;
 	test_global->period_ns = period_ns;
 
@@ -305,6 +315,7 @@ static int start_timers(test_global_t *test_global)
 	printf("  max timeout:     %" PRIu64 " nsec\n", timer_param.max_tmo);
 	printf("  num timeout:     %" PRIu64 "\n", num_tmo);
 	printf("  burst size:      %" PRIu64 "\n", burst);
+	printf("  burst gap:       %" PRIu64 "\n", burst_gap);
 	printf("  total timers:    %" PRIu64 "\n", tot_timers);
 	printf("  alloc timers:    %" PRIu64 "\n", alloc_timers);
 	printf("  test run time:   %.2f sec\n\n",
@@ -370,10 +381,11 @@ static int start_timers(test_global_t *test_global)
 		num_tmo = 1;
 
 	for (i = 0; i < num_tmo; i++) {
-		nsec = offset_ns + (i * period_ns);
-		tick = start_tick + odp_timer_ns_to_tick(timer_pool, nsec);
-
 		for (j = 0; j < burst; j++) {
+			nsec = offset_ns + (i * period_ns) + (j * burst_gap);
+			tick = start_tick + odp_timer_ns_to_tick(timer_pool,
+								 nsec);
+
 			timer_ctx_t *ctx = &test_global->timer_ctx[idx];
 
 			timer = ctx->timer;
@@ -680,13 +692,22 @@ int main(int argc, char *argv[])
 	}
 
 	if (test_global.opt.output) {
-		test_global.log = calloc(test_global.tot_timers,
-					 sizeof(test_log_t));
+		odp_shm_t shm;
+		void *addr;
+		uint64_t size = test_global.tot_timers * sizeof(test_log_t);
 
-		if (test_global.log == NULL) {
-			printf("Test log calloc failed.\n");
+		shm = odp_shm_reserve("timer_accuracy_log", size,
+				      sizeof(test_log_t), 0);
+
+		if (shm == ODP_SHM_INVALID) {
+			printf("Test log alloc failed.\n");
 			goto quit;
 		}
+
+		addr = odp_shm_addr(shm);
+		memset(addr, 0, size);
+		test_global.log = addr;
+		test_global.log_shm = shm;
 	}
 
 	if (start_timers(&test_global))
@@ -707,7 +728,7 @@ quit:
 		free(test_global.timer_ctx);
 
 	if (test_global.log)
-		free(test_global.log);
+		odp_shm_free(test_global.log_shm);
 
 	if (odp_term_local()) {
 		printf("Term local failed.\n");

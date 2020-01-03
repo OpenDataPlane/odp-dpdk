@@ -55,6 +55,14 @@
 #include <rte_string_fns.h>
 #include <rte_version.h>
 
+#if RTE_VERSION < RTE_VERSION_NUM(19, 8, 0, 0)
+	#define rte_ether_addr ether_addr
+	#define rte_ipv4_hdr   ipv4_hdr
+	#define rte_ipv6_hdr   ipv6_hdr
+	#define rte_tcp_hdr    tcp_hdr
+	#define rte_udp_hdr    udp_hdr
+#endif
+
 /* NUMA is not supported on all platforms */
 #ifdef _ODP_HAVE_NUMA_LIBRARY
 #include <numa.h>
@@ -64,6 +72,14 @@
 
 #if RTE_VERSION < RTE_VERSION_NUM(17, 5, 0, 0)
 #define rte_log_set_global_level rte_set_log_level
+#endif
+
+/* Release notes v19.11: "Changed the mempool allocation behaviour
+ * so that objects no longer cross pages by default" */
+#if RTE_VERSION >= RTE_VERSION_NUM(19, 11, 0, 0)
+#define MEMPOOL_FLAGS MEMPOOL_F_NO_IOVA_CONTIG
+#else
+#define MEMPOOL_FLAGS 0
 #endif
 
 #if _ODP_DPDK_ZERO_COPY
@@ -323,7 +339,7 @@ static struct rte_mempool *mbuf_pool_create(const char *name,
 		goto fail;
 	}
 
-	total_size = rte_mempool_calc_obj_size(elt_size, 0, &sz);
+	total_size = rte_mempool_calc_obj_size(elt_size, MEMPOOL_FLAGS, &sz);
 	if (total_size != pool_entry->block_size) {
 		ODP_ERR("DPDK pool block size not matching to ODP pool: "
 			"%" PRIu32 "/%" PRIu32 "\n", total_size,
@@ -336,7 +352,7 @@ static struct rte_mempool *mbuf_pool_create(const char *name,
 	mp = rte_mempool_create_empty(name, num + pool_entry->skipped_blocks,
 				      elt_size, cache_size(num),
 				      sizeof(struct rte_pktmbuf_pool_private),
-				      rte_socket_id(), 0);
+				      rte_socket_id(), MEMPOOL_FLAGS);
 	if (mp == NULL) {
 		ODP_ERR("Failed to create empty DPDK packet pool\n");
 		goto fail;
@@ -510,7 +526,7 @@ uint32_t _odp_dpdk_pool_obj_size(pool_t *pool, uint32_t block_size)
 	}
 
 	block_size += sizeof(struct rte_mbuf);
-	total_size = rte_mempool_calc_obj_size(block_size, 0, &sz);
+	total_size = rte_mempool_calc_obj_size(block_size, MEMPOOL_FLAGS, &sz);
 	pool->dpdk_elt_size = sz.elt_size;
 	pool->block_offset = sz.header_size + sizeof(struct rte_mbuf);
 
@@ -649,7 +665,7 @@ static inline int check_proto(void *l3_hdr, odp_bool_t *l3_proto_v4,
 	uint8_t l3_proto_ver = _ODP_IPV4HDR_VER(*(uint8_t *)l3_hdr);
 
 	if (l3_proto_ver == _ODP_IPV4) {
-		struct ipv4_hdr *ip = (struct ipv4_hdr *)l3_hdr;
+		struct rte_ipv4_hdr *ip = (struct rte_ipv4_hdr *)l3_hdr;
 
 		*l3_proto_v4 = 1;
 		if (!rte_ipv4_frag_pkt_is_fragmented(ip))
@@ -659,7 +675,7 @@ static inline int check_proto(void *l3_hdr, odp_bool_t *l3_proto_v4,
 
 		return 0;
 	} else if (l3_proto_ver == _ODP_IPV6) {
-		struct ipv6_hdr *ipv6 = (struct ipv6_hdr *)l3_hdr;
+		struct rte_ipv6_hdr *ipv6 = (struct rte_ipv6_hdr *)l3_hdr;
 
 		*l3_proto_v4 = 0;
 		*l4_proto = ipv6->proto;
@@ -730,7 +746,7 @@ static inline void pkt_set_ol_tx(odp_pktout_config_opt_t *pktout_cfg,
 	if (ipv4_chksum_pkt) {
 		mbuf->ol_flags |=  PKT_TX_IP_CKSUM;
 
-		((struct ipv4_hdr *)l3_hdr)->hdr_checksum = 0;
+		((struct rte_ipv4_hdr *)l3_hdr)->hdr_checksum = 0;
 		mbuf->l3_len = _ODP_IPV4HDR_IHL(*(uint8_t *)l3_hdr) * 4;
 	}
 
@@ -744,12 +760,12 @@ static inline void pkt_set_ol_tx(odp_pktout_config_opt_t *pktout_cfg,
 	if (udp_chksum_pkt) {
 		mbuf->ol_flags |= PKT_TX_UDP_CKSUM;
 
-		((struct udp_hdr *)l4_hdr)->dgram_cksum =
+		((struct rte_udp_hdr *)l4_hdr)->dgram_cksum =
 			phdr_csum(l3_proto_v4, l3_hdr, mbuf->ol_flags);
 	} else if (tcp_chksum_pkt) {
 		mbuf->ol_flags |= PKT_TX_TCP_CKSUM;
 
-		((struct tcp_hdr *)l4_hdr)->cksum =
+		((struct rte_tcp_hdr *)l4_hdr)->cksum =
 			phdr_csum(l3_proto_v4, l3_hdr, mbuf->ol_flags);
 	}
 }
@@ -1163,7 +1179,6 @@ static int dpdk_pktio_init(void)
 	int cmd_len;
 	int numa_nodes;
 	cpu_set_t original_cpuset;
-	struct rte_config *cfg;
 
 	/**
 	 * DPDK init changes the affinity of the calling thread, so after it
@@ -1259,9 +1274,7 @@ static int dpdk_pktio_init(void)
 	if (i)
 		ODP_ERR("Failed to reset thread affinity: %d\n", i);
 
-	cfg = rte_eal_get_configuration();
-	for (i = 0; i < RTE_MAX_LCORE; i++)
-		cfg->lcore_role[i] = ROLE_RTE;
+	ODP_PRINT("\nDPDK version: %s\n", rte_version());
 
 	return 0;
 }
@@ -1517,6 +1530,33 @@ static void dpdk_init_capability(pktio_entry_t *pktio_entry,
 		capa->config.pktout.bit.tcp_chksum;
 }
 
+/* Some DPDK PMD virtual devices, like PCAP, do not support promisc
+ * mode change. Use system call for them. */
+static void promisc_mode_check(pkt_dpdk_t *pkt_dpdk)
+{
+#if RTE_VERSION < RTE_VERSION_NUM(19, 11, 0, 0)
+	/* Enable and disable calls do not have return value */
+	rte_eth_promiscuous_enable(pkt_dpdk->port_id);
+
+	if (!rte_eth_promiscuous_get(pkt_dpdk->port_id))
+		pkt_dpdk->vdev_sysc_promisc = 1;
+
+	rte_eth_promiscuous_disable(pkt_dpdk->port_id);
+#else
+	int ret;
+
+	ret = rte_eth_promiscuous_enable(pkt_dpdk->port_id);
+
+	if (!rte_eth_promiscuous_get(pkt_dpdk->port_id))
+		pkt_dpdk->vdev_sysc_promisc = 1;
+
+	ret += rte_eth_promiscuous_disable(pkt_dpdk->port_id);
+
+	if (ret)
+		pkt_dpdk->vdev_sysc_promisc = 1;
+#endif
+}
+
 static int dpdk_open(odp_pktio_t id ODP_UNUSED,
 		     pktio_entry_t *pktio_entry,
 		     const char *netdev,
@@ -1581,12 +1621,7 @@ static int dpdk_open(odp_pktio_t id ODP_UNUSED,
 	}
 	pkt_dpdk->mtu = mtu + _ODP_ETHHDR_LEN;
 
-	/* Some DPDK PMD virtual devices, like PCAP, do not support promisc
-	 * mode change. Use system call for them. */
-	rte_eth_promiscuous_enable(pkt_dpdk->port_id);
-	if (!rte_eth_promiscuous_get(pkt_dpdk->port_id))
-		pkt_dpdk->vdev_sysc_promisc = 1;
-	rte_eth_promiscuous_disable(pkt_dpdk->port_id);
+	promisc_mode_check(pkt_dpdk);
 
 	/* Drivers requiring minimum burst size. Supports also *_vf versions
 	 * of the drivers. */
@@ -1957,7 +1992,7 @@ static int dpdk_send(pktio_entry_t *pktio_entry, int index,
 static int dpdk_mac_addr_get(pktio_entry_t *pktio_entry, void *mac_addr)
 {
 	rte_eth_macaddr_get(pkt_priv(pktio_entry)->port_id,
-			    (struct ether_addr *)mac_addr);
+			    (struct rte_ether_addr *)mac_addr);
 	return ETH_ALEN;
 }
 

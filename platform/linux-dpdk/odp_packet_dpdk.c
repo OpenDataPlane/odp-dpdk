@@ -490,7 +490,7 @@ static int dpdk_init_capability(pktio_entry_t *pktio_entry,
 						       &mac_addr);
 		if (ret == 0) {
 			capa->set_op.op.mac_addr = 1;
-		} else if (ret != -ENOTSUP) {
+		} else if (ret != -ENOTSUP && ret != -EPERM) {
 			ODP_ERR("Failed to set interface default MAC: %d\n",
 				ret);
 			return -1;
@@ -595,6 +595,33 @@ static int dpdk_init_loopback(pkt_dpdk_t * const pkt_dpdk)
 	pkt_dpdk->loopback = 1;
 
 	return 0;
+}
+
+/* Some DPDK PMD virtual devices, like PCAP, do not support promisc
+ * mode change. Use system call for them. */
+static void promisc_mode_check(pkt_dpdk_t *pkt_dpdk)
+{
+#if RTE_VERSION < RTE_VERSION_NUM(19, 11, 0, 0)
+	/* Enable and disable calls do not have return value */
+	rte_eth_promiscuous_enable(pkt_dpdk->port_id);
+
+	if (!rte_eth_promiscuous_get(pkt_dpdk->port_id))
+		pkt_dpdk->vdev_sysc_promisc = 1;
+
+	rte_eth_promiscuous_disable(pkt_dpdk->port_id);
+#else
+	int ret;
+
+	ret = rte_eth_promiscuous_enable(pkt_dpdk->port_id);
+
+	if (!rte_eth_promiscuous_get(pkt_dpdk->port_id))
+		pkt_dpdk->vdev_sysc_promisc = 1;
+
+	ret += rte_eth_promiscuous_disable(pkt_dpdk->port_id);
+
+	if (ret)
+		pkt_dpdk->vdev_sysc_promisc = 1;
+#endif
 }
 
 static int setup_pkt_dpdk(odp_pktio_t pktio ODP_UNUSED,
@@ -857,14 +884,7 @@ static int dpdk_start(pktio_entry_t *pktio_entry)
 		return -1;
 
 	/* Setup promiscuous mode and multicast */
-	rte_eth_promiscuous_enable(port_id);
-	/* Some DPDK PMD vdev like pcap do not support promisc mode change. Use
-	 * system call for them. */
-	if (!rte_eth_promiscuous_get(port_id))
-		pkt_dpdk->vdev_sysc_promisc = 1;
-	else
-		pkt_dpdk->vdev_sysc_promisc = 0;
-
+	promisc_mode_check(pkt_dpdk);
 	rte_eth_allmulticast_enable(port_id);
 
 	/* Add callback for loopback interface */

@@ -53,7 +53,7 @@ typedef union {
  */
 typedef struct {
 	unsigned int cpu_count; /**< Number of CPUs to be used */
-	unsigned if_count; /**< Number of interfaces to be used */
+	unsigned int if_count;  /**< Number of interfaces to be used */
 	int num_workers;   /**< Number of worker threads */
 	char **if_names;   /**< Array of pointers to interface names */
 	int time;	   /**< Time in seconds to run */
@@ -84,7 +84,7 @@ typedef union ODP_ALIGNED_CACHE {
  */
 typedef struct pkt_buf_t {
 	odp_packet_t pkt[MAX_PKT_BURST]; /**< Array of packet handles */
-	unsigned len;			 /**< Number of packets in buffer */
+	unsigned int len;		 /**< Number of packets in buffer */
 } pkt_buf_t;
 
 /**
@@ -263,7 +263,6 @@ static int create_pktio(const char *dev, int idx, int num_rx, int num_tx,
 	}
 
 	pktin_param.hash_enable = 1;
-	pktin_param.hash_proto.proto.ipv4 = 1;
 	pktin_param.hash_proto.proto.ipv4_tcp = 1;
 	pktin_param.hash_proto.proto.ipv4_udp = 1;
 	pktin_param.num_queues  = num_rx;
@@ -438,7 +437,7 @@ static inline void broadcast_packet(odp_packet_t pkt, thread_args_t *thr_arg,
 {
 	odp_bool_t first = 1;
 	uint8_t port_out;
-	unsigned buf_len;
+	unsigned int buf_len;
 
 	for (port_out = 0; port_out < gbl_args->appl.if_count; port_out++) {
 		if (port_out == port_in)
@@ -476,13 +475,13 @@ static inline void broadcast_packet(odp_packet_t pkt, thread_args_t *thr_arg,
  * @param thr_arg    Thread arguments
  * @param port_in    Input port index
  */
-static inline void forward_packets(odp_packet_t pkt_tbl[], unsigned num,
+static inline void forward_packets(odp_packet_t pkt_tbl[], unsigned int num,
 				   thread_args_t *thr_arg, uint8_t port_in)
 {
 	odp_packet_t pkt;
 	odph_ethhdr_t *eth;
-	unsigned i;
-	unsigned buf_id;
+	unsigned int i;
+	unsigned int buf_id;
 	int ret;
 	uint8_t port_out = 0;
 
@@ -584,8 +583,8 @@ static int run_worker(void *arg)
 	odp_packet_t pkt_tbl[MAX_PKT_BURST];
 	odp_pktin_queue_t pktin;
 	odp_pktout_queue_t pktout;
-	unsigned num_pktio;
-	unsigned pktio = 0;
+	unsigned int num_pktio;
+	unsigned int pktio = 0;
 	uint8_t port_in;
 	uint8_t port_out;
 	int pkts;
@@ -598,7 +597,7 @@ static int run_worker(void *arg)
 
 	while (!gbl_args->exit_threads) {
 		int sent;
-		unsigned drops;
+		unsigned int drops;
 
 		if (num_pktio > 1) {
 			pktin     = thr_args->rx_pktio[pktio].pktin;
@@ -620,7 +619,7 @@ static int run_worker(void *arg)
 		/* Empty all thread local tx buffers */
 		for (port_out = 0; port_out < gbl_args->appl.if_count;
 				port_out++) {
-			unsigned tx_pkts;
+			unsigned int tx_pkts;
 			odp_packet_t *tx_pkt_tbl;
 
 			if (port_out == port_in ||
@@ -642,7 +641,7 @@ static int run_worker(void *arg)
 			drops = tx_pkts - sent;
 
 			if (odp_unlikely(drops)) {
-				unsigned i;
+				unsigned int i;
 
 				thr_args->stats[port_out]->s.tx_drops += drops;
 
@@ -746,7 +745,7 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 	int long_index;
 	char *token;
 	size_t len;
-	unsigned i;
+	unsigned int i;
 	static const struct option longopts[] = {
 		{"count", required_argument, NULL, 'c'},
 		{"time", required_argument, NULL, 't'},
@@ -840,7 +839,7 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
  */
 static void print_info(char *progname, appl_args_t *appl_args)
 {
-	unsigned i;
+	unsigned int i;
 
 	odp_sys_info_print();
 
@@ -922,7 +921,7 @@ int main(int argc, char **argv)
 	}
 	gbl_args_init(gbl_args);
 
-	for (i = 0; (unsigned)i < MAC_TBL_SIZE; i++)
+	for (i = 0; (unsigned int)i < MAC_TBL_SIZE; i++)
 		odp_atomic_init_u64(&gbl_args->mac_tbl[i], 0);
 
 	/* Parse and store the application arguments */
