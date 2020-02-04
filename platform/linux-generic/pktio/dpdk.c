@@ -1115,6 +1115,8 @@ static int dpdk_setup_eth_dev(pktio_entry_t *pktio_entry,
 	struct rte_eth_rss_conf rss_conf;
 	struct rte_eth_conf eth_conf;
 	uint64_t rss_hf_capa = dev_info->flow_type_rss_offloads;
+	uint64_t rx_offloads = 0;
+	uint64_t tx_offloads = 0;
 
 	memset(&rss_conf, 0, sizeof(struct rte_eth_rss_conf));
 
@@ -1133,6 +1135,36 @@ static int dpdk_setup_eth_dev(pktio_entry_t *pktio_entry,
 	eth_conf.rxmode.mq_mode = ETH_MQ_RX_RSS;
 	eth_conf.txmode.mq_mode = ETH_MQ_TX_NONE;
 	eth_conf.rx_adv_conf.rss_conf = rss_conf;
+
+	/* Setup RX checksum offloads */
+	if (pktio_entry->s.config.pktin.bit.ipv4_chksum)
+		rx_offloads |= DEV_RX_OFFLOAD_IPV4_CKSUM;
+
+	if (pktio_entry->s.config.pktin.bit.udp_chksum)
+		rx_offloads |= DEV_RX_OFFLOAD_UDP_CKSUM;
+
+	if (pktio_entry->s.config.pktin.bit.tcp_chksum)
+		rx_offloads |= DEV_RX_OFFLOAD_TCP_CKSUM;
+
+	eth_conf.rxmode.offloads = rx_offloads;
+
+	/* Setup TX checksum offloads */
+	if (pktio_entry->s.config.pktout.bit.ipv4_chksum_ena)
+		tx_offloads |= DEV_TX_OFFLOAD_IPV4_CKSUM;
+
+	if (pktio_entry->s.config.pktout.bit.udp_chksum_ena)
+		tx_offloads |= DEV_TX_OFFLOAD_UDP_CKSUM;
+
+	if (pktio_entry->s.config.pktout.bit.tcp_chksum_ena)
+		tx_offloads |= DEV_TX_OFFLOAD_TCP_CKSUM;
+
+	if (pktio_entry->s.config.pktout.bit.sctp_chksum_ena)
+		tx_offloads |= DEV_TX_OFFLOAD_SCTP_CKSUM;
+
+	eth_conf.txmode.offloads = tx_offloads;
+
+	if (tx_offloads)
+		pktio_entry->s.chksum_insert_ena = 1;
 
 	ret = rte_eth_dev_configure(pkt_dpdk->port_id,
 				    pktio_entry->s.num_in_queue,
@@ -1441,15 +1473,17 @@ static int dpdk_output_queues_config(pktio_entry_t *pktio_entry,
 	return 0;
 }
 
-static void dpdk_init_capability(pktio_entry_t *pktio_entry,
-				 struct rte_eth_dev_info *dev_info)
+static int dpdk_init_capability(pktio_entry_t *pktio_entry,
+				struct rte_eth_dev_info *dev_info)
 {
 	pkt_dpdk_t *pkt_dpdk = pkt_priv(pktio_entry);
 	odp_pktio_capability_t *capa = &pktio_entry->s.capa;
+	struct rte_ether_addr mac_addr;
 	int ptype_cnt;
 	int ptype_l3_ipv4 = 0;
 	int ptype_l4_tcp = 0;
 	int ptype_l4_udp = 0;
+	int ret;
 	uint32_t ptype_mask = RTE_PTYPE_L3_MASK | RTE_PTYPE_L4_MASK;
 
 	memset(dev_info, 0, sizeof(struct rte_eth_dev_info));
@@ -1468,6 +1502,16 @@ static void dpdk_init_capability(pktio_entry_t *pktio_entry,
 	capa->max_output_queues = RTE_MIN(dev_info->max_tx_queues,
 					  PKTIO_MAX_QUEUES);
 	capa->set_op.op.promisc_mode = 1;
+
+	/* Check if setting default MAC address is supporter */
+	rte_eth_macaddr_get(pkt_dpdk->port_id, &mac_addr);
+	ret = rte_eth_dev_default_mac_addr_set(pkt_dpdk->port_id, &mac_addr);
+	if (ret == 0) {
+		capa->set_op.op.mac_addr = 1;
+	} else if (ret != -ENOTSUP && ret != -EPERM) {
+		ODP_ERR("Failed to set interface default MAC: %d\n", ret);
+		return -1;
+	}
 
 	ptype_cnt = rte_eth_dev_get_supported_ptypes(pkt_dpdk->port_id,
 						     ptype_mask, NULL, 0);
@@ -1528,6 +1572,8 @@ static void dpdk_init_capability(pktio_entry_t *pktio_entry,
 		capa->config.pktout.bit.udp_chksum;
 	capa->config.pktout.bit.tcp_chksum_ena =
 		capa->config.pktout.bit.tcp_chksum;
+
+	return 0;
 }
 
 /* Some DPDK PMD virtual devices, like PCAP, do not support promisc
@@ -1606,7 +1652,10 @@ static int dpdk_open(odp_pktio_t id ODP_UNUSED,
 		return -1;
 	}
 
-	dpdk_init_capability(pktio_entry, &dev_info);
+	if (dpdk_init_capability(pktio_entry, &dev_info)) {
+		ODP_ERR("Failed to initialize capability\n");
+		return -1;
+	}
 
 	/* Initialize runtime options */
 	if (init_options(pktio_entry, &dev_info)) {
@@ -1680,38 +1729,15 @@ static int dpdk_setup_eth_tx(pktio_entry_t *pktio_entry,
 			     const pkt_dpdk_t *pkt_dpdk,
 			     const struct rte_eth_dev_info *dev_info)
 {
-	struct rte_eth_txconf txconf;
-	uint64_t tx_offloads;
 	uint32_t i;
 	int ret;
 	uint16_t port_id = pkt_dpdk->port_id;
 
-	txconf = dev_info->default_txconf;
-
-	tx_offloads = 0;
-	if (pktio_entry->s.config.pktout.bit.ipv4_chksum_ena)
-		tx_offloads |= DEV_TX_OFFLOAD_IPV4_CKSUM;
-
-	if (pktio_entry->s.config.pktout.bit.udp_chksum_ena)
-		tx_offloads |= DEV_TX_OFFLOAD_UDP_CKSUM;
-
-	if (pktio_entry->s.config.pktout.bit.tcp_chksum_ena)
-		tx_offloads |= DEV_TX_OFFLOAD_TCP_CKSUM;
-
-	if (pktio_entry->s.config.pktout.bit.sctp_chksum_ena)
-		tx_offloads |= DEV_TX_OFFLOAD_SCTP_CKSUM;
-
-	txconf.offloads = tx_offloads;
-
-	if (tx_offloads)
-		pktio_entry->s.chksum_insert_ena = 1;
-
 	for (i = 0; i < pktio_entry->s.num_out_queue; i++) {
-
 		ret = rte_eth_tx_queue_setup(port_id, i,
 					     pkt_dpdk->opt.num_tx_desc,
 					     rte_eth_dev_socket_id(port_id),
-					     &txconf);
+					     &dev_info->default_txconf);
 		if (ret < 0) {
 			ODP_ERR("Queue setup failed: err=%d, port=%" PRIu8 "\n",
 				ret, port_id);
@@ -1727,7 +1753,6 @@ static int dpdk_setup_eth_rx(const pktio_entry_t *pktio_entry,
 			     const struct rte_eth_dev_info *dev_info)
 {
 	struct rte_eth_rxconf rxconf;
-	uint64_t rx_offloads;
 	uint32_t i;
 	int ret;
 	uint16_t port_id = pkt_dpdk->port_id;
@@ -1735,18 +1760,6 @@ static int dpdk_setup_eth_rx(const pktio_entry_t *pktio_entry,
 	rxconf = dev_info->default_rxconf;
 
 	rxconf.rx_drop_en = pkt_dpdk->opt.rx_drop_en;
-
-	rx_offloads = 0;
-	if (pktio_entry->s.config.pktin.bit.ipv4_chksum)
-		rx_offloads |= DEV_RX_OFFLOAD_IPV4_CKSUM;
-
-	if (pktio_entry->s.config.pktin.bit.udp_chksum)
-		rx_offloads |= DEV_RX_OFFLOAD_UDP_CKSUM;
-
-	if (pktio_entry->s.config.pktin.bit.tcp_chksum)
-		rx_offloads |= DEV_RX_OFFLOAD_TCP_CKSUM;
-
-	rxconf.offloads = rx_offloads;
 
 	for (i = 0; i < pktio_entry->s.num_in_queue; i++) {
 		ret = rte_eth_rx_queue_setup(port_id, i,
@@ -1996,6 +2009,14 @@ static int dpdk_mac_addr_get(pktio_entry_t *pktio_entry, void *mac_addr)
 	return ETH_ALEN;
 }
 
+static int dpdk_mac_addr_set(pktio_entry_t *pktio_entry, const void *mac_addr)
+{
+	struct rte_ether_addr addr = *(const struct rte_ether_addr *)mac_addr;
+
+	return rte_eth_dev_default_mac_addr_set(pkt_priv(pktio_entry)->port_id,
+						&addr);
+}
+
 static int dpdk_promisc_mode_set(pktio_entry_t *pktio_entry, odp_bool_t enable)
 {
 	uint16_t port_id = pkt_priv(pktio_entry)->port_id;
@@ -2089,7 +2110,7 @@ const pktio_if_ops_t dpdk_pktio_ops = {
 	.promisc_mode_set = dpdk_promisc_mode_set,
 	.promisc_mode_get = dpdk_promisc_mode_get,
 	.mac_get = dpdk_mac_addr_get,
-	.mac_set = NULL,
+	.mac_set = dpdk_mac_addr_set,
 	.capability = dpdk_capability,
 	.pktin_ts_res = NULL,
 	.pktin_ts_from_ns = NULL,

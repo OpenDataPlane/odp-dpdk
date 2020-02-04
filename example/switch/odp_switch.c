@@ -1,4 +1,5 @@
 /* Copyright (c) 2016-2018, Linaro Limited
+ * Copyright (c) 2020, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -9,6 +10,7 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <inttypes.h>
+#include <signal.h>
 
 #include <odp_api.h>
 #include <odp/helper/odph_api.h>
@@ -34,6 +36,9 @@
 /** Number of MAC table entries. Must match to hash length. */
 #define MAC_TBL_SIZE           UINT16_MAX
 
+/** Aging time for MAC table entries in minutes. Must be <= UINT8_MAX. */
+#define AGING_TIME 5
+
 /** Get rid of path in filename - only for unix-type paths using '/' */
 #define NO_PATH(file_name) (strrchr((file_name), '/') ? \
 			    strrchr((file_name), '/') + 1 : (file_name))
@@ -43,6 +48,7 @@ typedef union {
 	struct {
 		odph_ethaddr_t mac; /**< Ethernet MAC address */
 		uint8_t port;	    /**< Port index */
+		uint8_t tick;	    /**< Tick of the latest received packet */
 	} s;
 
 	uint64_t u64;
@@ -60,6 +66,12 @@ typedef struct {
 	int accuracy;	   /**< Statistics get and print interval in seconds */
 	char *if_str;	   /**< Storage for interface names */
 } appl_args_t;
+
+typedef enum frame_type_t {
+	FRAME_UNICAST,
+	FRAME_BROADCAST,
+	FRAME_INVALID
+} frame_type_t;
 
 /**
  * Statistics
@@ -138,6 +150,13 @@ typedef struct {
 /** Global pointer to args */
 static args_t *gbl_args;
 
+static void sig_handler(int signo ODP_UNUSED)
+{
+	if (gbl_args == NULL)
+		return;
+	gbl_args->exit_threads = 1;
+}
+
 /**
  * Calculate MAC table index using Ethernet address hash
  *
@@ -155,15 +174,29 @@ static inline uint16_t calc_mac_tbl_idx(odph_ethaddr_t *mac)
 }
 
 /**
+ * Calculate diff between ticks and take care of value wrap
+ */
+static inline uint8_t diff_ticks(uint8_t t2, uint8_t t1)
+{
+	if (t1 < t2)
+		return t2 - t1;
+	else if (t1 > t2)
+		return UINT8_MAX + t2 - t1;
+	return 0;
+}
+
+/**
  * Get Ethernet address port index from MAC table
  *
  * @param mac        Pointer to Ethernet address
  * @param port[out]  Pointer to port index for output
+ * @param cur_tick   Current tick
  *
- * @retval 0 on success
- * @retval -1 on failure
+ * @retval 1 on entry found
+ * @retval 0 on entry not found or expired
  */
-static inline int mac_table_get(odph_ethaddr_t *mac, uint8_t *port)
+static inline int mac_table_get(odph_ethaddr_t *mac, uint8_t *port,
+				uint8_t cur_tick)
 {
 	mac_tbl_entry_t entry;
 	uint16_t idx;
@@ -173,10 +206,13 @@ static inline int mac_table_get(odph_ethaddr_t *mac, uint8_t *port)
 	entry.u64 = odp_atomic_load_u64(&gbl_args->mac_tbl[idx]);
 
 	if (memcmp(mac->addr, entry.s.mac.addr, ODPH_ETHADDR_LEN))
-		return -1;
+		return 0;
+
+	if (odp_unlikely(diff_ticks(cur_tick, entry.s.tick) > AGING_TIME))
+		return 0;
 
 	*port = entry.s.port;
-	return 0;
+	return 1;
 }
 
 /**
@@ -184,18 +220,24 @@ static inline int mac_table_get(odph_ethaddr_t *mac, uint8_t *port)
  *
  * @param mac        Pointer to Ethernet address
  * @param port       Pointer to port index
+ * @param cur_tick   Current tick
  */
-static inline void mac_table_put(odph_ethaddr_t *mac, uint8_t port)
+static inline void mac_table_update(odph_ethaddr_t *mac, uint8_t port,
+				    uint8_t cur_tick)
 {
 	mac_tbl_entry_t entry;
 	uint16_t idx;
 
 	idx = calc_mac_tbl_idx(mac);
+	entry.u64 = odp_atomic_load_u64(&gbl_args->mac_tbl[idx]);
 
-	entry.s.mac = *mac;
-	entry.s.port = port;
-
-	odp_atomic_store_u64(&gbl_args->mac_tbl[idx], entry.u64);
+	if (memcmp(entry.s.mac.addr, mac->addr, ODPH_ETHADDR_LEN) ||
+	    entry.s.port != port || entry.s.tick != cur_tick) {
+		entry.s.mac = *mac;
+		entry.s.port = port;
+		entry.s.tick = cur_tick;
+		odp_atomic_store_u64(&gbl_args->mac_tbl[idx], entry.u64);
+	}
 }
 
 /**
@@ -318,6 +360,8 @@ static int print_speed_stats(int num_workers, stats_t (*thr_stats)[MAX_PKTIOS],
 	uint64_t tx_pkts_prev[MAX_PKTIOS] = {0};
 	uint64_t rx_pkts_tot;
 	uint64_t tx_pkts_tot;
+	uint64_t rx_drops_tot;
+	uint64_t tx_drops_tot;
 	uint64_t rx_pps;
 	uint64_t tx_pps;
 	int i, j;
@@ -336,11 +380,13 @@ static int print_speed_stats(int num_workers, stats_t (*thr_stats)[MAX_PKTIOS],
 	do {
 		uint64_t rx_pkts[MAX_PKTIOS] = {0};
 		uint64_t tx_pkts[MAX_PKTIOS] = {0};
-		uint64_t rx_drops = 0;
-		uint64_t tx_drops = 0;
+		uint64_t rx_drops[MAX_PKTIOS] = {0};
+		uint64_t tx_drops[MAX_PKTIOS] = {0};
 
 		rx_pkts_tot = 0;
 		tx_pkts_tot = 0;
+		rx_drops_tot = 0;
+		tx_drops_tot = 0;
 
 		sleep(timeout);
 		elapsed += timeout;
@@ -349,8 +395,8 @@ static int print_speed_stats(int num_workers, stats_t (*thr_stats)[MAX_PKTIOS],
 			for (j = 0; j < num_ifaces; j++) {
 				rx_pkts[j] += thr_stats[i][j].s.rx_packets;
 				tx_pkts[j] += thr_stats[i][j].s.tx_packets;
-				rx_drops += thr_stats[i][j].s.rx_drops;
-				tx_drops += thr_stats[i][j].s.tx_drops;
+				rx_drops[j] += thr_stats[i][j].s.rx_drops;
+				tx_drops[j] += thr_stats[i][j].s.tx_drops;
 			}
 		}
 
@@ -362,20 +408,24 @@ static int print_speed_stats(int num_workers, stats_t (*thr_stats)[MAX_PKTIOS],
 			tx_pps = (tx_pkts[j] - tx_pkts_prev[j]) / timeout;
 			printf("  Port %d: %" PRIu64 " rx pps, %" PRIu64
 			       " tx pps, %" PRIu64 " rx pkts, %" PRIu64
-			       " tx pkts\n", j, rx_pps, tx_pps, rx_pkts[j],
-			       tx_pkts[j]);
+			       " tx pkts, %" PRIu64 " rx drops, %" PRIu64
+			       " tx drops\n", j, rx_pps, tx_pps, rx_pkts[j],
+			       tx_pkts[j], rx_drops[j], tx_drops[j]);
 
 			rx_pkts_prev[j] = rx_pkts[j];
 			tx_pkts_prev[j] = tx_pkts[j];
 			rx_pkts_tot += rx_pkts[j];
 			tx_pkts_tot += tx_pkts[j];
+			rx_drops_tot += rx_drops[j];
+			tx_drops_tot += tx_drops[j];
 		}
 
 		printf("Total: %" PRIu64 " rx pkts, %" PRIu64 " tx pkts, %"
 		       PRIu64 " rx drops, %" PRIu64 " tx drops\n", rx_pkts_tot,
-		       tx_pkts_tot, rx_drops, tx_drops);
+		       tx_pkts_tot, rx_drops_tot, tx_drops_tot);
 
-	} while (loop_forever || (elapsed < duration));
+	} while (!gbl_args->exit_threads &&
+		 (loop_forever || (elapsed < duration)));
 
 	return rx_pkts_tot >= 100 ? 0 : -1;
 }
@@ -463,6 +513,34 @@ static inline void broadcast_packet(odp_packet_t pkt, thread_args_t *thr_arg,
 }
 
 /**
+ * Check Ethernet frame for broadcast/invalid addresses
+ *
+ * @param eth  Pointer to an Ethernet header
+ *
+ * @retval Ethernet frame_type_t
+ */
+static frame_type_t check_frame(odph_ethhdr_t *eth)
+{
+	static uint8_t broadcast_addr[ODPH_ETHADDR_LEN] = {0xff, 0xff, 0xff,
+							   0xff, 0xff, 0xff};
+	static uint8_t null_addr[ODPH_ETHADDR_LEN] = {0, 0, 0, 0, 0, 0};
+
+	/* Drop invalid frames */
+	if (odp_unlikely(!memcmp(eth->src.addr, broadcast_addr,
+				 ODPH_ETHADDR_LEN) ||
+			 !memcmp(eth->dst.addr, null_addr,
+				 ODPH_ETHADDR_LEN) ||
+			 !memcmp(eth->src.addr, null_addr,
+				 ODPH_ETHADDR_LEN))) {
+		return FRAME_INVALID;
+	}
+	if (!memcmp(eth->dst.addr, broadcast_addr, ODPH_ETHADDR_LEN))
+		return FRAME_BROADCAST;
+
+	return FRAME_UNICAST;
+}
+
+/**
  * Forward packets to correct output buffers
  *
  * Packets, whose destination MAC address is already known from previously
@@ -474,38 +552,44 @@ static inline void broadcast_packet(odp_packet_t pkt, thread_args_t *thr_arg,
  * @param num        Number of packets in the array
  * @param thr_arg    Thread arguments
  * @param port_in    Input port index
+ * @param cur_tick   Current tick
  */
 static inline void forward_packets(odp_packet_t pkt_tbl[], unsigned int num,
-				   thread_args_t *thr_arg, uint8_t port_in)
+				   thread_args_t *thr_arg, uint8_t port_in,
+				   uint8_t cur_tick)
 {
 	odp_packet_t pkt;
 	odph_ethhdr_t *eth;
 	unsigned int i;
 	unsigned int buf_id;
-	int ret;
 	uint8_t port_out = 0;
+	int frame_type;
 
 	for (i = 0; i < num; i++) {
 		pkt = pkt_tbl[i];
 
 		if (!odp_packet_has_eth(pkt)) {
+			thr_arg->stats[port_in]->s.rx_drops++;
 			odp_packet_free(pkt);
 			continue;
 		}
 
 		eth = (odph_ethhdr_t *)odp_packet_l2_ptr(pkt, NULL);
 
-		/* Lookup source MAC address */
-		ret = mac_table_get(&eth->src, &port_out);
+		/* Check Ethernet frame type */
+		frame_type = check_frame(eth);
+		if (odp_unlikely(frame_type == FRAME_INVALID)) {
+			thr_arg->stats[port_in]->s.rx_drops++;
+			odp_packet_free(pkt);
+			continue;
+		}
 
-		/* Update for address table if necessary */
-		if (ret < 0 || port_out != port_in)
-			mac_table_put(&eth->src, port_in);
+		/* Update source address MAC table entry */
+		mac_table_update(&eth->src, port_in, cur_tick);
 
-		/* Lookup destination MAC address */
-		ret = mac_table_get(&eth->dst, &port_out);
-		if (ret < 0) {
-			/* If address was not found, broadcast packet */
+		/* Broadcast frame is necessary */
+		if (frame_type == FRAME_BROADCAST ||
+		    !mac_table_get(&eth->dst, &port_out, cur_tick)) {
 			broadcast_packet(pkt, thr_arg, port_in);
 			continue;
 		}
@@ -583,6 +667,9 @@ static int run_worker(void *arg)
 	odp_packet_t pkt_tbl[MAX_PKT_BURST];
 	odp_pktin_queue_t pktin;
 	odp_pktout_queue_t pktout;
+	odp_time_t time_prev;
+	odp_time_t minute;
+	uint8_t cur_tick;
 	unsigned int num_pktio;
 	unsigned int pktio = 0;
 	uint8_t port_in;
@@ -595,7 +682,13 @@ static int run_worker(void *arg)
 
 	odp_barrier_wait(&gbl_args->barrier);
 
+	minute = odp_time_local_from_ns(ODP_TIME_MIN_IN_NS);
+	time_prev = odp_time_local();
+	cur_tick = (odp_time_to_ns(time_prev) / ODP_TIME_MIN_IN_NS) % UINT8_MAX;
+
 	while (!gbl_args->exit_threads) {
+		odp_time_t time_cur;
+		odp_time_t time_diff;
 		int sent;
 		unsigned int drops;
 
@@ -611,10 +704,20 @@ static int run_worker(void *arg)
 		if (odp_unlikely(pkts <= 0))
 			continue;
 
+		time_cur = odp_time_local();
+		time_diff = odp_time_diff(time_cur, time_prev);
+
+		if (odp_unlikely(odp_time_cmp(time_diff, minute))) {
+			/* Tick stored as 8 bit value */
+			cur_tick = (odp_time_to_ns(time_cur) /
+					ODP_TIME_MIN_IN_NS) % UINT8_MAX;
+			time_prev = time_cur;
+		}
+
 		thr_args->stats[port_in]->s.rx_packets += pkts;
 
 		/* Sort packets to thread local tx buffers */
-		forward_packets(pkt_tbl, pkts, thr_args, port_in);
+		forward_packets(pkt_tbl, pkts, thr_args, port_in, cur_tick);
 
 		/* Empty all thread local tx buffers */
 		for (port_out = 0; port_out < gbl_args->appl.if_count;
@@ -882,6 +985,8 @@ int main(int argc, char **argv)
 	odp_init_t init_param;
 	odph_odpthread_params_t thr_params;
 
+	signal(SIGINT, sig_handler);
+
 	/* Let helper collect its own arguments (e.g. --odph_proc) */
 	argc = odph_parse_options(argc, argv);
 	if (odph_options(&helper_options)) {
@@ -1066,6 +1171,5 @@ int main(int argc, char **argv)
 		exit(EXIT_FAILURE);
 	}
 
-	printf("Exit: %d\n\n", ret);
 	return ret;
 }
