@@ -171,6 +171,7 @@ int odp_pool_capability(odp_pool_capability_t *capa)
 	capa->buf.max_num   = CONFIG_POOL_MAX_NUM;
 
 	/* Packet pools */
+	capa->pkt.max_align        = ODP_CONFIG_BUFFER_ALIGN_MIN;
 	capa->pkt.max_pools        = max_pools;
 	capa->pkt.max_len          = 0;
 	capa->pkt.max_num	   = _odp_pool_glb->config.pkt_max_num;
@@ -291,6 +292,10 @@ static int check_params(odp_pool_param_t *params)
 		break;
 
 	case ODP_POOL_PACKET:
+		if (params->pkt.align > capa.pkt.max_align) {
+			ODP_ERR("pkt.align too large %u\n", params->pkt.align);
+			return -1;
+		}
 		if (params->pkt.num > capa.pkt.max_num) {
 			ODP_ERR("pkt.num too large %u\n", params->pkt.num);
 			return -1;

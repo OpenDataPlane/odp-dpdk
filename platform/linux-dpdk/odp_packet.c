@@ -174,6 +174,9 @@ odp_packet_t odp_packet_alloc(odp_pool_t pool_hdl, uint32_t len)
 		return ODP_PACKET_INVALID;
 	}
 
+	if (odp_unlikely(len == 0))
+		return ODP_PACKET_INVALID;
+
 	return packet_alloc(pool, len);
 }
 
@@ -187,6 +190,9 @@ int odp_packet_alloc_multi(odp_pool_t pool_hdl, uint32_t len,
 		__odp_errno = EINVAL;
 		return -1;
 	}
+
+	if (odp_unlikely(len == 0))
+		return -1;
 
 	for (i = 0; i < num; i++) {
 		pkt[i] = packet_alloc(pool, len);
@@ -202,6 +208,9 @@ int odp_packet_reset(odp_packet_t pkt, uint32_t len)
 	struct rte_mbuf *ms, *mb = &pkt_hdr->buf_hdr.mb;
 	uint8_t nb_segs = 0;
 	int32_t lenleft = len;
+
+	if (odp_unlikely(len == 0))
+		return -1;
 
 	if (RTE_PKTMBUF_HEADROOM + len > odp_packet_buf_len(pkt)) {
 		ODP_DBG("Not enought head room for that packet %d/%d\n",
@@ -366,7 +375,10 @@ int odp_packet_extend_head(odp_packet_t *pkt, uint32_t len, void **data_ptr,
 
 void *odp_packet_pull_head(odp_packet_t pkt, uint32_t len)
 {
-	struct rte_mbuf *mb = &(packet_hdr(pkt)->buf_hdr.mb);
+	struct rte_mbuf *mb = pkt_to_mbuf(pkt);
+
+	if (odp_unlikely(len >= mb->data_len))
+		return NULL;
 
 	return (void *)rte_pktmbuf_adj(mb, len);
 }
@@ -374,9 +386,9 @@ void *odp_packet_pull_head(odp_packet_t pkt, uint32_t len)
 int odp_packet_trunc_head(odp_packet_t *pkt, uint32_t len, void **data_ptr,
 			  uint32_t *seg_len)
 {
-	struct rte_mbuf *mb = &(packet_hdr(*pkt)->buf_hdr.mb);
+	struct rte_mbuf *mb = pkt_to_mbuf(*pkt);
 
-	if (odp_packet_len(*pkt) < len)
+	if (odp_unlikely(len >= odp_packet_len(*pkt)))
 		return -1;
 
 	if (len > mb->data_len) {
@@ -483,7 +495,11 @@ int odp_packet_extend_tail(odp_packet_t *pkt, uint32_t len, void **data_ptr,
 
 void *odp_packet_pull_tail(odp_packet_t pkt, uint32_t len)
 {
-	struct rte_mbuf *mb = &(packet_hdr(pkt)->buf_hdr.mb);
+	struct rte_mbuf *mb = pkt_to_mbuf(pkt);
+	struct rte_mbuf *mb_last = rte_pktmbuf_lastseg(mb);
+
+	if (odp_unlikely(len >= mb_last->data_len))
+		return NULL;
 
 	if (rte_pktmbuf_trim(mb, len))
 		return NULL;
@@ -494,9 +510,9 @@ void *odp_packet_pull_tail(odp_packet_t pkt, uint32_t len)
 int odp_packet_trunc_tail(odp_packet_t *pkt, uint32_t len, void **tail_ptr,
 			  uint32_t *tailroom)
 {
-	struct rte_mbuf *mb = &(packet_hdr(*pkt)->buf_hdr.mb);
+	struct rte_mbuf *mb = pkt_to_mbuf(*pkt);
 
-	if (odp_packet_len(*pkt) < len)
+	if (odp_unlikely(len >= odp_packet_len(*pkt)))
 		return -1;
 
 	if (rte_pktmbuf_trim(mb, len)) {
@@ -699,7 +715,7 @@ int odp_packet_rem_data(odp_packet_t *pkt_ptr, uint32_t offset, uint32_t len)
 	pool_t *pool = pkt_hdr->buf_hdr.pool_ptr;
 	odp_packet_t newpkt;
 
-	if (offset > pktlen || offset + len > pktlen)
+	if (odp_unlikely(offset + len >= pktlen))
 		return -1;
 
 	newpkt = odp_packet_alloc(pool->pool_hdl, pktlen - len);
@@ -805,7 +821,7 @@ int odp_packet_split(odp_packet_t *pkt, uint32_t len, odp_packet_t *tail)
 {
 	uint32_t pktlen = odp_packet_len(*pkt);
 
-	if (len >= pktlen || tail == NULL)
+	if (odp_unlikely(len == 0 || len >= pktlen || tail == NULL))
 		return -1;
 
 	*tail = odp_packet_copy_part(*pkt, len, pktlen - len,

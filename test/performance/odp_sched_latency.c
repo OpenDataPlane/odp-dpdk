@@ -1,4 +1,5 @@
 /* Copyright (c) 2016-2018, Linaro Limited
+ * Copyright (c) 2020, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -25,8 +26,8 @@
 
 #define MAX_QUEUES	  4096		/**< Maximum number of queues */
 #define EVENT_POOL_SIZE	  (1024 * 1024) /**< Event pool size */
-#define TEST_ROUNDS (4 * 1024 * 1024)	/**< Test rounds for each thread */
-#define MAIN_THREAD	   1 /**< Thread ID performing maintenance tasks */
+#define TEST_ROUNDS	  10	/**< Test rounds for each thread (millions) */
+#define MAIN_THREAD	  1	/**< Thread ID performing maintenance tasks */
 
 /* Default values for command line arguments */
 #define SAMPLE_EVENT_PER_PRIO	  0 /**< Allocate a separate sample event for
@@ -35,6 +36,7 @@
 #define LO_PRIO_EVENTS		 32 /**< Number of low priority events */
 #define HI_PRIO_QUEUES		 16 /**< Number of high priority queues */
 #define LO_PRIO_QUEUES		 64 /**< Number of low priority queues */
+#define WARM_UP_ROUNDS		100 /**< Number of warm-up rounds */
 
 #define EVENTS_PER_HI_PRIO_QUEUE 0  /**< Alloc HI_PRIO_QUEUES x HI_PRIO_EVENTS
 					 events */
@@ -54,7 +56,7 @@ ODP_STATIC_ASSERT(LO_PRIO_QUEUES <= MAX_QUEUES, "Too many LO priority queues");
 
 /** Test event types */
 typedef enum {
-	WARM_UP,  /**< Warm up event */
+	WARM_UP,  /**< Warm-up event */
 	COOL_DOWN,/**< Last event on queue */
 	TRAFFIC,  /**< Event used only as traffic load */
 	SAMPLE	  /**< Event used to measure latency */
@@ -66,12 +68,15 @@ typedef struct {
 	event_type_t type;	/**< Message type */
 	int src_idx[NUM_PRIOS]; /**< Source ODP queue */
 	int prio;		/**< Source queue priority */
+	int warm_up_rounds;	/**< Number of completed warm-up rounds */
 } test_event_t;
 
 /** Test arguments */
 typedef struct {
 	unsigned int cpu_count;	/**< CPU count */
 	odp_schedule_sync_t sync_type;	/**< Scheduler sync type */
+	int test_rounds;	/**< Number of test rounds (millions) */
+	int warm_up_rounds;	/**< Number of warm-up rounds */
 	struct {
 		int queues;	/**< Number of scheduling queues */
 		int events;	/**< Number of events */
@@ -218,9 +223,10 @@ static int enqueue_events(int prio, int num_queues, int num_events,
 			memset(event, 0, sizeof(test_event_t));
 
 			/* Latency isn't measured from the first processing
-			 * round. */
+			 * rounds. */
 			if (num_samples > 0) {
 				event->type = WARM_UP;
+				event->warm_up_rounds = 0;
 				num_samples--;
 			} else {
 				event->type = TRAFFIC;
@@ -329,7 +335,7 @@ static void print_results(test_globals_t *globals)
 /**
  * Measure latency of scheduled ODP events
  *
- * Schedule and enqueue events until 'TEST_ROUNDS' events have been processed.
+ * Schedule and enqueue events until 'test_rounds' events have been processed.
  * Scheduling latency is measured only from type 'SAMPLE' events. Other events
  * are simply enqueued back to the scheduling queues.
  *
@@ -354,12 +360,14 @@ static int test_schedule(int thr, test_globals_t *globals)
 	test_event_t *event;
 	test_stat_t *stats;
 	int dst_idx;
+	int warm_up_rounds = globals->args.warm_up_rounds;
+	uint64_t test_rounds = globals->args.test_rounds * 1000000;
 
 	memset(&globals->core_stat[thr], 0, sizeof(core_stat_t));
 	globals->core_stat[thr].prio[HI_PRIO].min = UINT64_MAX;
 	globals->core_stat[thr].prio[LO_PRIO].min = UINT64_MAX;
 
-	for (i = 0; i < TEST_ROUNDS; i++) {
+	for (i = 0; i < test_rounds; i++) {
 		ev = odp_schedule(&src_queue, ODP_SCHED_WAIT);
 
 		buf = odp_buffer_from_event(ev);
@@ -383,10 +391,13 @@ static int test_schedule(int thr, test_globals_t *globals)
 				event->prio = !event->prio;
 		}
 
-		if (odp_unlikely(event->type == WARM_UP))
-			event->type = SAMPLE;
-		else
+		if (odp_unlikely(event->type == WARM_UP)) {
+			event->warm_up_rounds++;
+			if (event->warm_up_rounds >= warm_up_rounds)
+				event->type = SAMPLE;
+		} else {
 			stats->events++;
+		}
 
 		/* Move event to next queue */
 		dst_idx = event->src_idx[event->prio] + 1;
@@ -496,6 +507,7 @@ static void usage(void)
 	       "Usage: ./odp_sched_latency [options]\n"
 	       "Optional OPTIONS:\n"
 	       "  -c, --count <number> CPU count, 0=all available, default=1\n"
+	       "  -d, --duration <number> Test duration in scheduling rounds (millions), default=%d, min=1\n"
 	       "  -l, --lo-prio-queues <number> Number of low priority scheduled queues\n"
 	       "  -t, --hi-prio-queues <number> Number of high priority scheduled queues\n"
 	       "  -m, --lo-prio-events-per-queue <number> Number of events per low priority queue\n"
@@ -511,8 +523,9 @@ static void usage(void)
 	       "               0: ODP_SCHED_SYNC_PARALLEL (default)\n"
 	       "               1: ODP_SCHED_SYNC_ATOMIC\n"
 	       "               2: ODP_SCHED_SYNC_ORDERED\n"
+	       "  -w, --warm-up <number> Number of warm-up rounds, default=%d, min=1\n"
 	       "  -h, --help   Display help and exit.\n\n"
-	       );
+	       , TEST_ROUNDS, WARM_UP_ROUNDS);
 }
 
 /**
@@ -538,13 +551,16 @@ static void parse_args(int argc, char *argv[], test_args_t *args)
 		{"hi-prio-events", required_argument, NULL, 'p'},
 		{"sample-per-prio", no_argument, NULL, 'r'},
 		{"sync", required_argument, NULL, 's'},
+		{"warm-up", required_argument, NULL, 'w'},
 		{"help", no_argument, NULL, 'h'},
 		{NULL, 0, NULL, 0}
 	};
 
-	static const char *shortopts = "+c:s:l:t:m:n:o:p:rh";
+	static const char *shortopts = "+c:d:s:l:t:m:n:o:p:rw:h";
 
 	args->cpu_count = 1;
+	args->test_rounds = TEST_ROUNDS;
+	args->warm_up_rounds = WARM_UP_ROUNDS;
 	args->sync_type = ODP_SCHED_SYNC_PARALLEL;
 	args->sample_per_prio = SAMPLE_EVENT_PER_PRIO;
 	args->prio[LO_PRIO].queues = LO_PRIO_QUEUES;
@@ -563,6 +579,9 @@ static void parse_args(int argc, char *argv[], test_args_t *args)
 		switch (opt) {
 		case 'c':
 			args->cpu_count = atoi(optarg);
+			break;
+		case 'd':
+			args->test_rounds = atoi(optarg);
 			break;
 		case 'l':
 			args->prio[LO_PRIO].queues = atoi(optarg);
@@ -598,6 +617,9 @@ static void parse_args(int argc, char *argv[], test_args_t *args)
 		case 'r':
 			args->sample_per_prio = 1;
 			break;
+		case 'w':
+			args->warm_up_rounds = atoi(optarg);
+			break;
 		case 'h':
 			usage();
 			exit(EXIT_SUCCESS);
@@ -616,6 +638,8 @@ static void parse_args(int argc, char *argv[], test_args_t *args)
 		args->prio[LO_PRIO].queues = MAX_QUEUES;
 	if (args->prio[HI_PRIO].queues > MAX_QUEUES)
 		args->prio[HI_PRIO].queues = MAX_QUEUES;
+	if (args->test_rounds < 1)
+		args->test_rounds = 1;
 	if (!args->prio[HI_PRIO].queues && !args->prio[LO_PRIO].queues) {
 		printf("No queues configured\n");
 		usage();
