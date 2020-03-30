@@ -42,7 +42,7 @@ extern "C" {
 /* Forward declaration */
 struct pktio_if_ops;
 
-#define PKTIO_PRIVATE_SIZE 1728
+#define PKTIO_PRIVATE_SIZE 2048
 
 struct pktio_entry {
 	const struct pktio_if_ops *ops; /**< Implementation specific methods */
