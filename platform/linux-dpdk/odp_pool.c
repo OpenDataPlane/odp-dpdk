@@ -30,6 +30,7 @@
 #include <odp/api/plat/pool_inline_types.h>
 
 #include <rte_config.h>
+#include <rte_errno.h>
 #include <rte_version.h>
 
 #ifdef POOL_USE_TICKETLOCK

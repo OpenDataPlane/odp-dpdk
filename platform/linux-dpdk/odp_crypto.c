@@ -28,6 +28,7 @@
 #include <rte_config.h>
 #include <rte_crypto.h>
 #include <rte_cryptodev.h>
+#include <rte_malloc.h>
 #include <rte_version.h>
 
 #include <string.h>
