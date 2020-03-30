@@ -46,9 +46,13 @@ run_packet_gen()
 		exit $TEST_SKIPPED
 	fi
 
+	export ODP_PLATFORM_PARAMS="-m 256 --file-prefix="l2fwd" \
+--proc-type auto --no-pci --vdev net_pcap1,iface=$IF0 \
+--vdev net_pcap2,iface=$IF1"
+
 	# Runs 500 * 10ms = 5 sec
 	# Sends 500 packets through both interfaces => total 1000 packets
-	odp_packet_gen${EXEEXT} -i $IF0,$IF1 -b 1 -g 10000000 -q 500
+	odp_packet_gen${EXEEXT} -i 0,1 -b 1 -g 10000000 -q 500
 
 	ret=$?
 
