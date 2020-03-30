@@ -55,11 +55,9 @@ env:
         - CHECK=0 CONF="--enable-lto"
         - CHECK=0 CONF="--enable-lto --disable-abi-compat"
         - CHECK=0 ARCH=arm64
-        - CHECK=0 ARCH=armhf
         - CHECK=0 ARCH=ppc64el
         - CHECK=0 ARCH=i386
         - CHECK=0 ARCH=arm64 CONF="--disable-abi-compat"
-        - CHECK=0 ARCH=armhf CONF="--disable-abi-compat"
         - CHECK=0 ARCH=ppc64el CONF="--disable-abi-compat"
         - CHECK=0 ARCH=i386 CONF="--disable-abi-compat"
         - CONF=""
@@ -84,6 +82,10 @@ matrix:
     env: CHECK=0 CONF="--enable-lto"
   - compiler: clang
     env: CHECK=0 CONF="--enable-lto --disable-abi-compat"
+  - compiler: clang
+    env: CHECK=0 ARCH=ppc64el
+  - compiler: clang
+    env: CHECK=0 ARCH=ppc64el CONF="--disable-abi-compat"
 
 install:
         - sudo sysctl vm.nr_hugepages=1000
@@ -127,7 +129,7 @@ jobs:
                               -e ODP_SCHEDULER=sp
                               ${DOCKER_NAMESPACE}/travis-odp-${OS}-${ARCH} /odp/scripts/ci/check.sh
                 - stage: test
-                  env: TEST=dpdk_18.11
+                  env: TEST=dpdk_19.11
                   install:
                           - true
                   compiler: gcc
@@ -137,7 +139,7 @@ jobs:
                               -v `pwd`:/odp --shm-size 8g
                               -e CC="${CC}"
                               -e CONF=""
-                              ${DOCKER_NAMESPACE}/travis-odp-${OS}-${ARCH} /odp/scripts/ci/check.sh
+                              ${DOCKER_NAMESPACE}/travis-odp-${OS}-${ARCH}-dpdk_19.11 /odp/scripts/ci/check.sh
                 - stage: test
                   env: TEST=distcheck
                   canfail: yes
