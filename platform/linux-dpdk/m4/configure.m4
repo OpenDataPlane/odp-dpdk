@@ -37,6 +37,15 @@ AC_ARG_WITH([dpdk-path],
 ODP_DPDK([$DPDK_PATH], [],
 	 [AC_MSG_FAILURE([can't find DPDK])])
 
+# In non-abi-compat mode DPDK is exposed to the application
+if test $ODP_ABI_COMPAT -eq 1; then
+	DPDK_LIBS_ABI_COMPAT=$DPDK_LIBS
+	AC_SUBST([DPDK_LIBS_ABI_COMPAT])
+else
+	DPDK_LIBS_NON_ABI_COMPAT=$DPDK_LIBS
+	AC_SUBST([DPDK_LIBS_NON_ABI_COMPAT])
+fi
+
 case "${host}" in
   i?86* | x86*)
     DPDK_CFLAGS="${DPDK_CFLAGS} -msse4.2"
