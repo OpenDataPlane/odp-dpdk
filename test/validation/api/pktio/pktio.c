@@ -1181,12 +1181,7 @@ static void test_recv_tmo(recv_tmo_mode_e mode)
 
 	memset(pkt_seq, 0, sizeof(pkt_seq));
 
-	/* No packets sent yet, so should wait */
 	ns = 100 * ODP_TIME_MSEC_IN_NS;
-
-	ret = recv_packets_tmo(pktio_rx, &pkt_tbl[0], &pkt_seq[0], 1, mode,
-			       odp_pktin_wait_time(ns), ns, 1);
-	CU_ASSERT(ret == 0);
 
 	ret = create_packets(pkt_tbl, pkt_seq, test_pkt_count, pktio_tx,
 			     pktio_rx);
@@ -1196,7 +1191,8 @@ static void test_recv_tmo(recv_tmo_mode_e mode)
 	CU_ASSERT_FATAL(ret == test_pkt_count);
 
 	ret = recv_packets_tmo(pktio_rx, &pkt_tbl[0], &pkt_seq[0], 1, mode,
-			       odp_pktin_wait_time(UINT64_MAX), 0, 0);
+			       odp_pktin_wait_time(10 * ODP_TIME_SEC_IN_NS),
+			       0, 0);
 	CU_ASSERT_FATAL(ret == 1);
 
 	ret = recv_packets_tmo(pktio_rx, &pkt_tbl[1], &pkt_seq[1], 1, mode,
@@ -1758,13 +1754,6 @@ static void pktio_test_statistics_counters(void)
 		CU_ASSERT(ret == 0);
 	}
 
-	/* flush packets with magic number in pipes */
-	for (i = 0; i < 1000; i++) {
-		ev = odp_schedule(NULL, wait);
-		if (ev != ODP_EVENT_INVALID)
-			odp_event_free(ev);
-	}
-
 	alloc = create_packets(tx_pkt, pkt_seq, 1000, pktio_tx, pktio_rx);
 
 	ret = odp_pktio_stats_reset(pktio_tx);
@@ -1833,6 +1822,13 @@ static void pktio_test_statistics_counters(void)
 		flush_input_queue(pktio[i], ODP_PKTIN_MODE_SCHED);
 		CU_ASSERT(odp_pktio_close(pktio[i]) == 0);
 	}
+}
+
+static int pktio_check_start_stop(void)
+{
+	if (getenv("ODP_PKTIO_TEST_DISABLE_START_STOP"))
+		return ODP_TEST_INACTIVE;
+	return ODP_TEST_ACTIVE;
 }
 
 static void pktio_test_start_stop(void)
@@ -2930,7 +2926,8 @@ odp_testinfo_t pktio_suite_unsegmented[] = {
 	ODP_TEST_INFO(pktio_test_mtu),
 	ODP_TEST_INFO(pktio_test_promisc),
 	ODP_TEST_INFO(pktio_test_mac),
-	ODP_TEST_INFO(pktio_test_start_stop),
+	ODP_TEST_INFO_CONDITIONAL(pktio_test_start_stop,
+				  pktio_check_start_stop),
 	ODP_TEST_INFO(pktio_test_recv_on_wonly),
 	ODP_TEST_INFO(pktio_test_send_on_ronly),
 	ODP_TEST_INFO(pktio_test_plain_multi_event),

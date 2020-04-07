@@ -46,23 +46,21 @@ env:
         # you need to generate a new one at https://codecov.io specific for your
         # repo.
         - CODECOV_TOKEN=8e1c0fd8-62ff-411e-a79f-5839f6662c11
-        - OS=ubuntu_16.04
+        - OS=ubuntu_18.04
         - ARCH=x86_64
         - CHECK=1
     matrix:
         - CHECK=0 CONF="CFLAGS=-O3"
         - CHECK=0 CONF="CFLAGS=-O0 --enable-debug --enable-debug-print"
-        - CHECK=0 OS=ubuntu_18.04 CONF="CFLAGS=-O3"
-        - CHECK=0 OS=ubuntu_18.04 CONF="CFLAGS=-O0 --enable-debug --enable-debug-print"
         - CHECK=0 CONF="--enable-lto"
         - CHECK=0 CONF="--enable-lto --disable-abi-compat"
-        - CHECK=0 OS=ubuntu_18.04 CONF="--enable-lto"
-        - CHECK=0 OS=ubuntu_18.04 CONF="--enable-lto --disable-abi-compat"
         - CHECK=0 ARCH=arm64
         - CHECK=0 ARCH=armhf
+        - CHECK=0 ARCH=ppc64el
         - CHECK=0 ARCH=i386
         - CHECK=0 ARCH=arm64 CONF="--disable-abi-compat"
         - CHECK=0 ARCH=armhf CONF="--disable-abi-compat"
+        - CHECK=0 ARCH=ppc64el CONF="--disable-abi-compat"
         - CHECK=0 ARCH=i386 CONF="--disable-abi-compat"
         - CONF=""
         - CONF="--disable-abi-compat"
@@ -73,7 +71,8 @@ env:
         - CHECK=0 CONF="--enable-pcapng-support"
         - CHECK=0 OS=centos_7
         - CONF="--without-openssl --without-pcap"
-        - OS=ubuntu_18.04
+        - OS=ubuntu_16.04
+        - OS=ubuntu_20.04
 
 matrix:
   exclude:
@@ -85,10 +84,6 @@ matrix:
     env: CHECK=0 CONF="--enable-lto"
   - compiler: clang
     env: CHECK=0 CONF="--enable-lto --disable-abi-compat"
-  - compiler: clang
-    env: CHECK=0 OS=ubuntu_18.04 CONF="--enable-lto"
-  - compiler: clang
-    env: CHECK=0 OS=ubuntu_18.04 CONF="--enable-lto --disable-abi-compat"
 
 install:
         - sudo sysctl vm.nr_hugepages=1000
@@ -99,14 +94,14 @@ script:
                docker run --privileged -i -t -v `pwd`:/odp --shm-size 8g
                  -e CC="${CC}"
                  -e CONF="${CONF}"
-                 ${DOCKER_NAMESPACE}/travis-odp-lng-${OS} /odp/scripts/ci/build_${ARCH}.sh ;
+                 ${DOCKER_NAMESPACE}/travis-odp-${OS}-${ARCH} /odp/scripts/ci/build_${ARCH}.sh ;
           else
                echo "Running test" ;
                docker run --privileged -i -t
                  -v `pwd`:/odp --shm-size 8g
                  -e CC="${CC}"
                  -e CONF="${CONF}"
-                 ${DOCKER_NAMESPACE}/travis-odp-lng-${OS} /odp/scripts/ci/check.sh ;
+                 ${DOCKER_NAMESPACE}/travis-odp-${OS}-${ARCH} /odp/scripts/ci/check.sh ;
           fi
 jobs:
         include:
@@ -119,7 +114,7 @@ jobs:
                               -v `pwd`:/odp --shm-size 8g
                               -e CODECOV_TOKEN="${CODECOV_TOKEN}"
                               -e CC="${CC}"
-                              ${DOCKER_NAMESPACE}/travis-odp-lng-ubuntu_16.04 /odp/scripts/ci/coverage.sh
+                              ${DOCKER_NAMESPACE}/travis-odp-${OS}-${ARCH} /odp/scripts/ci/coverage.sh
                 - stage: test
                   env: TEST=scheduler_sp
                   compiler: gcc
@@ -130,7 +125,7 @@ jobs:
                               -e CC="${CC}"
                               -e CONF=""
                               -e ODP_SCHEDULER=sp
-                              ${DOCKER_NAMESPACE}/travis-odp-lng-ubuntu_16.04 /odp/scripts/ci/check.sh
+                              ${DOCKER_NAMESPACE}/travis-odp-${OS}-${ARCH} /odp/scripts/ci/check.sh
                 - stage: test
                   env: TEST=dpdk_18.11
                   install:
@@ -142,7 +137,7 @@ jobs:
                               -v `pwd`:/odp --shm-size 8g
                               -e CC="${CC}"
                               -e CONF=""
-                              ${DOCKER_NAMESPACE}/travis-odp-lng-ubuntu_16.04-dpdk_18.11 /odp/scripts/ci/check.sh
+                              ${DOCKER_NAMESPACE}/travis-odp-${OS}-${ARCH} /odp/scripts/ci/check.sh
                 - stage: test
                   env: TEST=distcheck
                   canfail: yes
@@ -153,7 +148,7 @@ jobs:
                               -v `pwd`:/odp --shm-size 8g
                               -e CC="${CC}"
                               -e CONF="--enable-user-guides"
-                              ${DOCKER_NAMESPACE}/travis-odp-lng-ubuntu_16.04 /odp/scripts/ci/distcheck.sh
+                              ${DOCKER_NAMESPACE}/travis-odp-${OS}-${ARCH} /odp/scripts/ci/distcheck.sh
                 - stage: test
                   env: TEST=distcheck_nonabi
                   canfail: yes
@@ -164,7 +159,7 @@ jobs:
                               -v `pwd`:/odp --shm-size 8g
                               -e CC="${CC}"
                               -e CONF="--enable-user-guides --disable-abi-compat"
-                              ${DOCKER_NAMESPACE}/travis-odp-lng-ubuntu_16.04 /odp/scripts/ci/distcheck.sh
+                              ${DOCKER_NAMESPACE}/travis-odp-${OS}-${ARCH} /odp/scripts/ci/distcheck.sh
                 - stage: test
                   env: TEST=out_of_tree
                   compiler: gcc
@@ -174,7 +169,7 @@ jobs:
                               -v `pwd`:/odp --shm-size 8g
                               -e CC="${CC}"
                               -e CONF=""
-                              ${DOCKER_NAMESPACE}/travis-odp-lng-ubuntu_16.04 /odp/scripts/ci/out_of_tree.sh
+                              ${DOCKER_NAMESPACE}/travis-odp-${OS}-${ARCH} /odp/scripts/ci/out_of_tree.sh
                 - stage: "build only"
                   env: TEST=documentation
                   compiler: gcc
@@ -182,15 +177,14 @@ jobs:
                           - if [ -z "${DOCKER_NAMESPACE}" ] ; then export DOCKER_NAMESPACE="opendataplane"; fi
                           - docker run --privileged -i -t -v `pwd`:/odp --shm-size 8g
                               -e CC="${CC}"
-                              ${DOCKER_NAMESPACE}/travis-odp-lng-ubuntu_16.04 /odp/scripts/ci/doxygen.sh
-
+                              ${DOCKER_NAMESPACE}/travis-odp-${OS}-${ARCH} /odp/scripts/ci/doxygen.sh
                 - stage: "build only"
                   env: ARCH=x86_64
                   script:
                           - if [ -z "${DOCKER_NAMESPACE}" ] ; then export DOCKER_NAMESPACE="opendataplane"; fi
                           - docker run --privileged -i -t -v `pwd`:/odp --shm-size 8g
                               -e CC="${CC}"
-                              ${DOCKER_NAMESPACE}/travis-odp-lng-ubuntu_16.04 /odp/scripts/ci/build_${ARCH}.sh
+                              ${DOCKER_NAMESPACE}/travis-odp-${OS}-${ARCH} /odp/scripts/ci/build_${ARCH}.sh
                 - stage: "build only"
                   env: ARCH=x86_64
                   compiler: clang
@@ -198,7 +192,7 @@ jobs:
                           - if [ -z "${DOCKER_NAMESPACE}" ] ; then export DOCKER_NAMESPACE="opendataplane"; fi
                           - docker run --privileged -i -t -v `pwd`:/odp --shm-size 8g
                               -e CC="${CC}"
-                              ${DOCKER_NAMESPACE}/travis-odp-lng-ubuntu_16.04 /odp/scripts/ci/build_${ARCH}.sh
+                              ${DOCKER_NAMESPACE}/travis-odp-${OS}-${ARCH} /odp/scripts/ci/build_${ARCH}.sh
                 - stage: "build only"
                   env: ARCH=arm64
                   install:
@@ -207,14 +201,14 @@ jobs:
                           - if [ -z "${DOCKER_NAMESPACE}" ] ; then export DOCKER_NAMESPACE="opendataplane"; fi
                           - docker run --privileged -i -t -v `pwd`:/odp
                               -e CC="${CC}"
-                              ${DOCKER_NAMESPACE}/travis-odp-lng-ubuntu_16.04 /odp/scripts/ci/build_${ARCH}.sh
+                              ${DOCKER_NAMESPACE}/travis-odp-${OS}-${ARCH} /odp/scripts/ci/build_${ARCH}.sh
                 - stage: "build only"
                   env: ARCH=i386
                   script:
                           - if [ -z "${DOCKER_NAMESPACE}" ] ; then export DOCKER_NAMESPACE="opendataplane"; fi
                           - docker run --privileged -i -t -v `pwd`:/odp --shm-size 8g
                               -e CC="${CC}"
-                              ${DOCKER_NAMESPACE}/travis-odp-lng-ubuntu_16.04 /odp/scripts/ci/build_${ARCH}.sh
+                              ${DOCKER_NAMESPACE}/travis-odp-${OS}-${ARCH} /odp/scripts/ci/build_${ARCH}.sh
                 - stage: test
                   canfail: yes
                   env: TEST=checkpatch
