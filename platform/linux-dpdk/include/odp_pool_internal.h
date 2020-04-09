@@ -33,6 +33,11 @@ extern "C" {
 #include <rte_config.h>
 #include <rte_mbuf.h>
 #include <rte_mempool.h>
+/* ppc64 rte_memcpy.h may overwrite bool with incompatible type */
+#if defined(__PPC64__) && defined(bool)
+	#undef bool
+	#define bool _Bool
+#endif
 
 /* Use ticketlock instead of spinlock */
 #define POOL_USE_TICKETLOCK

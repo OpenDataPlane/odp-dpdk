@@ -36,7 +36,12 @@ extern "C" {
 #include <rte_config.h>
 #include <rte_mbuf.h>
 
+/* ppc64 rte_memcpy.h may overwrite bool with incompatible type */
 #include <rte_memcpy.h>
+#if defined(__PPC64__) && defined(bool)
+	#undef bool
+	#define bool _Bool
+#endif
 
 /** @cond _ODP_HIDE_FROM_DOXYGEN_ */
 

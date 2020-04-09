@@ -36,7 +36,8 @@ extern "C" {
 #if defined(__clang__)
 #undef RTE_TOOLCHAIN_GCC
 #endif
-#include <rte_acl_osdep.h>
+#include <rte_mbuf.h>
+#include <rte_memory.h>
 
 /** Minimum segment length expected by packet_parse_common() */
 #define PACKET_PARSE_SEG_LEN 96
