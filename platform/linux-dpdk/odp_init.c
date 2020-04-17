@@ -36,6 +36,7 @@ enum init_stage {
 	HASH_INIT,
 	THREAD_INIT,
 	POOL_INIT,
+	STASH_INIT,
 	QUEUE_INIT,
 	SCHED_INIT,
 	PKTIO_INIT,
@@ -257,6 +258,13 @@ static int term_global(enum init_stage stage)
 		}
 		/* Fall through */
 
+	case STASH_INIT:
+		if (_odp_stash_term_global()) {
+			ODP_ERR("ODP stash term failed.\n");
+			rc = -1;
+		}
+		/* Fall through */
+
 	case POOL_INIT:
 		if (_odp_pool_term_global()) {
 			ODP_ERR("ODP buffer pool term failed.\n");
@@ -421,6 +429,12 @@ int odp_init_global(odp_instance_t *instance,
 		goto init_failed;
 	}
 	stage = POOL_INIT;
+
+	if (_odp_stash_init_global()) {
+		ODP_ERR("ODP stash init failed.\n");
+		goto init_failed;
+	}
+	stage = STASH_INIT;
 
 	if (_odp_queue_init_global()) {
 		ODP_ERR("ODP queue init failed.\n");

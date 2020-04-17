@@ -190,6 +190,7 @@ __LIB__libodp_linux_la_SOURCES = \
 			   ../linux-generic/odp_sorted_list.c \
 			   ../linux-generic/odp_spinlock.c \
 			   ../linux-generic/odp_spinlock_recursive.c \
+			   ../linux-generic/odp_stash.c \
 			   ../linux-generic/odp_system_info.c \
 			   ../linux-generic/odp_pcapng.c \
 			   odp_thread.c \
