@@ -1,4 +1,5 @@
 /* Copyright (c) 2013-2018, Linaro Limited
+ * Copyright (c) 2020, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -18,6 +19,7 @@
 #include <odp_global_data.h>
 #include <odp_sysinfo_internal.h>
 #include <odp_init_internal.h>
+#include <odp_libconfig_internal.h>
 #include <odp_debug_internal.h>
 #include <odp/api/align.h>
 #include <odp/api/cpu.h>
@@ -331,11 +333,34 @@ static int system_hp(hugepage_info_t *hugeinfo)
 	return 0;
 }
 
+static int read_config_file(void)
+{
+	const char *str;
+	int val = 0;
+
+	str = "system.cpu_mhz";
+	if (!_odp_libconfig_lookup_int(str, &val)) {
+		ODP_ERR("Config option '%s' not found.\n", str);
+		return -1;
+	}
+	odp_global_ro.system_info.default_cpu_hz = (uint64_t)val * 1000000;
+
+	str = "system.cpu_mhz_max";
+	if (!_odp_libconfig_lookup_int(str, &val)) {
+		ODP_ERR("Config option '%s' not found.\n", str);
+		return -1;
+	}
+	odp_global_ro.system_info.default_cpu_hz_max = (uint64_t)val * 1000000;
+
+	return 0;
+}
+
 /*
  * System info initialisation
  */
 int _odp_system_info_init(void)
 {
+	int num_cpus;
 	int i;
 	FILE  *file;
 
@@ -343,8 +368,19 @@ int _odp_system_info_init(void)
 
 	odp_global_ro.system_info.page_size = ODP_PAGE_SIZE;
 
+	/* Read default CPU Hz values from config file */
+	if (read_config_file())
+		return -1;
+
+	/* Check that CONFIG_NUM_CPU_IDS is large enough */
+	num_cpus = get_nprocs_conf();
+	if (num_cpus > CONFIG_NUM_CPU_IDS)
+		ODP_ERR("Unable to handle all %d "
+			"CPU IDs. Increase CONFIG_NUM_CPU_IDS value.\n",
+			num_cpus);
+
 	/* By default, read max frequency from a cpufreq file */
-	for (i = 0; i < CONFIG_NUM_CPU; i++) {
+	for (i = 0; i < CONFIG_NUM_CPU_IDS; i++) {
 		uint64_t cpu_hz_max = read_cpufreq("cpuinfo_max_freq", i);
 
 		if (cpu_hz_max)
@@ -415,7 +451,7 @@ uint64_t odp_cpu_hz_max(void)
 
 uint64_t odp_cpu_hz_max_id(int id)
 {
-	if (id >= 0 && id < CONFIG_NUM_CPU)
+	if (id >= 0 && id < CONFIG_NUM_CPU_IDS)
 		return odp_global_ro.system_info.cpu_hz_max[id];
 	else
 		return 0;
@@ -475,7 +511,7 @@ const char *odp_cpu_model_str(void)
 
 const char *odp_cpu_model_str_id(int id)
 {
-	if (id >= 0 && id < CONFIG_NUM_CPU)
+	if (id >= 0 && id < CONFIG_NUM_CPU_IDS)
 		return odp_global_ro.system_info.model_str[id];
 	else
 		return NULL;
