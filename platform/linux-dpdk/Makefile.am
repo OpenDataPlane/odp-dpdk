@@ -70,6 +70,7 @@ odpapiabiarchinclude_HEADERS += \
 		  include-abi/odp/api/abi/shared_memory.h \
 		  include-abi/odp/api/abi/spinlock.h \
 		  include-abi/odp/api/abi/spinlock_recursive.h \
+		  include-abi/odp/api/abi/stash.h \
 		  include-abi/odp/api/abi/std_clib.h \
 		  include-abi/odp/api/abi/std_types.h \
 		  include-abi/odp/api/abi/sync.h \
@@ -189,6 +190,7 @@ __LIB__libodp_linux_la_SOURCES = \
 			   ../linux-generic/odp_sorted_list.c \
 			   ../linux-generic/odp_spinlock.c \
 			   ../linux-generic/odp_spinlock_recursive.c \
+			   ../linux-generic/odp_stash.c \
 			   ../linux-generic/odp_system_info.c \
 			   ../linux-generic/odp_pcapng.c \
 			   odp_thread.c \

@@ -31,12 +31,12 @@ Prerequisites and considerations:
 
 Fetching the DPDK code:
 ----------------------
-Right now odp-dpdk supports DPDK v18.11 (recommended version) and v17.11:
+Right now odp-dpdk supports DPDK v18.11 (recommended version) and v19.11:
     git clone http://dpdk.org/git/dpdk-stable --branch 18.11 --depth 1 ./<dpdk-dir>
 
 or
 
-    git clone http://dpdk.org/git/dpdk-stable --branch 17.11 --depth 1 ./<dpdk-dir>
+    git clone http://dpdk.org/git/dpdk-stable --branch 19.11 --depth 1 ./<dpdk-dir>
 
 Compile DPDK:
 ------------
