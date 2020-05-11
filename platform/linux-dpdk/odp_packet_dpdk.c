@@ -1,5 +1,5 @@
 /* Copyright (c) 2013-2018, Linaro Limited
- * Copyright (c) 2019, Nokia
+ * Copyright (c) 2019-2020, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -75,6 +75,7 @@
 
 /** DPDK runtime configuration options */
 typedef struct {
+	int multicast_enable;
 	int num_rx_desc;
 	int num_tx_desc;
 	int rx_drop_en;
@@ -188,11 +189,17 @@ static int init_options(pktio_entry_t *pktio_entry,
 		return -1;
 	opt->rx_drop_en = !!opt->rx_drop_en;
 
+	if (!lookup_opt("multicast_en", dev_info->driver_name,
+			&opt->multicast_enable))
+		return -1;
+	opt->multicast_enable = !!opt->multicast_enable;
+
 	ODP_PRINT("DPDK interface (%s): %" PRIu16 "\n", dev_info->driver_name,
 		  pkt_priv(pktio_entry)->port_id);
+	ODP_PRINT("  multicast:   %d\n", opt->multicast_enable);
 	ODP_PRINT("  num_rx_desc: %d\n", opt->num_rx_desc);
 	ODP_PRINT("  num_tx_desc: %d\n", opt->num_tx_desc);
-	ODP_PRINT("  rx_drop_en: %d\n", opt->rx_drop_en);
+	ODP_PRINT("  rx_drop_en:  %d\n", opt->rx_drop_en);
 
 	return 0;
 }
@@ -882,7 +889,10 @@ static int dpdk_start(pktio_entry_t *pktio_entry)
 
 	/* Setup promiscuous mode and multicast */
 	promisc_mode_check(pkt_dpdk);
-	rte_eth_allmulticast_enable(port_id);
+	if (pkt_dpdk->opt.multicast_enable)
+		rte_eth_allmulticast_enable(port_id);
+	else
+		rte_eth_allmulticast_disable(port_id);
 
 	/* Add callback for loopback interface */
 	if (pkt_dpdk->loopback) {
