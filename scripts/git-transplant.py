@@ -78,7 +78,8 @@ for dirname, dirnames, filenames in os.walk(overlay_dir):
 wholefilechanges = "git log --oneline --ancestry-path --name-status " + \
 		   interval + " " + orig_dir + " |grep \"^A\""
 try:
-	output = subprocess.check_output([wholefilechanges], shell=True)
+	output = subprocess.check_output([wholefilechanges], shell=True,
+					 encoding='utf8')
 except subprocess.CalledProcessError:
 	output = ""
 	pass
