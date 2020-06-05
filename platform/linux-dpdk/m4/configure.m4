@@ -17,7 +17,8 @@ AC_ARG_WITH([openssl],
 AS_IF([test "$with_openssl" != "no"],
       [ODP_OPENSSL])
 AM_CONDITIONAL([WITH_OPENSSL], [test x$with_openssl != xno])
-ODP_LIBCONFIG([linux-dpdk])
+
+m4_include([platform/linux-dpdk/m4/odp_libconfig.m4])
 m4_include([platform/linux-dpdk/m4/odp_pcapng.m4])
 ODP_SCHEDULER
 
