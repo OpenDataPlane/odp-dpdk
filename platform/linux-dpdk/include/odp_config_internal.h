@@ -145,11 +145,6 @@ extern "C" {
  */
 #define CONFIG_POOL_MAX_NUM ((1024 * 1024) - 1)
 
-/*
- * Maximum number of events in a thread local pool cache
- */
-#define CONFIG_POOL_CACHE_SIZE 256
-
 #ifdef __cplusplus
 }
 #endif
