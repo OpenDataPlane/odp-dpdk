@@ -266,7 +266,7 @@ odp_dpdk_mbuf_ctor(struct rte_mempool *mp,
 	}						\
 } while (0)
 
-static int check_params(odp_pool_param_t *params)
+static int check_params(const odp_pool_param_t *params)
 {
 	odp_pool_capability_t capa;
 
@@ -396,7 +396,7 @@ static void format_pool_name(const char *name, char *rte_name)
 	} while (rte_mempool_lookup(rte_name) != NULL);
 }
 
-odp_pool_t odp_pool_create(const char *name, odp_pool_param_t *params)
+odp_pool_t odp_pool_create(const char *name, const odp_pool_param_t *params)
 {
 	struct rte_pktmbuf_pool_private mbp_ctor_arg;
 	struct mbuf_ctor_arg mb_ctor_arg;
