@@ -1,4 +1,5 @@
 /* Copyright (c) 2015-2018, Linaro Limited
+ * Copyright (c) 2020, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -69,6 +70,12 @@ typedef struct odp_pool_capability_t {
 		 * The value of zero means that limited only by the available
 		 * memory size for the pool. */
 		uint32_t max_num;
+
+		/** Minimum size of thread local cache */
+		uint32_t min_cache_size;
+
+		/** Maximum size of thread local cache */
+		uint32_t max_cache_size;
 	} buf;
 
 	/** Packet pool capabilities  */
@@ -148,6 +155,12 @@ typedef struct odp_pool_capability_t {
 		 *  Maximum number of packet pool subparameters. Valid range is
 		 *  0 ... ODP_POOL_MAX_SUBPARAMS. */
 		uint8_t max_num_subparam;
+
+		/** Minimum size of thread local cache */
+		uint32_t min_cache_size;
+
+		/** Maximum size of thread local cache */
+		uint32_t max_cache_size;
 	} pkt;
 
 	/** Timeout pool capabilities  */
@@ -160,6 +173,12 @@ typedef struct odp_pool_capability_t {
 		 * The value of zero means that limited only by the available
 		 * memory size for the pool. */
 		uint32_t max_num;
+
+		/** Minimum size of thread local cache */
+		uint32_t min_cache_size;
+
+		/** Maximum size of thread local cache */
+		uint32_t max_cache_size;
 	} tmo;
 
 } odp_pool_capability_t;
@@ -190,11 +209,6 @@ typedef struct odp_pool_pkt_subparam_t {
 
 /**
  * Pool parameters
- *
- * A note for all pool types: a single thread may not be able to allocate all
- * 'num' elements from the pool at any particular time, as implementations are
- * allowed to store some elements (per thread and HW engine) for caching
- * purposes.
  */
 typedef struct odp_pool_param_t {
 	/** Pool type */
@@ -215,6 +229,22 @@ typedef struct odp_pool_param_t {
 		 *  Default will always be a multiple of 8.
 		 */
 		uint32_t align;
+
+		/** Maximum number of buffers cached locally per thread
+		 *
+		 *  A non-zero value allows implementation to cache buffers
+		 *  locally per each thread. Thread local caching may improve
+		 *  performance, but requires application to take account that
+		 *  some buffers may be stored locally per thread and thus are
+		 *  not available for allocation from other threads.
+		 *
+		 *  This is the maximum number of buffers to be cached per
+		 *  thread. The actual cache size is implementation specific.
+		 *  The value must not be less than 'min_cache_size' or exceed
+		 *  'max_cache_size' capability. The default value is
+		 *  implementation specific and set by odp_pool_param_init().
+		 */
+		uint32_t cache_size;
 	} buf;
 
 	/** Parameters for packet pools */
@@ -250,7 +280,7 @@ typedef struct odp_pool_param_t {
 
 		/** Maximum packet length that will be allocated from
 		 *  the pool. The maximum value is defined by pool capability
-		 *  pkt.max_len. Use 0 for default (the pool maximum).
+		 *  pkt.max_len. Use 0 for default.
 		 */
 		uint32_t max_len;
 
@@ -309,12 +339,24 @@ typedef struct odp_pool_param_t {
 		 *  simultaneously (e.g. due to subpool design).
 		 */
 		odp_pool_pkt_subparam_t sub[ODP_POOL_MAX_SUBPARAMS];
+
+		/** Maximum number of packets cached locally per thread
+		 *
+		 *  See buf.cache_size documentation for details.
+		 */
+		uint32_t cache_size;
 	} pkt;
 
 	/** Parameters for timeout pools */
 	struct {
 		/** Number of timeouts in the pool */
 		uint32_t num;
+
+		/** Maximum number of timeouts cached locally per thread
+		 *
+		 *  See buf.cache_size documentation for details.
+		 */
+		uint32_t cache_size;
 	} tmo;
 
 } odp_pool_param_t;
@@ -331,17 +373,17 @@ typedef struct odp_pool_param_t {
  *
  * This routine is used to create a pool. The use of pool name is optional.
  * Unique names are not required. However, odp_pool_lookup() returns only a
- * single matching pool.
+ * single matching pool. Use odp_pool_param_init() to initialize parameters
+ * into their default values.
  *
  * @param name     Name of the pool or NULL. Maximum string length is
  *                 ODP_POOL_NAME_LEN.
- * @param params   Pool parameters.
+ * @param param    Pool parameters.
  *
  * @return Handle of the created pool
  * @retval ODP_POOL_INVALID  Pool could not be created
  */
-
-odp_pool_t odp_pool_create(const char *name, odp_pool_param_t *params);
+odp_pool_t odp_pool_create(const char *name, const odp_pool_param_t *param);
 
 /**
  * Destroy a pool previously created by odp_pool_create()

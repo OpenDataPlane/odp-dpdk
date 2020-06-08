@@ -87,6 +87,7 @@ static int thread_state_init(int tidx)
 	ts->rvec_free = (1ULL << TS_RVEC_SIZE) - 1;
 	ts->num_schedq = 0;
 	ts->sg_sem = 1; /* Start with sched group semaphore changed */
+	ts->loop_cnt = 0;
 	memset(ts->sg_actual, 0, sizeof(ts->sg_actual));
 	for (i = 0; i < TS_RVEC_SIZE; i++) {
 		ts->rvec[i].rvec_free = &ts->rvec_free;
@@ -731,7 +732,6 @@ static void pktio_start(int pktio_idx,
 
 static void pktio_stop(sched_elem_t *elem)
 {
-	elem->cons_type &= ~FLAG_PKTIN; /* Clear pktin queue flag */
 	sched_pktin_rem(elem->sched_grp);
 	if (__atomic_sub_fetch(&global->poll_count[elem->pktio_idx],
 			       1, __ATOMIC_RELAXED) == 0) {
@@ -874,9 +874,9 @@ events_dequeued:
 static int _schedule(odp_queue_t *from, odp_event_t ev[], int num_evts)
 {
 	sched_scalable_thread_state_t *ts;
-	sched_elem_t *first;
 	sched_elem_t *atomq;
 	int num;
+	int cpu_id;
 	uint32_t i;
 
 	ts = sched_ts;
@@ -946,10 +946,13 @@ dequeue_atomic:
 		update_sg_membership(ts);
 	}
 
+	cpu_id = odp_cpu_id();
 	/* Scan our schedq list from beginning to end */
-	for (i = 0, first = NULL; i < ts->num_schedq; i++, first = NULL) {
+	for (i = 0; i < ts->num_schedq; i++) {
 		sched_queue_t *schedq = ts->schedq_list[i];
 		sched_elem_t *elem;
+
+		ts->loop_cnt++;
 restart_same:
 		elem = schedq_peek(schedq);
 		if (odp_unlikely(elem == NULL)) {
@@ -958,10 +961,12 @@ restart_same:
 		}
 		if (is_pktin(elem)) {
 			/* Pktio ingress queue */
-			if (first == NULL)
-				first = elem;
-			else if (elem == first) /* Wrapped around */
-				continue; /* Go to next schedq */
+			if (elem->schedq != schedq) { /* Low priority schedq*/
+				if (elem->loop_check[cpu_id] != ts->loop_cnt)
+					elem->loop_check[cpu_id] = ts->loop_cnt;
+				else /* Wrapped around */
+					continue; /* Go to next schedq */
+			}
 
 			if (odp_unlikely(!schedq_cond_pop(schedq, elem)))
 				goto restart_same;
@@ -1822,8 +1827,7 @@ static int schedule_init_global(void)
 		    sizeof(sched_queue_t);
 	max_alloc = min_alloc;
 	pool = _odp_ishm_pool_create("sched_shm_pool", pool_size,
-				     min_alloc, max_alloc,
-				     _ODP_ISHM_SINGLE_VA);
+				     min_alloc, max_alloc, 0);
 	if (pool == NULL) {
 		ODP_ERR("Failed to allocate shared memory pool "
 			"for sched\n");
