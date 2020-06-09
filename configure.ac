@@ -4,7 +4,7 @@ AC_PREREQ([2.5])
 ##########################################################################
 m4_define([odpapi_generation_version], [1])
 m4_define([odpapi_major_version], [23])
-m4_define([odpapi_minor_version], [4])
+m4_define([odpapi_minor_version], [5])
 m4_define([odpapi_point_version], [0])
 m4_define([odpapi_version],
     [odpapi_generation_version.odpapi_major_version.odpapi_minor_version.odpapi_point_version])
@@ -132,6 +132,15 @@ ODP_CHECK_CFLAG([-Wformat-overflow=0])
 # GCC-9 warns about taking pointers to packed structure fields (e.g. protocol
 # header structures). Generate only warnings on those, not errors.
 ODP_CHECK_CFLAG([-Wno-error=address-of-packed-member])
+
+# GCC 10 sometimes gets confused about object sizes and gives bogus warnings.
+# Make the affected warnings generate only warnings, not errors.
+AS_IF([test "$GCC" == yes],
+      AS_IF([test `$CC -dumpversion` -ge 10],
+	    ODP_CHECK_CFLAG([-Wno-error=array-bounds])
+	    ODP_CHECK_CFLAG([-Wno-error=stringop-overflow])
+      )
+)
 
 ODP_CFLAGS="$ODP_CFLAGS -std=c99"
 ODP_CXXFLAGS="$ODP_CXXFLAGS -std=c++11 -Wno-deprecated-register"

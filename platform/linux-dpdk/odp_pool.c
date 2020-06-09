@@ -1,5 +1,5 @@
 /* Copyright (c) 2013-2018, Linaro Limited
- * Copyright (c) 2019, Nokia
+ * Copyright (c) 2019-2020, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -170,6 +170,8 @@ int odp_pool_capability(odp_pool_capability_t *capa)
 	capa->buf.max_align = ODP_CONFIG_BUFFER_ALIGN_MAX;
 	capa->buf.max_size  = MAX_SIZE;
 	capa->buf.max_num   = CONFIG_POOL_MAX_NUM;
+	capa->buf.min_cache_size   = 0;
+	capa->buf.max_cache_size   = RTE_MEMPOOL_CACHE_MAX_SIZE;
 
 	/* Packet pools */
 	capa->pkt.max_align        = ODP_CONFIG_BUFFER_ALIGN_MIN;
@@ -183,10 +185,14 @@ int odp_pool_capability(odp_pool_capability_t *capa)
 	capa->pkt.min_seg_len      = CONFIG_PACKET_SEG_LEN_MIN;
 	capa->pkt.max_seg_len      = CONFIG_PACKET_SEG_LEN_MAX;
 	capa->pkt.max_uarea_size   = MAX_SIZE;
+	capa->pkt.min_cache_size   = 0;
+	capa->pkt.max_cache_size   = RTE_MEMPOOL_CACHE_MAX_SIZE;
 
 	/* Timeout pools */
 	capa->tmo.max_pools = max_pools;
 	capa->tmo.max_num   = CONFIG_POOL_MAX_NUM;
+	capa->tmo.min_cache_size   = 0;
+	capa->tmo.max_cache_size   = RTE_MEMPOOL_CACHE_MAX_SIZE;
 
 	return 0;
 }
@@ -266,7 +272,7 @@ odp_dpdk_mbuf_ctor(struct rte_mempool *mp,
 	}						\
 } while (0)
 
-static int check_params(odp_pool_param_t *params)
+static int check_params(const odp_pool_param_t *params)
 {
 	odp_pool_capability_t capa;
 
@@ -287,6 +293,12 @@ static int check_params(odp_pool_param_t *params)
 
 		if (params->buf.align > capa.buf.max_align) {
 			ODP_ERR("buf.align too large %u\n", params->buf.align);
+			return -1;
+		}
+
+		if (params->buf.cache_size > capa.buf.max_cache_size) {
+			ODP_ERR("buf.cache_size too large %u\n",
+				params->buf.cache_size);
 			return -1;
 		}
 
@@ -326,7 +338,14 @@ static int check_params(odp_pool_param_t *params)
 		}
 
 		if (params->pkt.headroom > CONFIG_PACKET_HEADROOM) {
-			ODP_ERR("Packet headroom size not supported\n");
+			ODP_ERR("pkt.headroom too large %u\n",
+				params->pkt.headroom);
+			return -1;
+		}
+
+		if (params->pkt.cache_size > capa.pkt.max_cache_size) {
+			ODP_ERR("pkt.cache_size too large %u\n",
+				params->pkt.cache_size);
 			return -1;
 		}
 
@@ -337,6 +356,13 @@ static int check_params(odp_pool_param_t *params)
 			ODP_ERR("tmo.num too large %u\n", params->tmo.num);
 			return -1;
 		}
+
+		if (params->tmo.cache_size > capa.tmo.max_cache_size) {
+			ODP_ERR("tmo.cache_size too large %u\n",
+				params->tmo.cache_size);
+			return -1;
+		}
+
 		break;
 
 	default:
@@ -347,35 +373,39 @@ static int check_params(odp_pool_param_t *params)
 	return 0;
 }
 
-static unsigned int calc_cache_size(uint32_t num)
+static unsigned int calc_cache_size(uint32_t pool_size, uint32_t max_num)
 {
-	unsigned int cache_size = 0;
-	unsigned int i;
+	unsigned int cache_size;
+	unsigned int max_supported = pool_size / 1.5;
 	int num_threads = odp_global_ro.init_param.num_control +
 				odp_global_ro.init_param.num_worker;
 
-	if (RTE_MEMPOOL_CACHE_MAX_SIZE == 0)
+	if (max_num == 0)
 		return 0;
 
-	i = ceil((double)num / RTE_MEMPOOL_CACHE_MAX_SIZE);
-	i = RTE_MAX(i, 2UL);
-	for (; i <= (num / 2); i++)
-		if ((num % i) == 0) {
-			cache_size = num / i;
+	cache_size = RTE_MIN(max_num, max_supported);
+
+	while (cache_size) {
+		if ((pool_size % cache_size) == 0)
 			break;
-		}
-	if (odp_unlikely(cache_size > RTE_MEMPOOL_CACHE_MAX_SIZE ||
-			 (uint32_t)cache_size * 1.5 > num)) {
-		ODP_ERR("Cache size calculation failed: %d\n", cache_size);
-		cache_size = 0;
+		cache_size--;
 	}
+
+	if (odp_unlikely(cache_size == 0)) {
+		cache_size = RTE_MIN(max_num, max_supported);
+		ODP_DBG("Using nonoptimal cache size: %d\n", cache_size);
+	}
+
+	/* Cache size of one exposes DPDK implementation bug */
+	if (cache_size == 1)
+		cache_size = 0;
 
 	ODP_DBG("Cache_size: %d\n", cache_size);
 
 	if (num_threads && cache_size) {
 		unsigned int total_cache_size = num_threads * cache_size;
 
-		if (total_cache_size >= num)
+		if (total_cache_size >= pool_size)
 			ODP_DBG("Entire pool fits into thread local caches. "
 				"Pool starvation may occur if the pool is used "
 				"by multiple threads.\n");
@@ -396,7 +426,7 @@ static void format_pool_name(const char *name, char *rte_name)
 	} while (rte_mempool_lookup(rte_name) != NULL);
 }
 
-odp_pool_t odp_pool_create(const char *name, odp_pool_param_t *params)
+odp_pool_t odp_pool_create(const char *name, const odp_pool_param_t *params)
 {
 	struct rte_pktmbuf_pool_private mbp_ctor_arg;
 	struct mbuf_ctor_arg mb_ctor_arg;
@@ -436,6 +466,7 @@ odp_pool_t odp_pool_create(const char *name, odp_pool_param_t *params)
 		case ODP_POOL_BUFFER:
 			buf_align = params->buf.align;
 			blk_size = params->buf.size;
+			cache_size = params->buf.cache_size;
 
 			/* Validate requested buffer alignment */
 			if (buf_align > ODP_CONFIG_BUFFER_ALIGN_MAX ||
@@ -468,6 +499,7 @@ odp_pool_t odp_pool_create(const char *name, odp_pool_param_t *params)
 			tailroom = CONFIG_PACKET_TAILROOM;
 			min_seg_len = CONFIG_PACKET_SEG_LEN_MIN;
 			min_align = ODP_CONFIG_BUFFER_ALIGN_MIN;
+			cache_size = params->pkt.cache_size;
 
 			blk_size = min_seg_len;
 			if (params->pkt.seg_len > blk_size)
@@ -510,6 +542,8 @@ odp_pool_t odp_pool_create(const char *name, odp_pool_param_t *params)
 			hdr_size = sizeof(odp_timeout_hdr_t);
 			mbp_ctor_arg.mbuf_data_room_size = 0;
 			num = params->tmo.num;
+			cache_size = params->tmo.cache_size;
+
 			ODP_DBG("type: tmo name: %s num: %u\n",
 				pool_name, num);
 			break;
@@ -532,7 +566,7 @@ odp_pool_t odp_pool_create(const char *name, odp_pool_param_t *params)
 		ODP_DBG("Metadata size: %u, mb_size %d\n",
 			mb_ctor_arg.seg_buf_offset, mb_size);
 
-		cache_size = calc_cache_size(num);
+		cache_size = calc_cache_size(num, cache_size);
 
 		format_pool_name(pool_name, rte_name);
 
@@ -728,6 +762,10 @@ void odp_pool_param_init(odp_pool_param_t *params)
 {
 	memset(params, 0, sizeof(odp_pool_param_t));
 	params->pkt.headroom = CONFIG_PACKET_HEADROOM;
+	params->buf.cache_size = RTE_MEMPOOL_CACHE_MAX_SIZE;
+	params->pkt.cache_size = RTE_MEMPOOL_CACHE_MAX_SIZE;
+	params->tmo.cache_size = RTE_MEMPOOL_CACHE_MAX_SIZE;
+
 }
 
 uint64_t odp_pool_to_u64(odp_pool_t hdl)

@@ -1339,7 +1339,7 @@ static int crypto_fill_aead_xform(struct rte_crypto_sym_xform *aead_xform,
 	return 0;
 }
 
-int odp_crypto_session_create(odp_crypto_session_param_t *param,
+int odp_crypto_session_create(const odp_crypto_session_param_t *param,
 			      odp_crypto_session_t *session_out,
 			      odp_crypto_ses_create_err_t *status)
 {

@@ -54,6 +54,14 @@ ODP_STATIC_ASSERT(CONFIG_PACKET_SEG_SIZE < 0xffff,
 typedef struct pool_local_t {
 	pool_cache_t *cache[ODP_CONFIG_POOLS];
 	int thr_id;
+
+	/* Number of event allocs and frees by this thread. */
+	struct {
+		uint64_t num_alloc;
+		uint64_t num_free;
+
+	} stat[ODP_CONFIG_POOLS];
+
 } pool_local_t;
 
 pool_global_t *_odp_pool_glb;
@@ -84,15 +92,12 @@ static inline pool_t *pool_from_buf(odp_buffer_t buf)
 static inline void cache_init(pool_cache_t *cache)
 {
 	memset(cache, 0, sizeof(pool_cache_t));
-
-	cache->size = _odp_pool_glb->config.local_cache_size;
-	cache->burst_size = _odp_pool_glb->config.burst_size;
 }
 
 static inline uint32_t cache_pop(pool_cache_t *cache,
 				 odp_buffer_hdr_t *buf_hdr[], int max_num)
 {
-	uint32_t cache_num = cache->num;
+	uint32_t cache_num = cache->cache_num;
 	uint32_t num_ch = max_num;
 	uint32_t cache_begin;
 	uint32_t i;
@@ -106,7 +111,7 @@ static inline uint32_t cache_pop(pool_cache_t *cache,
 	for (i = 0; i < num_ch; i++)
 		buf_hdr[i] = cache->buf_hdr[cache_begin + i];
 
-	cache->num = cache_num - num_ch;
+	cache->cache_num = cache_num - num_ch;
 
 	return num_ch;
 }
@@ -114,13 +119,13 @@ static inline uint32_t cache_pop(pool_cache_t *cache,
 static inline void cache_push(pool_cache_t *cache, odp_buffer_hdr_t *buf_hdr[],
 			      uint32_t num)
 {
-	uint32_t cache_num = cache->num;
+	uint32_t cache_num = cache->cache_num;
 	uint32_t i;
 
 	for (i = 0; i < num; i++)
 		cache->buf_hdr[cache_num + i] = buf_hdr[i];
 
-	cache->num = cache_num + num;
+	cache->cache_num = cache_num + num;
 }
 
 static void cache_flush(pool_cache_t *cache, pool_t *pool)
@@ -336,6 +341,18 @@ int _odp_pool_term_local(void)
 		pool_t *pool = pool_entry(i);
 
 		cache_flush(local.cache[i], pool);
+
+		if (ODP_DEBUG == 1) {
+			uint64_t num_alloc = local.stat[i].num_alloc;
+			uint64_t num_free  = local.stat[i].num_free;
+
+			if (num_alloc || num_free) {
+				ODP_DBG("Pool[%i] stats: thr %i, "
+					"allocs % " PRIu64 ", "
+					"frees % " PRIu64 "\n",
+					i, local.thr_id, num_alloc, num_free);
+			}
+		}
 	}
 
 	return 0;
@@ -486,19 +503,20 @@ static bool shm_is_from_huge_pages(odp_shm_t shm)
 	return (info.page_size >= huge_page_size);
 }
 
-static odp_pool_t pool_create(const char *name, odp_pool_param_t *params,
+static odp_pool_t pool_create(const char *name, const odp_pool_param_t *params,
 			      uint32_t shmflags)
 {
 	pool_t *pool;
 	uint32_t uarea_size, headroom, tailroom;
 	odp_shm_t shm;
 	uint32_t seg_len, align, num, hdr_size, block_size;
-	uint32_t max_len;
+	uint32_t max_len, cache_size, burst_size;
 	uint32_t ring_size;
 	uint32_t num_extra = 0;
-	int name_len;
-	const char *postfix = "_uarea";
-	char uarea_name[ODP_POOL_NAME_LEN + sizeof(postfix)];
+	const char *max_prefix = "pool_000_uarea_";
+	int max_prefix_len = strlen(max_prefix);
+	char shm_name[ODP_POOL_NAME_LEN + max_prefix_len];
+	char uarea_name[ODP_POOL_NAME_LEN + max_prefix_len];
 
 	align = 0;
 
@@ -533,11 +551,13 @@ static odp_pool_t pool_create(const char *name, odp_pool_param_t *params,
 	seg_len     = 0;
 	max_len     = 0;
 	uarea_size  = 0;
+	cache_size  = 0;
 
 	switch (params->type) {
 	case ODP_POOL_BUFFER:
 		num  = params->buf.num;
 		seg_len = params->buf.size;
+		cache_size = params->buf.cache_size;
 		break;
 
 	case ODP_POOL_PACKET:
@@ -572,10 +592,12 @@ static odp_pool_t pool_create(const char *name, odp_pool_param_t *params,
 		tailroom    = CONFIG_PACKET_TAILROOM;
 		num         = params->pkt.num;
 		uarea_size  = params->pkt.uarea_size;
+		cache_size  = params->pkt.cache_size;
 		break;
 
 	case ODP_POOL_TIMEOUT:
 		num = params->tmo.num;
+		cache_size = params->tmo.cache_size;
 		break;
 
 	default:
@@ -601,9 +623,9 @@ static odp_pool_t pool_create(const char *name, odp_pool_param_t *params,
 		pool->name[ODP_POOL_NAME_LEN - 1] = 0;
 	}
 
-	name_len = strlen(pool->name);
-	memcpy(uarea_name, pool->name, name_len);
-	strcpy(&uarea_name[name_len], postfix);
+	/* Format SHM names from prefix, pool index and pool name. */
+	sprintf(shm_name,   "pool_%03i_%s", pool->pool_idx, pool->name);
+	sprintf(uarea_name, "pool_%03i_uarea_%s", pool->pool_idx, pool->name);
 
 	pool->params = *params;
 	pool->block_offset = 0;
@@ -671,7 +693,21 @@ static odp_pool_t pool_create(const char *name, odp_pool_param_t *params,
 	pool->ext_desc       = NULL;
 	pool->ext_destroy    = NULL;
 
-	shm = odp_shm_reserve(pool->name, pool->shm_size, ODP_PAGE_SIZE,
+	pool->cache_size = 0;
+	pool->burst_size = 1;
+
+	if (cache_size > 1) {
+		cache_size = (cache_size / 2) * 2;
+		burst_size = _odp_pool_glb->config.burst_size;
+
+		if ((cache_size / burst_size) < 2)
+			burst_size = cache_size / 2;
+
+		pool->cache_size = cache_size;
+		pool->burst_size = burst_size;
+	}
+
+	shm = odp_shm_reserve(shm_name, pool->shm_size, ODP_PAGE_SIZE,
 			      shmflags);
 
 	pool->shm = shm;
@@ -724,24 +760,23 @@ error:
 	return ODP_POOL_INVALID;
 }
 
-static int check_params(odp_pool_param_t *params)
+static int check_params(const odp_pool_param_t *params)
 {
 	odp_pool_capability_t capa;
-	odp_bool_t cache_warning = false;
-	uint32_t cache_size = _odp_pool_glb->config.local_cache_size;
+	uint32_t cache_size, num;
 	int num_threads = odp_global_ro.init_param.num_control +
 				odp_global_ro.init_param.num_worker;
 
 	if (!params || odp_pool_capability(&capa) < 0)
 		return -1;
 
-	if (num_threads)
-		cache_size = num_threads * cache_size;
+	num = 0;
+	cache_size = 0;
 
 	switch (params->type) {
 	case ODP_POOL_BUFFER:
-		if (params->buf.num <= cache_size)
-			cache_warning = true;
+		num = params->buf.num;
+		cache_size = params->buf.cache_size;
 
 		if (params->buf.num > capa.buf.max_num) {
 			ODP_ERR("buf.num too large %u\n", params->buf.num);
@@ -761,8 +796,8 @@ static int check_params(odp_pool_param_t *params)
 		break;
 
 	case ODP_POOL_PACKET:
-		if (params->pkt.num <= cache_size)
-			cache_warning = true;
+		num = params->pkt.num;
+		cache_size = params->pkt.cache_size;
 
 		if (params->pkt.num > capa.pkt.max_num) {
 			ODP_ERR("pkt.num too large %u\n", params->pkt.num);
@@ -807,8 +842,8 @@ static int check_params(odp_pool_param_t *params)
 		break;
 
 	case ODP_POOL_TIMEOUT:
-		if (params->tmo.num <= cache_size)
-			cache_warning = true;
+		num = params->tmo.num;
+		cache_size = params->tmo.cache_size;
 
 		if (params->tmo.num > capa.tmo.max_num) {
 			ODP_ERR("tmo.num too large %u\n", params->tmo.num);
@@ -821,7 +856,12 @@ static int check_params(odp_pool_param_t *params)
 		return -1;
 	}
 
-	if (cache_warning)
+	if (cache_size > CONFIG_POOL_CACHE_MAX_SIZE) {
+		ODP_ERR("Too large cache size %u\n", cache_size);
+		return -1;
+	}
+
+	if (num <= (num_threads * cache_size))
 		ODP_DBG("Entire pool fits into thread local caches. Pool "
 			"starvation may occur if the pool is used by multiple "
 			"threads.\n");
@@ -829,7 +869,7 @@ static int check_params(odp_pool_param_t *params)
 	return 0;
 }
 
-odp_pool_t odp_pool_create(const char *name, odp_pool_param_t *params)
+odp_pool_t odp_pool_create(const char *name, const odp_pool_param_t *params)
 {
 	uint32_t shm_flags = 0;
 
@@ -935,12 +975,13 @@ int odp_pool_info(odp_pool_t pool_hdl, odp_pool_info_t *info)
 
 int buffer_alloc_multi(pool_t *pool, odp_buffer_hdr_t *buf_hdr[], int max_num)
 {
-	pool_cache_t *cache = local.cache[pool->pool_idx];
+	uint32_t pool_idx = pool->pool_idx;
+	pool_cache_t *cache = local.cache[pool_idx];
 	ring_ptr_t *ring;
 	odp_buffer_hdr_t *hdr;
-	uint32_t mask, num_ch, i;
+	uint32_t mask, num_ch, num_alloc, i;
 	uint32_t num_deq = 0;
-	uint32_t burst_size = cache->burst_size;
+	uint32_t burst_size = pool->burst_size;
 
 	/* First pull packets from local cache */
 	num_ch = cache_pop(cache, buf_hdr, max_num);
@@ -980,16 +1021,25 @@ int buffer_alloc_multi(pool_t *pool, odp_buffer_hdr_t *buf_hdr[], int max_num)
 			cache_push(cache, &hdr_tmp[num_deq], cache_num);
 	}
 
-	return num_ch + num_deq;
+	num_alloc = num_ch + num_deq;
+
+	if (ODP_DEBUG == 1)
+		local.stat[pool_idx].num_alloc += num_alloc;
+
+	return num_alloc;
 }
 
 static inline void buffer_free_to_pool(pool_t *pool,
 				       odp_buffer_hdr_t *buf_hdr[], int num)
 {
-	pool_cache_t *cache = local.cache[pool->pool_idx];
+	uint32_t pool_idx = pool->pool_idx;
+	pool_cache_t *cache = local.cache[pool_idx];
 	ring_ptr_t *ring;
 	uint32_t cache_num, mask;
-	uint32_t cache_size = cache->size;
+	uint32_t cache_size = pool->cache_size;
+
+	if (ODP_DEBUG == 1)
+		local.stat[pool_idx].num_free += num;
 
 	/* Special case of a very large free. Move directly to
 	 * the global pool. */
@@ -1004,10 +1054,10 @@ static inline void buffer_free_to_pool(pool_t *pool,
 
 	/* Make room into local cache if needed. Do at least burst size
 	 * transfer. */
-	cache_num = cache->num;
+	cache_num = cache->cache_num;
 
 	if (odp_unlikely((int)(cache_size - cache_num) < num)) {
-		int burst = cache->burst_size;
+		int burst = pool->burst_size;
 
 		ring  = &pool->ring->hdr;
 		mask  = pool->ring_mask;
@@ -1110,6 +1160,8 @@ int odp_pool_capability(odp_pool_capability_t *capa)
 	capa->buf.max_align = ODP_CONFIG_BUFFER_ALIGN_MAX;
 	capa->buf.max_size  = MAX_SIZE;
 	capa->buf.max_num   = CONFIG_POOL_MAX_NUM;
+	capa->buf.min_cache_size = 0;
+	capa->buf.max_cache_size = CONFIG_POOL_CACHE_MAX_SIZE;
 
 	/* Packet pools */
 	capa->pkt.max_pools        = max_pools;
@@ -1123,10 +1175,14 @@ int odp_pool_capability(odp_pool_capability_t *capa)
 	capa->pkt.min_seg_len      = CONFIG_PACKET_SEG_LEN_MIN;
 	capa->pkt.max_seg_len      = max_seg_len;
 	capa->pkt.max_uarea_size   = MAX_SIZE;
+	capa->pkt.min_cache_size   = 0;
+	capa->pkt.max_cache_size   = CONFIG_POOL_CACHE_MAX_SIZE;
 
 	/* Timeout pools */
 	capa->tmo.max_pools = max_pools;
 	capa->tmo.max_num   = CONFIG_POOL_MAX_NUM;
+	capa->tmo.min_cache_size = 0;
+	capa->tmo.max_cache_size = CONFIG_POOL_CACHE_MAX_SIZE;
 
 	return 0;
 }
@@ -1163,6 +1219,8 @@ void odp_pool_print(odp_pool_t pool_hdl)
 	ODP_PRINT("  base addr       %p\n", pool->base_addr);
 	ODP_PRINT("  uarea shm size  %" PRIu64 "\n", pool->uarea_shm_size);
 	ODP_PRINT("  uarea base addr %p\n", pool->uarea_base_addr);
+	ODP_PRINT("  cache size      %u\n", pool->cache_size);
+	ODP_PRINT("  burst size      %u\n", pool->burst_size);
 	ODP_PRINT("\n");
 }
 
@@ -1175,8 +1233,13 @@ odp_pool_t odp_buffer_pool(odp_buffer_t buf)
 
 void odp_pool_param_init(odp_pool_param_t *params)
 {
+	uint32_t default_cache_size = _odp_pool_glb->config.local_cache_size;
+
 	memset(params, 0, sizeof(odp_pool_param_t));
 	params->pkt.headroom = CONFIG_PACKET_HEADROOM;
+	params->buf.cache_size = default_cache_size;
+	params->pkt.cache_size = default_cache_size;
+	params->tmo.cache_size = default_cache_size;
 }
 
 uint64_t odp_pool_to_u64(odp_pool_t hdl)
