@@ -638,29 +638,50 @@ static int dpdk_init_loopback(pkt_dpdk_t * const pkt_dpdk)
 
 /* Some DPDK PMD virtual devices, like PCAP, do not support promisc
  * mode change. Use system call for them. */
-static void promisc_mode_check(pkt_dpdk_t *pkt_dpdk)
+static int promisc_mode_check(pkt_dpdk_t *pkt_dpdk)
 {
+	int orig_mode = rte_eth_promiscuous_get(pkt_dpdk->port_id);
+
+	if (orig_mode < 0) {
+		ODP_ERR("rte_eth_promiscuous_get() failed\n");
+		return -1;
+	}
 #if RTE_VERSION < RTE_VERSION_NUM(19, 11, 0, 0)
 	/* Enable and disable calls do not have return value */
-	rte_eth_promiscuous_enable(pkt_dpdk->port_id);
+	if (orig_mode)
+		rte_eth_promiscuous_disable(pkt_dpdk->port_id);
+	else
+		rte_eth_promiscuous_enable(pkt_dpdk->port_id);
 
-	if (!rte_eth_promiscuous_get(pkt_dpdk->port_id))
+	if (rte_eth_promiscuous_get(pkt_dpdk->port_id) == orig_mode) {
 		pkt_dpdk->vdev_sysc_promisc = 1;
-
-	rte_eth_promiscuous_disable(pkt_dpdk->port_id);
+	} else {
+		if (orig_mode)
+			rte_eth_promiscuous_enable(pkt_dpdk->port_id);
+		else
+			rte_eth_promiscuous_disable(pkt_dpdk->port_id);
+	}
 #else
 	int ret;
 
-	ret = rte_eth_promiscuous_enable(pkt_dpdk->port_id);
+	if (orig_mode)
+		ret = rte_eth_promiscuous_disable(pkt_dpdk->port_id);
+	else
+		ret = rte_eth_promiscuous_enable(pkt_dpdk->port_id);
 
-	if (!rte_eth_promiscuous_get(pkt_dpdk->port_id))
+	if (rte_eth_promiscuous_get(pkt_dpdk->port_id) == orig_mode) {
 		pkt_dpdk->vdev_sysc_promisc = 1;
-
-	ret += rte_eth_promiscuous_disable(pkt_dpdk->port_id);
-
+	} else {
+		/* Return back to original mode */
+		if (orig_mode)
+			ret += rte_eth_promiscuous_enable(pkt_dpdk->port_id);
+		else
+			ret += rte_eth_promiscuous_disable(pkt_dpdk->port_id);
+	}
 	if (ret)
 		pkt_dpdk->vdev_sysc_promisc = 1;
 #endif
+	return 0;
 }
 
 static int setup_pkt_dpdk(odp_pktio_t pktio ODP_UNUSED,
@@ -888,7 +909,10 @@ static int dpdk_start(pktio_entry_t *pktio_entry)
 		return -1;
 
 	/* Setup promiscuous mode and multicast */
-	promisc_mode_check(pkt_dpdk);
+	if (promisc_mode_check(pkt_dpdk)) {
+		ODP_ERR("Failed to configure promiscuous mode\n");
+		return -1;
+	}
 	if (pkt_dpdk->opt.multicast_enable)
 		rte_eth_allmulticast_enable(port_id);
 	else
