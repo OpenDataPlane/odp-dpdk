@@ -672,6 +672,8 @@ static int setup_pkt_dpdk(odp_pktio_t pktio ODP_UNUSED,
 	pkt_dpdk_t * const pkt_dpdk = pkt_priv(pktio_entry);
 	int i;
 
+	printf("dummy test!\n");
+
 	if (!strcmp(netdev, "loop")) {
 		if (dpdk_init_loopback(pkt_dpdk))
 			return -1;
