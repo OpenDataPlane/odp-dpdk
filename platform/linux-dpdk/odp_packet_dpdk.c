@@ -715,6 +715,13 @@ static int setup_pkt_dpdk(odp_pktio_t pktio ODP_UNUSED,
 	}
 	pkt_dpdk->mtu = mtu + _ODP_ETHHDR_LEN;
 
+	/* Setup promiscuous mode and multicast */
+	promisc_mode_check(pkt_dpdk);
+	if (pkt_dpdk->opt.multicast_enable)
+		rte_eth_allmulticast_enable(pkt_dpdk->port_id);
+	else
+		rte_eth_allmulticast_disable(pkt_dpdk->port_id);
+
 	for (i = 0; i < PKTIO_MAX_QUEUES; i++) {
 		odp_ticketlock_init(&pkt_dpdk->rx_lock[i]);
 		odp_ticketlock_init(&pkt_dpdk->tx_lock[i]);
@@ -886,13 +893,6 @@ static int dpdk_start(pktio_entry_t *pktio_entry)
 	/* Setup RX queues */
 	if (dpdk_setup_eth_rx(pktio_entry, pkt_dpdk, &dev_info))
 		return -1;
-
-	/* Setup promiscuous mode and multicast */
-	promisc_mode_check(pkt_dpdk);
-	if (pkt_dpdk->opt.multicast_enable)
-		rte_eth_allmulticast_enable(port_id);
-	else
-		rte_eth_allmulticast_disable(port_id);
 
 	/* Add callback for loopback interface */
 	if (pkt_dpdk->loopback) {
