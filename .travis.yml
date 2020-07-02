@@ -185,7 +185,7 @@ jobs:
                   compiler: gcc-10
                   script:
                           - if [ -z "${DOCKER_NAMESPACE}" ] ; then export DOCKER_NAMESPACE="opendataplane"; fi
-                          - docker run -i -t -v `pwd`:/odp --shm-size 8g
+                          - docker run --privileged -i -t -v `pwd`:/odp --shm-size 8g
                               -e CC="${CC}"
                               -e CXX=g++-10
                               -e CONF="--enable-lto"
