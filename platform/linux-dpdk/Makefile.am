@@ -1,5 +1,6 @@
 include $(top_srcdir)/platform/Makefile.inc
 include $(top_srcdir)/platform/@with_platform@/Makefile.inc
+lib_LTLIBRARIES += $(LIB)/libodp-linux.la
 
 AM_CPPFLAGS  =  $(ODP_INCLUDES)
 AM_CPPFLAGS +=  -I$(top_srcdir)/platform/$(with_platform)/include
