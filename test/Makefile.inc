@@ -31,7 +31,7 @@ endif
 AM_CFLAGS = $(CUNIT_CFLAGS)
 
 if STATIC_APPS
-AM_LDFLAGS = -L$(LIB)
+AM_LDFLAGS = -L$(LIB) -static
 else
 AM_LDFLAGS =
 endif
