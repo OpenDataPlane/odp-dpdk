@@ -3,10 +3,10 @@ exec_prefix=@exec_prefix@
 libdir=@libdir@
 includedir=@includedir@
 
-Name: libodp-linux
+Name: lib@ODP_LIB_NAME@
 Description: The ODP packet processing engine
 Version: @PKGCONFIG_VERSION@
 Requires.private: libconfig@DPDK_PKG@
-Libs: -L${libdir} -lodp-linux @DPDK_LIBS_NON_ABI_COMPAT@
+Libs: -L${libdir} -l@ODP_LIB_NAME@ @DPDK_LIBS_NON_ABI_COMPAT@
 Libs.private: @DPDK_LIBS_ABI_COMPAT@ @OPENSSL_STATIC_LIBS@ @PTHREAD_LIBS@ @TIMER_LIBS@ -lpthread @ATOMIC_LIBS@
 Cflags: -I${includedir} @DPDK_CFLAGS@

@@ -1453,7 +1453,64 @@ static int link_status_pkt_dpdk(pktio_entry_t *pktio_entry)
 	struct rte_eth_link link;
 
 	rte_eth_link_get(pkt_priv(pktio_entry)->port_id, &link);
-	return link.link_status;
+
+	if (link.link_status)
+		return ODP_PKTIO_LINK_STATUS_UP;
+	return ODP_PKTIO_LINK_STATUS_DOWN;
+}
+
+static int dpdk_link_info(pktio_entry_t *pktio_entry, odp_pktio_link_info_t *info)
+{
+	struct rte_eth_link link;
+	struct rte_eth_fc_conf fc_conf;
+	uint16_t port_id = pkt_priv(pktio_entry)->port_id;
+	int ret;
+
+	memset(&fc_conf, 0, sizeof(struct rte_eth_fc_conf));
+	memset(&link, 0, sizeof(struct rte_eth_link));
+
+	ret = rte_eth_dev_flow_ctrl_get(port_id, &fc_conf);
+	if (ret && ret != -ENOTSUP) {
+		ODP_ERR("rte_eth_dev_flow_ctrl_get() failed\n");
+		return -1;
+	}
+
+	memset(info, 0, sizeof(odp_pktio_link_info_t));
+	info->pause_rx = ODP_PKTIO_LINK_PAUSE_OFF;
+	info->pause_tx = ODP_PKTIO_LINK_PAUSE_OFF;
+	if (fc_conf.mode == RTE_FC_RX_PAUSE) {
+		info->pause_rx = ODP_PKTIO_LINK_PAUSE_ON;
+	} else if (fc_conf.mode == RTE_FC_TX_PAUSE) {
+		info->pause_tx = ODP_PKTIO_LINK_PAUSE_ON;
+	} else if (fc_conf.mode == RTE_FC_FULL) {
+		info->pause_rx = ODP_PKTIO_LINK_PAUSE_ON;
+		info->pause_tx = ODP_PKTIO_LINK_PAUSE_ON;
+	}
+
+	rte_eth_link_get_nowait(port_id, &link);
+	if (link.link_autoneg == ETH_LINK_AUTONEG)
+		info->autoneg = ODP_PKTIO_LINK_AUTONEG_ON;
+	else
+		info->autoneg = ODP_PKTIO_LINK_AUTONEG_OFF;
+
+	if (link.link_duplex == ETH_LINK_FULL_DUPLEX)
+		info->duplex = ODP_PKTIO_LINK_DUPLEX_FULL;
+	else
+		info->duplex = ODP_PKTIO_LINK_DUPLEX_HALF;
+
+	if (link.link_speed == ETH_SPEED_NUM_NONE)
+		info->speed = ODP_PKTIO_LINK_SPEED_UNKNOWN;
+	else
+		info->speed = link.link_speed;
+
+	if (link.link_status == ETH_LINK_UP)
+		info->status = ODP_PKTIO_LINK_STATUS_UP;
+	else
+		info->status = ODP_PKTIO_LINK_STATUS_DOWN;
+
+	info->media = "unknown";
+
+	return 0;
 }
 
 static void stats_convert(struct rte_eth_stats *rte_stats,
@@ -1514,6 +1571,7 @@ const pktio_if_ops_t dpdk_pktio_ops = {
 	.mac_get = mac_get_pkt_dpdk,
 	.mac_set = mac_set_pkt_dpdk,
 	.link_status = link_status_pkt_dpdk,
+	.link_info = dpdk_link_info,
 	.capability = capability_pkt_dpdk,
 	.config = NULL,
 	.input_queues_config = dpdk_input_queues_config,

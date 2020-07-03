@@ -1,5 +1,5 @@
 /* Copyright (c) 2018, Linaro Limited
- * Copyright (c) 2019, Nokia
+ * Copyright (c) 2019-2020, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -24,6 +24,9 @@
 
 #include <inttypes.h>
 #include <string.h>
+
+/* One divided by one nanosecond in Hz */
+#define GIGA_HZ 1000000000
 
 /* Timer states */
 #define NOT_TICKING 0
@@ -52,6 +55,7 @@ ODP_STATIC_ASSERT(MAX_TIMERS < MAX_TIMER_RING_SIZE,
 /* Actual resolution depends on application polling frequency. Promise
  * 10 usec resolution. */
 #define MAX_RES_NS       10000
+#define MAX_RES_HZ       (GIGA_HZ / MAX_RES_NS)
 
 /* Limit minimum supported timeout in timer (CPU) cycles. Timer setup, polling,
  * timer management, timeout enqueue, etc takes about this many CPU cycles.
@@ -267,9 +271,11 @@ int odp_timer_capability(odp_timer_clk_src_t clk_src,
 	capa->max_timers = MAX_TIMERS;
 	capa->highest_res_ns = MAX_RES_NS;
 	capa->max_res.res_ns  = MAX_RES_NS;
+	capa->max_res.res_hz  = MAX_RES_HZ;
 	capa->max_res.min_tmo = min_tmo;
 	capa->max_res.max_tmo = MAX_TMO_NS;
 	capa->max_tmo.res_ns  = MAX_RES_NS;
+	capa->max_tmo.res_hz  = MAX_RES_HZ;
 	capa->max_tmo.min_tmo = min_tmo;
 	capa->max_tmo.max_tmo = MAX_TMO_NS;
 
@@ -291,12 +297,13 @@ int odp_timer_res_capability(odp_timer_clk_src_t clk_src,
 		return -1;
 	}
 
-	if (res_capa->res_ns) {
+	if (res_capa->res_ns || res_capa->res_hz) {
 		res_capa->min_tmo = min_tmo;
 		res_capa->max_tmo = MAX_TMO_NS;
 	} else { /* max_tmo */
 		res_capa->min_tmo = min_tmo;
 		res_capa->res_ns  = MAX_RES_NS;
+		res_capa->res_hz = MAX_RES_HZ;
 	}
 
 	return 0;
@@ -315,7 +322,18 @@ odp_timer_pool_t odp_timer_pool_create(const char *name,
 		return ODP_TIMER_POOL_INVALID;
 	}
 
-	if (param->res_ns < MAX_RES_NS) {
+	if ((param->res_ns && param->res_hz) ||
+	    (param->res_ns == 0 && param->res_hz == 0)) {
+		ODP_ERR("Invalid timeout resolution\n");
+		return ODP_TIMER_POOL_INVALID;
+	}
+
+	if (param->res_hz == 0 && param->res_ns < MAX_RES_NS) {
+		ODP_ERR("Too high resolution\n");
+		return ODP_TIMER_POOL_INVALID;
+	}
+
+	if (param->res_ns == 0 && param->res_hz > MAX_RES_HZ) {
 		ODP_ERR("Too high resolution\n");
 		return ODP_TIMER_POOL_INVALID;
 	}
@@ -326,7 +344,12 @@ odp_timer_pool_t odp_timer_pool_create(const char *name,
 	}
 
 	num_timers = param->num_timers;
-	res_ns = param->res_ns;
+
+	if (param->res_ns)
+		res_ns = param->res_ns;
+	else
+		res_ns = GIGA_HZ / param->res_hz;
+
 
 	/* Scan timer pool twice during resolution interval */
 	if (res_ns > ODP_TIME_USEC_IN_NS)
@@ -376,6 +399,7 @@ odp_timer_pool_t odp_timer_pool_create(const char *name,
 	}
 
 	timer_pool->param = *param;
+	timer_pool->param.res_ns = res_ns;
 
 	ring_u32_init(&timer_pool->free_timer.ring_hdr);
 	timer_pool->free_timer.ring_mask = num_timers - 1;
