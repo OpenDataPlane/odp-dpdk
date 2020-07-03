@@ -1453,7 +1453,10 @@ static int link_status_pkt_dpdk(pktio_entry_t *pktio_entry)
 	struct rte_eth_link link;
 
 	rte_eth_link_get(pkt_priv(pktio_entry)->port_id, &link);
-	return link.link_status;
+
+	if (link.link_status)
+		return ODP_PKTIO_LINK_STATUS_UP;
+	return ODP_PKTIO_LINK_STATUS_DOWN;
 }
 
 static int dpdk_link_info(pktio_entry_t *pktio_entry, odp_pktio_link_info_t *info)
