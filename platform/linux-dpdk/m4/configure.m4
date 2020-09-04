@@ -57,6 +57,8 @@ esac
 # Required for experimental rte_event_port_unlinks_in_progress() API
 DPDK_CFLAGS="${DPDK_CFLAGS} -DALLOW_EXPERIMENTAL_API"
 
+AS_VAR_APPEND([PLAT_DEP_LIBS], ["${LIBCONFIG_LIBS} ${OPENSSL_LIBS} ${DPDK_LIBS_LT}"])
+
 ODP_CHECK_CFLAG([-Wno-error=cast-align])
 AC_DEFINE([_ODP_PKTIO_DPDK], [1])
 AC_CONFIG_COMMANDS_PRE([dnl
