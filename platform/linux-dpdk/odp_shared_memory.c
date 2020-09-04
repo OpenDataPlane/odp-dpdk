@@ -423,15 +423,15 @@ void odp_shm_print_all(void)
 
 	odp_spinlock_lock(&shm_tbl->lock);
 
-	printf("\nShared memory blocks\n--------------------\n");
+	ODP_PRINT("\nShared memory blocks\n--------------------\n");
 
 	for (idx = 0; idx < ODP_CONFIG_SHM_BLOCKS; idx++) {
 		block = &shm_tbl->block[idx];
 		if (block->mz == NULL)
 			continue;
-		printf("  %s: addr: %p, len: %" PRIu64 " page size: "
-		       "%" PRIu64 "\n", block->name, block->mz->addr,
-		       shm_size(block->mz), block->mz->hugepage_sz);
+		ODP_PRINT("  %s: addr: %p, len: %" PRIu64 " page size: "
+			  "%" PRIu64 "\n", block->name, block->mz->addr,
+			  shm_size(block->mz), block->mz->hugepage_sz);
 	}
 
 	odp_spinlock_unlock(&shm_tbl->lock);
