@@ -257,24 +257,24 @@ scripts/git-transplant.py platform/linux-generic/ platform/linux-dpdk/ \
 It prints the list of prospective patches to be ported. See its comments about
 what it does.
 
-8. Building odp-dpdk with dpdk crypto PMD's
+8. Building odp-dpdk with DPDK crypto PMDs
 ======================================================
 
-Refer to dpdk crypto documentation for detailed building of crypto PMD's:
-http://dpdk.org/doc/guides/cryptodevs/index.html.
+Refer to the DPDK crypto documentation for detailed crypto PMD build instructions:
+http://dpdk.org/doc/guides/cryptodevs/index.html
 
-To build odp-dpdk with dpdk virtual crypto devices, we need to build supporting
-intel multi-buffer library prior to dpdk build.
+To build odp-dpdk with DPDK virtual crypto devices, we need to build supporting
+Intel Multi-Buffer Crypto for IPsec library prior to DPDK build.
 
-Get the Intel multi-buffer crypto library from,
-https://github.com/intel/intel-ipsec-mb
-and follow the README from the repo on how to build the library.
+Get the Intel Multi-Buffer Crypto library from
+https://github.com/intel/intel-ipsec-mb and follow the README from the repo on
+how to build the library.
 
-building dpdk:
+Building DPDK:
 
-Follow the instructions from "Compile DPDK" section.
-Make sure to enable necessary crypto PMD's,
-
+Follow the instructions from "Compile DPDK" section and make sure to enable the
+necessary crypto PMDs:
+E.g.
 # Compile PMD for AESNI backed device
 sed -ri 's,(CONFIG_RTE_LIBRTE_PMD_AESNI_MB=).*,\1y,' .config
 
@@ -285,13 +285,11 @@ sed -ri 's,(CONFIG_RTE_LIBRTE_PMD_AESNI_GCM=).*,\1y,' .config
 sed -ri 's,(CONFIG_RTE_LIBRTE_PMD_SNOW3G=).*,\1y,' .config
 
 AESNI_MULTI_BUFFER_LIB_PATH=/path-to/Intel-multi-buffer-crypto/ \
-	make install T=x86_64-native-linuxapp-gcc EXTRA_CFLAGS="-fPIC"
+	make install T=x86_64-native-linuxapp-gcc DESTDIR=./install EXTRA_CFLAGS="-fPIC"
 
-when building odp-dpdk application, add the multi-buffer crypto library path to make file.
-Before running the application, export ODP_PLATFORM_PARAMS with corresponding
-crypto vdev's.
-ex: ODP_PLATFORM_PARAMS="--vdev cryptodev_aesni_mb_pmd,max_nb_sessions=32 \
-    --vdev cryptodev_null_pmd,max_nb_sessions=32"
+When running an ODP application, include the required crypto devices in
+ODP_PLATFORM_PARAMS environment variable.
+E.g. ODP_PLATFORM_PARAMS="--vdev crypto_aesni_mb --vdev crypto_null"
 
 9. Using eventdev scheduling and queues (experimental)
 ======================================================
