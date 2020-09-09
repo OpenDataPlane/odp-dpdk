@@ -28,7 +28,7 @@ if [[ -f "$1"/librte_pmd_pcap.a ]]; then
     have_pmd_pcap=yes
 fi
 AC_CONFIG_COMMANDS_PRE([dnl
-AM_CONDITIONAL([HAVE_PMD_PCAP], [test x$have_pmd_pcap = xyes])
+AM_CONDITIONAL([ODP_PKTIO_PCAP], [test x$have_pmd_pcap = xyes])
 ])
 ])
 

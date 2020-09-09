@@ -4,9 +4,6 @@ ODP_LIB_NAME="odp-linux"
 ODP_VISIBILITY
 ODP_ATOMIC
 
-# linux-generic PCAP support is not relevant as the code doesn't use
-# linux-generic pktio at all. And DPDK has its own PCAP support anyway
-AM_CONDITIONAL([HAVE_PCAP], [false])
 AM_CONDITIONAL([PKTIO_DPDK], [false])
 ODP_PTHREAD
 ODP_TIMER

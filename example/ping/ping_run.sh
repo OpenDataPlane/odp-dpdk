@@ -11,8 +11,11 @@ PCAP_OUT="pcapout.pcap"
 PCAP_IN_SIZE=`stat -c %s ${PCAP_IN}`
 echo "using PCAP in=${PCAP_IN}:out=${PCAP_OUT} size %${PCAP_IN_SIZE}"
 
+export ODP_PLATFORM_PARAMS="--no-pci \
+--vdev net_pcap0,rx_pcap=${PCAP_IN},tx_pcap=${PCAP_OUT}"
+
 # Ping test with 100 ICMP echo request packets (verbose mode)
-./odp_ping${EXEEXT} -v -n 100 -ipcap:in=${PCAP_IN}:out=${PCAP_OUT}
+./odp_ping${EXEEXT} -v -n 100 -i0
 STATUS=$?
 PCAP_OUT_SIZE=`stat -c %s ${PCAP_OUT}`
 rm -f ${PCAP_OUT}
