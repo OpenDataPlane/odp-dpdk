@@ -5,12 +5,14 @@ ODP_VISIBILITY
 ODP_ATOMIC
 
 AM_CONDITIONAL([PKTIO_DPDK], [false])
-ODP_PTHREAD
-ODP_TIMER
 
 m4_include([platform/linux-dpdk/m4/odp_libconfig.m4])
 m4_include([platform/linux-dpdk/m4/odp_pcapng.m4])
+m4_include([platform/linux-dpdk/m4/odp_scheduler.m4])
+
+ODP_PTHREAD
 ODP_SCHEDULER
+ODP_TIMER
 
 ##########################################################################
 # Set DPDK install path
