@@ -10,14 +10,6 @@ AM_CONDITIONAL([HAVE_PCAP], [false])
 AM_CONDITIONAL([PKTIO_DPDK], [false])
 ODP_PTHREAD
 ODP_TIMER
-AC_ARG_WITH([openssl],
-	    [AS_HELP_STRING([--without-openssl],
-			    [compile without OpenSSL (results in disabled crypto and random support)])],
-	    [],
-	    [with_openssl=yes])
-AS_IF([test "$with_openssl" != "no"],
-      [ODP_OPENSSL])
-AM_CONDITIONAL([WITH_OPENSSL], [test x$with_openssl != xno])
 
 m4_include([platform/linux-dpdk/m4/odp_libconfig.m4])
 m4_include([platform/linux-dpdk/m4/odp_pcapng.m4])
