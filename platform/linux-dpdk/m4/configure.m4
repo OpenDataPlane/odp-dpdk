@@ -4,8 +4,6 @@ ODP_LIB_NAME="odp-linux"
 ODP_VISIBILITY
 ODP_ATOMIC
 
-AM_CONDITIONAL([PKTIO_DPDK], [false])
-
 m4_include([platform/linux-dpdk/m4/odp_libconfig.m4])
 m4_include([platform/linux-dpdk/m4/odp_pcapng.m4])
 m4_include([platform/linux-dpdk/m4/odp_scheduler.m4])
@@ -18,7 +16,8 @@ ODP_TIMER
 # Set DPDK install path
 ##########################################################################
 AC_ARG_WITH([dpdk-path],
-[AS_HELP_STRING([--with-dpdk-path=DIR], [path to dpdk build directory])],
+[AS_HELP_STRING([--with-dpdk-path=DIR],
+		[path to DPDK build directory [default=system] (linux-dpdk)])],
     [DPDK_PATH="$withval"],[DPDK_PATH=system])
 
 ##########################################################################
