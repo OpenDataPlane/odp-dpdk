@@ -50,6 +50,13 @@ DPDK_CFLAGS="${DPDK_CFLAGS} -DALLOW_EXPERIMENTAL_API"
 
 AS_VAR_APPEND([PLAT_DEP_LIBS], ["${LIBCONFIG_LIBS} ${OPENSSL_LIBS} ${DPDK_LIBS_LT}"])
 
+# Add text to the end of configure with platform specific settings.
+# Make sure it's aligned same as other lines in configure.ac.
+AS_VAR_APPEND([PLAT_CFG_TEXT], ["
+	pcap:			${have_pmd_pcap}
+	pcapng:			${have_pcapng}
+	default_config_path:	${default_config_path}"])
+
 ODP_CHECK_CFLAG([-Wno-error=cast-align])
 AC_DEFINE([_ODP_PKTIO_DPDK], [1])
 AC_CONFIG_COMMANDS_PRE([dnl
