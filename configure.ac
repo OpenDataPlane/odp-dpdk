@@ -4,7 +4,7 @@ AC_PREREQ([2.5])
 ##########################################################################
 m4_define([odpapi_generation_version], [1])
 m4_define([odpapi_major_version], [24])
-m4_define([odpapi_minor_version], [0])
+m4_define([odpapi_minor_version], [1])
 m4_define([odpapi_point_version], [0])
 m4_define([odpapi_version],
     [odpapi_generation_version.odpapi_major_version.odpapi_minor_version.odpapi_point_version])
@@ -166,7 +166,7 @@ AX_VALGRIND_CHECK
 ##########################################################################
 AC_ARG_WITH([archincludedir],
 	    [AS_HELP_STRING([--with-archincludedir=DIR],
-	     [directory to hold arch-specific headers (${includedir})])],
+	     [directory to hold arch-specific headers [default=INCLUDEDIR]])],
 	    [archincludedir=$with_archincludedir],
 	    [archincludedir="${includedir}"])
 AC_SUBST([archincludedir])
@@ -201,7 +201,8 @@ AC_SUBST([ARCH_ABI])
 
 AC_ARG_ENABLE([host-optimization],
 	      [AS_HELP_STRING([--disable-host-optimization],
-			      [disables using host-specific ARCH and ABI files])],
+			      [disables using host-specific ARCH and ABI files]
+			      [[default=enabled]])],
 			      [], [enable_host_optimization=yes])
 if test "x$enable_host_optimization" = "xno" ; then
 	ARCH_DIR=default
@@ -234,7 +235,8 @@ ODP_ABI_COMPAT=1
 abi_compat=yes
 AC_ARG_ENABLE([abi-compat],
     [AS_HELP_STRING([--disable-abi-compat],
-		    [disables ABI compatible mode, enables inline code in header files])],
+		    [disables ABI compatible mode, enables inline code in header files]
+		    [[default=enabled]])],
     [if test "x$enableval" = "xno"; then
 	ODP_ABI_COMPAT=0
 	abi_compat=no
@@ -259,7 +261,8 @@ AM_CONDITIONAL(ODP_ABI_COMPAT, [test "x$ODP_ABI_COMPAT" = "x1"])
 lto_enabled=no
 AC_ARG_ENABLE([lto],
 	[AS_HELP_STRING([--enable-lto],
-			[Enable Link Time Optimization (LTO) in compiler and linker])],
+			[Enable Link Time Optimization (LTO) in compiler and linker]
+			[[default=disabled]])],
 	[if test "x$enableval" = "xyes"; then
 		lto_enabled=yes
 		# Fat LTO object file contains GIMPLE bytecodes and the usual
@@ -272,38 +275,12 @@ AC_SUBST(ODP_LTO_FLAGS)
 ODP_CFLAGS="$ODP_CFLAGS $ODP_LTO_FLAGS"
 
 ##########################################################################
-# Determine which platform to build for
-##########################################################################
-AC_ARG_WITH([platform],
-    [AS_HELP_STRING([--with-platform=platform],
-	[select platform to be used, default linux-dpdk])],
-    [],
-    [with_platform=linux-dpdk
-    ])
-
-AC_SUBST([with_platform])
-##########################################################################
-# Run platform specific checks and settings
-##########################################################################
-AS_IF([test "${with_platform}" = "linux-generic"],
-      [m4_include([./platform/linux-generic/m4/configure.m4])],
-      [test "${with_platform}" = "linux-dpdk"],
-      [m4_include([./platform/linux-dpdk/m4/configure.m4])],
-      [AC_MSG_ERROR([UNSUPPORTED PLATFORM: ${with_platform}])])
-
-AC_DEFINE_UNQUOTED([_ODP_IMPLEMENTATION_NAME], ["$ODP_IMPLEMENTATION_NAME"],
-		   [Define to the name of the implementation])
-
-AM_CONDITIONAL([ODP_USE_CONFIG], [test "x$odp_use_config" = "xtrue"])
-AC_SUBST([ODP_LIB_NAME])
-
-##########################################################################
 # Build examples/tests dynamically
 ##########################################################################
 AC_ARG_ENABLE([static-applications],
 	      [AS_HELP_STRING([--disable-static-applications],
 			      [disable static linking of examples and tests]
-			      [ with ODP])], [],
+			      [with ODP [default=enabled]])], [],
 	      [enable_static_applications=yes])
 AS_IF([test "x$enable_static" != "xno" -a "x$enable_static_applications" != "xno"],
       [enable_static_applications=yes], [enable_static_applications=no])
@@ -317,6 +294,22 @@ then
 fi
 
 ##########################################################################
+# Configure/disable usage of OpenSSL library
+##########################################################################
+AC_ARG_WITH([openssl],
+	    [AS_HELP_STRING([--without-openssl],
+			    [compile without OpenSSL (may result in disabled crypto and random support)]
+			    [[default=with]])],
+	    [],
+	    [with_openssl=yes])
+AS_IF([test "$with_openssl" != "no"],
+      [ODP_OPENSSL
+       have_openssl=1], [have_openssl=0])
+AM_CONDITIONAL([WITH_OPENSSL], [test x$with_openssl != xno])
+AC_DEFINE_UNQUOTED([_ODP_OPENSSL], [$have_openssl],
+	  [Define to 1 to enable OpenSSL support])
+
+##########################################################################
 # Include m4 files
 ##########################################################################
 m4_include([./doc/m4/configure.m4])
@@ -328,7 +321,8 @@ m4_include([./test/m4/configure.m4])
 # Set the install directory for test binaries/scripts
 ##########################################################################
 AC_ARG_WITH([testdir],
-    [AS_HELP_STRING([--with-testdir=DIR], [installation directory for tests])],
+    [AS_HELP_STRING([--with-testdir[=DIR]],
+		    [installation directory for tests [default=none]])],
 	[testdir=$withval],
 	[testdir=no])
 AS_IF([test "x$testdir" = "xyes"], [testdir=$libdir/odp/tests],
@@ -353,28 +347,13 @@ AM_CONDITIONAL([ARCH_IS_X86_32], [test "x${ARCH_ABI}" = "xx86_32-linux"])
 AM_CONDITIONAL([ARCH_IS_X86_64], [test "x${ARCH_ABI}" = "xx86_64-linux"])
 
 ##########################################################################
-# Setup doxygen documentation
-##########################################################################
-DX_HTML_FEATURE(ON)
-DX_PDF_FEATURE(OFF)
-DX_PS_FEATURE(OFF)
-DX_ENV_APPEND(WITH_PLATFORM, $with_platform)
-
-DX_INIT_DOXYGEN($PACKAGE_NAME,
-		${srcdir}/doc/application-api-guide/Doxyfile,
-		${builddir}/doc/application-api-guide/output,
-		${srcdir}/doc/helper-guide/Doxyfile,
-		${builddir}/doc/helper-guide/output,
-		${srcdir}/doc/platform-api-guide/Doxyfile,
-		${builddir}/doc/platform-api-guide/output)
-
-##########################################################################
 # Enable/disable ODP_DEBUG
 ##########################################################################
 AC_ARG_ENABLE([debug],
     [AS_HELP_STRING([--enable-debug],
-		    [include additional debugging code ]
-		    [(set to 'full' to enable all --enable-*-debug-* options)])],
+		    [include additional debugging code.]
+		    [Set to 'full' to enable all --enable-*-debug-* options]
+		    [[default=disabled]])],
 		    [], [enable_debug=no])
 
 AS_IF([test "x$enable_debug" != "xno"], [ODP_DEBUG=1],
@@ -383,7 +362,8 @@ AC_DEFINE_UNQUOTED([ODP_DEBUG], [$ODP_DEBUG],
 		   [Define to 1 to include additional debug code])
 
 AC_ARG_ENABLE([helper-debug],
-    [AS_HELP_STRING([--enable-helper-debug], [helpers include additional debugging code])],
+    [AS_HELP_STRING([--enable-helper-debug],
+		    [helpers include additional debugging code [default=disabled]])],
     [], [AS_IF([test "x$enable_debug" = "xfull"], [enable_helper_debug=yes],
     [enable_helper_debug=no])])
 AS_IF([test "x$enable_helper_debug" != "xno"], [ODPH_DEBUG=1], [ODPH_DEBUG=0])
@@ -394,7 +374,8 @@ AC_DEFINE_UNQUOTED([ODPH_DEBUG], [$ODPH_DEBUG],
 # Enable/disable ODP_DEBUG_PRINT
 ##########################################################################
 AC_ARG_ENABLE([debug-print],
-    [AS_HELP_STRING([--enable-debug-print], [display debugging information])],
+    [AS_HELP_STRING([--enable-debug-print],
+		    [display debugging information [default=disabled]])],
     [], [AS_IF([test "x$enable_debug" = "xfull"], [enable_debug_print=yes],
 	       [enable_debug_print=no])])
 AS_IF([test "x$enable_debug_print" != "xno"], [ODP_DEBUG_PRINT=1],
@@ -403,7 +384,8 @@ AC_DEFINE_UNQUOTED([ODP_DEBUG_PRINT], [$ODP_DEBUG_PRINT],
 		   [Define to 1 to display debug information])
 
 AC_ARG_ENABLE([helper-debug-print],
-    [AS_HELP_STRING([--enable-helper-debug-print], [display helper debugging information])],
+    [AS_HELP_STRING([--enable-helper-debug-print],
+		    [display helper debugging information [default=disabled]])],
     [], [AS_IF([test "x$enable_debug" = "xfull"], [enable_helper_debug_print=yes],
 	       [enable_helper_debug_print=no])])
 AS_IF([test "x$enable_helper_debug_print" != "xno"], [ODPH_DEBUG_PRINT=1],
@@ -420,12 +402,67 @@ ODPH_DEBUG=${ODPH_DEBUG}, ODPH_DEBUG_PRINT=${ODPH_DEBUG_PRINT}"
 ODP_DEPRECATED_API=0
 deprecated=no
 AC_ARG_ENABLE([deprecated],
-    [  --enable-deprecated     enable deprecated API definitions],
+    [AS_HELP_STRING([--enable-deprecated],
+		    [enable deprecated API definitions [default=disabled]])],
     [if test "x$enableval" = "xyes"; then
 	ODP_DEPRECATED_API=1
 	deprecated=yes
     fi])
 AC_SUBST(ODP_DEPRECATED_API)
+
+##########################################################################
+# Determine which platform to build for
+##########################################################################
+AC_ARG_WITH([platform],
+    [AS_HELP_STRING([--with-platform=platform],
+	[select platform to be used [default=linux-dpdk]])],
+    [],
+    [with_platform=linux-dpdk
+    ])
+
+AC_SUBST([with_platform])
+
+##########################################################################
+# Run platform specific checks and settings
+##########################################################################
+# Placeholder for platform dependency libraries which might come from custom
+# paths. Platform should fill it in configure.m4 with AS_VAR_APPEND.
+# This works around a bug in libtool.m4 on some systems:
+# https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=297726
+PLAT_DEP_LIBS=
+AC_SUBST([PLAT_DEP_LIBS])
+# Platforms should append to this variable to have their settings printed
+# at the end of the configure report.
+PLAT_CFG_TEXT="
+	Platform specific:"
+
+AS_IF([test "${with_platform}" = "linux-generic"],
+      [m4_include([./platform/linux-generic/m4/configure.m4])],
+      [test "${with_platform}" = "linux-dpdk"],
+      [m4_include([./platform/linux-dpdk/m4/configure.m4])],
+      [AC_MSG_ERROR([UNSUPPORTED PLATFORM: ${with_platform}])])
+
+AC_DEFINE_UNQUOTED([_ODP_IMPLEMENTATION_NAME], ["$ODP_IMPLEMENTATION_NAME"],
+		   [Define to the name of the implementation])
+
+AM_CONDITIONAL([ODP_USE_CONFIG], [test "x$odp_use_config" = "xtrue"])
+AC_SUBST([ODP_LIB_NAME])
+
+##########################################################################
+# Setup doxygen documentation
+##########################################################################
+DX_HTML_FEATURE(ON)
+DX_PDF_FEATURE(OFF)
+DX_PS_FEATURE(OFF)
+DX_ENV_APPEND(WITH_PLATFORM, $with_platform)
+
+DX_INIT_DOXYGEN($PACKAGE_NAME,
+		${srcdir}/doc/application-api-guide/Doxyfile,
+		${builddir}/doc/application-api-guide/output,
+		${srcdir}/doc/helper-guide/Doxyfile,
+		${builddir}/doc/helper-guide/output,
+		${srcdir}/doc/platform-api-guide/Doxyfile,
+		${builddir}/doc/platform-api-guide/output)
 
 ##########################################################################
 # Default include setup
@@ -483,6 +520,7 @@ AC_MSG_RESULT([
 	ld:			${LD}
 	ldflags:		${LDFLAGS}
 	libs:			${LIBS}
+	dependency libs:	${PLAT_DEP_LIBS}
 	defs:			${DEFS}
 	static libraries:	${enable_static}
 	shared libraries:	${enable_shared}
@@ -500,8 +538,7 @@ AC_MSG_RESULT([
 	test_helper:		${test_helper}
 	test_example:		${test_example}
 	user_guides:		${user_guides}
-	pcapng:			${have_pcapng}
-	default_config_path:    ${default_config_path}
+${PLAT_CFG_TEXT}
 ])
 
 AS_IF([test "${with_openssl}" = "no"],

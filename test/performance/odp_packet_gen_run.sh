@@ -52,7 +52,7 @@ run_packet_gen()
 
 	# Runs 500 * 10ms = 5 sec
 	# Sends 500 packets through both interfaces => total 1000 packets
-	odp_packet_gen${EXEEXT} -i 0,1 -b 1 -g 10000000 -q 500
+	odp_packet_gen${EXEEXT} -i 0,1 -b 1 -g 10000000 -q 500 -w 10
 
 	ret=$?
 

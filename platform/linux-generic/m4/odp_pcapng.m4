@@ -6,7 +6,7 @@ pcapng_support=0
 
 AC_ARG_ENABLE([pcapng-support],
 	[AS_HELP_STRING([--enable-pcapng-support],
-	[enable experimental tcpdump for pktios])],
+	[enable experimental tcpdump for pktios [default=disabled] (linux-generic)])],
 	have_pcapng=$enableval
     [if test x$enableval = xyes; then
         pcapng_support=1
@@ -15,4 +15,6 @@ AC_ARG_ENABLE([pcapng-support],
 AC_DEFINE_UNQUOTED([_ODP_PCAPNG], [$pcapng_support],
 	[Define to 1 to enable pcapng support])
 
+AC_CONFIG_COMMANDS_PRE([dnl
 AM_CONDITIONAL([have_pcapng], [test x$have_pcapng = xyes])
+])
