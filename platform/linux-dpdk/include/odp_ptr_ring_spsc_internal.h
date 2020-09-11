@@ -89,6 +89,18 @@ static inline int ring_spsc_is_empty(ring_spsc_t ring)
 	return rte_ring_empty(ring);
 }
 
+/* Return current ring length */
+static inline int ring_spsc_length(ring_spsc_t ring)
+{
+	return rte_ring_count(ring);
+}
+
+/* Return maximum ring length */
+static inline int ring_spsc_max_length(ring_spsc_t ring)
+{
+	return rte_ring_get_capacity(ring);
+}
+
 #ifdef __cplusplus
 }
 #endif

@@ -4,30 +4,20 @@ ODP_LIB_NAME="odp-linux"
 ODP_VISIBILITY
 ODP_ATOMIC
 
-# linux-generic PCAP support is not relevant as the code doesn't use
-# linux-generic pktio at all. And DPDK has its own PCAP support anyway
-AM_CONDITIONAL([HAVE_PCAP], [false])
-AM_CONDITIONAL([PKTIO_DPDK], [false])
-ODP_PTHREAD
-ODP_TIMER
-AC_ARG_WITH([openssl],
-	    [AS_HELP_STRING([--without-openssl],
-			    [compile without OpenSSL (results in disabled crypto and random support)])],
-	    [],
-	    [with_openssl=yes])
-AS_IF([test "$with_openssl" != "no"],
-      [ODP_OPENSSL])
-AM_CONDITIONAL([WITH_OPENSSL], [test x$with_openssl != xno])
-
 m4_include([platform/linux-dpdk/m4/odp_libconfig.m4])
 m4_include([platform/linux-dpdk/m4/odp_pcapng.m4])
+m4_include([platform/linux-dpdk/m4/odp_scheduler.m4])
+
+ODP_PTHREAD
 ODP_SCHEDULER
+ODP_TIMER
 
 ##########################################################################
 # Set DPDK install path
 ##########################################################################
 AC_ARG_WITH([dpdk-path],
-[AS_HELP_STRING([--with-dpdk-path=DIR], [path to dpdk build directory])],
+[AS_HELP_STRING([--with-dpdk-path=DIR],
+		[path to DPDK build directory [default=system] (linux-dpdk)])],
     [DPDK_PATH="$withval"],[DPDK_PATH=system])
 
 ##########################################################################
@@ -56,6 +46,15 @@ esac
 
 # Required for experimental rte_event_port_unlinks_in_progress() API
 DPDK_CFLAGS="${DPDK_CFLAGS} -DALLOW_EXPERIMENTAL_API"
+
+AS_VAR_APPEND([PLAT_DEP_LIBS], ["${LIBCONFIG_LIBS} ${OPENSSL_LIBS} ${DPDK_LIBS_LT}"])
+
+# Add text to the end of configure with platform specific settings.
+# Make sure it's aligned same as other lines in configure.ac.
+AS_VAR_APPEND([PLAT_CFG_TEXT], ["
+	pcap:			${have_pmd_pcap}
+	pcapng:			${have_pcapng}
+	default_config_path:	${default_config_path}"])
 
 ODP_CHECK_CFLAG([-Wno-error=cast-align])
 AC_DEFINE([_ODP_PKTIO_DPDK], [1])

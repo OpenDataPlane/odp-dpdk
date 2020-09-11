@@ -349,7 +349,7 @@ int _odp_crypto_init_global(void)
 
 	cdev_count = rte_cryptodev_count();
 	if (cdev_count == 0) {
-		printf("No crypto devices available\n");
+		ODP_PRINT("No crypto devices available\n");
 		return 0;
 	}
 
@@ -408,8 +408,8 @@ int _odp_crypto_init_global(void)
 				return -1;
 			}
 
-			printf("Allocated session pool on socket %d\n",
-			       socket_id);
+			ODP_PRINT("Allocated session pool on socket %d\n",
+				  socket_id);
 			global->session_mempool[socket_id] = mp;
 		}
 		mp = global->session_mempool[socket_id];

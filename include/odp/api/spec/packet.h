@@ -71,6 +71,12 @@ extern "C" {
   */
 
 /**
+ * Maximum number of packet colors which accommodates ODP_PACKET_GREEN, ODP_PACKET_YELLOW and
+ * ODP_PACKET_RED.
+ */
+#define ODP_NUM_PACKET_COLORS 3
+
+/**
  * @typedef odp_proto_l2_type_t
  * Layer 2 protocol type
  */
@@ -106,6 +112,11 @@ extern "C" {
  *
  * @def ODP_PROTO_L3_TYPE_IPV6
  * Layer 3 protocol type is IPv6
+ */
+
+/**
+ * @typedef odp_proto_l4_type_t
+ * Layer 4 protocol type
  */
 
 /**

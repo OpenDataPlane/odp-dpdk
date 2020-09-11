@@ -6,29 +6,35 @@ ODP_ATOMIC
 
 ODP_PTHREAD
 ODP_TIMER
-AC_ARG_WITH([openssl],
-	    [AS_HELP_STRING([--without-openssl],
-			    [compile without OpenSSL (results in disabled crypto and random support)])],
-	    [],
-	    [with_openssl=yes])
-AS_IF([test "$with_openssl" != "no"],
-      [ODP_OPENSSL])
-AM_CONDITIONAL([WITH_OPENSSL], [test x$with_openssl != xno])
+m4_include([platform/linux-generic/m4/odp_pcap.m4])
+m4_include([platform/linux-generic/m4/odp_scheduler.m4])
 
 AC_ARG_WITH([pcap],
 	    [AS_HELP_STRING([--without-pcap],
-			    [compile without PCAP])],
+			    [compile without PCAP [default=with] (linux-generic)])],
 	    [],
 	    [with_pcap=yes])
+have_pcap=no
 AS_IF([test "x$with_pcap" != xno],
       [ODP_PCAP([with_pcap=yes]‚[with_pcap=no])])
-AM_CONDITIONAL([HAVE_PCAP], [test x$have_pcap = xyes])
+AC_CONFIG_COMMANDS_PRE([dnl
+AM_CONDITIONAL([ODP_PKTIO_PCAP], [test x$have_pcap = xyes])
+])
 
 m4_include([platform/linux-generic/m4/odp_libconfig.m4])
 m4_include([platform/linux-generic/m4/odp_pcapng.m4])
 m4_include([platform/linux-generic/m4/odp_netmap.m4])
 m4_include([platform/linux-generic/m4/odp_dpdk.m4])
 ODP_SCHEDULER
+
+AS_VAR_APPEND([PLAT_DEP_LIBS], ["${LIBCONFIG_LIBS} ${OPENSSL_LIBS} ${DPDK_LIBS_LT}"])
+
+# Add text to the end of configure with platform specific settings.
+# Make sure it's aligned same as other lines in configure.ac.
+AS_VAR_APPEND([PLAT_CFG_TEXT], ["
+	pcap:			${have_pcap}
+	pcapng:			${have_pcapng}
+	default_config_path:	${default_config_path}"])
 
 AC_CONFIG_COMMANDS_PRE([dnl
 AM_CONDITIONAL([PLATFORM_IS_LINUX_GENERIC],
