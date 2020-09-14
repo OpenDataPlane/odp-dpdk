@@ -28,6 +28,7 @@ AC_ARG_WITH([dpdk-path],
 ##########################################################################
 ODP_DPDK([$DPDK_PATH], [],
 	 [AC_MSG_FAILURE([can't find DPDK])])
+AM_CONDITIONAL([ODP_PKTIO_PCAP], [test x$have_pmd_pcap = xyes])
 
 # In non-abi-compat mode DPDK is exposed to the application
 if test $ODP_ABI_COMPAT -eq 1; then
