@@ -1,4 +1,6 @@
+if PLATFORM_IS_LINUX_DPDK
 include $(top_srcdir)/platform/@with_platform@/Makefile.inc
+endif
 
 include $(top_srcdir)/Makefile.inc
 
