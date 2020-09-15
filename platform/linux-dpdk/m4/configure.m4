@@ -1,5 +1,5 @@
 ODP_IMPLEMENTATION_NAME="odp-dpdk"
-ODP_LIB_NAME="odp-linux"
+ODP_LIB_NAME="odp-dpdk"
 
 ODP_VISIBILITY
 ODP_ATOMIC
@@ -63,7 +63,7 @@ AC_CONFIG_COMMANDS_PRE([dnl
 AM_CONDITIONAL([PLATFORM_IS_LINUX_DPDK],
 	       [test "${with_platform}" = "linux-dpdk"])
 AC_CONFIG_FILES([platform/linux-dpdk/Makefile
-		 platform/linux-dpdk/libodp-linux.pc
+		 platform/linux-dpdk/libodp-dpdk.pc
 		 platform/linux-dpdk/dumpconfig/Makefile
 		 platform/linux-dpdk/test/Makefile
 		 platform/linux-dpdk/test/validation/api/pktio/Makefile])
