@@ -209,6 +209,7 @@ jobs:
                           - docker run --privileged -i -t -v `pwd`:/odp --shm-size 8g
                               -e CC="${CC}"
                               -e CONF="--with-platform=linux-generic"
+                              -e ODP_LIB_NAME="libodp-linux"
                               ${DOCKER_NAMESPACE}/travis-odp-${OS}-${ARCH} /odp/scripts/ci/build_${ARCH}.sh
                 - stage: "build only"
                   env: TEST=documentation
