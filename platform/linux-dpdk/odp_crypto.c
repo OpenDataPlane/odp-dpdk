@@ -1863,11 +1863,8 @@ int odp_crypto_int(odp_packet_t pkt_in,
 	if (rte_session == NULL)
 		goto out;
 
-	odp_spinlock_lock(&global->lock);
 	op = rte_crypto_op_alloc(global->crypto_op_pool,
 				 RTE_CRYPTO_OP_TYPE_SYMMETRIC);
-	odp_spinlock_unlock(&global->lock);
-
 	if (op == NULL) {
 		ODP_ERR("Failed to allocate crypto operation");
 		goto err;
