@@ -37,8 +37,17 @@
 
 /* default number supported by DPDK crypto */
 #define MAX_SESSIONS 2048
-#define NB_MBUF  8192
-#define NB_DESC_PER_QUEUE_PAIR  4096
+/*
+ * Max size of per-thread session object cache. May be useful if sessions
+ * are created and destroyed very frequently.
+ */
+#define SESSION_CACHE_SIZE 16
+/*
+ * Max size of per-thread crypto operation cache. We can have only one
+ * operation per thread in flight at a time so this can be very small.
+ */
+#define OP_CACHE_SIZE 16
+#define NB_DESC_PER_QUEUE_PAIR  16
 #define MAX_IV_LENGTH 16
 #define AES_CCM_AAD_OFFSET 18
 #define IV_OFFSET	(sizeof(struct rte_crypto_op) + \
@@ -289,7 +298,7 @@ int _odp_crypto_init_global(void)
 	int idx;
 	int16_t cdev_id, cdev_count;
 	int rc = -1;
-	unsigned int cache_size = 0;
+	unsigned int pool_size;
 	unsigned int nb_queue_pairs = 0, queue_pair;
 	uint32_t max_sess_sz = 0, sess_sz;
 	odp_shm_t shm;
@@ -332,23 +341,6 @@ int _odp_crypto_init_global(void)
 
 	if (global->is_crypto_dev_initialized)
 		return 0;
-
-	if (RTE_MEMPOOL_CACHE_MAX_SIZE > 0) {
-		unsigned int j;
-
-		j = ceil((double)NB_MBUF / RTE_MEMPOOL_CACHE_MAX_SIZE);
-		j = RTE_MAX(j, 2UL);
-		for (; j <= (NB_MBUF / 2); ++j)
-			if ((NB_MBUF % j) == 0) {
-				cache_size = NB_MBUF / j;
-				break;
-			}
-		if (odp_unlikely(cache_size > RTE_MEMPOOL_CACHE_MAX_SIZE ||
-				 (uint32_t)cache_size * 1.5 > NB_MBUF)) {
-			ODP_ERR("cache_size calc failure: %d\n", cache_size);
-			cache_size = 0;
-		}
-	}
 
 	cdev_count = rte_cryptodev_count();
 	if (cdev_count == 0) {
@@ -397,17 +389,27 @@ int _odp_crypto_init_global(void)
 
 			/*
 			 * Create enough objects for session headers and
-			 * device private data
+			 * device private data. Since we use shared pool,
+			 * the pool has to have twice as many elements
+			 * as the maximum number of sessions.
 			 */
+			pool_size = 2 * MAX_SESSIONS;
+			/*
+			 * Add the number of elements that may get lost
+			 * in thread local caches. The mempool implementation
+			 * can actually cache a bit more than the specified
+			 * cache size, so we multiply by 2.
+			 */
+			pool_size += 2 * odp_thread_count_max() * SESSION_CACHE_SIZE;
 #if RTE_VERSION < RTE_VERSION_NUM(19, 2, 0, 0)
-			mp = rte_mempool_create(mp_name, NB_MBUF, max_sess_sz,
-						cache_size, 0, NULL, NULL, NULL,
+			mp = rte_mempool_create(mp_name, pool_size, max_sess_sz,
+						SESSION_CACHE_SIZE, 0, NULL, NULL, NULL,
 						NULL, socket_id, 0);
 #else
 			mp = rte_cryptodev_sym_session_pool_create(mp_name,
-								   NB_MBUF,
+								   pool_size,
 								   max_sess_sz,
-								   cache_size,
+								   SESSION_CACHE_SIZE,
 								   0,
 								   socket_id);
 #endif
@@ -466,11 +468,19 @@ int _odp_crypto_init_global(void)
 		global->enabled_crypto_devs++;
 	}
 
+	/*
+	 * Make pool size big enough to fill all per-thread caches but
+	 * not much bigger since we only have single operation in
+	 * flight per thread. Multiply by 2 since mempool can cache
+	 * 1.5 times more elements than the specified cache size.
+	 */
+	pool_size = 2 * odp_thread_count_max() * OP_CACHE_SIZE;
+
 	/* create crypto op pool */
 	global->crypto_op_pool =
 		rte_crypto_op_pool_create("crypto_op_pool",
 					  RTE_CRYPTO_OP_TYPE_SYMMETRIC,
-					  NB_MBUF, cache_size,
+					  pool_size, OP_CACHE_SIZE,
 					  2 * MAX_IV_LENGTH,
 					  rte_socket_id());
 
