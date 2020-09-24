@@ -451,8 +451,7 @@ int _odp_crypto_init_global(void)
 
 		global->enabled_crypto_dev_ids[global->enabled_crypto_devs] =
 			cdev_id;
-		global->enabled_crypto_dev_qpairs[global->enabled_crypto_devs] =
-			nb_queue_pairs;
+		global->enabled_crypto_dev_qpairs[cdev_id] = nb_queue_pairs;
 		global->enabled_crypto_devs++;
 	}
 
