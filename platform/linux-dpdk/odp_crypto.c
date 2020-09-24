@@ -1,4 +1,5 @@
 /* Copyright (c) 2017-2018, Linaro Limited
+ * Copyright (c) 2020, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -56,6 +57,7 @@ typedef struct crypto_session_entry_s {
 	struct rte_crypto_sym_xform cipher_xform;
 	struct rte_crypto_sym_xform auth_xform;
 	uint16_t cdev_nb_qpairs;
+	odp_bool_t cdev_qpairs_shared;
 	uint8_t cdev_id;
 	uint8_t cipher_iv_data[MAX_IV_LENGTH];
 	uint8_t auth_iv_data[MAX_IV_LENGTH];
@@ -66,6 +68,7 @@ typedef struct crypto_global_s {
 	uint8_t enabled_crypto_devs;
 	uint8_t enabled_crypto_dev_ids[RTE_CRYPTO_MAX_DEVS];
 	uint16_t enabled_crypto_dev_qpairs[RTE_CRYPTO_MAX_DEVS];
+	odp_bool_t enabled_crypto_dev_qpairs_shared[RTE_CRYPTO_MAX_DEVS];
 	crypto_session_entry_t *free;
 	crypto_session_entry_t sessions[MAX_SESSIONS];
 	int is_crypto_dev_initialized;
@@ -366,11 +369,17 @@ int _odp_crypto_init_global(void)
 	for (cdev_id = cdev_count - 1; cdev_id >= 0; cdev_id--) {
 		struct rte_cryptodev_info dev_info;
 		struct rte_mempool *mp;
+		odp_bool_t queue_pairs_shared = false;
 
 		rte_cryptodev_info_get(cdev_id, &dev_info);
-		nb_queue_pairs = odp_cpu_count();
-		if (nb_queue_pairs > dev_info.max_nb_queue_pairs)
+		nb_queue_pairs = odp_thread_count_max();
+		if (nb_queue_pairs > dev_info.max_nb_queue_pairs) {
 			nb_queue_pairs = dev_info.max_nb_queue_pairs;
+			queue_pairs_shared = true;
+			ODP_PRINT("Using shared queue pairs for crypto device %"
+				  PRIu16 " (driver: %s)\n",
+				  cdev_id, dev_info.driver_name);
+		}
 
 		struct rte_cryptodev_qp_conf qp_conf;
 		uint8_t socket_id = rte_cryptodev_socket_id(cdev_id);
@@ -452,6 +461,8 @@ int _odp_crypto_init_global(void)
 		global->enabled_crypto_dev_ids[global->enabled_crypto_devs] =
 			cdev_id;
 		global->enabled_crypto_dev_qpairs[cdev_id] = nb_queue_pairs;
+		global->enabled_crypto_dev_qpairs_shared[cdev_id] =
+			queue_pairs_shared;
 		global->enabled_crypto_devs++;
 	}
 
@@ -1473,6 +1484,7 @@ int odp_crypto_session_create(const odp_crypto_session_param_t *param,
 	}
 
 	session->cdev_nb_qpairs = global->enabled_crypto_dev_qpairs[cdev_id];
+	session->cdev_qpairs_shared = global->enabled_crypto_dev_qpairs_shared[cdev_id];
 out_null:
 	session->rte_session  = rte_session;
 	session->cdev_id = cdev_id;
@@ -1861,16 +1873,36 @@ int odp_crypto_int(odp_packet_t pkt_in,
 	if (rc_cipher == ODP_CRYPTO_ALG_ERR_NONE &&
 	    rc_auth == ODP_CRYPTO_ALG_ERR_NONE) {
 		int retry_count = 0;
-		int queue_pair = odp_cpu_id() % session->cdev_nb_qpairs;
+		int queue_pair;
 		int rc;
+		odp_bool_t queue_pairs_shared = session->cdev_qpairs_shared;
+
+		if (odp_unlikely(queue_pairs_shared))
+			queue_pair = odp_thread_id() % session->cdev_nb_qpairs;
+		else
+			queue_pair = odp_thread_id();
 
 		/* Set crypto operation data parameters */
 		rte_crypto_op_attach_sym_session(op, rte_session);
 
 		op->sym->m_src = (struct rte_mbuf *)(intptr_t)out_pkt;
+		/*
+		 * If queue pairs are shared between multiple threads,
+		 * we protect enqueue and dequeue using a lock. In addition,
+		 * we keep the lock over the whole enqueue-dequeue sequence
+		 * to guarantee that we get the same op back as what we
+		 * enqueued. Otherwise synchronous ODP crypto operations
+		 * could report the completion and status of an unrelated
+		 * operation that was sent to the same queue pair from
+		 * another thread.
+		 */
+		if (odp_unlikely(queue_pairs_shared))
+			odp_spinlock_lock(&global->lock);
 		rc = rte_cryptodev_enqueue_burst(session->cdev_id,
 						 queue_pair, &op, 1);
 		if (rc == 0) {
+			if (odp_unlikely(queue_pairs_shared))
+				odp_spinlock_unlock(&global->lock);
 			ODP_ERR("Failed to enqueue packet\n");
 			goto err_op_free;
 		}
@@ -1887,6 +1919,8 @@ int odp_crypto_int(odp_packet_t pkt_in,
 			}
 			break;
 		}
+		if (odp_unlikely(queue_pairs_shared))
+			odp_spinlock_unlock(&global->lock);
 		if (rc == 0) {
 			ODP_ERR("Failed to dequeue packet");
 			goto err_op_free;
