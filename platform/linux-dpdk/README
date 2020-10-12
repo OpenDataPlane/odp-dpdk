@@ -1,5 +1,5 @@
 Copyright (c) 2018-2019, Linaro Limited
-Copyright (c) 2019, Nokia
+Copyright (c) 2019-2020, Nokia
 All rights reserved.
 
 SPDX-License-Identifier:        BSD-3-Clause
@@ -19,11 +19,11 @@ Prerequisites and considerations:
 - it's also possible to use odp-dpdk for evaluation purposes without a DPDK
   compatible NIC, using the pcap poll mode driver
 - DPDK code must be downloaded, configured and compiled, details below
-- ODP-DPDK has been compiled and tested on an x86 host with Ubuntu 16.04 LTS
-  (4.4.0 kernel).
+- ODP-DPDK has been compiled and tested on an x86 host with Ubuntu 18.04 LTS
+  (4.15.0 kernel).
 - DPDK only works on a selected range of network cards. The list of known and
   supported devices can be found in the DPDK documentation:
-      http://doc.dpdk.org/guides-18.11/nics/index.html
+      http://doc.dpdk.org/guides-19.11/nics/index.html
 
 
 2. Preparing DPDK
@@ -31,12 +31,12 @@ Prerequisites and considerations:
 
 Fetching the DPDK code:
 ----------------------
-Right now odp-dpdk supports DPDK v18.11 (recommended version) and v19.11:
-    git clone http://dpdk.org/git/dpdk-stable --branch 18.11 --depth 1 ./<dpdk-dir>
+Right now odp-dpdk supports DPDK v19.11 (recommended version) and v18.11:
+    git clone http://dpdk.org/git/dpdk-stable --branch 19.11 --depth 1 ./<dpdk-dir>
 
 or
 
-    git clone http://dpdk.org/git/dpdk-stable --branch 19.11 --depth 1 ./<dpdk-dir>
+    git clone http://dpdk.org/git/dpdk-stable --branch 18.11 --depth 1 ./<dpdk-dir>
 
 Compile DPDK:
 ------------
