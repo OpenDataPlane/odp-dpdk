@@ -117,11 +117,14 @@ Insert DPDK kernel module:
 -------------------------
 DPDK uses userspace poll mode drivers, so it's necessary to insert a couple of
 modules to allow DPDK to map the NIC's registers to userspace:
-    sudo /sbin/modprobe uio
-    ulimit -Sn 2048
 
+If UIO is used:
+    sudo modprobe uio
     cd <dpdk-dir>
     sudo insmod x86_64-native-linuxapp-gcc/kmod/igb_uio.ko
+
+or VFIO is used (requires kernel and BIOS support e.g. iommu=pt intel_iommu=on)
+    sudo modprobe vfio-pci
 
 Bind NIC's to DPDK:
 ------------------
@@ -155,9 +158,14 @@ The easiest way is to let the tool automatically switch the regular drivers. For
 that the interface must not be active i.e. no IP addresses assigned:
     sudo ifconfig eth0 0
     sudo ifconfig eth1 0
+
+If UIO is used:
     sudo ./usertools/dpdk-devbind.py --bind=igb_uio eth0
     sudo ./usertools/dpdk-devbind.py --bind=igb_uio eth1
 
+or if VFIO is used:
+    sudo ./usertools/dpdk-devbind.py --bind=vfio-pci eth0
+    sudo ./usertools/dpdk-devbind.py --bind=vfio-pci eth1
 
 Bind using PCI ids:
 ------------------
