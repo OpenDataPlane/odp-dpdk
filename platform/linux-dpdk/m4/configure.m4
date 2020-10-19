@@ -66,5 +66,12 @@ AC_CONFIG_FILES([platform/linux-dpdk/Makefile
 		 platform/linux-dpdk/libodp-dpdk.pc
 		 platform/linux-dpdk/dumpconfig/Makefile
 		 platform/linux-dpdk/test/Makefile
+		 platform/linux-dpdk/test/example/Makefile
+		 platform/linux-dpdk/test/example/l2fwd_simple/Makefile
+		 platform/linux-dpdk/test/example/l3fwd/Makefile
+		 platform/linux-dpdk/test/example/packet/Makefile
+		 platform/linux-dpdk/test/example/ping/Makefile
+		 platform/linux-dpdk/test/example/simple_pipeline/Makefile
+		 platform/linux-dpdk/test/example/switch/Makefile
 		 platform/linux-dpdk/test/validation/api/pktio/Makefile])
 ])

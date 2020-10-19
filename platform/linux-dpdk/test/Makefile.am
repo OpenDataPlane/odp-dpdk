@@ -10,7 +10,8 @@ SUBDIRS += validation/api/pktio
 else
 #performance tests refer to pktio_env
 if test_perf
-SUBDIRS += validation/api/pktio
+SUBDIRS += validation/api/pktio \
+	   example
 endif
 endif
 
