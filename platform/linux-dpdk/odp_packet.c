@@ -1049,6 +1049,8 @@ void odp_packet_print(odp_packet_t pkt)
 	}
 	len += snprintf(&str[len], n - len, "  flags        0x%" PRIx32 "\n",
 			hdr->p.flags.all_flags);
+	len += snprintf(&str[len], n - len, "  cls_mark     %" PRIu64 "\n",
+			odp_packet_cls_mark(pkt));
 	len += snprintf(&str[len], n - len,
 			"  l2_offset    %" PRIu32 "\n", hdr->p.l2_offset);
 	len += snprintf(&str[len], n - len,
@@ -1175,6 +1177,7 @@ int _odp_packet_copy_md_to_packet(odp_packet_t srcpkt, odp_packet_t dstpkt)
 
 	dsthdr->input = srchdr->input;
 	dsthdr->dst_queue = srchdr->dst_queue;
+	dsthdr->cls_mark = srchdr->cls_mark;
 	dsthdr->buf_hdr.mb.userdata = srchdr->buf_hdr.mb.userdata;
 
 	dsthdr->buf_hdr.mb.port = srchdr->buf_hdr.mb.port;
@@ -2305,4 +2308,14 @@ odp_proto_l4_type_t odp_packet_l4_type(odp_packet_t pkt)
 		return ODP_PROTO_L4_TYPE_NO_NEXT;
 
 	return ODP_PROTO_L4_TYPE_NONE;
+}
+
+uint64_t odp_packet_cls_mark(odp_packet_t pkt)
+{
+	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
+
+	if (pkt_hdr->p.input_flags.cls_mark)
+		return pkt_hdr->cls_mark;
+
+	return 0;
 }
