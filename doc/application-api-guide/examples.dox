@@ -10,6 +10,11 @@
  */
 
 /**
+ * @example odp_debug.c
+ * Debug example application
+ */
+
+/**
  * @example odp_generator.c
  * Traffic generator and loopback demo application
  */
@@ -24,14 +29,14 @@
  * IPv4 lock-free fragmentation and reassembly example application
  */
 
- /**
- * @example ipsec/odp_ipsec.c
- * IPsec example application using crypto API
- */
-
 /**
  * @example ipsec_api/odp_ipsec.c
  * IPsec example application using IPsec API
+ */
+
+ /**
+ * @example ipsec_crypto/odp_ipsec.c
+ * IPsec example application using crypto API
  */
 
 /**
