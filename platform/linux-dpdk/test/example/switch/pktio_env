@@ -1,0 +1,61 @@
+#!/bin/sh
+#
+# Copyright (c) 2020, Marvell
+# Copyright (c) 2020, Nokia
+# All rights reserved.
+#
+# SPDX-License-Identifier:	BSD-3-Clause
+#
+# Script to setup interfaces used for running application on linux-dpdk.
+#
+# For linux-dpdk the default behavior is to create four pcap interfaces of which
+# the first one uses udp64.pcap file to inject traffic. The other three
+# interfaces generate individual output pcap files.
+#
+# Network set-up
+# IF0 |---> IF1
+#     |---> IF2
+#     |---> IF3
+
+NUM_RX_PORT=3
+PCAP_IN=`find . ${TEST_DIR} $(dirname $0) -name udp64.pcap -print -quit`
+PCAP_EMPTY=`find . ${TEST_DIR} $(dirname $0) -name empty.pcap -print -quit`
+IF0=0
+IF1=1
+IF2=2
+IF3=3
+
+export ODP_PLATFORM_PARAMS="--no-pci \
+--vdev net_pcap0,rx_pcap=${PCAP_IN},tx_pcap=/dev/null \
+--vdev net_pcap1,rx_pcap=${PCAP_EMPTY},tx_pcap=pcapout1.pcap \
+--vdev net_pcap2,rx_pcap=${PCAP_EMPTY},tx_pcap=pcapout2.pcap \
+--vdev net_pcap3,rx_pcap=${PCAP_EMPTY},tx_pcap=pcapout3.pcap"
+
+echo "Switch test using PCAP_IN = ${PCAP_IN}"
+
+if [ "$0" = "$BASH_SOURCE" ]; then
+	echo "Error: Platform specific env file has to be sourced."
+fi
+
+validate_result()
+{
+	for i in `seq 1 $NUM_RX_PORT`;
+	do
+		if [ `stat -c %s pcapout${i}.pcap` -ne `stat -c %s ${PCAP_IN}` ]; then
+			echo "Error: Output file $i size not matching"
+		fi
+		rm -f pcapout${i}.pcap
+	done
+}
+
+setup_interfaces()
+{
+	echo "pktio: setting up test interfaces $IF0, $IF1, $IF2, $IF3."
+	return 0
+}
+
+cleanup_interfaces()
+{
+	echo "pktio: cleaning up test interfaces $IF0, $IF1, $IF2, $IF3."
+	return 0
+}

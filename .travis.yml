@@ -139,7 +139,7 @@ jobs:
                               -e ODP_SCHEDULER=sp
                               ${DOCKER_NAMESPACE}/travis-odp-${OS}-${ARCH} /odp/scripts/ci/check.sh
                 - stage: test
-                  env: TEST=dpdk-19.11
+                  env: TEST=dpdk-18.11
                   install:
                           - true
                   compiler: gcc
@@ -149,7 +149,7 @@ jobs:
                               -v `pwd`:/odp --shm-size 8g
                               -e CC="${CC}"
                               -e CONF=""
-                              ${DOCKER_NAMESPACE}/travis-odp-${OS}-${ARCH}-dpdk_19.11 /odp/scripts/ci/check.sh
+                              ${DOCKER_NAMESPACE}/travis-odp-${OS}-${ARCH}-dpdk_18.11 /odp/scripts/ci/check.sh
                 - stage: test
                   env: TEST=distcheck
                   canfail: yes

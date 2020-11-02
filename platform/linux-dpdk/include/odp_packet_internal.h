@@ -101,26 +101,21 @@ typedef struct {
 	/* common buffer header */
 	odp_buffer_hdr_t buf_hdr;
 
-	/*
-	 * Following members are initialized by packet_init()
-	 */
-
 	packet_parser_t p;
 
 	odp_pktio_t input;
-
-	/* Event subtype */
-	int8_t subtype;
-
-	/*
-	 * Members below are not initialized by packet_init()
-	 */
 
 	/* Timestamp value */
 	odp_time_t timestamp;
 
 	/* Classifier destination queue */
 	odp_queue_t dst_queue;
+
+	/* Classifier mark */
+	uint16_t cls_mark;
+
+	/* Event subtype */
+	int8_t subtype;
 
 	union {
 		struct {
@@ -182,8 +177,9 @@ static inline void packet_subtype_set(odp_packet_t pkt, int ev)
  */
 static inline void packet_init(odp_packet_hdr_t *pkt_hdr, odp_pktio_t input)
 {
-	pkt_hdr->p.input_flags.all  = 0;
-	pkt_hdr->p.flags.all_flags  = 0;
+	/* Clear all flags. Resets also return value of cls_mark, user_ptr, etc. */
+	pkt_hdr->p.input_flags.all = 0;
+	pkt_hdr->p.flags.all_flags = 0;
 
 	pkt_hdr->p.l2_offset        = 0;
 	pkt_hdr->p.l3_offset        = ODP_PACKET_OFFSET_INVALID;
@@ -207,6 +203,7 @@ static inline void copy_packet_cls_metadata(odp_packet_hdr_t *src_hdr,
 	dst_hdr->p = src_hdr->p;
 	dst_hdr->dst_queue = src_hdr->dst_queue;
 	dst_hdr->timestamp = src_hdr->timestamp;
+	dst_hdr->cls_mark  = src_hdr->cls_mark;
 }
 
 static inline uint32_t packet_len(odp_packet_hdr_t *pkt_hdr)

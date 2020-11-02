@@ -14,16 +14,17 @@ TESTS = validation/api/pktio/pktio_run.sh \
 	validation/api/pktio/pktio_run_tap.sh \
 	validation/api/shmem/shmem_linux$(EXEEXT) \
 	ipsec/ipsec_api_example.sh \
-	ipsec/ipsec_example.sh
+	ipsec/ipsec_crypto_example.sh
 
 dist_check_SCRIPTS = ipsec/ipsec_api_example.sh \
-		     ipsec/ipsec_example.sh
+		     ipsec/ipsec_crypto_example.sh
 
 test_SCRIPTS = $(dist_check_SCRIPTS)
 
 SUBDIRS += validation/api/pktio\
 	  validation/api/shmem\
-	  pktio_ipc
+	  pktio_ipc \
+	  example
 
 if ODP_PKTIO_PCAP
 TESTS += validation/api/pktio/pktio_run_pcap.sh
@@ -62,3 +63,23 @@ if test_installdir
 installcheck-local:
 	$(DESTDIR)/$(testdir)/run-test.sh $(TESTNAME)
 endif
+
+# If building out-of-tree, make check will not copy the scripts and data to the
+# $(builddir) assuming that all commands are run locally. However this prevents
+# running tests on a remote target using LOG_COMPILER.
+# So copy all script and data files explicitly here.
+all-local:
+	if [ "x$(srcdir)" != "x$(builddir)" ]; then \
+		for f in $(dist_check_SCRIPTS); do \
+			if [ -e $(srcdir)/$$f ]; then \
+				mkdir -p $(builddir)/$$(dirname $$f); \
+				cp -f $(srcdir)/$$f $(builddir)/$$f; \
+			fi \
+		done \
+	fi
+clean-local:
+	if [ "x$(srcdir)" != "x$(builddir)" ]; then \
+		for f in $(dist_check_SCRIPTS); do \
+			rm -f $(builddir)/$$f; \
+		done \
+	fi

@@ -52,14 +52,29 @@ run_packet_gen()
 
 	# Runs 500 * 10ms = 5 sec
 	# Sends 500 packets through both interfaces => total 1000 packets
-	odp_packet_gen${EXEEXT} -i 0,1 -b 1 -g 10000000 -q 500 -w 10
 
+	# Static packet length
+	odp_packet_gen${EXEEXT} -i 0,1 -b 1 -g 10000000 -q 500 -w 10
 	ret=$?
 
-	if [ $ret -eq -1 ]; then
-		echo "FAIL: test failed"
-	elif [ $ret -eq -2 ]; then
+	if [ $ret -eq 2 ]; then
 		echo "FAIL: too few packets received"
+	fi
+	if [ $ret -ne 0 ]; then
+		echo "FAIL: test failed: $ret"
+		cleanup_pktio_env
+		exit $ret
+	fi
+
+	# Random packet length
+	odp_packet_gen${EXEEXT} -i 0,1 -b 1 -g 10000000 -q 500 -L 60,1514,10 -w 10
+	ret=$?
+
+	if [ $ret -eq 2 ]; then
+		echo "FAIL: too few packets received"
+	fi
+	if [ $ret -ne 0 ]; then
+		echo "FAIL: test failed: $ret"
 	fi
 
 	cleanup_pktio_env

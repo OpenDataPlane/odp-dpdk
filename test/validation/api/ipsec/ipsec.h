@@ -1,4 +1,5 @@
 /* Copyright (c) 2017-2018, Linaro Limited
+ * Copyright (c) 2020, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -94,9 +95,17 @@ int ipsec_check_esp_aes_cbc_128_null(void);
 int ipsec_check_esp_aes_cbc_128_sha256(void);
 int ipsec_check_esp_aes_ctr_128_null(void);
 int ipsec_check_esp_aes_gcm_128(void);
+int ipsec_check_esp_aes_gcm_192(void);
 int ipsec_check_esp_aes_gcm_256(void);
 int ipsec_check_ah_aes_gmac_128(void);
+int ipsec_check_ah_aes_gmac_192(void);
+int ipsec_check_ah_aes_gmac_256(void);
 int ipsec_check_esp_null_aes_gmac_128(void);
+int ipsec_check_esp_null_aes_gmac_192(void);
+int ipsec_check_esp_null_aes_gmac_256(void);
+int ipsec_check_esp_aes_ccm_128(void);
+int ipsec_check_esp_aes_ccm_192(void);
+int ipsec_check_esp_aes_ccm_256(void);
 int ipsec_check_esp_chacha20_poly1305(void);
 
 #endif

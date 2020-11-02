@@ -6,15 +6,17 @@
 # SPDX-License-Identifier:     BSD-3-Clause
 #
 
-PCAP_IN=`find . ${TEST_DIR} $(dirname $0) -name udp64.pcap -print -quit`
-echo "using PCAP_IN = ${PCAP_IN}"
+if  [ -f ./pktio_env ]; then
+  . ./pktio_env
+else
+  echo "BUG: unable to find pktio_env!"
+  echo "pktio_env has to be in current directory"
+  exit 1
+fi
 
-export ODP_PLATFORM_PARAMS="--no-pci \
---vdev net_pcap0,rx_pcap=${PCAP_IN},tx_pcap=pcapout.pcap \
---vdev net_pcap1,rx_pcap=${PCAP_IN},tx_pcap=pcapout.pcap"
+setup_interfaces
 
-./odp_l2fwd_simple${EXEEXT} 0 1 \
-	02:00:00:00:00:01 02:00:00:00:00:02 -t 2
+./odp_l2fwd_simple${EXEEXT} $IF0 $IF1 02:00:00:00:00:01 02:00:00:00:00:02 -t 2
 STATUS=$?
 
 if [ "$STATUS" -ne 0 ]; then
@@ -22,21 +24,8 @@ if [ "$STATUS" -ne 0 ]; then
   exit 1
 fi
 
-if [ `stat -c %s pcapout.pcap` -ne `stat -c %s  ${PCAP_IN}` ]; then
-  echo "File sizes disagree"
-  exit 1
-fi
+validate_result
 
-rm -f pcapout.pcap
-unset ODP_PLATFORM_PARAMS
-
-./odp_l2fwd_simple${EXEEXT} null:0 null:1 \
-	02:00:00:00:00:01 02:00:00:00:00:02 -t 2
-STATUS=$?
-
-if [ "$STATUS" -ne 0 ]; then
-  echo "Error: status was: $STATUS, expected 0"
-  exit 1
-fi
+cleanup_interfaces
 
 exit 0

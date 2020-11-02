@@ -53,7 +53,9 @@
 #define CHAOS_PTR_TO_NDX(p) ((uint64_t)(uint32_t)(uintptr_t)p)
 #define CHAOS_NDX_TO_PTR(n) ((void *)(uintptr_t)n)
 
-#define WAIT_TOLERANCE (150 * ODP_TIME_MSEC_IN_NS)
+#define WAIT_TIMEOUT     (1000 * ODP_TIME_MSEC_IN_NS)
+#define WAIT_ROUNDS      5
+#define WAIT_TOLERANCE   (150 * ODP_TIME_MSEC_IN_NS)
 #define WAIT_1MS_RETRIES 1000
 
 #define SCHED_AND_PLAIN_ROUNDS 10000
@@ -155,10 +157,12 @@ static void scheduler_test_wait_time(void)
 {
 	int i;
 	odp_queue_t queue;
+	odp_event_t ev;
 	uint64_t wait_time;
 	odp_queue_param_t qp;
 	odp_time_t lower_limit, upper_limit;
 	odp_time_t start_time, end_time, diff;
+	uint64_t duration_ns = WAIT_ROUNDS * WAIT_TIMEOUT;
 
 	/* check on read */
 	wait_time = odp_schedule_wait_time(0);
@@ -173,10 +177,11 @@ static void scheduler_test_wait_time(void)
 	queue = odp_queue_create("dummy_queue", &qp);
 	CU_ASSERT_FATAL(queue != ODP_QUEUE_INVALID);
 
-	wait_time = odp_schedule_wait_time(ODP_TIME_SEC_IN_NS);
+	wait_time = odp_schedule_wait_time(WAIT_TIMEOUT);
 	start_time = odp_time_local();
-	odp_schedule(&queue, ODP_SCHED_NO_WAIT);
+	ev = odp_schedule(NULL, ODP_SCHED_NO_WAIT);
 	end_time = odp_time_local();
+	CU_ASSERT_FATAL(ev == ODP_EVENT_INVALID);
 
 	diff = odp_time_diff(end_time, start_time);
 	lower_limit = ODP_TIME_NULL;
@@ -186,28 +191,27 @@ static void scheduler_test_wait_time(void)
 	CU_ASSERT(odp_time_cmp(diff, upper_limit) <= 0);
 
 	/* check time correctness */
+	printf("\nTesting wait time for %.3f sec ...\n", (double)duration_ns / ODP_TIME_SEC_IN_NS);
 	start_time = odp_time_local();
-	for (i = 1; i < 6; i++)
-		odp_schedule(&queue, wait_time);
+	for (i = 0; i < WAIT_ROUNDS; i++) {
+		ev = odp_schedule(NULL, wait_time);
+		CU_ASSERT_FATAL(ev == ODP_EVENT_INVALID);
+	}
 	end_time = odp_time_local();
 
 	diff = odp_time_diff(end_time, start_time);
-	lower_limit = odp_time_local_from_ns(5 * ODP_TIME_SEC_IN_NS -
-					     WAIT_TOLERANCE);
-	upper_limit = odp_time_local_from_ns(5 * ODP_TIME_SEC_IN_NS +
-					     WAIT_TOLERANCE);
+	lower_limit = odp_time_local_from_ns(duration_ns - WAIT_TOLERANCE);
+	upper_limit = odp_time_local_from_ns(duration_ns + WAIT_TOLERANCE);
 
 	if (odp_time_cmp(diff, lower_limit) <= 0) {
-		fprintf(stderr, "Exceed lower limit: "
-			"diff is %" PRIu64 ", lower_limit %" PRIu64 "\n",
-			odp_time_to_ns(diff), odp_time_to_ns(lower_limit));
+		ODPH_ERR("Exceed lower limit: diff is %" PRIu64 ", lower_limit %" PRIu64 "\n",
+			 odp_time_to_ns(diff), odp_time_to_ns(lower_limit));
 		CU_FAIL("Exceed lower limit\n");
 	}
 
 	if (odp_time_cmp(diff, upper_limit) >= 0) {
-		fprintf(stderr, "Exceed upper limit: "
-			"diff is %" PRIu64 ", upper_limit %" PRIu64 "\n",
-			odp_time_to_ns(diff), odp_time_to_ns(upper_limit));
+		ODPH_ERR("Exceed upper limit: diff is %" PRIu64 ", upper_limit %" PRIu64 "\n",
+			 odp_time_to_ns(diff), odp_time_to_ns(upper_limit));
 		CU_FAIL("Exceed upper limit\n");
 	}
 
@@ -1847,6 +1851,104 @@ static void scheduler_test_pause_resume(void)
 	CU_ASSERT(drain_queues() == 0);
 }
 
+static void scheduler_test_pause_enqueue(void)
+{
+	odp_queue_t queue;
+	odp_buffer_t buf;
+	odp_event_t ev;
+	odp_event_t ev_tbl[NUM_BUFS_BEFORE_PAUSE];
+	odp_queue_t from;
+	odp_pool_t pool;
+	int i;
+	int ret;
+	int local_bufs;
+
+	queue = odp_queue_lookup("sched_0_0_n");
+	CU_ASSERT_FATAL(queue != ODP_QUEUE_INVALID);
+
+	pool = odp_pool_lookup(MSG_POOL_NAME);
+	CU_ASSERT_FATAL(pool != ODP_POOL_INVALID);
+
+	for (i = 0; i < NUM_BUFS_PAUSE; i++) {
+		buf = odp_buffer_alloc(pool);
+		CU_ASSERT_FATAL(buf != ODP_BUFFER_INVALID);
+		ev = odp_buffer_to_event(buf);
+		ret = odp_queue_enq(queue, ev);
+		CU_ASSERT_FATAL(ret == 0);
+	}
+
+	for (i = 0; i < NUM_BUFS_BEFORE_PAUSE; i++) {
+		from = ODP_QUEUE_INVALID;
+		ev = odp_schedule(&from, ODP_SCHED_WAIT);
+		CU_ASSERT_FATAL(ev != ODP_EVENT_INVALID);
+		CU_ASSERT(from == queue);
+		ev_tbl[i] = ev;
+	}
+
+	/* Pause, enqueue, schedule, resume */
+	odp_schedule_pause();
+
+	for (i = 0; i < NUM_BUFS_BEFORE_PAUSE; i++) {
+		ev = ev_tbl[i];
+		ret = odp_queue_enq(queue, ev);
+		CU_ASSERT_FATAL(ret == 0);
+	}
+
+	local_bufs = 0;
+	while (1) {
+		from = ODP_QUEUE_INVALID;
+		ev = odp_schedule(&from, ODP_SCHED_NO_WAIT);
+		if (ev == ODP_EVENT_INVALID)
+			break;
+
+		CU_ASSERT(from == queue);
+		ret = odp_queue_enq(queue, ev);
+		CU_ASSERT_FATAL(ret == 0);
+
+		local_bufs++;
+		CU_ASSERT_FATAL(local_bufs <= NUM_BUFS_PAUSE);
+	}
+
+	odp_schedule_resume();
+
+	for (i = 0; i < NUM_BUFS_BEFORE_PAUSE; i++) {
+		from = ODP_QUEUE_INVALID;
+		ev = odp_schedule(&from, ODP_SCHED_WAIT);
+		CU_ASSERT_FATAL(ev != ODP_EVENT_INVALID);
+		CU_ASSERT(from == queue);
+		ev_tbl[i] = ev;
+	}
+
+	/* Pause, schedule, enqueue, resume */
+	odp_schedule_pause();
+
+	local_bufs = 0;
+	while (1) {
+		from = ODP_QUEUE_INVALID;
+		ev = odp_schedule(&from, ODP_SCHED_NO_WAIT);
+		if (ev == ODP_EVENT_INVALID)
+			break;
+
+		CU_ASSERT(from == queue);
+		ret = odp_queue_enq(queue, ev);
+		CU_ASSERT_FATAL(ret == 0);
+
+		local_bufs++;
+		CU_ASSERT_FATAL(local_bufs <= NUM_BUFS_PAUSE - NUM_BUFS_BEFORE_PAUSE);
+	}
+
+	for (i = 0; i < NUM_BUFS_BEFORE_PAUSE; i++) {
+		ev = ev_tbl[i];
+		ret = odp_queue_enq(queue, ev);
+		CU_ASSERT_FATAL(ret == 0);
+	}
+
+	odp_schedule_resume();
+
+	/* Free all */
+	CU_ASSERT(drain_queues() == NUM_BUFS_PAUSE);
+}
+
 /* Basic, single threaded ordered lock API testing */
 static void scheduler_test_ordered_lock(void)
 {
@@ -2479,7 +2581,7 @@ static int destroy_queues(void)
 	}
 
 	if (odp_pool_destroy(globals->queue_ctx_pool) != 0) {
-		fprintf(stderr, "error: failed to destroy queue ctx pool\n");
+		ODPH_ERR("Failed to destroy queue ctx pool\n");
 		return -1;
 	}
 
@@ -2492,21 +2594,21 @@ static int scheduler_suite_term(void)
 	odp_shm_t shm;
 
 	if (destroy_queues() != 0) {
-		fprintf(stderr, "error: failed to destroy queues\n");
+		ODPH_ERR("Failed to destroy queues\n");
 		return -1;
 	}
 
 	pool = odp_pool_lookup(MSG_POOL_NAME);
 	if (odp_pool_destroy(pool) != 0)
-		fprintf(stderr, "error: failed to destroy pool\n");
+		ODPH_ERR("Failed to destroy pool\n");
 
 	shm = odp_shm_lookup(SHM_THR_ARGS_NAME);
 	if (odp_shm_free(shm) != 0)
-		fprintf(stderr, "error: failed to free shm\n");
+		ODPH_ERR("Failed to free shm\n");
 
 	shm = odp_shm_lookup(GLOBALS_SHM_NAME);
 	if (odp_shm_free(shm) != 0)
-		fprintf(stderr, "error: failed to free shm\n");
+		ODPH_ERR("Failed to free shm\n");
 
 	if (odp_cunit_print_inactive())
 		return -1;
@@ -2646,6 +2748,7 @@ odp_testinfo_t scheduler_suite[] = {
 	ODP_TEST_INFO(scheduler_test_order_ignore),
 	ODP_TEST_INFO(scheduler_test_groups),
 	ODP_TEST_INFO(scheduler_test_pause_resume),
+	ODP_TEST_INFO(scheduler_test_pause_enqueue),
 	ODP_TEST_INFO(scheduler_test_ordered_lock),
 	ODP_TEST_INFO_CONDITIONAL(scheduler_test_flow_aware,
 				  check_flow_aware_support),
@@ -2697,7 +2800,7 @@ static int global_init(odp_instance_t *inst)
 	odph_helper_options_t helper_options;
 
 	if (odph_options(&helper_options)) {
-		fprintf(stderr, "error: odph_options() failed.\n");
+		ODPH_ERR("odph_options() failed.\n");
 		return -1;
 	}
 
@@ -2705,12 +2808,12 @@ static int global_init(odp_instance_t *inst)
 	init_param.mem_model = helper_options.mem_model;
 
 	if (0 != odp_init_global(inst, &init_param, NULL)) {
-		fprintf(stderr, "error: odp_init_global() failed.\n");
+		ODPH_ERR("odp_init_global() failed.\n");
 		return -1;
 	}
 
 	if (0 != odp_init_local(*inst, ODP_THREAD_CONTROL)) {
-		fprintf(stderr, "error: odp_init_local() failed.\n");
+		ODPH_ERR("odp_init_local() failed.\n");
 		return -1;
 	}
 

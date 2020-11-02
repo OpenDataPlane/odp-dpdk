@@ -367,25 +367,25 @@ static void free_tbl_entry(profile_tbl_t *profile_tbl,
 	switch (profile_kind) {
 	case TM_SHAPER_PROFILE:
 		odp_ticketlock_lock(&profile_tbl->shaper.lock);
-		profile_tbl->shaper.profile[idx].status = TM_STATUS_RESERVED;
+		profile_tbl->shaper.profile[idx].status = TM_STATUS_FREE;
 		odp_ticketlock_unlock(&profile_tbl->shaper.lock);
 		return;
 
 	case TM_SCHED_PROFILE:
 		odp_ticketlock_lock(&profile_tbl->sched.lock);
-		profile_tbl->sched.profile[idx].status = TM_STATUS_RESERVED;
+		profile_tbl->sched.profile[idx].status = TM_STATUS_FREE;
 		odp_ticketlock_unlock(&profile_tbl->sched.lock);
 		return;
 
 	case TM_THRESHOLD_PROFILE:
 		odp_ticketlock_lock(&profile_tbl->threshold.lock);
-		profile_tbl->threshold.profile[idx].status = TM_STATUS_RESERVED;
+		profile_tbl->threshold.profile[idx].status = TM_STATUS_FREE;
 		odp_ticketlock_unlock(&profile_tbl->threshold.lock);
 		return;
 
 	case TM_WRED_PROFILE:
 		odp_ticketlock_lock(&profile_tbl->wred.lock);
-		profile_tbl->wred.profile[idx].status = TM_STATUS_RESERVED;
+		profile_tbl->wred.profile[idx].status = TM_STATUS_FREE;
 		odp_ticketlock_unlock(&profile_tbl->wred.lock);
 		return;
 
@@ -2959,7 +2959,6 @@ odp_tm_t odp_tm_create(const char            *name,
 	tm_system_capabilities_set(&tm_system->capabilities,
 				   &tm_system->requirements);
 
-	tm_system->next_queue_num = 1;
 	tm_system->root_node.is_root_node = true;
 
 	tm_init_random_data(&tm_system->tm_random_data);
@@ -3973,7 +3972,7 @@ odp_tm_queue_t odp_tm_queue_create(odp_tm_t odp_tm,
 		queue_obj->user_context = params->user_context;
 		queue_obj->priority = params->priority;
 		queue_obj->tm_idx = tm_system->tm_idx;
-		queue_obj->queue_num = tm_system->next_queue_num++;
+		queue_obj->queue_num = (uint32_t)_odp_int_pkt_queue;
 		queue_obj->_odp_int_pkt_queue = _odp_int_pkt_queue;
 		queue_obj->pkt = ODP_PACKET_INVALID;
 		odp_ticketlock_init(&queue_obj->tm_wred_node.tm_wred_node_lock);
@@ -4052,6 +4051,8 @@ int odp_tm_queue_destroy(odp_tm_queue_t tm_queue)
 	odp_queue_destroy(tm_queue_obj->queue);
 
 	odp_ticketlock_lock(&tm_glb->queue_obj.lock);
+	_odp_pkt_queue_destroy(tm_system->_odp_int_queue_pool,
+			       tm_queue_obj->_odp_int_pkt_queue);
 	tm_queue_obj->status = TM_STATUS_FREE;
 	odp_ticketlock_unlock(&tm_glb->queue_obj.lock);
 
@@ -4683,7 +4684,7 @@ void odp_tm_stats_print(odp_tm_t odp_tm)
 	input_work_queue_t *input_work_queue;
 	tm_queue_obj_t *tm_queue_obj;
 	tm_system_t *tm_system;
-	uint32_t queue_num, max_queue_num;
+	uint32_t queue_num;
 
 	tm_system = GET_TM_SYSTEM(odp_tm);
 	input_work_queue = &tm_system->input_work_queue;
@@ -4706,8 +4707,7 @@ void odp_tm_stats_print(odp_tm_t odp_tm)
 	_odp_timer_wheel_stats_print(tm_system->_odp_int_timer_wheel);
 	_odp_sorted_list_stats_print(tm_system->_odp_int_sorted_pool);
 
-	max_queue_num = tm_system->next_queue_num;
-	for (queue_num = 1; queue_num < max_queue_num; queue_num++) {
+	for (queue_num = 1; queue_num <= ODP_TM_MAX_TM_QUEUES; queue_num++) {
 		tm_queue_obj = tm_system->queue_num_tbl[queue_num - 1];
 		if (tm_queue_obj && tm_queue_obj->pkts_rcvd_cnt != 0)
 			ODP_PRINT("queue_num=%u priority=%u rcvd=%u enqueued=%u "
