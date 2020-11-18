@@ -94,7 +94,7 @@ typedef struct ODP_ALIGNED_CACHE {
 	uint32_t supported_ptypes;
 	char ifname[32];
 	/** RX queue locks */
-	odp_ticketlock_t ODP_ALIGNED_CACHE rx_lock[PKTIO_MAX_QUEUES];
+	odp_ticketlock_t rx_lock[PKTIO_MAX_QUEUES] ODP_ALIGNED_CACHE;
 	odp_ticketlock_t tx_lock[PKTIO_MAX_QUEUES];  /**< TX queue locks */
 	uint8_t vdev_sysc_promisc;	/**< promiscuous mode defined with
 					    system call */
