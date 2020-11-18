@@ -297,7 +297,7 @@ static int dpdk_setup_eth_dev(pktio_entry_t *pktio_entry,
 	eth_conf.txmode.offloads = tx_offloads;
 
 	if (tx_offloads)
-		pktio_entry->s.chksum_insert_ena = 1;
+		pktio_entry->s.enabled.chksum_insert = 1;
 
 	/* RX packet len same size as pool segment minus headroom and double
 	 * VLAN tag
@@ -1236,7 +1236,7 @@ static int send_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 			 const odp_packet_t pkt_table[], int num)
 {
 	pkt_dpdk_t * const pkt_dpdk = pkt_priv(pktio_entry);
-	uint8_t chksum_insert_ena = pktio_entry->s.chksum_insert_ena;
+	uint8_t chksum_insert_ena = pktio_entry->s.enabled.chksum_insert;
 	odp_pktout_config_opt_t *pktout_cfg = &pktio_entry->s.config.pktout;
 	odp_pktout_config_opt_t *pktout_capa =
 		&pktio_entry->s.capa.config.pktout;
