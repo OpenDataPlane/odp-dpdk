@@ -32,6 +32,7 @@
 #include <inttypes.h>
 #include <ctype.h>
 
+#include <rte_string_fns.h>
 #include <rte_version.h>
 
 /* sysconf */
@@ -111,34 +112,6 @@ static uint64_t default_huge_page_size(void)
 	ODP_ERR("unable to get default hp size\n");
 	fclose(file);
 	return 0;
-}
-
-/*
- * split string into tokens. largely "inspired" by dpdk:
- * lib/librte_eal/common/eal_common_string_fns.c: rte_strsplit
- */
-static int strsplit(char *string, int stringlen,
-		    char **tokens, int maxtokens, char delim)
-{
-	int i, tok = 0;
-	int tokstart = 1; /* first token is right at start of string */
-
-	if (string == NULL || tokens == NULL)
-		return -1;
-
-	for (i = 0; i < stringlen; i++) {
-		if (string[i] == '\0' || tok >= maxtokens)
-			break;
-		if (tokstart) {
-			tokstart = 0;
-			tokens[tok++] = &string[i];
-		}
-		if (string[i] == delim) {
-			string[i] = '\0';
-			tokstart = 1;
-		}
-	}
-	return tok;
 }
 
 /*
@@ -232,8 +205,8 @@ static char *get_hugepage_dir(uint64_t hugepage_sz)
 		hugepage_sz = default_size;
 
 	while (fgets(buf, sizeof(buf), fd)) {
-		if (strsplit(buf, sizeof(buf), tokens,
-			     _FIELDNAME_MAX, split_tok) != _FIELDNAME_MAX) {
+		if (rte_strsplit(buf, sizeof(buf), tokens,
+				 _FIELDNAME_MAX, split_tok) != _FIELDNAME_MAX) {
 			ODP_ERR("Error parsing %s\n", proc_mounts);
 			break; /* return NULL */
 		}
