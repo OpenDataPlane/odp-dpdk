@@ -596,6 +596,8 @@ static int dpdk_init_capability(pktio_entry_t *pktio_entry,
 	capa->config.pktout.bit.tcp_chksum_ena =
 		capa->config.pktout.bit.tcp_chksum;
 
+	capa->config.pktout.bit.ts_ena = 1;
+
 	return 0;
 }
 
@@ -1237,20 +1239,26 @@ static int send_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 {
 	pkt_dpdk_t * const pkt_dpdk = pkt_priv(pktio_entry);
 	uint8_t chksum_insert_ena = pktio_entry->s.enabled.chksum_insert;
+	uint8_t tx_ts_ena = pktio_entry->s.enabled.tx_ts;
 	odp_pktout_config_opt_t *pktout_cfg = &pktio_entry->s.config.pktout;
 	odp_pktout_config_opt_t *pktout_capa =
 		&pktio_entry->s.capa.config.pktout;
+	int tx_ts_idx = 0;
 	int pkts;
 
-	if (chksum_insert_ena) {
+	if (chksum_insert_ena || tx_ts_ena) {
 		int i;
 
 		for (i = 0; i < num; i++) {
 			struct rte_mbuf *mbuf = pkt_to_mbuf(pkt_table[i]);
+			odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt_table[i]);
 
-			pkt_set_ol_tx(pktout_cfg, pktout_capa,
-				      packet_hdr(pkt_table[i]), mbuf,
-				      rte_pktmbuf_mtod(mbuf, char *));
+			if (chksum_insert_ena)
+				pkt_set_ol_tx(pktout_cfg, pktout_capa, pkt_hdr, mbuf,
+					      rte_pktmbuf_mtod(mbuf, char *));
+
+			if (odp_unlikely(tx_ts_ena && tx_ts_idx == 0 && pkt_hdr->p.flags.ts_set))
+				tx_ts_idx = i + 1;
 		}
 	}
 
@@ -1276,6 +1284,8 @@ static int send_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 			__odp_errno = EMSGSIZE;
 			return -1;
 		}
+	} else if (odp_unlikely(tx_ts_idx && pkts >= tx_ts_idx)) {
+		_odp_pktio_tx_ts_set(pktio_entry);
 	}
 	rte_errno = 0;
 	return pkts;
