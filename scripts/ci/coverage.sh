@@ -19,5 +19,3 @@ export CI="true"
 
 ODP_SCHEDULER=basic    make check
 ODP_SCHEDULER=sp       make check
-
-bash <(curl -s https://codecov.io/bash) -X coveragepy
