@@ -20,6 +20,7 @@ env:
 build:
   ci:
     - add-apt-repository -y ppa:lumag/odp-xenial
+    - rm -f /etc/apt/sources.list.d/basho_riak.list
     - apt-get update
     - apt-get install -yy --no-install-recommends --option Acquire::Retries=10 --option Acquire::http::Timeout=300 asciidoctor autoconf automake build-essential ccache clang doxygen gcc graphviz libconfig-dev libcunit1-dev libnuma-dev libdpdk-dev libpcap-dev libssl-dev libtool mscgen xsltproc
     - mkdir -p $HOME/odp-shmdir
