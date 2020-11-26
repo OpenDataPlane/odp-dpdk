@@ -18,4 +18,9 @@ make -j $(nproc)
 export CI="true"
 
 ODP_SCHEDULER=basic    make check
+
+# Run only validation tests for the sp scheduler
+pushd ./test/validation/api/
 ODP_SCHEDULER=sp       make check
+popd
+
