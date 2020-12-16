@@ -50,25 +50,19 @@ extern "C" {
  * Invalid packet segment
  */
 
- /**
-  * @typedef odp_packet_color_t
-  * Color of packet for shaper/drop processing
-  */
-
- /**
-  * @def ODP_PACKET_GREEN
-  * Packet is green
-  */
-
- /**
-  * @def ODP_PACKET_YELLOW
-  * Packet is yellow
-  */
-
- /**
-  * @def ODP_PACKET_RED
-  * Packet is red
-  */
+/**
+ * @enum odp_packet_color_t
+ * Color of packet for shaper/drop processing
+ *
+ * @var ODP_PACKET_GREEN
+ * Packet is green
+ *
+ * @var ODP_PACKET_YELLOW
+ * Packet is yellow
+ *
+ * @var ODP_PACKET_RED
+ * Packet is red
+ */
 
 /**
  * Maximum number of packet colors which accommodates ODP_PACKET_GREEN, ODP_PACKET_YELLOW and
@@ -168,6 +162,21 @@ extern "C" {
  */
 
 /**
+ * @enum odp_packet_chksum_status_t
+ * Checksum check status in packet
+ *
+ * @var ODP_PACKET_CHKSUM_UNKNOWN
+ * Checksum was not checked. Checksum check was not
+ * attempted or the attempt failed.
+ *
+ * @var ODP_PACKET_CHKSUM_BAD
+ * Checksum was checked and it was not correct.
+ *
+ * @var ODP_PACKET_CHKSUM_OK
+ * Checksum was checked and it was correct.
+ */
+
+/**
  * Protocol
  */
 typedef enum odp_proto_t {
@@ -217,22 +226,6 @@ typedef struct odp_packet_data_range {
 	uint32_t length;
 
 } odp_packet_data_range_t;
-
-/**
- * Checksum check status in packet
- */
-typedef enum odp_packet_chksum_status_t {
-	/** Checksum was not checked. Checksum check was not attempted or
-	  * the attempt failed. */
-	ODP_PACKET_CHKSUM_UNKNOWN = 0,
-
-	/** Checksum was checked and it was not correct */
-	ODP_PACKET_CHKSUM_BAD,
-
-	/** Checksum was checked and it was correct */
-	ODP_PACKET_CHKSUM_OK
-
-} odp_packet_chksum_status_t;
 
 /**
  * Event subtype of a packet
@@ -1830,9 +1823,14 @@ odp_packet_chksum_status_t odp_packet_l4_chksum_status(odp_packet_t pkt);
  * inserted if the packet is output through a pktio that does not have
  * the relevant checksum insertion enabled.
  *
+ * L3 type and L3 offset in packet metadata should provide valid protocol
+ * and header offset for checksum insertion purposes.
+ *
  * @param pkt     Packet handle
  * @param insert  0: do not insert L3 checksum
  *                1: insert L3 checksum
+ *
+ * @see odp_packet_l3_offset(), odp_packet_has_ipv4(), odp_packet_has_ipv6()
  */
 void odp_packet_l3_chksum_insert(odp_packet_t pkt, int insert);
 
@@ -1847,9 +1845,16 @@ void odp_packet_l3_chksum_insert(odp_packet_t pkt, int insert);
  * inserted if the packet is output through a pktio that does not have
  * the relevant checksum insertion enabled.
  *
+ * L3 type, L4 type, L3 offset and L4 offset in packet metadata should provide
+ * valid protocols and header offsets for checksum insertion purposes.
+ *
  * @param pkt     Packet handle
  * @param insert  0: do not insert L4 checksum
  *                1: insert L4 checksum
+ *
+ * @see odp_packet_l3_offset(), odp_packet_has_ipv4(), odp_packet_has_ipv6()
+ * @see odp_packet_l4_offset(), odp_packet_has_tcp(), odp_packet_has_udp()
+ * @see odp_packet_has_sctp()
  */
 void odp_packet_l4_chksum_insert(odp_packet_t pkt, int insert);
 
@@ -1939,6 +1944,22 @@ odp_time_t odp_packet_ts(odp_packet_t pkt);
  * odp_pktin_ts_from_ns()
  */
 void odp_packet_ts_set(odp_packet_t pkt, odp_time_t timestamp);
+
+/**
+ * Request Tx timestamp capture
+ *
+ * Control whether timestamp needs to be captured when this packet is
+ * transmitted. By default, Tx timestamping is disabled. This API is allowed to
+ * be called always, but the Tx timestamp is not captured if the output packet
+ * IO device is not configured to enable timestamping.
+ *
+ * @param pkt     Packet handle
+ * @param enable  0: do not capture timestamp on Tx
+ *                1: capture timestamp on Tx
+ *
+ * @see odp_pktout_ts_read()
+ */
+void odp_packet_ts_request(odp_packet_t pkt, int enable);
 
 /**
  * Get packet color

@@ -14,6 +14,7 @@ extern "C" {
 #include <odp/api/init.h>
 #include <odp/api/cpumask.h>
 #include <odp/api/random.h>
+#include <odp/api/system_info.h>
 #include <sys/types.h>
 #include <pthread.h>
 #include <stdint.h>
@@ -30,6 +31,9 @@ typedef struct {
 	uint64_t page_size;
 	int      cache_line_size;
 	int      cpu_count;
+	odp_cpu_arch_t cpu_arch;
+	odp_cpu_arch_isa_t cpu_isa_sw;
+	odp_cpu_arch_isa_t cpu_isa_hw;
 	char     cpu_arch_str[128];
 	char     model_str[CONFIG_NUM_CPU_IDS][MODEL_STR_SIZE];
 } system_info_t;
@@ -51,6 +55,7 @@ typedef struct odp_global_data_ro_t {
 	uint64_t shm_max_size;
 	int shm_single_va;
 	pid_t main_pid;
+	pid_t fdserver_pid;
 	char uid[UID_MAXLEN];
 	odp_log_func_t log_fn;
 	odp_abort_func_t abort_fn;
@@ -59,6 +64,7 @@ typedef struct odp_global_data_ro_t {
 	odp_cpumask_t control_cpus;
 	odp_cpumask_t worker_cpus;
 	int num_cpus_installed;
+	uint8_t has_config_rt;
 	config_t libconfig_default;
 	config_t libconfig_runtime;
 	odp_random_kind_t ipsec_rand_kind;
