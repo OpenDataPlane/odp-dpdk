@@ -145,6 +145,9 @@ extern "C" {
  */
 #define CONFIG_POOL_MAX_NUM ((1024 * 1024) - 1)
 
+/* Maximum packet vector size */
+#define CONFIG_PACKET_VECTOR_MAX_SIZE 256
+
 #ifdef __cplusplus
 }
 #endif

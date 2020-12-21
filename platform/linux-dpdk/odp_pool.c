@@ -21,6 +21,7 @@
 #include <odp_debug_internal.h>
 #include <odp/api/cpumask.h>
 #include <odp_libconfig_internal.h>
+#include <odp_event_vector_internal.h>
 
 #include <string.h>
 #include <stdlib.h>
@@ -125,8 +126,11 @@ int _odp_pool_init_global(void)
 	}
 
 	ODP_DBG("\nPool init global\n");
-	ODP_DBG("  odp_buffer_hdr_t size %zu\n", sizeof(odp_buffer_hdr_t));
-	ODP_DBG("  odp_packet_hdr_t size %zu\n", sizeof(odp_packet_hdr_t));
+	ODP_DBG("  odp_buffer_hdr_t size:       %zu\n", sizeof(odp_buffer_hdr_t));
+	ODP_DBG("  odp_packet_hdr_t size:       %zu\n", sizeof(odp_packet_hdr_t));
+	ODP_DBG("  odp_timeout_hdr_t size:      %zu\n", sizeof(odp_timeout_hdr_t));
+	ODP_DBG("  odp_event_vector_hdr_t size: %zu\n", sizeof(odp_event_vector_hdr_t));
+
 	ODP_DBG("\n");
 
 	return 0;
@@ -194,6 +198,13 @@ int odp_pool_capability(odp_pool_capability_t *capa)
 	capa->tmo.min_cache_size   = 0;
 	capa->tmo.max_cache_size   = RTE_MEMPOOL_CACHE_MAX_SIZE;
 
+	/* Vector pools */
+	capa->vector.max_pools      = max_pools;
+	capa->vector.max_num        = CONFIG_POOL_MAX_NUM;
+	capa->vector.max_size       = CONFIG_PACKET_VECTOR_MAX_SIZE;
+	capa->vector.min_cache_size = 0;
+	capa->vector.max_cache_size = RTE_MEMPOOL_CACHE_MAX_SIZE;
+
 	return 0;
 }
 
@@ -201,7 +212,8 @@ struct mbuf_ctor_arg {
 	pool_t	*pool;
 	uint16_t seg_buf_offset; /* To skip the ODP buf/pkt/tmo header */
 	uint16_t seg_buf_size;   /* size of user data */
-	int type;
+	int type;                /* ODP pool type */
+	int event_type;          /* ODP event type */
 	int pkt_uarea_size;      /* size of user area in bytes */
 };
 
@@ -261,7 +273,15 @@ odp_dpdk_mbuf_ctor(struct rte_mempool *mp,
 	buf_hdr->index = i;
 	buf_hdr->pool_ptr = mb_ctor_arg->pool;
 	buf_hdr->type = mb_ctor_arg->type;
-	buf_hdr->event_type = mb_ctor_arg->type;
+	buf_hdr->event_type = mb_ctor_arg->event_type;
+
+	/* Initialize event vector metadata */
+	if (mb_ctor_arg->type == ODP_POOL_VECTOR) {
+		odp_event_vector_hdr_t *vect_hdr;
+
+		vect_hdr = (odp_event_vector_hdr_t *)raw_mbuf;
+		vect_hdr->size = 0;
+	}
 }
 
 #define CHECK_U16_OVERFLOW(X)	do {			\
@@ -365,6 +385,34 @@ static int check_params(const odp_pool_param_t *params)
 
 		break;
 
+	case ODP_POOL_VECTOR:
+		if (params->vector.num == 0) {
+			ODP_ERR("vector.num zero\n");
+			return -1;
+		}
+
+		if (params->vector.num > capa.vector.max_num) {
+			ODP_ERR("vector.num too large %u\n", params->vector.num);
+			return -1;
+		}
+
+		if (params->vector.max_size == 0) {
+			ODP_ERR("vector.max_size zero\n");
+			return -1;
+		}
+
+		if (params->vector.max_size > capa.vector.max_size) {
+			ODP_ERR("vector.max_size too large %u\n", params->vector.max_size);
+			return -1;
+		}
+
+		if (params->vector.cache_size > capa.vector.max_cache_size) {
+			ODP_ERR("vector.cache_size too large %u\n", params->vector.cache_size);
+			return -1;
+		}
+
+		break;
+
 	default:
 		ODP_ERR("bad pool type %i\n", params->type);
 		return -1;
@@ -436,6 +484,7 @@ odp_pool_t odp_pool_create(const char *name, const odp_pool_param_t *params)
 	pool_t *pool;
 	uint32_t buf_align, blk_size, headroom, tailroom, min_seg_len;
 	uint32_t max_len, min_align;
+	int8_t event_type;
 	char pool_name[ODP_POOL_NAME_LEN];
 	char rte_name[RTE_MEMPOOL_NAMESIZE];
 
@@ -490,9 +539,10 @@ odp_pool_t odp_pool_create(const char *name, const odp_pool_param_t *params)
 			CHECK_U16_OVERFLOW(blk_size);
 			mbp_ctor_arg.mbuf_data_room_size = blk_size;
 			num = params->buf.num;
-			ODP_DBG("type: buffer name: %s num: "
-				"%u size: %u align: %u\n", pool_name, num,
-				params->buf.size, params->buf.align);
+			event_type = ODP_EVENT_BUFFER;
+
+			ODP_DBG("type: buffer, name: %s, num: %u, size: %u, align: %u\n",
+				pool_name, num, params->buf.size, params->buf.align);
 			break;
 		case ODP_POOL_PACKET:
 			headroom = CONFIG_PACKET_HEADROOM;
@@ -531,21 +581,30 @@ odp_pool_t odp_pool_create(const char *name, const odp_pool_param_t *params)
 			CHECK_U16_OVERFLOW(blk_size);
 			mbp_ctor_arg.mbuf_data_room_size = blk_size;
 			num = params->pkt.num;
+			event_type = ODP_EVENT_PACKET;
 
-			ODP_DBG("type: packet, name: %s, "
-				"num: %u, len: %u, blk_size: %u, "
-				"uarea_size %d, hdr_size %d\n",
-				pool_name, num, params->pkt.len, blk_size,
-				params->pkt.uarea_size, hdr_size);
+			ODP_DBG("type: packet, name: %s, num: %u, len: %u, blk_size: %u, "
+				"uarea_size: %d, hdr_size: %d\n", pool_name, num, params->pkt.len,
+				blk_size, params->pkt.uarea_size, hdr_size);
 			break;
 		case ODP_POOL_TIMEOUT:
 			hdr_size = sizeof(odp_timeout_hdr_t);
 			mbp_ctor_arg.mbuf_data_room_size = 0;
 			num = params->tmo.num;
 			cache_size = params->tmo.cache_size;
+			event_type = ODP_EVENT_TIMEOUT;
 
-			ODP_DBG("type: tmo name: %s num: %u\n",
-				pool_name, num);
+			ODP_DBG("type: tmo, name: %s, num: %u\n", pool_name, num);
+			break;
+		case ODP_POOL_VECTOR:
+			hdr_size = sizeof(odp_event_vector_hdr_t) +
+					(params->vector.max_size * sizeof(odp_packet_t));
+			mbp_ctor_arg.mbuf_data_room_size = 0;
+			num = params->vector.num;
+			cache_size = params->vector.cache_size;
+			event_type = ODP_EVENT_PACKET_VECTOR;
+
+			ODP_DBG("type: vector, name: %s, num: %u\n", pool_name, num);
 			break;
 		default:
 			ODP_ERR("Bad type %i\n",
@@ -558,6 +617,7 @@ odp_pool_t odp_pool_create(const char *name, const odp_pool_param_t *params)
 			(uint16_t)ROUNDUP_CACHE_LINE(hdr_size);
 		mb_ctor_arg.seg_buf_size = mbp_ctor_arg.mbuf_data_room_size;
 		mb_ctor_arg.type = params->type;
+		mb_ctor_arg.event_type = event_type;
 		mb_size = mb_ctor_arg.seg_buf_offset + mb_ctor_arg.seg_buf_size;
 		mb_ctor_arg.pool = pool;
 		mbp_ctor_arg.mbuf_priv_size = mb_ctor_arg.seg_buf_offset -
@@ -765,7 +825,7 @@ void odp_pool_param_init(odp_pool_param_t *params)
 	params->buf.cache_size = RTE_MEMPOOL_CACHE_MAX_SIZE;
 	params->pkt.cache_size = RTE_MEMPOOL_CACHE_MAX_SIZE;
 	params->tmo.cache_size = RTE_MEMPOOL_CACHE_MAX_SIZE;
-
+	params->vector.cache_size = RTE_MEMPOOL_CACHE_MAX_SIZE;
 }
 
 uint64_t odp_pool_to_u64(odp_pool_t hdl)
