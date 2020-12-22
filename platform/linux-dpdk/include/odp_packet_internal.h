@@ -114,6 +114,9 @@ typedef struct {
 	/* Classifier mark */
 	uint16_t cls_mark;
 
+	/* Classifier handle index */
+	uint16_t cos;
+
 	/* Event subtype */
 	int8_t subtype;
 
@@ -202,6 +205,7 @@ static inline void copy_packet_cls_metadata(odp_packet_hdr_t *src_hdr,
 {
 	dst_hdr->p = src_hdr->p;
 	dst_hdr->dst_queue = src_hdr->dst_queue;
+	dst_hdr->cos = src_hdr->cos;
 	dst_hdr->timestamp = src_hdr->timestamp;
 	dst_hdr->cls_mark  = src_hdr->cls_mark;
 }

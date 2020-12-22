@@ -1177,6 +1177,7 @@ int _odp_packet_copy_md_to_packet(odp_packet_t srcpkt, odp_packet_t dstpkt)
 
 	dsthdr->input = srchdr->input;
 	dsthdr->dst_queue = srchdr->dst_queue;
+	dsthdr->cos = srchdr->cos;
 	dsthdr->cls_mark = srchdr->cls_mark;
 	dsthdr->buf_hdr.mb.userdata = srchdr->buf_hdr.mb.userdata;
 
