@@ -67,6 +67,7 @@ AC_CONFIG_FILES([platform/linux-dpdk/Makefile
 		 platform/linux-dpdk/dumpconfig/Makefile
 		 platform/linux-dpdk/test/Makefile
 		 platform/linux-dpdk/test/example/Makefile
+		 platform/linux-dpdk/test/example/generator/Makefile
 		 platform/linux-dpdk/test/example/l2fwd_simple/Makefile
 		 platform/linux-dpdk/test/example/l3fwd/Makefile
 		 platform/linux-dpdk/test/example/packet/Makefile
