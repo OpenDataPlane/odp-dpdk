@@ -70,6 +70,49 @@ static inline odp_pool_t pool_index_to_handle(uint32_t pool_idx)
 	return _odp_cast_scalar(odp_pool_t, pool_idx + 1);
 }
 
+struct mem_cb_arg_t {
+	uint8_t *addr;
+	odp_bool_t match;
+};
+
+static void ptr_from_mempool(struct rte_mempool *mp ODP_UNUSED, void *opaque,
+			     struct rte_mempool_memhdr *memhdr,
+			     unsigned int mem_idx ODP_UNUSED)
+{
+	struct mem_cb_arg_t *args = (struct mem_cb_arg_t *)opaque;
+	uint8_t *min_addr = (uint8_t *)memhdr->addr;
+	uint8_t *max_addr = min_addr + memhdr->len;
+
+	/* Match found already */
+	if (args->match)
+		return;
+
+	if (args->addr >= min_addr && args->addr < max_addr)
+		args->match = true;
+}
+
+static pool_t *find_pool(odp_buffer_hdr_t *buf_hdr)
+{
+	int i;
+
+	for (i = 0; i < ODP_CONFIG_POOLS; i++) {
+		pool_t *pool = pool_entry(i);
+		struct mem_cb_arg_t args;
+
+		if (pool->rte_mempool == NULL)
+			continue;
+
+		args.addr = (uint8_t *)buf_hdr;
+		args.match = false;
+		rte_mempool_mem_iter(pool->rte_mempool, ptr_from_mempool, &args);
+
+		if (args.match)
+			return pool;
+	}
+
+	return NULL;
+}
+
 static int read_config_file(pool_global_t *pool_gbl)
 {
 	const char *str;
@@ -158,6 +201,28 @@ int _odp_pool_term_global(void)
 int _odp_pool_term_local(void)
 {
 	return 0;
+}
+
+int _odp_buffer_is_valid(odp_buffer_t buf)
+{
+	pool_t *pool;
+	odp_buffer_hdr_t *buf_hdr = buf_hdl_to_hdr(buf);
+
+	if (buf == ODP_BUFFER_INVALID)
+		return 0;
+
+	/* Check that buffer header is from a known pool */
+	pool = find_pool(buf_hdr);
+	if (pool == NULL)
+		return 0;
+
+	if (pool != buf_hdr->pool_ptr)
+		return 0;
+
+	if (buf_hdr->index >= pool->rte_mempool->size)
+		return 0;
+
+	return 1;
 }
 
 int odp_pool_capability(odp_pool_capability_t *capa)

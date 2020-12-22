@@ -95,6 +95,8 @@ static inline void buffer_free_multi(odp_buffer_hdr_t *buf_hdr[], int num)
 		rte_mbuf_raw_free((struct rte_mbuf *)(uintptr_t)buf_hdr[i]);
 }
 
+int _odp_buffer_is_valid(odp_buffer_t buf);
+
 #ifdef __cplusplus
 }
 #endif

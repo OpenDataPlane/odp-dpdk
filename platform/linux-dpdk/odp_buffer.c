@@ -47,9 +47,13 @@ void _odp_buffer_type_set(odp_buffer_t buf, int type)
 
 int odp_buffer_is_valid(odp_buffer_t buf)
 {
-	/* We could call rte_mbuf_sanity_check, but that panics
-	 * and aborts the program */
-	return buf != ODP_BUFFER_INVALID;
+	if (_odp_buffer_is_valid(buf) == 0)
+		return 0;
+
+	if (odp_event_type(odp_buffer_to_event(buf)) != ODP_EVENT_BUFFER)
+		return 0;
+
+	return 1;
 }
 
 int odp_buffer_snprint(char *str, uint32_t n, odp_buffer_t buf)
