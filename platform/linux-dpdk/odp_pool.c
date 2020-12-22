@@ -709,7 +709,8 @@ static inline int buffer_alloc_multi(pool_t *pool, odp_buffer_hdr_t *buf_hdr[],
 	struct rte_mempool *mp = pool->rte_mempool;
 
 	ODP_ASSERT(pool->params.type == ODP_POOL_BUFFER ||
-		   pool->params.type == ODP_POOL_TIMEOUT);
+		   pool->params.type == ODP_POOL_TIMEOUT ||
+		   pool->params.type == ODP_POOL_VECTOR);
 
 	for (i = 0; i < num; i++) {
 		struct rte_mbuf *mbuf;

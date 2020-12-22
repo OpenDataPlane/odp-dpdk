@@ -174,6 +174,7 @@ __LIB__libodp_dpdk_la_SOURCES = \
 			   ../linux-generic/odp_libconfig.c \
 			   odp_packet.c \
 			   odp_packet_dpdk.c \
+			   ../linux-generic/odp_packet_vector.c \
 			   ../linux-generic/pktio/dpdk_parse.c \
 			   odp_packet_flags.c \
 			   ../linux-generic/odp_packet_io.c \
