@@ -1,5 +1,5 @@
 /* Copyright (c) 2015-2018, Linaro Limited
- * Copyright (c) 2019, Nokia
+ * Copyright (c) 2019-2020, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -84,6 +84,7 @@ typedef struct {
 	int shutdown;		/**< Shutdown threads if !0 */
 	int shutdown_sig;
 	int verbose;
+	int promisc_mode;	/**< Promiscuous mode enabled */
 } appl_args_t;
 
 enum packet_mode {
@@ -199,6 +200,7 @@ static odp_pktio_t create_pktio(const char *dev, odp_pool_t pool)
 	odp_pktio_t pktio;
 	odp_pktio_param_t pktio_param;
 	odp_pktin_queue_param_t pktin_param;
+	odp_pktio_capability_t capa;
 
 	odp_pktio_param_init(&pktio_param);
 	pktio_param.in_mode = ODP_PKTIN_MODE_SCHED;
@@ -210,6 +212,11 @@ static odp_pktio_t create_pktio(const char *dev, odp_pool_t pool)
 			ODPH_ERR("Root level permission required\n");
 
 		ODPH_ERR("pktio create failed for %s\n", dev);
+		exit(EXIT_FAILURE);
+	}
+
+	if (odp_pktio_capability(pktio, &capa)) {
+		ODPH_ERR("pktio capability failed for %s\n", dev);
 		exit(EXIT_FAILURE);
 	}
 
@@ -225,6 +232,18 @@ static odp_pktio_t create_pktio(const char *dev, odp_pool_t pool)
 	if (odp_pktout_queue_config(pktio, NULL)) {
 		ODPH_ERR("pktout queue config failed for %s\n", dev);
 		exit(EXIT_FAILURE);
+	}
+
+	if (appl_args_gbl->promisc_mode) {
+		if (!capa.set_op.op.promisc_mode) {
+			ODPH_ERR("enabling promisc mode not supported %s\n", dev);
+			exit(EXIT_FAILURE);
+		}
+
+		if (odp_pktio_promisc_mode_set(pktio, true)) {
+			ODPH_ERR("failed to enable promisc mode for %s\n", dev);
+			exit(EXIT_FAILURE);
+		}
 	}
 
 	printf("  created pktio:%02" PRIu64
@@ -778,8 +797,14 @@ static int convert_str_to_pmr_enum(char *token, odp_cls_pmr_term_t *term)
 	} else if (strcasecmp(token, "ODP_PMR_TCP_SPORT") == 0) {
 		*term = ODP_PMR_TCP_SPORT;
 		return 0;
+	} else if (strcasecmp(token, "ODP_PMR_DIP_ADDR") == 0) {
+		*term = ODP_PMR_DIP_ADDR;
+		return 0;
 	} else if (strcasecmp(token, "ODP_PMR_SIP_ADDR") == 0) {
 		*term = ODP_PMR_SIP_ADDR;
+		return 0;
+	} else if (strcasecmp(token, "ODP_PMR_DMAC") == 0) {
+		*term = ODP_PMR_DMAC;
 		return 0;
 	} else if (strcasecmp(token, "ODP_PMR_CUSTOM_FRAME") == 0) {
 		*term = ODP_PMR_CUSTOM_FRAME;
@@ -795,10 +820,11 @@ static int convert_str_to_pmr_enum(char *token, odp_cls_pmr_term_t *term)
 static int parse_pmr_policy(appl_args_t *appl_args, char *optarg)
 {
 	int policy_count;
-	char *token, *cos0, *cos1;
+	char *token, *cos0, *cos1, *cur_char;
 	size_t len;
 	odp_cls_pmr_term_t term;
 	global_statistics *stats;
+	odph_ethaddr_t mac;
 	char *pmr_str;
 	uint32_t offset, ip_addr, u32;
 	unsigned long int value, mask;
@@ -868,6 +894,8 @@ static int parse_pmr_policy(appl_args_t *appl_args, char *optarg)
 
 		stats[policy_count].rule.val_sz = 2;
 	break;
+	case ODP_PMR_DIP_ADDR:
+		/* Fall through */
 	case ODP_PMR_SIP_ADDR:
 		/* :<IP addr>:<mask> */
 		token = strtok(NULL, ":");
@@ -891,6 +919,34 @@ static int parse_pmr_policy(appl_args_t *appl_args, char *optarg)
 		memcpy(stats[policy_count].rule.mask_be, &u32, sizeof(u32));
 
 		stats[policy_count].rule.val_sz = 4;
+	break;
+	case ODP_PMR_DMAC:
+		/* :<MAC addr>:<mask> */
+		token = strtok(NULL, ":");
+		strncpy(stats[policy_count].value, token,
+			DISPLAY_STRING_LEN - 1);
+
+		/* Replace hyphens in the MAC string with colons to be compatible with
+		 * odph_eth_addr_parse(). */
+		cur_char = token;
+		while ((cur_char = strchr(cur_char, '-')) != NULL)
+			*cur_char++ = ':';
+
+		if (odph_eth_addr_parse(&mac, token)) {
+			ODPH_ERR("Invalid MAC address. Use format 11-22-33-44-55-66.\n");
+			exit(EXIT_FAILURE);
+		}
+
+		memcpy(stats[policy_count].rule.value_be, mac.addr, ODPH_ETHADDR_LEN);
+		stats[policy_count].rule.val_sz = 6;
+
+		token = strtok(NULL, ":");
+		strncpy(stats[policy_count].mask, token, DISPLAY_STRING_LEN - 1);
+		mask_sz = parse_custom(token, stats[policy_count].rule.mask_be, ODPH_ETHADDR_LEN);
+		if (mask_sz != ODPH_ETHADDR_LEN) {
+			ODPH_ERR("Invalid mask. Provide mask without 0x prefix.\n");
+			return -1;
+		}
 	break;
 	case ODP_PMR_CUSTOM_FRAME:
 		/* Fall through */
@@ -973,15 +1029,17 @@ static int parse_args(int argc, char *argv[], appl_args_t *appl_args)
 		{"policy", required_argument, NULL, 'p'},
 		{"mode", required_argument, NULL, 'm'},
 		{"time", required_argument, NULL, 't'},
+		{"promisc_mode", no_argument, NULL, 'P'},
 		{"verbose", no_argument, NULL, 'v'},
 		{"help", no_argument, NULL, 'h'},
 		{NULL, 0, NULL, 0}
 	};
 
-	static const char *shortopts = "+c:t:i:p:m:t:vh";
+	static const char *shortopts = "+c:t:i:p:m:t:Pvh";
 
 	appl_args->cpu_count = 1; /* Use one worker by default */
 	appl_args->verbose = 0;
+	appl_args->promisc_mode = 0;
 
 	while (ret == 0) {
 		opt = getopt_long(argc, argv, shortopts,
@@ -1028,6 +1086,9 @@ static int parse_args(int argc, char *argv[], appl_args_t *appl_args)
 			else
 				appl_args->appl_mode = APPL_MODE_REPLY;
 			break;
+		case 'P':
+			appl_args->promisc_mode = 1;
+			break;
 		case 'v':
 			appl_args->verbose = 1;
 			break;
@@ -1067,8 +1128,9 @@ static void print_info(char *progname, appl_args_t *appl_args)
 
 	printf("Running ODP appl: \"%s\"\n"
 			"-----------------\n"
-			"Using IF:%s      ",
+			"Using IF:        %s\n",
 			progname, appl_args->if_name);
+	printf("Promisc mode:    %s\n", appl_args->promisc_mode ? "enabled" : "disabled");
 	printf("\n\n");
 	fflush(NULL);
 }
@@ -1110,10 +1172,12 @@ static void usage(void)
 		"                           !0: Packet ICMP mode. Received packets will be sent back\n"
 		"                           default: Packet Drop mode\n"
 		"\n"
-		" -t, --timeout <sec>       !0: Time for which the classifier will be run in seconds\n"
+		"  -t, --time <sec>         !0: Time for which the classifier will be run in seconds\n"
 		"                           0: Runs in infinite loop\n"
 		"                           default: Runs in infinite loop\n"
 		"\n"
+		"  -P, --promisc_mode       Enable promiscuous mode.\n"
+		"  -v, --verbose            Verbose output.\n"
 		"  -h, --help               Display help and exit.\n"
 		"\n");
 }

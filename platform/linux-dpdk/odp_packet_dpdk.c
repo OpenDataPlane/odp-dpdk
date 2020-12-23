@@ -83,21 +83,32 @@ typedef struct {
 
 /** Packet socket using dpdk mmaped rings for both Rx and Tx */
 typedef struct ODP_ALIGNED_CACHE {
-	uint16_t port_id;		  /**< DPDK port identifier */
-	uint16_t mtu;			  /**< maximum transmission unit */
-	uint8_t lockless_rx;		  /**< no locking for rx */
-	uint8_t lockless_tx;		  /**< no locking for tx */
-	uint8_t min_rx_burst;		  /**< minimum RX burst size */
-	uint8_t loopback;		  /**< Operate as loopback interface */
-	odp_pktin_hash_proto_t hash;	  /**< Packet input hash protocol */
-	/* Supported RTE_PTYPE_XXX flags in a mask */
+	/** Supported RTE_PTYPE_XXX flags in a mask */
 	uint32_t supported_ptypes;
+	/** Packet input hash protocol */
+	odp_pktin_hash_proto_t hash;
 	char ifname[32];
+	/** DPDK port identifier */
+	uint16_t port_id;
+	/** Maximum transmission unit */
+	uint16_t mtu;
+	struct {
+		/** No locking for rx */
+		uint8_t lockless_rx : 1;
+		/** No locking for tx */
+		uint8_t lockless_tx : 1;
+		/** Operates as loopback interface */
+		uint8_t loopback : 1;
+		/** Promiscuous mode defined with system call */
+		uint8_t vdev_sysc_promisc : 1;
+	} flags;
+	/** Minimum RX burst size */
+	uint8_t min_rx_burst;
 	/** RX queue locks */
-	odp_ticketlock_t ODP_ALIGNED_CACHE rx_lock[PKTIO_MAX_QUEUES];
-	odp_ticketlock_t tx_lock[PKTIO_MAX_QUEUES];  /**< TX queue locks */
-	uint8_t vdev_sysc_promisc;	/**< promiscuous mode defined with
-					    system call */
+	odp_ticketlock_t rx_lock[PKTIO_MAX_QUEUES] ODP_ALIGNED_CACHE;
+	/** TX queue locks */
+	odp_ticketlock_t tx_lock[PKTIO_MAX_QUEUES] ODP_ALIGNED_CACHE;
+	/** Configuration options */
 	dpdk_opt_t opt;
 	/* RX callback functions */
 #if RTE_VERSION < RTE_VERSION_NUM(18, 05, 0, 0)
@@ -194,12 +205,12 @@ static int init_options(pktio_entry_t *pktio_entry,
 		return -1;
 	opt->multicast_enable = !!opt->multicast_enable;
 
-	ODP_PRINT("DPDK interface (%s): %" PRIu16 "\n", dev_info->driver_name,
-		  pkt_priv(pktio_entry)->port_id);
-	ODP_PRINT("  multicast:   %d\n", opt->multicast_enable);
-	ODP_PRINT("  num_rx_desc: %d\n", opt->num_rx_desc);
-	ODP_PRINT("  num_tx_desc: %d\n", opt->num_tx_desc);
-	ODP_PRINT("  rx_drop_en:  %d\n", opt->rx_drop_en);
+	ODP_DBG("DPDK interface (%s): %" PRIu16 "\n", dev_info->driver_name,
+		pkt_priv(pktio_entry)->port_id);
+	ODP_DBG("  multicast:   %d\n", opt->multicast_enable);
+	ODP_DBG("  num_rx_desc: %d\n", opt->num_rx_desc);
+	ODP_DBG("  num_tx_desc: %d\n", opt->num_tx_desc);
+	ODP_DBG("  rx_drop_en:  %d\n", opt->rx_drop_en);
 
 	return 0;
 }
@@ -297,7 +308,7 @@ static int dpdk_setup_eth_dev(pktio_entry_t *pktio_entry,
 	eth_conf.txmode.offloads = tx_offloads;
 
 	if (tx_offloads)
-		pktio_entry->s.chksum_insert_ena = 1;
+		pktio_entry->s.enabled.chksum_insert = 1;
 
 	/* RX packet len same size as pool segment minus headroom and double
 	 * VLAN tag
@@ -411,7 +422,7 @@ static int dpdk_input_queues_config(pktio_entry_t *pktio_entry,
 	if (p->hash_enable && p->num_queues > 1)
 		pkt_priv(pktio_entry)->hash = p->hash_proto;
 
-	pkt_priv(pktio_entry)->lockless_rx = lockless;
+	pkt_priv(pktio_entry)->flags.lockless_rx = lockless;
 
 	return 0;
 }
@@ -427,7 +438,7 @@ static int dpdk_output_queues_config(pktio_entry_t *pktio_entry,
 	else
 		lockless = 0;
 
-	pkt_dpdk->lockless_tx = lockless;
+	pkt_dpdk->flags.lockless_tx = lockless;
 
 	return 0;
 }
@@ -519,7 +530,7 @@ static int dpdk_init_capability(pktio_entry_t *pktio_entry,
 	capa->set_op.op.promisc_mode = 1;
 
 	/* Ring pmd doesn't support setting MAC or enabling promisc mode */
-	if (pkt_dpdk->loopback) {
+	if (pkt_dpdk->flags.loopback) {
 		capa->set_op.op.mac_addr = 0;
 		capa->set_op.op.promisc_mode = 0;
 	} else {
@@ -596,6 +607,8 @@ static int dpdk_init_capability(pktio_entry_t *pktio_entry,
 	capa->config.pktout.bit.tcp_chksum_ena =
 		capa->config.pktout.bit.tcp_chksum;
 
+	capa->config.pktout.bit.ts_ena = 1;
+
 	return 0;
 }
 
@@ -631,7 +644,7 @@ static int dpdk_init_loopback(pkt_dpdk_t * const pkt_dpdk)
 		pkt_dpdk->port_id = dpdk_glb->loopback_port_id;
 	}
 
-	pkt_dpdk->loopback = 1;
+	pkt_dpdk->flags.loopback = 1;
 
 	return 0;
 }
@@ -645,7 +658,7 @@ static void promisc_mode_check(pkt_dpdk_t *pkt_dpdk)
 	rte_eth_promiscuous_enable(pkt_dpdk->port_id);
 
 	if (!rte_eth_promiscuous_get(pkt_dpdk->port_id))
-		pkt_dpdk->vdev_sysc_promisc = 1;
+		pkt_dpdk->flags.vdev_sysc_promisc = 1;
 
 	rte_eth_promiscuous_disable(pkt_dpdk->port_id);
 #else
@@ -654,12 +667,12 @@ static void promisc_mode_check(pkt_dpdk_t *pkt_dpdk)
 	ret = rte_eth_promiscuous_enable(pkt_dpdk->port_id);
 
 	if (!rte_eth_promiscuous_get(pkt_dpdk->port_id))
-		pkt_dpdk->vdev_sysc_promisc = 1;
+		pkt_dpdk->flags.vdev_sysc_promisc = 1;
 
 	ret += rte_eth_promiscuous_disable(pkt_dpdk->port_id);
 
 	if (ret)
-		pkt_dpdk->vdev_sysc_promisc = 1;
+		pkt_dpdk->flags.vdev_sysc_promisc = 1;
 #endif
 }
 
@@ -727,7 +740,7 @@ static int setup_pkt_dpdk(odp_pktio_t pktio ODP_UNUSED,
 		odp_ticketlock_init(&pkt_dpdk->tx_lock[i]);
 	}
 
-	if (pkt_dpdk->loopback)
+	if (pkt_dpdk->flags.loopback)
 		dpdk_glb->loopback_in_use = 1;
 
 	return 0;
@@ -743,7 +756,7 @@ static int close_pkt_dpdk(pktio_entry_t *pktio_entry)
 	else
 		rte_eth_dev_stop(pkt_dpdk->port_id);
 
-	if (pkt_dpdk->loopback)
+	if (pkt_dpdk->flags.loopback)
 		dpdk_glb->loopback_in_use = 0;
 
 	return 0;
@@ -829,7 +842,7 @@ static void dpdk_ptype_support_set(pktio_entry_t *pktio_entry, uint16_t port_id)
 
 	max_num = rte_eth_dev_get_supported_ptypes(port_id, mask, NULL, 0);
 	if (max_num <= 0) {
-		ODP_ERR("Device does not support any ptype flags\n");
+		ODP_DBG("Device does not support any ptype flags\n");
 		return;
 	}
 
@@ -895,7 +908,7 @@ static int dpdk_start(pktio_entry_t *pktio_entry)
 		return -1;
 
 	/* Add callback for loopback interface */
-	if (pkt_dpdk->loopback) {
+	if (pkt_dpdk->flags.loopback) {
 		unsigned int i;
 
 		for (i = 0; i < pktio_entry->s.num_in_queue; i++) {
@@ -940,7 +953,7 @@ static int stop_pkt_dpdk(pktio_entry_t *pktio_entry)
 	for (i = 0; i < pktio_entry->s.num_out_queue; i++)
 		rte_eth_dev_tx_queue_stop(port_id, i);
 
-	if (!pkt_dpdk->loopback)
+	if (!pkt_dpdk->flags.loopback)
 		return 0;
 
 	for (i = 0; i < pktio_entry->s.num_in_queue; i++) {
@@ -994,7 +1007,7 @@ int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int num)
 			uint32_t ptypes = pkt_dpdk->supported_ptypes;
 
 			/* DPDK ring pmd doesn't support packet parsing */
-			if (pkt_dpdk->loopback) {
+			if (pkt_dpdk->flags.loopback) {
 				packet_parse_layer(pkt_hdr, parse_layer,
 						   pktio_entry->s.in_chksums);
 			} else {
@@ -1030,7 +1043,7 @@ int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int num)
 			packet_parse_reset(&parsed_hdr, 1);
 			packet_set_len(&parsed_hdr, pkt_len);
 
-			if (!pkt_dpdk->loopback) {
+			if (!pkt_dpdk->flags.loopback) {
 				int layer = ODP_PROTO_LAYER_ALL;
 
 				if (_odp_dpdk_packet_parse_common(&parsed_hdr.p,
@@ -1044,7 +1057,7 @@ int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int num)
 			}
 			if (cls_classify_packet(pktio_entry, data, pkt_len,
 						pkt_len, &new_pool, &parsed_hdr,
-						pkt_dpdk->loopback)) {
+						pkt_dpdk->flags.loopback)) {
 				failed++;
 				odp_packet_free(pkt);
 				continue;
@@ -1083,7 +1096,7 @@ static int recv_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 	uint16_t nb_rx;
 	uint8_t min = pkt_dpdk->min_rx_burst;
 
-	if (!pkt_dpdk->lockless_rx)
+	if (!pkt_dpdk->flags.lockless_rx)
 		odp_ticketlock_lock(&pkt_dpdk->rx_lock[index]);
 
 	if (odp_likely(num >= min)) {
@@ -1110,7 +1123,7 @@ static int recv_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 		nb_rx = RTE_MIN(num, nb_rx);
 	}
 
-	if (!pkt_dpdk->lockless_rx)
+	if (!pkt_dpdk->flags.lockless_rx)
 		odp_ticketlock_unlock(&pkt_dpdk->rx_lock[index]);
 
 	/* Packets may also me received through eventdev, so don't add any
@@ -1236,25 +1249,31 @@ static int send_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 			 const odp_packet_t pkt_table[], int num)
 {
 	pkt_dpdk_t * const pkt_dpdk = pkt_priv(pktio_entry);
-	uint8_t chksum_insert_ena = pktio_entry->s.chksum_insert_ena;
+	uint8_t chksum_insert_ena = pktio_entry->s.enabled.chksum_insert;
+	uint8_t tx_ts_ena = pktio_entry->s.enabled.tx_ts;
 	odp_pktout_config_opt_t *pktout_cfg = &pktio_entry->s.config.pktout;
 	odp_pktout_config_opt_t *pktout_capa =
 		&pktio_entry->s.capa.config.pktout;
+	int tx_ts_idx = 0;
 	int pkts;
 
-	if (chksum_insert_ena) {
+	if (chksum_insert_ena || tx_ts_ena) {
 		int i;
 
 		for (i = 0; i < num; i++) {
 			struct rte_mbuf *mbuf = pkt_to_mbuf(pkt_table[i]);
+			odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt_table[i]);
 
-			pkt_set_ol_tx(pktout_cfg, pktout_capa,
-				      packet_hdr(pkt_table[i]), mbuf,
-				      rte_pktmbuf_mtod(mbuf, char *));
+			if (chksum_insert_ena)
+				pkt_set_ol_tx(pktout_cfg, pktout_capa, pkt_hdr, mbuf,
+					      rte_pktmbuf_mtod(mbuf, char *));
+
+			if (odp_unlikely(tx_ts_ena && tx_ts_idx == 0 && pkt_hdr->p.flags.ts_set))
+				tx_ts_idx = i + 1;
 		}
 	}
 
-	if (!pkt_dpdk->lockless_tx)
+	if (!pkt_dpdk->flags.lockless_tx)
 		odp_ticketlock_lock(&pkt_dpdk->tx_lock[index]);
 
 #pragma GCC diagnostic push
@@ -1263,7 +1282,7 @@ static int send_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 				(struct rte_mbuf **)pkt_table, num);
 #pragma GCC diagnostic pop
 
-	if (!pkt_dpdk->lockless_tx)
+	if (!pkt_dpdk->flags.lockless_tx)
 		odp_ticketlock_unlock(&pkt_dpdk->tx_lock[index]);
 
 	if (pkts == 0) {
@@ -1276,6 +1295,8 @@ static int send_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 			__odp_errno = EMSGSIZE;
 			return -1;
 		}
+	} else if (odp_unlikely(tx_ts_idx && pkts >= tx_ts_idx)) {
+		_odp_pktio_tx_ts_set(pktio_entry);
 	}
 	rte_errno = 0;
 	return pkts;
@@ -1376,7 +1397,7 @@ static int promisc_mode_set_pkt_dpdk(pktio_entry_t *pktio_entry,  int enable)
 	else
 		rte_eth_promiscuous_disable(port_id);
 
-	if (pkt_priv(pktio_entry)->vdev_sysc_promisc) {
+	if (pkt_priv(pktio_entry)->flags.vdev_sysc_promisc) {
 		int ret = _dpdk_vdev_promisc_mode_set(port_id, enable);
 
 		if (ret < 0)
@@ -1417,10 +1438,10 @@ static int promisc_mode_get_pkt_dpdk(pktio_entry_t *pktio_entry)
 	uint16_t port_id = pkt_dpdk->port_id;
 
 	/* Loopback interface always in promisc mode */
-	if (pkt_dpdk->loopback)
+	if (pkt_dpdk->flags.loopback)
 		return 1;
 
-	if (pkt_dpdk->vdev_sysc_promisc)
+	if (pkt_dpdk->flags.vdev_sysc_promisc)
 		return _dpdk_vdev_promisc_mode(port_id);
 	else
 		return rte_eth_promiscuous_get(port_id);
@@ -1563,8 +1584,9 @@ const pktio_if_ops_t dpdk_pktio_ops = {
 	.stop = stop_pkt_dpdk,
 	.stats = stats_pkt_dpdk,
 	.stats_reset = stats_reset_pkt_dpdk,
-	.pktin_ts_res = NULL,
-	.pktin_ts_from_ns = NULL,
+	.pktio_ts_res = NULL,
+	.pktio_ts_from_ns = NULL,
+	.pktio_time = NULL,
 	.mtu_get = dpdk_frame_maxlen,
 	.promisc_mode_set = promisc_mode_set_pkt_dpdk,
 	.promisc_mode_get = promisc_mode_get_pkt_dpdk,

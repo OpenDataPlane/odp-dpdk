@@ -365,14 +365,16 @@ typedef union odp_pktin_config_opt_t {
  * These defaults may be overridden on per packet basis using e.g.
  * odp_packet_l4_chksum_insert().
  *
- * For correct operation, packet metadata must provide valid offsets for the
- * appropriate protocols. For example, UDP checksum calculation needs both L3
- * and L4 offsets (to access IP and UDP headers). When application
- * (e.g. a switch) does not modify L3/L4 data and thus checksum does not need
- * to be updated, checksum insertion should be disabled for optimal performance.
- *
- * Packet flags (odp_packet_has_*()) are ignored for the purpose of checksum
- * insertion in packet output.
+ * For correct operation, packet metadata must provide valid offsets and type
+ * flags for the appropriate layer 3 and layer 4 protocols.  L3 and L4 offsets
+ * can be updated with odp_packet_l3_offset_set() and odp_packet_l4_offset_set()
+ * calls. L3 and L4 type flags can be updated using odp_packet_has_*_set() calls
+ * For example, UDP checksum calculation needs both L3 and L4 types (IP and UDP) and
+ * L3 and L4 offsets (to access IP and UDP headers), while IP checksum
+ * calculation only needs L3 type (IP) and L3 offset (to access IP header).
+ * When application (e.g. a switch) does not modify L3/L4 data and thus checksum
+ * does not need to be updated, checksum insertion should be disabled for optimal
+ * performance.
  *
  * UDP, TCP and SCTP checksum insertion must not be requested for IP fragments.
  * Use checksum override function (odp_packet_l4_chksum_insert()) to disable
@@ -388,7 +390,10 @@ typedef union odp_pktin_config_opt_t {
 typedef union odp_pktout_config_opt_t {
 	/** Option flags for packet output */
 	struct {
-		/** Enable IPv4 header checksum insertion. */
+		/** Enable Tx timestamp capture */
+		uint64_t ts_ena : 1;
+
+		/** Enable IPv4 header checksum insertion */
 		uint64_t ipv4_chksum_ena : 1;
 
 		/** Enable UDP checksum insertion */
@@ -411,6 +416,20 @@ typedef union odp_pktout_config_opt_t {
 
 		/** Insert SCTP checksum on packet by default */
 		uint64_t sctp_chksum     : 1;
+
+		/** Packet references not used on packet output
+		 *
+		 * When set, application indicates that it will not transmit
+		 * packet references on this packet IO interface.
+		 * Since every ODP implementation supports it, it is always
+		 * ok to set this flag.
+		 *
+		 * 0: Packet references may be transmitted on the
+		 *    interface (the default value).
+		 * 1: Packet references will not be transmitted on the
+		 *    interface.
+		 */
+		uint64_t no_packet_refs  : 1;
 
 	} bit;
 
@@ -516,13 +535,14 @@ typedef struct odp_pktio_config_t {
 	 *  to the pktio interface for output. IPSEC configuration is done
 	 *  through the IPSEC API.
 	 *
-	 *  Outbound IPSEC inline operation cannot be combined with traffic
-	 *  manager (ODP_PKTOUT_MODE_TM).
+	 *  Support of outbound IPSEC inline operation with traffic manager
+	 *  (ODP_PKTOUT_MODE_TM) can be queried with odp_ipsec_capability().
 	 *
-	 *  0: Disable outbound IPSEC inline operation (default)
-	 *  1: Enable outbound IPSEC inline operation
+	 * * 0: Disable outbound IPSEC inline operation (default)
+	 * * 1: Enable outbound IPSEC inline operation
 	 *
 	 *  @see odp_ipsec_config(), odp_ipsec_sa_create()
+	 *  odp_ipsec_out_inline()
 	 */
 	odp_bool_t outbound_ipsec;
 
@@ -540,6 +560,8 @@ typedef union odp_pktio_set_op_t {
 		uint32_t promisc_mode : 1;
 		/** MAC address  */
 		uint32_t mac_addr : 1;
+		/** Per port header offset(skip)set */
+		uint32_t skip_offset : 1;
 	} op;
 	/** All bits of the bit field structure.
 	  * This field can be used to set/clear all flags, or bitwise
@@ -1119,6 +1141,11 @@ int odp_pktio_error_cos_set(odp_pktio_t pktio, odp_cos_t error_cos);
  * @param pktio      Ingress port pktio handle.
  * @param offset     Number of bytes the classifier must skip.
  *
+ * This option is input to packet input parser/classifier indicating
+ * how many bytes of data should be skipped from start of packet,
+ * before parsing starts. So this option effects all packet input
+ * protocol identification and other offloads.
+ *
  * @retval  0 on success
  * @retval <0 on failure
  *
@@ -1371,6 +1398,9 @@ int odp_pktio_link_info(odp_pktio_t pktio, odp_pktio_link_info_t *info);
 /**
  * Packet input timestamp resolution in hertz
  *
+ * @deprecated Use odp_pktio_ts_res() instead, which returns resolution for
+ * both packet input and output timestamps.
+ *
  * This is the resolution of packet input timestamps. Returns zero on a failure
  * or when timestamping is disabled.
  *
@@ -1379,10 +1409,13 @@ int odp_pktio_link_info(odp_pktio_t pktio, odp_pktio_link_info_t *info);
  * @return Packet input timestamp resolution in hertz
  * @retval 0 on failure
  */
-uint64_t odp_pktin_ts_res(odp_pktio_t pktio);
+uint64_t ODP_DEPRECATE(odp_pktin_ts_res)(odp_pktio_t pktio);
 
 /**
  * Convert nanoseconds to packet input time
+ *
+ * @deprecated Use odp_pktio_ts_from_ns() instead, which can be used with both
+ * packet input and output timestamps.
  *
  * Packet input time source is used for timestamping incoming packets.
  * This function is used convert nanosecond time to packet input timestamp time.
@@ -1392,7 +1425,68 @@ uint64_t odp_pktin_ts_res(odp_pktio_t pktio);
  *
  * @return Packet input timestamp
  */
-odp_time_t odp_pktin_ts_from_ns(odp_pktio_t pktio, uint64_t ns);
+odp_time_t ODP_DEPRECATE(odp_pktin_ts_from_ns)(odp_pktio_t pktio, uint64_t ns);
+
+/**
+ * Packet IO timestamp resolution in hertz
+ *
+ * This is the resolution of packet input and output timestamps using a packet
+ * IO time source.
+ *
+ * @param      pktio   Packet IO handle
+ *
+ * @return Packet IO timestamp resolution in hertz
+ * @retval 0 on failure
+ */
+uint64_t odp_pktio_ts_res(odp_pktio_t pktio);
+
+/**
+ * Convert nanoseconds to packet IO time
+ *
+ * Packet IO time source is used for timestamping incoming and outgoing packets.
+ * This function is used to convert nanosecond time to packet input or output
+ * timestamp time.
+ *
+ * @param      pktio   Packet IO handle
+ * @param      ns      Time in nanoseconds
+ *
+ * @return Packet IO timestamp
+ * @retval ODP_TIME_NULL on failure
+ */
+odp_time_t odp_pktio_ts_from_ns(odp_pktio_t pktio, uint64_t ns);
+
+/**
+ * Current packet IO time and global time
+ *
+ * Returns current packet IO time and optionally global time. The returned
+ * global time is that of global time source, where as the packet IO time is of
+ * packet IO time source that is used to timestamp incoming and outgoing
+ * packets.
+ *
+ * @param      pktio        Packet IO handle
+ * @param[out] ts_global    Pointer to odp_time_t for output or NULL.
+ *                          On success, global timestamp will be taken at the
+ *                          same point of time as packet IO time.
+ *
+ * @return Current packet IO time
+ * @retval ODP_TIME_NULL on failure
+ */
+odp_time_t odp_pktio_time(odp_pktio_t pktio, odp_time_t *ts_global);
+
+/**
+ * Read last captured Tx timestamp of a packet if available and clear it for
+ * next timestamp.
+ *
+ * @param      pktio   Packet IO handle
+ * @param[out] ts      Pointer to odp_time_t for output
+ *
+ * @retval  0 on success
+ * @retval >0 Timestamp not available either because none has been requested or
+ *            the requested timestamp is not yet available. In case it is the
+ *            latter, then retry again later for retrieving the timestamp.
+ * @retval <0 on failure
+ */
+int odp_pktout_ts_read(odp_pktio_t pktio, odp_time_t *ts);
 
 /**
  * @}

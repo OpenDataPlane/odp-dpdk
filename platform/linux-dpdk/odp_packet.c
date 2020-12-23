@@ -34,7 +34,7 @@
 
 /* Fill in packet header field offsets for inline functions */
 
-const _odp_packet_inline_offset_t ODP_ALIGNED_CACHE _odp_packet_inline = {
+const _odp_packet_inline_offset_t _odp_packet_inline ODP_ALIGNED_CACHE = {
 	.mb               = offsetof(odp_packet_hdr_t, buf_hdr.mb),
 	.pool             = offsetof(odp_packet_hdr_t, buf_hdr.pool_ptr),
 	.input            = offsetof(odp_packet_hdr_t, input),
@@ -2318,4 +2318,11 @@ uint64_t odp_packet_cls_mark(odp_packet_t pkt)
 		return pkt_hdr->cls_mark;
 
 	return 0;
+}
+
+void odp_packet_ts_request(odp_packet_t pkt, int enable)
+{
+	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
+
+	pkt_hdr->p.flags.ts_set = !!enable;
 }

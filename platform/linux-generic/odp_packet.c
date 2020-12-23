@@ -35,7 +35,7 @@
 #include <odp/visibility_begin.h>
 
 /* Fill in packet header field offsets for inline functions */
-const _odp_packet_inline_offset_t ODP_ALIGNED_CACHE _odp_packet_inline = {
+const _odp_packet_inline_offset_t _odp_packet_inline ODP_ALIGNED_CACHE = {
 	.seg_data       = offsetof(odp_packet_hdr_t, seg_data),
 	.seg_len        = offsetof(odp_packet_hdr_t, seg_len),
 	.seg_next       = offsetof(odp_packet_hdr_t, seg_next),
@@ -460,7 +460,7 @@ static inline void buffer_ref_inc(odp_buffer_hdr_t *buf_hdr)
 	uint32_t ref_cnt = odp_atomic_load_u32(&buf_hdr->ref_cnt);
 
 	/* First count increment after alloc */
-	if (odp_likely(ref_cnt) == 0)
+	if (odp_likely(ref_cnt == 0))
 		odp_atomic_store_u32(&buf_hdr->ref_cnt, 2);
 	else
 		odp_atomic_inc_u32(&buf_hdr->ref_cnt);
@@ -2855,4 +2855,11 @@ uint64_t odp_packet_cls_mark(odp_packet_t pkt)
 		return pkt_hdr->cls_mark;
 
 	return 0;
+}
+
+void odp_packet_ts_request(odp_packet_t pkt, int enable)
+{
+	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
+
+	pkt_hdr->p.flags.ts_set = !!enable;
 }

@@ -32,6 +32,9 @@
 #include <inttypes.h>
 #include <ctype.h>
 
+#include <rte_string_fns.h>
+#include <rte_version.h>
+
 /* sysconf */
 #include <unistd.h>
 #include <sys/sysinfo.h>
@@ -51,8 +54,7 @@ static int sysconf_cpu_count(void)
 	return odp_global_ro.num_cpus_installed;
 }
 
-#if defined __x86_64__ || defined __i386__ || defined __OCTEON__ || \
-defined __powerpc__
+#if defined __x86_64__ || defined __i386__ || defined __OCTEON__ || defined __powerpc__
 /*
  * Analysis of /sys/devices/system/cpu/ files
  */
@@ -89,7 +91,6 @@ static int systemcpu_cache_line_size(void)
 }
 #endif
 
-
 static uint64_t default_huge_page_size(void)
 {
 	char str[1024];
@@ -114,84 +115,6 @@ static uint64_t default_huge_page_size(void)
 }
 
 /*
- * split string into tokens. largely "inspired" by dpdk:
- * lib/librte_eal/common/eal_common_string_fns.c: rte_strsplit
- */
-static int strsplit(char *string, int stringlen,
-		    char **tokens, int maxtokens, char delim)
-{
-	int i, tok = 0;
-	int tokstart = 1; /* first token is right at start of string */
-
-	if (string == NULL || tokens == NULL)
-		return -1;
-
-	for (i = 0; i < stringlen; i++) {
-		if (string[i] == '\0' || tok >= maxtokens)
-			break;
-		if (tokstart) {
-			tokstart = 0;
-			tokens[tok++] = &string[i];
-		}
-		if (string[i] == delim) {
-			string[i] = '\0';
-			tokstart = 1;
-		}
-	}
-	return tok;
-}
-
-/*
- * Converts a numeric string to the equivalent uint64_t value.
- * As well as straight number conversion, also recognises the suffixes
- * k, m and g for kilobytes, megabytes and gigabytes respectively.
- *
- * If a negative number is passed in  i.e. a string with the first non-black
- * character being "-", zero is returned. Zero is also returned in the case of
- * an error with the strtoull call in the function.
- * largely "inspired" by dpdk:
- * lib/librte_eal/common/include/rte_common.h: rte_str_to_size
- *
- * param str
- *     String containing number to convert.
- * return
- *     Number.
- */
-static inline uint64_t str_to_size(const char *str)
-{
-	char *endptr;
-	unsigned long long size;
-
-	while (isspace((int)*str))
-		str++;
-	if (*str == '-')
-		return 0;
-
-	errno = 0;
-	size = strtoull(str, &endptr, 0);
-	if (errno)
-		return 0;
-
-	if (*endptr == ' ')
-		endptr++; /* allow 1 space gap */
-
-	switch (*endptr) {
-	case 'G':
-	case 'g':
-		size *= 1024; /* fall-through */
-	case 'M':
-	case 'm':
-		size *= 1024; /* fall-through */
-	case 'K':
-	case 'k':
-		size *= 1024; /* fall-through */
-	default:
-		break;
-	}
-	return size;
-}
-
-/*
  * returns a malloced string containing the name of the directory for
  * huge pages of a given size (0 for default)
  * largely "inspired" by dpdk:
@@ -209,10 +132,10 @@ static char *get_hugepage_dir(uint64_t hugepage_sz)
 		_FIELDNAME_MAX
 	};
 	static uint64_t default_size;
-	const char proc_mounts[] = "/proc/mounts";
-	const char hugetlbfs_str[] = "hugetlbfs";
+	const char *proc_mounts = "/proc/mounts";
+	const char *hugetlbfs_str = "hugetlbfs";
 	const size_t htlbfs_str_len = sizeof(hugetlbfs_str) - 1;
-	const char pagesize_opt[] = "pagesize=";
+	const char *pagesize_opt = "pagesize=";
 	const size_t pagesize_opt_len = sizeof(pagesize_opt) - 1;
 	const char split_tok = ' ';
 	char *tokens[_FIELDNAME_MAX];
@@ -232,8 +155,8 @@ static char *get_hugepage_dir(uint64_t hugepage_sz)
 		hugepage_sz = default_size;
 
 	while (fgets(buf, sizeof(buf), fd)) {
-		if (strsplit(buf, sizeof(buf), tokens,
-			     _FIELDNAME_MAX, split_tok) != _FIELDNAME_MAX) {
+		if (rte_strsplit(buf, sizeof(buf), tokens,
+				 _FIELDNAME_MAX, split_tok) != _FIELDNAME_MAX) {
 			ODP_ERR("Error parsing %s\n", proc_mounts);
 			break; /* return NULL */
 		}
@@ -248,11 +171,8 @@ static char *get_hugepage_dir(uint64_t hugepage_sz)
 					retval = strdup(tokens[MOUNTPT]);
 					break;
 				}
-			}
-			/* there is an explicit page size, so check it */
-			else {
-				pagesz =
-				     str_to_size(&pagesz_str[pagesize_opt_len]);
+			} else { /* there is an explicit page size, so check it */
+				pagesz = rte_str_to_size(&pagesz_str[pagesize_opt_len]);
 				if (pagesz == hugepage_sz) {
 					retval = strdup(tokens[MOUNTPT]);
 					break;
@@ -303,7 +223,6 @@ static int systemcpu(system_info_t *sysinfo)
 	}
 
 	sysinfo->cpu_count = ret;
-
 
 	ret = systemcpu_cache_line_size();
 	if (ret == 0) {
@@ -559,6 +478,7 @@ void odp_sys_info_print(void)
 		       "ODP API version:  %s\n"
 		       "ODP impl name:    %s\n"
 		       "ODP impl details: %s\n"
+		       "DPDK version:     %d.%d.%d\n"
 		       "CPU model:        %s\n"
 		       "CPU freq (hz):    %" PRIu64 "\n"
 		       "Cache line size:  %i\n"
@@ -568,6 +488,7 @@ void odp_sys_info_print(void)
 		       odp_version_api_str(),
 		       odp_version_impl_name(),
 		       odp_version_impl_str(),
+		       RTE_VER_YEAR, RTE_VER_MONTH, RTE_VER_MINOR,
 		       odp_cpu_model_str(),
 		       odp_cpu_hz_max(),
 		       odp_sys_cache_line_size(),
@@ -587,17 +508,23 @@ void odp_sys_config_print(void)
 
 	ODP_PRINT("\n\nodp_config_internal.h values:\n"
 		  "-----------------------------\n");
+	ODP_PRINT("CONFIG_NUM_CPU_IDS:          %i\n", CONFIG_NUM_CPU_IDS);
 	ODP_PRINT("ODP_CONFIG_POOLS:            %i\n", ODP_CONFIG_POOLS);
+	ODP_PRINT("CONFIG_INTERNAL_QUEUES:      %i\n", CONFIG_INTERNAL_QUEUES);
 	ODP_PRINT("CONFIG_MAX_PLAIN_QUEUES:     %i\n", CONFIG_MAX_PLAIN_QUEUES);
 	ODP_PRINT("CONFIG_MAX_SCHED_QUEUES:     %i\n", CONFIG_MAX_SCHED_QUEUES);
+	ODP_PRINT("CONFIG_MAX_QUEUES:           %i\n", CONFIG_MAX_QUEUES);
 	ODP_PRINT("CONFIG_QUEUE_MAX_ORD_LOCKS:  %i\n", CONFIG_QUEUE_MAX_ORD_LOCKS);
 	ODP_PRINT("ODP_CONFIG_PKTIO_ENTRIES:    %i\n", ODP_CONFIG_PKTIO_ENTRIES);
+	ODP_PRINT("ODP_CONFIG_BUFFER_ALIGN_MIN: %i\n", ODP_CONFIG_BUFFER_ALIGN_MIN);
+	ODP_PRINT("ODP_CONFIG_BUFFER_ALIGN_MAX: %i\n", ODP_CONFIG_BUFFER_ALIGN_MAX);
 	ODP_PRINT("CONFIG_PACKET_HEADROOM:      %i\n", CONFIG_PACKET_HEADROOM);
 	ODP_PRINT("CONFIG_PACKET_TAILROOM:      %i\n", CONFIG_PACKET_TAILROOM);
-	ODP_PRINT("CONFIG_PACKET_MAX_LEN:       %i\n", CONFIG_PACKET_MAX_LEN);
+	ODP_PRINT("CONFIG_PACKET_MAX_SEGS:      %i\n", CONFIG_PACKET_MAX_SEGS);
+	ODP_PRINT("CONFIG_PACKET_SEG_LEN_MIN:   %i\n", CONFIG_PACKET_SEG_LEN_MIN);
+	ODP_PRINT("CONFIG_PACKET_SEG_LEN_MAX:   %i\n", CONFIG_PACKET_SEG_LEN_MAX);
 	ODP_PRINT("ODP_CONFIG_SHM_BLOCKS:       %i\n", ODP_CONFIG_SHM_BLOCKS);
 	ODP_PRINT("CONFIG_BURST_SIZE:           %i\n", CONFIG_BURST_SIZE);
 	ODP_PRINT("CONFIG_POOL_MAX_NUM:         %i\n", CONFIG_POOL_MAX_NUM);
-	ODP_PRINT("CONFIG_POOL_CACHE_MAX_SIZE:  %i\n", CONFIG_POOL_CACHE_MAX_SIZE);
 	ODP_PRINT("\n");
 }

@@ -85,11 +85,26 @@ static int null_recv_mq_tmo(pktio_entry_t *pktio_entry[] ODP_UNUSED,
 	return 0;
 }
 
-static int null_send(pktio_entry_t *pktio_entry ODP_UNUSED,
-		     int index ODP_UNUSED, const odp_packet_t pkt_table[],
-		     int num)
+static int null_send(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
+		     const odp_packet_t pkt_table[], int num)
 {
+	odp_bool_t set_tx_ts = false;
+
+	if (_odp_pktio_tx_ts_enabled(pktio_entry)) {
+		int i;
+
+		for (i = 0; i < num; i++) {
+			if (odp_unlikely(packet_hdr(pkt_table[i])->p.flags.ts_set)) {
+				set_tx_ts = true;
+				break;
+			}
+		}
+	}
+
 	odp_packet_free_multi(pkt_table, num);
+
+	if (odp_unlikely(set_tx_ts))
+		_odp_pktio_tx_ts_set(pktio_entry);
 
 	return num;
 }
@@ -133,6 +148,9 @@ static int null_capability(pktio_entry_t *pktio_entry ODP_UNUSED,
 	odp_pktio_config_init(&capa->config);
 	capa->config.pktin.bit.ts_all = 1;
 	capa->config.pktin.bit.ts_ptp = 1;
+
+	capa->config.pktout.bit.ts_ena = 1;
+
 	return 0;
 }
 
@@ -194,8 +212,9 @@ const pktio_if_ops_t null_pktio_ops = {
 	.promisc_mode_get = null_promisc_mode_get,
 	.mac_get = null_mac_addr_get,
 	.capability = null_capability,
-	.pktin_ts_res = NULL,
-	.pktin_ts_from_ns = NULL,
+	.pktio_ts_res = NULL,
+	.pktio_ts_from_ns = NULL,
+	.pktio_time = NULL,
 	.config = NULL,
 	.input_queues_config = null_inqueues_config,
 	.output_queues_config = null_outqueues_config,

@@ -1,5 +1,5 @@
 /* Copyright (c) 2013-2018, Linaro Limited
- * Copyright (c) 2019, Nokia
+ * Copyright (c) 2019-2020, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -49,11 +49,17 @@ struct pktio_entry {
 	/* These two locks together lock the whole pktio device */
 	odp_ticketlock_t rxl;		/**< RX ticketlock */
 	odp_ticketlock_t txl;		/**< TX ticketlock */
-	uint8_t cls_enabled;            /**< classifier enabled */
-	uint8_t chksum_insert_ena;      /**< pktout checksum offload enabled */
 	uint16_t pktin_frame_offset;
+	struct {
+		/* Pktout checksum offload */
+		uint8_t chksum_insert : 1;
+		/* Classifier */
+		uint8_t cls : 1;
+		/* Tx timestamp */
+		uint8_t tx_ts : 1;
+	} enabled;
 	odp_pktio_t handle;		/**< pktio handle */
-	unsigned char ODP_ALIGNED_CACHE pkt_priv[PKTIO_PRIVATE_SIZE];
+	unsigned char pkt_priv[PKTIO_PRIVATE_SIZE] ODP_ALIGNED_CACHE;
 	enum {
 		/* Not allocated */
 		PKTIO_STATE_FREE = 0,
@@ -80,6 +86,8 @@ struct pktio_entry {
 	struct {
 		odp_atomic_u64_t in_discards;
 	} stats_extra;
+	/* Latest Tx timestamp */
+	odp_atomic_u64_t tx_ts;
 	odp_proto_chksums_t in_chksums; /**< Checksums validation settings */
 	char name[PKTIO_NAME_LEN];	/**< name of pktio provided to
 					     internal pktio_open() calls */
@@ -146,8 +154,9 @@ typedef struct pktio_if_ops {
 	int (*stop)(pktio_entry_t *pktio_entry);
 	int (*stats)(pktio_entry_t *pktio_entry, odp_pktio_stats_t *stats);
 	int (*stats_reset)(pktio_entry_t *pktio_entry);
-	uint64_t (*pktin_ts_res)(pktio_entry_t *pktio_entry);
-	odp_time_t (*pktin_ts_from_ns)(pktio_entry_t *pktio_entry, uint64_t ns);
+	uint64_t (*pktio_ts_res)(pktio_entry_t *pktio_entry);
+	odp_time_t (*pktio_ts_from_ns)(pktio_entry_t *pktio_entry, uint64_t ns);
+	odp_time_t (*pktio_time)(pktio_entry_t *pktio_entry, odp_time_t *global_ts);
 	int (*recv)(pktio_entry_t *entry, int index, odp_packet_t packets[],
 		    int num);
 	int (*recv_tmo)(pktio_entry_t *entry, int index, odp_packet_t packets[],
@@ -197,17 +206,29 @@ static inline pktio_entry_t *get_pktio_entry(odp_pktio_t pktio)
 
 static inline int pktio_cls_enabled(pktio_entry_t *entry)
 {
-	return entry->s.cls_enabled;
+	return entry->s.enabled.cls;
 }
 
 static inline void pktio_cls_enabled_set(pktio_entry_t *entry, int ena)
 {
-	entry->s.cls_enabled = ena;
+	entry->s.enabled.cls = !!ena;
 }
 
 uint16_t dpdk_pktio_port_id(pktio_entry_t *entry);
 
 int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int num);
+
+static inline int _odp_pktio_tx_ts_enabled(pktio_entry_t *entry)
+{
+	return entry->s.enabled.tx_ts;
+}
+
+static inline void _odp_pktio_tx_ts_set(pktio_entry_t *entry)
+{
+	odp_time_t ts_val = odp_time_global();
+
+	odp_atomic_store_u64(&entry->s.tx_ts, ts_val.u64);
+}
 
 extern const pktio_if_ops_t null_pktio_ops;
 extern const pktio_if_ops_t dpdk_pktio_ops;

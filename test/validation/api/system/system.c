@@ -327,8 +327,7 @@ static void system_test_odp_sys_huge_page_size_all(void)
 static int system_check_cycle_counter(void)
 {
 	if (odp_cpu_cycles_max() == 0) {
-		fprintf(stderr, "Cycle counter is not supported, skipping "
-			"test\n");
+		printf("Cycle counter is not supported, skipping test\n");
 		return ODP_TEST_INACTIVE;
 	}
 
@@ -338,8 +337,7 @@ static int system_check_cycle_counter(void)
 static int system_check_odp_cpu_hz(void)
 {
 	if (odp_cpu_hz() == 0) {
-		fprintf(stderr, "odp_cpu_hz() is not supported, skipping "
-			"test\n");
+		printf("odp_cpu_hz() is not supported, skipping test\n");
 		return ODP_TEST_INACTIVE;
 	}
 
@@ -369,8 +367,7 @@ static int system_check_odp_cpu_hz_id(void)
 	for (i = 0; i < num; i++) {
 		hz = odp_cpu_hz_id(cpu);
 		if (hz == 0) {
-			fprintf(stderr, "odp_cpu_hz_id() is not supported by "
-				"CPU %d, skipping test\n", cpu);
+			printf("odp_cpu_hz_id() is not supported by CPU %d, skipping test\n", cpu);
 			return ODP_TEST_INACTIVE;
 		}
 		cpu = odp_cpumask_next(&mask, cpu);
@@ -401,8 +398,7 @@ static void system_test_odp_cpu_hz_id(void)
 static int system_check_odp_cpu_hz_max(void)
 {
 	if (odp_cpu_hz_max() == 0) {
-		fprintf(stderr, "odp_cpu_hz_max() is not supported, skipping "
-			"test\n");
+		printf("odp_cpu_hz_max() is not supported, skipping test\n");
 		return ODP_TEST_INACTIVE;
 	}
 	return ODP_TEST_ACTIVE;
@@ -429,8 +425,8 @@ static int system_check_odp_cpu_hz_max_id(void)
 	for (i = 0; i < num; i++) {
 		hz = odp_cpu_hz_max_id(cpu);
 		if (hz == 0) {
-			fprintf(stderr, "odp_cpu_hz_max_id() is not supported "
-			"by CPU %d, skipping test\n", cpu);
+			printf("odp_cpu_hz_max_id() is not supported by CPU %d, skipping test\n",
+			       cpu);
 			return ODP_TEST_INACTIVE;
 		}
 		cpu = odp_cpumask_next(&mask, cpu);
@@ -464,6 +460,69 @@ static void system_test_info_print(void)
 	printf("...done. ");
 }
 
+static void system_test_config_print(void)
+{
+	printf("\n\nCalling system config print...\n");
+	odp_sys_config_print();
+	printf("...done. ");
+}
+
+static void system_test_info(void)
+{
+	odp_system_info_t info;
+	odp_cpu_arch_t cpu_arch;
+
+	memset(&info, 0xff, sizeof(odp_system_info_t));
+	CU_ASSERT(odp_system_info(&info) == 0);
+	cpu_arch = info.cpu_arch;
+
+	memset(&info, 0, sizeof(odp_system_info_t));
+	CU_ASSERT(odp_system_info(&info) == 0);
+
+	CU_ASSERT(info.cpu_arch == cpu_arch);
+	CU_ASSERT(info.cpu_arch >= ODP_CPU_ARCH_UNKNOWN && info.cpu_arch <= ODP_CPU_ARCH_X86);
+
+	if (info.cpu_arch == ODP_CPU_ARCH_X86) {
+		printf("\n        ODP_CPU_ARCH_X86\n");
+		CU_ASSERT(info.cpu_isa_sw.x86 != ODP_CPU_ARCH_X86_UNKNOWN);
+
+		if (info.cpu_isa_sw.x86 == ODP_CPU_ARCH_X86_64)
+			printf("        ODP_CPU_ARCH_X86_64\n");
+		else if (info.cpu_isa_sw.x86 == ODP_CPU_ARCH_X86_I686)
+			printf("        ODP_CPU_ARCH_X86_I686\n");
+
+		if (info.cpu_isa_hw.x86 != ODP_CPU_ARCH_X86_UNKNOWN)
+			CU_ASSERT(info.cpu_isa_sw.x86 <= info.cpu_isa_hw.x86);
+	}
+
+	if (info.cpu_arch == ODP_CPU_ARCH_ARM) {
+		printf("\n        ODP_CPU_ARCH_ARM\n");
+		CU_ASSERT(info.cpu_isa_sw.arm != ODP_CPU_ARCH_ARM_UNKNOWN);
+
+		if (info.cpu_isa_sw.arm == ODP_CPU_ARCH_ARMV6)
+			printf("        ODP_CPU_ARCH_ARMV6\n");
+		else if (info.cpu_isa_sw.arm == ODP_CPU_ARCH_ARMV7)
+			printf("        ODP_CPU_ARCH_ARMV7\n");
+		else if (info.cpu_isa_sw.arm == ODP_CPU_ARCH_ARMV8_0)
+			printf("        ODP_CPU_ARCH_ARMV8_0\n");
+		else if (info.cpu_isa_sw.arm == ODP_CPU_ARCH_ARMV8_1)
+			printf("        ODP_CPU_ARCH_ARMV8_1\n");
+		else if (info.cpu_isa_sw.arm == ODP_CPU_ARCH_ARMV8_2)
+			printf("        ODP_CPU_ARCH_ARMV8_2\n");
+		else if (info.cpu_isa_sw.arm == ODP_CPU_ARCH_ARMV8_3)
+			printf("        ODP_CPU_ARCH_ARMV8_3\n");
+		else if (info.cpu_isa_sw.arm == ODP_CPU_ARCH_ARMV8_4)
+			printf("        ODP_CPU_ARCH_ARMV8_4\n");
+		else if (info.cpu_isa_sw.arm == ODP_CPU_ARCH_ARMV8_5)
+			printf("        ODP_CPU_ARCH_ARMV8_5\n");
+		else if (info.cpu_isa_sw.arm == ODP_CPU_ARCH_ARMV8_6)
+			printf("        ODP_CPU_ARCH_ARMV8_6\n");
+
+		if (info.cpu_isa_hw.arm != ODP_CPU_ARCH_ARM_UNKNOWN)
+			CU_ASSERT(info.cpu_isa_sw.arm <= info.cpu_isa_hw.arm);
+	}
+}
+
 odp_testinfo_t system_suite[] = {
 	ODP_TEST_INFO(test_version_api_str),
 	ODP_TEST_INFO(test_version_str),
@@ -493,7 +552,9 @@ odp_testinfo_t system_suite[] = {
 				  system_check_cycle_counter),
 	ODP_TEST_INFO_CONDITIONAL(system_test_cpu_cycles_long_period,
 				  system_check_cycle_counter),
+	ODP_TEST_INFO(system_test_info),
 	ODP_TEST_INFO(system_test_info_print),
+	ODP_TEST_INFO(system_test_config_print),
 	ODP_TEST_INFO_NULL,
 };
 
