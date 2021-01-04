@@ -38,7 +38,7 @@ const _odp_packet_inline_offset_t _odp_packet_inline ODP_ALIGNED_CACHE = {
 	.mb               = offsetof(odp_packet_hdr_t, buf_hdr.mb),
 	.pool             = offsetof(odp_packet_hdr_t, buf_hdr.pool_ptr),
 	.input            = offsetof(odp_packet_hdr_t, input),
-	.user_ptr         = offsetof(odp_packet_hdr_t, buf_hdr.mb.userdata),
+	.user_ptr         = offsetof(odp_packet_hdr_t, buf_hdr.user_ptr),
 	.l2_offset        = offsetof(odp_packet_hdr_t, p.l2_offset),
 	.l3_offset        = offsetof(odp_packet_hdr_t, p.l3_offset),
 	.l4_offset        = offsetof(odp_packet_hdr_t, p.l4_offset),
@@ -298,8 +298,8 @@ void *odp_packet_push_head(odp_packet_t pkt, uint32_t len)
 static void _copy_head_metadata(struct rte_mbuf *newhead,
 				struct rte_mbuf *oldhead)
 {
-	odp_packet_t pkt = (odp_packet_t)newhead;
-	uint32_t saved_index = packet_hdr(pkt)->buf_hdr.index;
+	odp_packet_hdr_t *pkt_hdr = packet_hdr((odp_packet_t)newhead);
+	uint32_t saved_index = pkt_hdr->buf_hdr.index;
 
 	rte_mbuf_refcnt_set(newhead, rte_mbuf_refcnt_read(oldhead));
 	newhead->port = oldhead->port;
@@ -308,11 +308,12 @@ static void _copy_head_metadata(struct rte_mbuf *newhead,
 	newhead->vlan_tci = oldhead->vlan_tci;
 	newhead->hash.rss = 0;
 	newhead->vlan_tci_outer = oldhead->vlan_tci_outer;
-	newhead->udata64 = oldhead->udata64;
+
 	memcpy(&newhead->tx_offload, &oldhead->tx_offload,
 	       sizeof(odp_packet_hdr_t) -
 	       offsetof(struct rte_mbuf, tx_offload));
-	packet_hdr(pkt)->buf_hdr.index = saved_index;
+	pkt_hdr->buf_hdr.index = saved_index;
+	pkt_hdr->buf_hdr.user_ptr = packet_hdr((odp_packet_t)oldhead)->buf_hdr.user_ptr;
 }
 
 int odp_packet_extend_head(odp_packet_t *pkt, uint32_t len, void **data_ptr,
@@ -560,14 +561,13 @@ int odp_packet_trunc_tail(odp_packet_t *pkt, uint32_t len, void **tail_ptr,
 void odp_packet_user_ptr_set(odp_packet_t pkt, const void *ptr)
 {
 	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
-	uintptr_t user_ptr = (uintptr_t)ptr;
 
 	if (odp_unlikely(ptr == NULL)) {
 		pkt_hdr->p.flags.user_ptr_set = 0;
 		return;
 	}
 
-	pkt_hdr->buf_hdr.mb.userdata  = (void *)user_ptr;
+	pkt_hdr->buf_hdr.user_ptr = ptr;
 	pkt_hdr->p.flags.user_ptr_set = 1;
 }
 
@@ -1201,8 +1201,8 @@ int _odp_packet_copy_md_to_packet(odp_packet_t srcpkt, odp_packet_t dstpkt)
 	dsthdr->dst_queue = srchdr->dst_queue;
 	dsthdr->cos = srchdr->cos;
 	dsthdr->cls_mark = srchdr->cls_mark;
-	dsthdr->buf_hdr.mb.userdata = srchdr->buf_hdr.mb.userdata;
 
+	dsthdr->buf_hdr.user_ptr = srchdr->buf_hdr.user_ptr;
 	dsthdr->buf_hdr.mb.port = srchdr->buf_hdr.mb.port;
 	dsthdr->buf_hdr.mb.ol_flags = srchdr->buf_hdr.mb.ol_flags;
 	dsthdr->buf_hdr.mb.packet_type = srchdr->buf_hdr.mb.packet_type;
