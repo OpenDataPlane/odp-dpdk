@@ -307,7 +307,6 @@ static void _copy_head_metadata(struct rte_mbuf *newhead,
 	newhead->packet_type = oldhead->packet_type;
 	newhead->vlan_tci = oldhead->vlan_tci;
 	newhead->hash.rss = 0;
-	newhead->seqn = oldhead->seqn;
 	newhead->vlan_tci_outer = oldhead->vlan_tci_outer;
 	newhead->udata64 = oldhead->udata64;
 	memcpy(&newhead->tx_offload, &oldhead->tx_offload,
