@@ -73,6 +73,9 @@ struct odp_buffer_hdr_t {
 
 	/* --- Mostly read only data --- */
 
+	/* User pointer */
+	const void *user_ptr;
+
 	/* Pool pointer */
 	void *pool_ptr;
 };
