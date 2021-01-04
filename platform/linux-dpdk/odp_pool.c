@@ -320,15 +320,9 @@ odp_dpdk_mbuf_ctor(struct rte_mempool *mp,
 
 	/* Start of buffer is just after the ODP type specific header
 	 * which contains in the very beginning the rte_mbuf struct */
-	mb->buf_addr     = (char *)mb + mb_ctor_arg->seg_buf_offset;
-#if RTE_VERSION < RTE_VERSION_NUM(17, 11, 0, 0)
-	mb->buf_physaddr = rte_mempool_virt2phy(mp, mb) +
-			mb_ctor_arg->seg_buf_offset;
-#else
-	mb->buf_physaddr = rte_mempool_virt2iova(mb) +
-			mb_ctor_arg->seg_buf_offset;
-#endif
-	mb->buf_len      = mb_ctor_arg->seg_buf_size;
+	mb->buf_addr = (char *)mb + mb_ctor_arg->seg_buf_offset;
+	mb->buf_iova = rte_mempool_virt2iova(mb) + mb_ctor_arg->seg_buf_offset;
+	mb->buf_len = mb_ctor_arg->seg_buf_size;
 	mb->priv_size = rte_pktmbuf_priv_size(mp);
 
 	/* keep some headroom between start of buffer and data */
