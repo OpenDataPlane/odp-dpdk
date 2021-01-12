@@ -38,6 +38,10 @@ extern "C" {
 #undef RTE_TOOLCHAIN_GCC
 #endif
 #include <rte_mbuf.h>
+/* ppc64 rte_memcpy.h (included through rte_mbuf.h) may define vector */
+#if defined(__PPC64__) && defined(vector)
+	#undef vector
+#endif
 
 ODP_STATIC_ASSERT(CONFIG_PACKET_SEG_LEN_MIN >= 256,
 		  "ODP Segment size must be a minimum of 256 bytes");
