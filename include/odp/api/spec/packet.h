@@ -177,6 +177,16 @@ extern "C" {
  */
 
 /**
+ * @typedef odp_packet_vector_t
+ * ODP packet vector
+ */
+
+/**
+ * @def ODP_PACKET_VECTOR_INVALID
+ * Invalid packet vector
+ */
+
+/**
  * Protocol
  */
 typedef enum odp_proto_t {
@@ -2027,6 +2037,181 @@ uint64_t odp_packet_cls_mark(odp_packet_t pkt);
 
 /*
  *
+ * Packet vector handling routines
+ * ********************************************************
+ *
+ */
+
+/**
+ * Get packet vector handle from event
+ *
+ * Converts an ODP_EVENT_PACKET_VECTOR type event to a packet vector handle
+ *
+ * @param ev Event handle
+ * @return Packet vector handle
+ *
+ * @see odp_event_type()
+ */
+odp_packet_vector_t odp_packet_vector_from_event(odp_event_t ev);
+
+/**
+ * Convert packet vector handle to event
+ *
+ * @param pktv Packet vector handle
+ *
+ * @return Event handle
+ */
+odp_event_t odp_packet_vector_to_event(odp_packet_vector_t pktv);
+
+/**
+ * Allocate a packet vector from a packet vector pool
+ *
+ * Allocates a packet vector from the specified packet vector pool.
+ * The pool must have been created with the ODP_POOL_VECTOR type.
+ *
+ * @param pool Packet vector pool handle
+ *
+ * @return Handle of allocated packet vector
+ * @retval ODP_PACKET_VECTOR_INVALID  Packet vector could not be allocated
+ *
+ * @note A newly allocated vector shall not contain any packets, instead, alloc
+ * operation shall reserve the space for odp_pool_param_t::vector::max_size packets.
+ */
+odp_packet_vector_t odp_packet_vector_alloc(odp_pool_t pool);
+
+/**
+ * Free packet vector
+ *
+ * Frees the packet vector into the packet vector pool it was allocated from.
+ *
+ * @param pktv Packet vector handle
+ *
+ * @note This API just frees the vector, not any packets inside the vector.
+ * Application can use odp_event_free() to free the vector and packets inside
+ * the vector.
+ */
+void odp_packet_vector_free(odp_packet_vector_t pktv);
+
+/**
+ * Get packet vector table
+ *
+ * Packet vector table is an array of packets (odp_packet_t) stored in
+ * contiguous memory location. Upon completion of this API, the implementation
+ * returns the packet table pointer in pkt_tbl.
+ *
+ * @param      pktv    Packet vector handle
+ * @param[out] pkt_tbl Points to packet vector table
+ *
+ * @return Number of packets available in the vector.
+ *
+ * @note When pktin subsystem is producing the packet vectors,
+ * odp_pktin_vector_config_t::pool shall be used to configure the pool to form
+ * the vector table.
+ *
+ * @note The maximum number of packets this vector can hold is defined by
+ * odp_pool_param_t:vector:max_size. The return value of this function will not
+ * be greater than odp_pool_param_t:vector:max_size
+ *
+ * @note The pkt_tbl points to the packet vector table. Application can edit the
+ * packet handles in the table directly (up to odp_pool_param_t::vector::max_size).
+ * Application must update the size of the table using odp_packet_vector_size_set()
+ * when there is a change in the size of the vector.
+ *
+ * @note Invalid packet handles (ODP_PACKET_INVALID) are not allowed to be
+ * stored in the table to allow consumers of odp_packet_vector_t handle to have
+ * optimized implementation. So consumption of packets in the middle of the
+ * vector would call for moving the remaining packets up to form a contiguous
+ * array of packets and update the size of the new vector using
+ * odp_packet_vector_size_set().
+ *
+ * @note The table memory is backed by a vector pool buffer. The ownership of
+ * the table memory is linked to the ownership of the event. I.e. after sending
+ * the event to a queue, the sender loses ownership to the table also.
+ */
+uint32_t odp_packet_vector_tbl(odp_packet_vector_t pktv, odp_packet_t **pkt_tbl);
+
+/**
+ * Number of packets in a vector
+ *
+ * @param pktv Packet vector handle
+ *
+ * @return The number of packets available in the vector
+ */
+uint32_t odp_packet_vector_size(odp_packet_vector_t pktv);
+
+/**
+ * Set the number of packets stored in a vector
+ *
+ * Update the number of packets stored in a vector. When the application is
+ * producing a packet vector, this function shall be used by the application
+ * to set the number of packets available in this vector.
+ *
+ * @param pktv Packet vector handle
+ * @param size Number of packets in this vector
+ *
+ * @note The maximum number of packets this vector can hold is defined by
+ * odp_pool_param_t::vector::max_size. The size value must not be greater than
+ * odp_pool_param_t::vector::max_size
+ *
+ * @note All handles in the vector table (0 .. size - 1) need to be valid packet
+ * handles.
+ *
+ * @see odp_packet_vector_tbl()
+ *
+ */
+void odp_packet_vector_size_set(odp_packet_vector_t pktv, uint32_t size);
+
+/**
+ * Check that packet vector is valid
+ *
+ * This function can be used for debugging purposes to check if a packet vector handle represents
+ * a valid packet vector. The level of error checks depends on the implementation. Considerable
+ * number of cpu cycles may be consumed depending on the level. The call should not crash if
+ * the packet vector handle is corrupted.
+ *
+ * @param pktv Packet vector handle
+ *
+ * @retval 0 Packet vector is not valid
+ * @retval 1 Packet vector is valid
+ */
+int odp_packet_vector_valid(odp_packet_vector_t pktv);
+
+/**
+ * Packet vector pool
+ *
+ * Returns handle to the packet vector pool where the packet vector was
+ * allocated from.
+ *
+ * @param pktv Packet vector handle
+ *
+ * @return Packet vector pool handle
+ */
+odp_pool_t odp_packet_vector_pool(odp_packet_vector_t pktv);
+
+/**
+ * Print packet vector debug information
+ *
+ * Print all packet vector debug information to ODP log.
+ *
+ * @param pktv Packet vector handle
+ */
+void odp_packet_vector_print(odp_packet_vector_t pktv);
+
+/**
+ * Get printable value for an odp_packet_vector_t
+ *
+ * @param hdl  odp_packet_vector_t handle to be printed
+ *
+ * @return uint64_t value that can be used to print/display this handle
+ *
+ * @note This routine is intended to be used for diagnostic purposes to enable
+ * applications to generate a printable value that represents an
+ * odp_packet_vector_t handle.
+ */
+uint64_t odp_packet_vector_to_u64(odp_packet_vector_t hdl);
+
+/*
+ *
  * Debugging
  * ********************************************************
  *
@@ -2055,10 +2240,12 @@ void odp_packet_print(odp_packet_t pkt);
 void odp_packet_print_data(odp_packet_t pkt, uint32_t offset, uint32_t len);
 
 /**
- * Perform full packet validity check
+ * Check that packet is valid
  *
- * The operation may consume considerable number of cpu cycles depending on
- * the check level.
+ * This function can be used for debugging purposes to check if a packet handle represents
+ * a valid packet. The level of error checks depends on the implementation. Considerable number of
+ * cpu cycles may be consumed depending on the level. The call should not crash if the packet
+ * handle is corrupted.
  *
  * @param pkt  Packet handle
  *

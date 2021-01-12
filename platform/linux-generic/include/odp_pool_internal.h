@@ -73,6 +73,7 @@ typedef struct pool_t {
 	uint32_t         block_size;
 	uint32_t         block_offset;
 	uint8_t         *base_addr;
+	uint8_t         *max_addr;
 	uint8_t         *uarea_base_addr;
 
 	/* Used by DPDK zero-copy pktio */
@@ -82,6 +83,14 @@ typedef struct pool_t {
 	uint8_t          mem_from_huge_pages;
 	pool_destroy_cb_fn ext_destroy;
 	void            *ext_desc;
+
+	struct ODP_CACHE_ALIGNED {
+		odp_atomic_u64_t alloc_ops;
+		odp_atomic_u64_t alloc_fails;
+		odp_atomic_u64_t free_ops;
+		odp_atomic_u64_t cache_alloc_ops;
+		odp_atomic_u64_t cache_free_ops;
+	} stats;
 
 	pool_cache_t     local_cache[ODP_THREAD_COUNT_MAX];
 
@@ -152,6 +161,7 @@ static inline odp_buffer_hdr_t *buf_hdr_from_index_u32(uint32_t u32)
 
 int buffer_alloc_multi(pool_t *pool, odp_buffer_hdr_t *buf_hdr[], int num);
 void buffer_free_multi(odp_buffer_hdr_t *buf_hdr[], int num_free);
+int _odp_buffer_is_valid(odp_buffer_t buf);
 
 #ifdef __cplusplus
 }

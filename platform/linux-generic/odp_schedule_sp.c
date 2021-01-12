@@ -1,5 +1,5 @@
 /* Copyright (c) 2016-2018, Linaro Limited
- * Copyright (c) 2019, Nokia
+ * Copyright (c) 2019-2020, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -240,7 +240,7 @@ static int term_global(void)
 		int report = 1;
 
 		if (sched_global->queue_cmd[qi].s.init) {
-			while (sched_queue_deq(qi, &event, 1, 1) > 0) {
+			while (_odp_sched_queue_deq(qi, &event, 1, 1) > 0) {
 				if (report) {
 					ODP_ERR("Queue not empty\n");
 					report = 0;
@@ -268,7 +268,7 @@ static int term_local(void)
 static void schedule_config_init(odp_schedule_config_t *config)
 {
 	config->num_queues = CONFIG_MAX_SCHED_QUEUES;
-	config->queue_size = queue_glb->config.max_queue_size;
+	config->queue_size = _odp_queue_glb->config.max_queue_size;
 }
 
 static int schedule_config(const odp_schedule_config_t *config)
@@ -293,7 +293,7 @@ static void add_group(sched_group_t *sched_group, int thr, int group)
 	thr_group->group[num] = group;
 	thr_group->num_group  = num + 1;
 	gen_cnt = odp_atomic_load_u32(&thr_group->gen_cnt);
-	odp_atomic_store_u32(&thr_group->gen_cnt, gen_cnt + 1);
+	odp_atomic_store_rel_u32(&thr_group->gen_cnt, gen_cnt + 1);
 }
 
 static void remove_group(sched_group_t *sched_group, int thr, int group)
@@ -326,7 +326,7 @@ static void remove_group(sched_group_t *sched_group, int thr, int group)
 
 		thr_group->num_group = num - 1;
 		gen_cnt = odp_atomic_load_u32(&thr_group->gen_cnt);
-		odp_atomic_store_u32(&thr_group->gen_cnt, gen_cnt + 1);
+		odp_atomic_store_rel_u32(&thr_group->gen_cnt, gen_cnt + 1);
 	}
 }
 
@@ -571,7 +571,7 @@ static int schedule_multi(odp_queue_t *from, uint64_t wait,
 
 	if (sched_local.cmd) {
 		/* Continue scheduling if queue is not empty */
-		if (sched_queue_empty(sched_local.cmd->s.index) == 0)
+		if (_odp_sched_queue_empty(sched_local.cmd->s.index) == 0)
 			add_tail(sched_local.cmd);
 
 		sched_local.cmd = NULL;
@@ -598,13 +598,13 @@ static int schedule_multi(odp_queue_t *from, uint64_t wait,
 			odp_queue_t *queue = cmd->s.queue;
 
 			for (i = 0; i < num_pktin; i++) {
-				num_pkt = sched_cb_pktin_poll(pktio_idx,
-							      pktin_idx[i],
-							      hdr_tbl, max_num);
+				num_pkt = _odp_sched_cb_pktin_poll(pktio_idx,
+								   pktin_idx[i],
+								   hdr_tbl, max_num);
 
 				if (num_pkt < 0) {
 					/* Pktio stopped or closed. */
-					sched_cb_pktio_stop_finalize(pktio_idx);
+					_odp_sched_cb_pktio_stop_finalize(pktio_idx);
 					break;
 				}
 
@@ -646,7 +646,7 @@ static int schedule_multi(odp_queue_t *from, uint64_t wait,
 		}
 
 		qi  = cmd->s.index;
-		num = sched_queue_deq(qi, events, 1, 1);
+		num = _odp_sched_queue_deq(qi, events, 1, 1);
 
 		if (num <= 0) {
 			timer_run(1);
@@ -740,7 +740,7 @@ static odp_schedule_group_t schedule_group_create(const char *name,
 {
 	odp_schedule_group_t group = ODP_SCHED_GROUP_INVALID;
 	sched_group_t *sched_group = &sched_global->sched_group;
-	int i;
+	int i, thr;
 
 	odp_ticketlock_lock(&sched_group->s.lock);
 
@@ -755,10 +755,16 @@ static odp_schedule_group_t schedule_group_create(const char *name,
 					ODP_SCHED_GROUP_NAME_LEN - 1);
 				grp_name[ODP_SCHED_GROUP_NAME_LEN - 1] = 0;
 			}
-			odp_thrmask_copy(&sched_group->s.group[i].mask,
-					 thrmask);
+
+			odp_thrmask_copy(&sched_group->s.group[i].mask, thrmask);
 			sched_group->s.group[i].allocated = 1;
 			group = i;
+
+			thr = odp_thrmask_first(thrmask);
+			while (thr >= 0) {
+				add_group(sched_group, thr, group);
+				thr = odp_thrmask_next(thrmask, thr);
+			}
 			break;
 		}
 	}
@@ -771,6 +777,8 @@ static odp_schedule_group_t schedule_group_create(const char *name,
 static int schedule_group_destroy(odp_schedule_group_t group)
 {
 	sched_group_t *sched_group = &sched_global->sched_group;
+	int thr;
+	const odp_thrmask_t *thrmask;
 
 	if (group < NUM_STATIC_GROUP || group >= NUM_GROUP)
 		return -1;
@@ -780,6 +788,14 @@ static int schedule_group_destroy(odp_schedule_group_t group)
 	if (!sched_group->s.group[group].allocated) {
 		odp_ticketlock_unlock(&sched_group->s.lock);
 		return -1;
+	}
+
+	thrmask = &sched_group->s.group[group].mask;
+
+	thr = odp_thrmask_first(thrmask);
+	while (thr >= 0) {
+		remove_group(sched_group, thr, group);
+		thr = odp_thrmask_next(thrmask, thr);
 	}
 
 	memset(&sched_group->s.group[group], 0,
@@ -965,13 +981,13 @@ static int schedule_capability(odp_schedule_capability_t *capa)
 	capa->max_groups = num_grps();
 	capa->max_prios = schedule_num_prio();
 	capa->max_queues = CONFIG_MAX_SCHED_QUEUES;
-	capa->max_queue_size = queue_glb->config.max_queue_size;
+	capa->max_queue_size = _odp_queue_glb->config.max_queue_size;
 
 	return 0;
 }
 
 /* Fill in scheduler interface */
-const schedule_fn_t schedule_sp_fn = {
+const schedule_fn_t _odp_schedule_sp_fn = {
 	.pktio_start   = pktio_start,
 	.thr_add       = thr_add,
 	.thr_rem       = thr_rem,
@@ -990,7 +1006,7 @@ const schedule_fn_t schedule_sp_fn = {
 };
 
 /* Fill in scheduler API calls */
-const schedule_api_t schedule_sp_api = {
+const schedule_api_t _odp_schedule_sp_api = {
 	.schedule_wait_time       = schedule_wait_time,
 	.schedule_capability      = schedule_capability,
 	.schedule_config_init     = schedule_config_init,

@@ -1,4 +1,5 @@
 /* Copyright (c) 2017-2018, Linaro Limited
+ * Copyright (c) 2020, Marvell
  * Copyright (c) 2020, Nokia
  * All rights reserved.
  *
@@ -46,18 +47,39 @@ typedef struct {
 #define _ODP_PROTO_L3_TYPE_UNDEF ((odp_proto_l3_type_t)-1)
 #define _ODP_PROTO_L4_TYPE_UNDEF ((odp_proto_l4_type_t)-1)
 
+enum ipsec_test_stats {
+	IPSEC_TEST_STATS_NONE = 0,
+	IPSEC_TEST_STATS_SUCCESS,
+	IPSEC_TEST_STATS_PROTO_ERR,
+	IPSEC_TEST_STATS_AUTH_ERR,
+};
+
+typedef struct {
+	odp_bool_t display_algo;
+	odp_bool_t lookup;
+	odp_bool_t ah;
+	odp_bool_t inline_hdr_in_packet;
+	enum ipsec_test_stats stats;
+} ipsec_test_flags;
+
 typedef struct {
 	const ipsec_test_packet *pkt_in;
-	odp_bool_t lookup;
+	ipsec_test_flags flags;
 	int num_opt;
 	odp_ipsec_out_opt_t opt;
-	int out_pkt;
+	int num_pkt;
 	struct {
 		odp_ipsec_op_status_t status;
-		const ipsec_test_packet *pkt_out;
+		const ipsec_test_packet *pkt_res;
 		odp_proto_l3_type_t l3_type;
 		odp_proto_l4_type_t l4_type;
 	} out[1];
+	struct {
+		odp_ipsec_op_status_t status;
+		const ipsec_test_packet *pkt_res;
+		odp_proto_l3_type_t l3_type;
+		odp_proto_l4_type_t l4_type;
+	} in[1];
 } ipsec_test_part;
 
 void ipsec_sa_param_fill(odp_ipsec_sa_param_t *param,
@@ -92,10 +114,12 @@ int ipsec_check(odp_bool_t ah,
 int ipsec_check_ah_sha256(void);
 int ipsec_check_esp_null_sha256(void);
 int ipsec_check_esp_aes_cbc_128_null(void);
+int ipsec_check_esp_aes_cbc_128_sha1(void);
 int ipsec_check_esp_aes_cbc_128_sha256(void);
+int ipsec_check_esp_aes_cbc_128_sha384(void);
+int ipsec_check_esp_aes_cbc_128_sha512(void);
 int ipsec_check_esp_aes_ctr_128_null(void);
 int ipsec_check_esp_aes_gcm_128(void);
-int ipsec_check_esp_aes_gcm_192(void);
 int ipsec_check_esp_aes_gcm_256(void);
 int ipsec_check_ah_aes_gmac_128(void);
 int ipsec_check_ah_aes_gmac_192(void);
@@ -103,9 +127,6 @@ int ipsec_check_ah_aes_gmac_256(void);
 int ipsec_check_esp_null_aes_gmac_128(void);
 int ipsec_check_esp_null_aes_gmac_192(void);
 int ipsec_check_esp_null_aes_gmac_256(void);
-int ipsec_check_esp_aes_ccm_128(void);
-int ipsec_check_esp_aes_ccm_192(void);
-int ipsec_check_esp_aes_ccm_256(void);
 int ipsec_check_esp_chacha20_poly1305(void);
 
 #endif

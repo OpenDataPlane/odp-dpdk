@@ -104,6 +104,7 @@ struct pktio_entry {
 	/* Statistics counters used outside drivers */
 	struct {
 		odp_atomic_u64_t in_discards;
+		odp_atomic_u64_t out_discards;
 	} stats_extra;
 	/* Latest Tx timestamp */
 	odp_atomic_u64_t tx_ts;
@@ -126,6 +127,7 @@ struct pktio_entry {
 	struct {
 		odp_queue_t        queue;
 		odp_pktin_queue_t  pktin;
+		odp_pktin_vector_config_t vector;
 	} in_queue[PKTIO_MAX_QUEUES];
 
 	struct {
@@ -205,7 +207,7 @@ typedef struct pktio_if_ops {
 				    const odp_pktout_queue_param_t *p);
 } pktio_if_ops_t;
 
-extern void *pktio_entry_ptr[];
+extern void *_odp_pktio_entry_ptr[];
 
 static inline pktio_entry_t *get_pktio_entry(odp_pktio_t pktio)
 {
@@ -222,7 +224,7 @@ static inline pktio_entry_t *get_pktio_entry(odp_pktio_t pktio)
 
 	idx = odp_pktio_index(pktio);
 
-	return pktio_entry_ptr[idx];
+	return _odp_pktio_entry_ptr[idx];
 }
 
 static inline int pktio_cls_enabled(pktio_entry_t *entry)
@@ -249,15 +251,15 @@ static inline void _odp_pktio_tx_ts_set(pktio_entry_t *entry)
 
 extern const pktio_if_ops_t netmap_pktio_ops;
 extern const pktio_if_ops_t dpdk_pktio_ops;
-extern const pktio_if_ops_t sock_mmsg_pktio_ops;
-extern const pktio_if_ops_t sock_mmap_pktio_ops;
-extern const pktio_if_ops_t loopback_pktio_ops;
+extern const pktio_if_ops_t _odp_sock_mmsg_pktio_ops;
+extern const pktio_if_ops_t _odp_sock_mmap_pktio_ops;
+extern const pktio_if_ops_t _odp_loopback_pktio_ops;
 #ifdef _ODP_PKTIO_PCAP
-extern const pktio_if_ops_t pcap_pktio_ops;
+extern const pktio_if_ops_t _odp_pcap_pktio_ops;
 #endif
-extern const pktio_if_ops_t tap_pktio_ops;
-extern const pktio_if_ops_t null_pktio_ops;
-extern const pktio_if_ops_t ipc_pktio_ops;
+extern const pktio_if_ops_t _odp_tap_pktio_ops;
+extern const pktio_if_ops_t _odp_null_pktio_ops;
+extern const pktio_if_ops_t _odp_ipc_pktio_ops;
 extern const pktio_if_ops_t * const pktio_if_ops[];
 
 /**
@@ -274,11 +276,11 @@ extern const pktio_if_ops_t * const pktio_if_ops[];
  * @return >=0 on success, number of packets received
  * @return <0 on failure
  */
-int sock_recv_mq_tmo_try_int_driven(const struct odp_pktin_queue_t queues[],
-				    unsigned num_q, unsigned *from,
-				    odp_packet_t packets[], int num,
-				    uint64_t usecs,
-				    int *trial_successful);
+int _odp_sock_recv_mq_tmo_try_int_driven(const struct odp_pktin_queue_t queues[],
+					 unsigned int num_q, unsigned int *from,
+					 odp_packet_t packets[], int num,
+					 uint64_t usecs,
+					 int *trial_successful);
 
 #ifdef __cplusplus
 }

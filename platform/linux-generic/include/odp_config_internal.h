@@ -146,6 +146,12 @@ extern "C" {
  */
 #define CONFIG_POOL_CACHE_MAX_SIZE 256
 
+/* Maximum packet vector size */
+#define CONFIG_PACKET_VECTOR_MAX_SIZE 256
+
+/* Enable pool statistics collection */
+#define CONFIG_POOL_STATISTICS 1
+
 #ifdef __cplusplus
 }
 #endif

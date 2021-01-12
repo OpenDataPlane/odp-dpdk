@@ -103,7 +103,20 @@ typedef union odp_cls_pmr_terms_t {
 		/** Custom layer 3 match rule. PMR offset is counted from
 		 *  the start of layer 3 in the packet. */
 		uint64_t        custom_l3:1;
-
+		/** IGMP Group address, implies IPPROTO=2 */
+		uint64_t	igmp_grp_addr:1;
+		/** ICMP identifier, implies IPPROTO=1 and ICMP_TYPE=0 or ICMP_TYPE=8 */
+		uint64_t	icmp_id:1;
+		/** ICMP type, implies IPPROTO=1 */
+		uint64_t	icmp_type:1;
+		/** ICMP code, implies IPPROTO=1 */
+		uint64_t	icmp_code:1;
+		/** Source SCTP port, implies IPPROTO=132 */
+		uint64_t	sctp_sport:1;
+		/** Destination SCTP port, implies IPPROTO=132 */
+		uint64_t	sctp_dport:1;
+		/** GTPv1 tunnel endpoint identifier */
+		uint64_t	gtpv1_teid:1;
 	} bit;
 	/** All bits of the bit field structure */
 	uint64_t all_bits;
@@ -285,6 +298,9 @@ typedef struct odp_cls_cos_param {
 
 	/** Back Pressure configuration */
 	odp_bp_param_t bp;
+
+	/** Packet input vector configuration */
+	odp_pktin_vector_config_t vector;
 } odp_cls_cos_param_t;
 
 /**
@@ -551,6 +567,32 @@ typedef enum {
 	 * Custom L3 rules may be combined with other PMRs.
 	 */
 	ODP_PMR_CUSTOM_L3,
+
+	/** IGMP Group address (val_sz = 4), implies IPPROTO=2 */
+	ODP_PMR_IGMP_GRP_ADDR,
+
+	/** ICMP identifier (val_sz = 2), implies IPPROTO=1 and ICMP_TYPE=0 or ICMP_TYPE=8 */
+	ODP_PMR_ICMP_ID,
+
+	/** ICMP type (val_sz = 1), implies IPPROTO=1 */
+	ODP_PMR_ICMP_TYPE,
+
+	/** ICMP code (val_sz = 1), implies IPPROTO=1 */
+	ODP_PMR_ICMP_CODE,
+
+	/** Source SCTP port (val_sz = 2), implies IPPROTO=132 */
+	ODP_PMR_SCTP_SPORT,
+
+	/** Destination SCTP port (val_sz = 2), implies IPPROTO=132 */
+	ODP_PMR_SCTP_DPORT,
+
+	/** GTPv1 tunnel endpoint identifier (val_sz = 4)
+	 *
+	 * Matches if and only if IP protocol is UDP, UDP destination port
+	 * is 2152 and the UDP payload interpreted as GTP header has GTP
+	 * version 1 and TEID as specified.
+	 */
+	ODP_PMR_GTPV1_TEID,
 
 	/** Inner header may repeat above values with this offset */
 	ODP_PMR_INNER_HDR_OFF = 32

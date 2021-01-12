@@ -1,4 +1,6 @@
 SUBDIRS = \
+	classifier \
+	generator \
 	l2fwd_simple \
 	l3fwd \
 	packet \

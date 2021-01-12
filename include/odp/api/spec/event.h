@@ -58,6 +58,8 @@ extern "C" {
  *     - Crypto completion event (odp_crypto_compl_t)
  * - ODP_EVENT_IPSEC_STATUS
  *     - IPSEC status update event (odp_ipsec_status_t)
+ * - ODP_EVENT_PACKET_VECTOR
+ *     - Vector of packet events (odp_packet_t) as odp_packet_vector_t
  */
 
 /**
@@ -178,6 +180,20 @@ int odp_event_filter_packet(const odp_event_t event[],
  * an odp_event_t handle.
  */
 uint64_t odp_event_to_u64(odp_event_t hdl);
+
+/**
+ * Check that event is valid
+ *
+ * This function can be used for debugging purposes to check if an event handle represents
+ * a valid event. The level of error checks depends on the implementation. The call should not
+ * crash if the event handle is corrupted.
+ *
+ * @param event    Event handle
+ *
+ * @retval 1 Event handle represents a valid event.
+ * @retval 0 Event handle does not represent a valid event.
+ */
+int odp_event_is_valid(odp_event_t event);
 
 /**
  * Free event
