@@ -77,8 +77,6 @@ struct odp_buffer_hdr_t {
 	void *pool_ptr;
 };
 
-int odp_buffer_snprint(char *str, uint32_t n, odp_buffer_t buf);
-
 /*
  * Buffer type
  *
