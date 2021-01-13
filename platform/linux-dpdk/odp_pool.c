@@ -33,6 +33,11 @@
 #include <rte_config.h>
 #include <rte_errno.h>
 #include <rte_version.h>
+#include <rte_mempool.h>
+/* ppc64 rte_memcpy.h (included through rte_mempool.h) may define vector */
+#if defined(__PPC64__) && defined(vector)
+	#undef vector
+#endif
 
 #ifdef POOL_USE_TICKETLOCK
 #include <odp/api/ticketlock.h>
@@ -228,12 +233,16 @@ int _odp_buffer_is_valid(odp_buffer_t buf)
 
 int odp_pool_capability(odp_pool_capability_t *capa)
 {
+	odp_pool_stats_opt_t supported_stats;
 	unsigned int max_pools;
 
 	memset(capa, 0, sizeof(odp_pool_capability_t));
 
 	/* Reserve one pool for internal usage */
 	max_pools = ODP_CONFIG_POOLS - 1;
+
+	supported_stats.all = 0;
+	supported_stats.bit.available = 1;
 
 	/* Buffer pools */
 	capa->buf.max_pools = max_pools;
@@ -242,6 +251,7 @@ int odp_pool_capability(odp_pool_capability_t *capa)
 	capa->buf.max_num   = CONFIG_POOL_MAX_NUM;
 	capa->buf.min_cache_size   = 0;
 	capa->buf.max_cache_size   = RTE_MEMPOOL_CACHE_MAX_SIZE;
+	capa->buf.stats.all = supported_stats.all;
 
 	/* Packet pools */
 	capa->pkt.max_align        = ODP_CONFIG_BUFFER_ALIGN_MIN;
@@ -257,12 +267,14 @@ int odp_pool_capability(odp_pool_capability_t *capa)
 	capa->pkt.max_uarea_size   = MAX_SIZE;
 	capa->pkt.min_cache_size   = 0;
 	capa->pkt.max_cache_size   = RTE_MEMPOOL_CACHE_MAX_SIZE;
+	capa->pkt.stats.all = supported_stats.all;
 
 	/* Timeout pools */
 	capa->tmo.max_pools = max_pools;
 	capa->tmo.max_num   = CONFIG_POOL_MAX_NUM;
 	capa->tmo.min_cache_size   = 0;
 	capa->tmo.max_cache_size   = RTE_MEMPOOL_CACHE_MAX_SIZE;
+	capa->tmo.stats.all = supported_stats.all;
 
 	/* Vector pools */
 	capa->vector.max_pools      = max_pools;
@@ -270,6 +282,7 @@ int odp_pool_capability(odp_pool_capability_t *capa)
 	capa->vector.max_size       = CONFIG_PACKET_VECTOR_MAX_SIZE;
 	capa->vector.min_cache_size = 0;
 	capa->vector.max_cache_size = RTE_MEMPOOL_CACHE_MAX_SIZE;
+	capa->vector.stats.all = supported_stats.all;
 
 	return 0;
 }
@@ -388,6 +401,11 @@ static int check_params(const odp_pool_param_t *params)
 			return -1;
 		}
 
+		if (params->stats.all & ~capa.buf.stats.all) {
+			ODP_ERR("Unsupported pool statistics counter\n");
+			return -1;
+		}
+
 		break;
 
 	case ODP_POOL_PACKET:
@@ -435,6 +453,11 @@ static int check_params(const odp_pool_param_t *params)
 			return -1;
 		}
 
+		if (params->stats.all & ~capa.pkt.stats.all) {
+			ODP_ERR("Unsupported pool statistics counter\n");
+			return -1;
+		}
+
 		break;
 
 	case ODP_POOL_TIMEOUT:
@@ -446,6 +469,11 @@ static int check_params(const odp_pool_param_t *params)
 		if (params->tmo.cache_size > capa.tmo.max_cache_size) {
 			ODP_ERR("tmo.cache_size too large %u\n",
 				params->tmo.cache_size);
+			return -1;
+		}
+
+		if (params->stats.all & ~capa.tmo.stats.all) {
+			ODP_ERR("Unsupported pool statistics counter\n");
 			return -1;
 		}
 
@@ -474,6 +502,11 @@ static int check_params(const odp_pool_param_t *params)
 
 		if (params->vector.cache_size > capa.vector.max_cache_size) {
 			ODP_ERR("vector.cache_size too large %u\n", params->vector.cache_size);
+			return -1;
+		}
+
+		if (params->stats.all & ~capa.vector.stats.all) {
+			ODP_ERR("Unsupported pool statistics counter\n");
 			return -1;
 		}
 
@@ -914,4 +947,32 @@ int odp_pool_index(odp_pool_t pool_hdl)
 	pool = pool_entry_from_hdl(pool_hdl);
 
 	return pool->pool_idx;
+}
+
+int odp_pool_stats(odp_pool_t pool_hdl, odp_pool_stats_t *stats)
+{
+	pool_t *pool;
+
+	if (odp_unlikely(pool_hdl == ODP_POOL_INVALID)) {
+		ODP_ERR("Invalid pool handle\n");
+		return -1;
+	}
+	if (odp_unlikely(stats == NULL)) {
+		ODP_ERR("Output buffer NULL\n");
+		return -1;
+	}
+
+	pool = pool_entry_from_hdl(pool_hdl);
+
+	memset(stats, 0, sizeof(odp_pool_stats_t));
+
+	if (pool->params.stats.bit.available)
+		stats->available = rte_mempool_avail_count(pool->rte_mempool);
+
+	return 0;
+}
+
+int odp_pool_stats_reset(odp_pool_t pool_hdl ODP_UNUSED)
+{
+	return 0;
 }
