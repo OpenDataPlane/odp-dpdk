@@ -369,6 +369,11 @@ static int schedule_create_queue(uint32_t qi,
 	uint8_t priority = queue->s.eventdev.prio;
 	int thr;
 
+	if (sched_param->group < 0 || sched_param->group >= NUM_SCHED_GRPS) {
+		ODP_ERR("Bad schedule group\n");
+		return -1;
+	}
+
 	odp_ticketlock_lock(&eventdev_gbl->grp_lock);
 
 	eventdev_gbl->grp[sched_param->group].queue[queue_id] = queue;
@@ -791,7 +796,7 @@ static int schedule_num_prio(void)
 
 static int schedule_num_grps(void)
 {
-	return NUM_SCHED_GRPS;
+	return NUM_SCHED_GRPS - SCHED_GROUP_NAMED;
 }
 
 static odp_schedule_group_t schedule_group_create(const char *name,
