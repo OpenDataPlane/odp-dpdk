@@ -234,12 +234,12 @@ int _odp_buffer_is_valid(odp_buffer_t buf)
 int odp_pool_capability(odp_pool_capability_t *capa)
 {
 	odp_pool_stats_opt_t supported_stats;
-	unsigned int max_pools;
+	/* Reserve one pool for internal usage */
+	unsigned int max_pools = ODP_CONFIG_POOLS - 1;
 
 	memset(capa, 0, sizeof(odp_pool_capability_t));
 
-	/* Reserve one pool for internal usage */
-	max_pools = ODP_CONFIG_POOLS - 1;
+	capa->max_pools = max_pools;
 
 	supported_stats.all = 0;
 	supported_stats.bit.available = 1;
