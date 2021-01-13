@@ -65,6 +65,7 @@ typedef struct ODP_ALIGNED_CACHE {
 	odp_pool_param_t	params;
 	odp_pool_t		pool_hdl;
 	struct rte_mempool	*rte_mempool;
+	uint32_t		pool_idx;
 	uint32_t		seg_len;
 
 } pool_t;

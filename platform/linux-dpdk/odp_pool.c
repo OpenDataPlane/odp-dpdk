@@ -166,6 +166,7 @@ int _odp_pool_init_global(void)
 
 		LOCK_INIT(&pool->lock);
 		pool->pool_hdl = pool_index_to_handle(i);
+		pool->pool_idx = i;
 	}
 
 	ODP_DBG("\nPool init global\n");
@@ -897,4 +898,20 @@ void odp_pool_param_init(odp_pool_param_t *params)
 uint64_t odp_pool_to_u64(odp_pool_t hdl)
 {
 	return _odp_pri(hdl);
+}
+
+unsigned int odp_pool_max_index(void)
+{
+	return ODP_CONFIG_POOLS - 1;
+}
+
+int odp_pool_index(odp_pool_t pool_hdl)
+{
+	pool_t *pool;
+
+	ODP_ASSERT(pool_hdl != ODP_POOL_INVALID);
+
+	pool = pool_entry_from_hdl(pool_hdl);
+
+	return pool->pool_idx;
 }
