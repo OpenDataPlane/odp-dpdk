@@ -79,7 +79,7 @@ static odp_buffer_hdr_t *queue_spsc_deq(odp_queue_t handle)
 		return NULL;
 }
 
-void queue_spsc_init(queue_entry_t *queue, uint32_t queue_size)
+void _odp_queue_spsc_init(queue_entry_t *queue, uint32_t queue_size)
 {
 	queue->s.enqueue = queue_spsc_enq;
 	queue->s.dequeue = queue_spsc_deq;

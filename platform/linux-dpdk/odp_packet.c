@@ -1776,9 +1776,9 @@ int packet_parse_common_l3_l4(packet_parser_t *prs, const uint8_t *parseptr,
  * The function expects at least PACKET_PARSE_SEG_LEN bytes of data to be
  * available from the ptr. Also parse metadata must be already initialized.
  */
-int packet_parse_common(packet_parser_t *prs, const uint8_t *ptr,
-			uint32_t frame_len, uint32_t seg_len,
-			int layer, odp_proto_chksums_t chksums)
+int _odp_packet_parse_common(packet_parser_t *prs, const uint8_t *ptr,
+			     uint32_t frame_len, uint32_t seg_len,
+			     int layer, odp_proto_chksums_t chksums)
 {
 	uint32_t offset;
 	uint16_t ethtype;
@@ -2048,9 +2048,9 @@ static int packet_l4_chksum(odp_packet_hdr_t *pkt_hdr,
 /**
  * Simple packet parser
  */
-int packet_parse_layer(odp_packet_hdr_t *pkt_hdr,
-		       odp_proto_layer_t layer,
-		       odp_proto_chksums_t chksums)
+int _odp_packet_parse_layer(odp_packet_hdr_t *pkt_hdr,
+			    odp_proto_layer_t layer,
+			    odp_proto_chksums_t chksums)
 {
 	odp_packet_t pkt = packet_handle(pkt_hdr);
 	uint32_t seg_len = odp_packet_seg_len(pkt);

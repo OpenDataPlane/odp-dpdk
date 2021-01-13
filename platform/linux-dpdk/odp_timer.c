@@ -536,7 +536,7 @@ odp_timer_t odp_timer_alloc(odp_timer_pool_t tp,
 	timer->tmo_event = ODP_EVENT_INVALID;
 
 	/* Add timer to queue */
-	queue_fn->timer_add(queue);
+	_odp_queue_fn->timer_add(queue);
 
 	odp_ticketlock_lock(&timer_pool->lock);
 
@@ -577,7 +577,7 @@ retry:
 	}
 
 	/* Remove timer from queue */
-	queue_fn->timer_rem(timer->queue);
+	_odp_queue_fn->timer_rem(timer->queue);
 
 	odp_ticketlock_unlock(&timer->lock);
 

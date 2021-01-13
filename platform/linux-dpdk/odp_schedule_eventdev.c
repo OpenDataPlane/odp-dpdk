@@ -51,10 +51,10 @@ static int link_port(uint8_t dev_id, uint8_t port_id, uint8_t queue_ids[],
 {
 	int ret;
 
-	odp_ticketlock_lock(&eventdev_gbl->port_lock);
+	odp_ticketlock_lock(&_odp_eventdev_gbl->port_lock);
 
-	if (!eventdev_gbl->port[port_id].linked && !link_now) {
-		odp_ticketlock_unlock(&eventdev_gbl->port_lock);
+	if (!_odp_eventdev_gbl->port[port_id].linked && !link_now) {
+		odp_ticketlock_unlock(&_odp_eventdev_gbl->port_lock);
 		return 0;
 	}
 
@@ -62,13 +62,13 @@ static int link_port(uint8_t dev_id, uint8_t port_id, uint8_t queue_ids[],
 				  nb_links);
 	if (ret < 0 || (queue_ids && ret != nb_links)) {
 		ODP_ERR("rte_event_port_link failed: %d\n", ret);
-		odp_ticketlock_unlock(&eventdev_gbl->port_lock);
+		odp_ticketlock_unlock(&_odp_eventdev_gbl->port_lock);
 		return ret;
 	}
 
-	eventdev_gbl->port[port_id].linked = 1;
+	_odp_eventdev_gbl->port[port_id].linked = 1;
 
-	odp_ticketlock_unlock(&eventdev_gbl->port_lock);
+	odp_ticketlock_unlock(&_odp_eventdev_gbl->port_lock);
 
 	return ret;
 }
@@ -78,17 +78,17 @@ static int unlink_port(uint8_t dev_id, uint8_t port_id, uint8_t queue_ids[],
 {
 	int ret;
 
-	odp_ticketlock_lock(&eventdev_gbl->port_lock);
+	odp_ticketlock_lock(&_odp_eventdev_gbl->port_lock);
 
-	if (!eventdev_gbl->port[port_id].linked) {
-		odp_ticketlock_unlock(&eventdev_gbl->port_lock);
+	if (!_odp_eventdev_gbl->port[port_id].linked) {
+		odp_ticketlock_unlock(&_odp_eventdev_gbl->port_lock);
 		return 0;
 	}
 
 	ret = rte_event_port_unlink(dev_id, port_id, queue_ids, nb_links);
 	if (ret < 0) {
 		ODP_ERR("rte_event_port_unlink failed: %d\n", ret);
-		odp_ticketlock_unlock(&eventdev_gbl->port_lock);
+		odp_ticketlock_unlock(&_odp_eventdev_gbl->port_lock);
 		return ret;
 	}
 
@@ -104,9 +104,9 @@ static int unlink_port(uint8_t dev_id, uint8_t port_id, uint8_t queue_ids[],
 	} while (ret > 0);
 #endif
 	if (queue_ids == NULL)
-		eventdev_gbl->port[port_id].linked = 0;
+		_odp_eventdev_gbl->port[port_id].linked = 0;
 
-	odp_ticketlock_unlock(&eventdev_gbl->port_lock);
+	odp_ticketlock_unlock(&_odp_eventdev_gbl->port_lock);
 
 	return ret;
 }
@@ -119,18 +119,18 @@ static int resume_scheduling(uint8_t dev_id, uint8_t port_id)
 	int ret;
 	int i;
 
-	odp_ticketlock_lock(&eventdev_gbl->grp_lock);
+	odp_ticketlock_lock(&_odp_eventdev_gbl->grp_lock);
 
 	for (i = 0; i < NUM_SCHED_GRPS; i++) {
 		int j;
 
-		if (!eventdev_gbl->grp[i].allocated ||
-		    !odp_thrmask_isset(&eventdev_gbl->grp[i].mask,
-				       eventdev_local.port_id))
+		if (!_odp_eventdev_gbl->grp[i].allocated ||
+		    !odp_thrmask_isset(&_odp_eventdev_gbl->grp[i].mask,
+				       _odp_eventdev_local.port_id))
 			continue;
 
 		for (j = 0; j < RTE_EVENT_MAX_QUEUES_PER_DEV; j++) {
-			queue_entry_t *queue = eventdev_gbl->grp[i].queue[j];
+			queue_entry_t *queue = _odp_eventdev_gbl->grp[i].queue[j];
 
 			if (!queue)
 				continue;
@@ -141,7 +141,7 @@ static int resume_scheduling(uint8_t dev_id, uint8_t port_id)
 		}
 	}
 
-	odp_ticketlock_unlock(&eventdev_gbl->grp_lock);
+	odp_ticketlock_unlock(&_odp_eventdev_gbl->grp_lock);
 
 	if (!nb_links)
 		return 0;
@@ -150,9 +150,9 @@ static int resume_scheduling(uint8_t dev_id, uint8_t port_id)
 	if (ret != nb_links)
 		return -1;
 
-	if (eventdev_local.started == 0) {
-		odp_atomic_inc_u32(&eventdev_gbl->num_started);
-		eventdev_local.started = 1;
+	if (_odp_eventdev_local.started == 0) {
+		odp_atomic_inc_u32(&_odp_eventdev_gbl->num_started);
+		_odp_eventdev_local.started = 1;
 	}
 
 	return 0;
@@ -161,7 +161,7 @@ static int resume_scheduling(uint8_t dev_id, uint8_t port_id)
 static int link_group(int group, const odp_thrmask_t *mask, odp_bool_t unlink)
 {
 	odp_thrmask_t new_mask;
-	uint8_t dev_id = eventdev_gbl->dev_id;
+	uint8_t dev_id = _odp_eventdev_gbl->dev_id;
 	uint8_t queue_ids[RTE_EVENT_MAX_QUEUES_PER_DEV];
 	uint8_t priorities[RTE_EVENT_MAX_QUEUES_PER_DEV];
 	int nb_links = 0;
@@ -170,7 +170,7 @@ static int link_group(int group, const odp_thrmask_t *mask, odp_bool_t unlink)
 	int i;
 
 	for (i = 0; i < RTE_EVENT_MAX_QUEUES_PER_DEV; i++) {
-		queue_entry_t *queue = eventdev_gbl->grp[group].queue[i];
+		queue_entry_t *queue = _odp_eventdev_gbl->grp[group].queue[i];
 
 		if (queue == NULL)
 			continue;
@@ -214,7 +214,7 @@ static int rx_adapter_create(uint8_t dev_id, uint8_t rx_adapter_id,
 		return -1;
 	}
 	if ((capa & RTE_EVENT_ETH_RX_ADAPTER_CAP_MULTI_EVENTQ) == 0)
-		eventdev_gbl->rx_adapter.single_queue = 1;
+		_odp_eventdev_gbl->rx_adapter.single_queue = 1;
 
 	memset(&port_config, 0, sizeof(struct rte_event_port_conf));
 	port_config.new_event_threshold = config->nb_events_limit;
@@ -227,7 +227,7 @@ static int rx_adapter_create(uint8_t dev_id, uint8_t rx_adapter_id,
 		return -1;
 	}
 
-	eventdev_gbl->rx_adapter.status = RX_ADAPTER_STOPPED;
+	_odp_eventdev_gbl->rx_adapter.status = RX_ADAPTER_STOPPED;
 
 	return 0;
 }
@@ -236,13 +236,13 @@ static int rx_adapter_add_queues(uint8_t rx_adapter_id, uint8_t port_id,
 				 int num_pktin, int pktin_idx[],
 				 odp_queue_t queues[])
 {
-	int num_dummy_links = eventdev_gbl->config.nb_event_queues;
+	int num_dummy_links = _odp_eventdev_gbl->config.nb_event_queues;
 	uint8_t dummy_links[num_dummy_links];
 	int ret = 0;
 	int i;
 
 	/* SW eventdev requires that all queues have ports linked */
-	num_dummy_links = dummy_link_queues(eventdev_gbl->dev_id, dummy_links,
+	num_dummy_links = dummy_link_queues(_odp_eventdev_gbl->dev_id, dummy_links,
 					    num_dummy_links);
 
 	for (i = 0; i < num_pktin; i++) {
@@ -263,7 +263,7 @@ static int rx_adapter_add_queues(uint8_t rx_adapter_id, uint8_t port_id,
 		qconf.rx_queue_flags = 0;
 		qconf.servicing_weight = 1;
 
-		if (eventdev_gbl->rx_adapter.single_queue)
+		if (_odp_eventdev_gbl->rx_adapter.single_queue)
 			rx_queue_id = -1;
 
 		ret = rte_event_eth_rx_adapter_queue_add(rx_adapter_id, port_id,
@@ -273,11 +273,11 @@ static int rx_adapter_add_queues(uint8_t rx_adapter_id, uint8_t port_id,
 			return -1;
 		}
 
-		if (eventdev_gbl->rx_adapter.single_queue)
+		if (_odp_eventdev_gbl->rx_adapter.single_queue)
 			break;
 	}
 
-	if (dummy_unlink_queues(eventdev_gbl->dev_id, dummy_links,
+	if (dummy_unlink_queues(_odp_eventdev_gbl->dev_id, dummy_links,
 				num_dummy_links))
 		return -1;
 
@@ -287,13 +287,13 @@ static int rx_adapter_add_queues(uint8_t rx_adapter_id, uint8_t port_id,
 int rx_adapter_close(void)
 {
 	uint16_t port_id;
-	uint8_t rx_adapter_id = eventdev_gbl->rx_adapter.id;
+	uint8_t rx_adapter_id = _odp_eventdev_gbl->rx_adapter.id;
 	int ret = 0;
 
-	if (eventdev_gbl->rx_adapter.status == RX_ADAPTER_INIT)
+	if (_odp_eventdev_gbl->rx_adapter.status == RX_ADAPTER_INIT)
 		return ret;
 
-	if (eventdev_gbl->rx_adapter.status != RX_ADAPTER_STOPPED &&
+	if (_odp_eventdev_gbl->rx_adapter.status != RX_ADAPTER_STOPPED &&
 	    rte_event_eth_rx_adapter_stop(rx_adapter_id)) {
 		ODP_ERR("Failed to stop RX adapter\n");
 		ret = -1;
@@ -303,14 +303,14 @@ int rx_adapter_close(void)
 		rte_eth_dev_close(port_id);
 	}
 
-	eventdev_gbl->rx_adapter.status = RX_ADAPTER_INIT;
+	_odp_eventdev_gbl->rx_adapter.status = RX_ADAPTER_INIT;
 
 	return ret;
 }
 
 void rx_adapter_port_stop(uint16_t port_id)
 {
-	uint8_t rx_adapter_id = eventdev_gbl->rx_adapter.id;
+	uint8_t rx_adapter_id = _odp_eventdev_gbl->rx_adapter.id;
 
 	if (rte_event_eth_rx_adapter_queue_del(rx_adapter_id, port_id, -1))
 		ODP_ERR("Failed to delete RX queue\n");
@@ -351,7 +351,7 @@ static inline int schedule_min_prio(void)
 
 static inline  int schedule_max_prio(void)
 {
-	return eventdev_gbl->num_prio - 1;
+	return _odp_eventdev_gbl->num_prio - 1;
 }
 
 static inline  int schedule_default_prio(void)
@@ -364,7 +364,7 @@ static int schedule_create_queue(uint32_t qi,
 {
 	queue_entry_t *queue = qentry_from_index(qi);
 	odp_thrmask_t mask;
-	uint8_t dev_id = eventdev_gbl->dev_id;
+	uint8_t dev_id = _odp_eventdev_gbl->dev_id;
 	uint8_t queue_id = queue->s.index;
 	uint8_t priority = queue->s.eventdev.prio;
 	int thr;
@@ -374,17 +374,17 @@ static int schedule_create_queue(uint32_t qi,
 		return -1;
 	}
 
-	odp_ticketlock_lock(&eventdev_gbl->grp_lock);
+	odp_ticketlock_lock(&_odp_eventdev_gbl->grp_lock);
 
-	eventdev_gbl->grp[sched_param->group].queue[queue_id] = queue;
+	_odp_eventdev_gbl->grp[sched_param->group].queue[queue_id] = queue;
 
-	mask = eventdev_gbl->grp[sched_param->group].mask;
+	mask = _odp_eventdev_gbl->grp[sched_param->group].mask;
 	thr = odp_thrmask_first(&mask);
 	while (0 <= thr) {
 		link_port(dev_id, thr, &queue_id, &priority, 1, 0);
 		thr = odp_thrmask_next(&mask, thr);
 	}
-	odp_ticketlock_unlock(&eventdev_gbl->grp_lock);
+	odp_ticketlock_unlock(&_odp_eventdev_gbl->grp_lock);
 
 	return 0;
 }
@@ -394,21 +394,21 @@ static void schedule_destroy_queue(uint32_t qi)
 	queue_entry_t *queue = qentry_from_index(qi);
 	odp_thrmask_t mask;
 	odp_schedule_group_t group = queue->s.param.sched.group;
-	uint8_t dev_id = eventdev_gbl->dev_id;
+	uint8_t dev_id = _odp_eventdev_gbl->dev_id;
 	uint8_t queue_id = queue->s.index;
 	int thr;
 
-	odp_ticketlock_lock(&eventdev_gbl->grp_lock);
+	odp_ticketlock_lock(&_odp_eventdev_gbl->grp_lock);
 
-	eventdev_gbl->grp[group].queue[queue_id] = NULL;
+	_odp_eventdev_gbl->grp[group].queue[queue_id] = NULL;
 
-	mask = eventdev_gbl->grp[group].mask;
+	mask = _odp_eventdev_gbl->grp[group].mask;
 	thr = odp_thrmask_first(&mask);
 	while (0 <= thr) {
 		unlink_port(dev_id, thr, &queue_id, 1);
 		thr = odp_thrmask_next(&mask, thr);
 	}
-	odp_ticketlock_unlock(&eventdev_gbl->grp_lock);
+	odp_ticketlock_unlock(&_odp_eventdev_gbl->grp_lock);
 }
 
 static void schedule_pktio_start(int pktio_index, int num_pktin,
@@ -416,31 +416,31 @@ static void schedule_pktio_start(int pktio_index, int num_pktin,
 {
 	pktio_entry_t *entry = get_pktio_entry(index_to_pktio(pktio_index));
 	uint16_t port_id = dpdk_pktio_port_id(entry);
-	uint8_t rx_adapter_id = eventdev_gbl->rx_adapter.id;
+	uint8_t rx_adapter_id = _odp_eventdev_gbl->rx_adapter.id;
 
 	/* All eventdev pktio devices should to be started before calling
 	 * odp_schedule(). This is due to the SW eventdev requirement that all
 	 * event queues are linked when rte_event_eth_rx_adapter_queue_add() is
 	 * called. */
-	if (odp_atomic_load_u32(&eventdev_gbl->num_started))
+	if (odp_atomic_load_u32(&_odp_eventdev_gbl->num_started))
 		ODP_PRINT("All ODP pktio devices used by the scheduler should "
 			  "be started before calling odp_schedule() for the "
 			  "first time.\n");
 
-	eventdev_gbl->pktio[port_id] = entry;
+	_odp_eventdev_gbl->pktio[port_id] = entry;
 
-	odp_ticketlock_lock(&eventdev_gbl->rx_adapter.lock);
+	odp_ticketlock_lock(&_odp_eventdev_gbl->rx_adapter.lock);
 
-	if (eventdev_gbl->rx_adapter.status == RX_ADAPTER_INIT &&
-	    rx_adapter_create(eventdev_gbl->dev_id, rx_adapter_id,
-			      &eventdev_gbl->config))
+	if (_odp_eventdev_gbl->rx_adapter.status == RX_ADAPTER_INIT &&
+	    rx_adapter_create(_odp_eventdev_gbl->dev_id, rx_adapter_id,
+			      &_odp_eventdev_gbl->config))
 		ODP_ABORT("Creating eventdev RX adapter failed\n");
 
 	if (rx_adapter_add_queues(rx_adapter_id, port_id, num_pktin, pktin_idx,
 				  queue))
 		ODP_ABORT("Adding RX adapter queues failed\n");
 
-	if (eventdev_gbl->rx_adapter.status == RX_ADAPTER_STOPPED) {
+	if (_odp_eventdev_gbl->rx_adapter.status == RX_ADAPTER_STOPPED) {
 		uint32_t service_id = 0;
 		int ret;
 
@@ -456,10 +456,10 @@ static void schedule_pktio_start(int pktio_index, int num_pktin,
 		if (rte_event_eth_rx_adapter_start(rx_adapter_id))
 			ODP_ABORT("Unable to start RX adapter\n");
 
-		eventdev_gbl->rx_adapter.status = RX_ADAPTER_RUNNING;
+		_odp_eventdev_gbl->rx_adapter.status = RX_ADAPTER_RUNNING;
 	}
 
-	odp_ticketlock_unlock(&eventdev_gbl->rx_adapter.lock);
+	odp_ticketlock_unlock(&_odp_eventdev_gbl->rx_adapter.lock);
 }
 
 static inline int classify_pkts(odp_packet_t packets[], int num)
@@ -547,11 +547,11 @@ static inline uint16_t event_input(struct rte_event ev[], odp_event_t out_ev[],
 		if (odp_unlikely(event->queue_id != first_queue)) {
 			uint16_t cache_idx, j;
 
-			eventdev_local.cache.idx = 0;
+			_odp_eventdev_local.cache.idx = 0;
 			for (j = i; j < nb_events; j++) {
-				cache_idx = eventdev_local.cache.count;
-				eventdev_local.cache.event[cache_idx] = ev[j];
-				eventdev_local.cache.count++;
+				cache_idx = _odp_eventdev_local.cache.count;
+				_odp_eventdev_local.cache.event[cache_idx] = ev[j];
+				_odp_eventdev_local.cache.count++;
 			}
 			break;
 		}
@@ -566,7 +566,7 @@ static inline uint16_t event_input(struct rte_event ev[], odp_event_t out_ev[],
 	}
 
 	if (num_pkts) {
-		pktio_entry_t *entry = eventdev_gbl->pktio[pkt_table[0]->port];
+		pktio_entry_t *entry = _odp_eventdev_gbl->pktio[pkt_table[0]->port];
 
 		num_pkts = input_pkts(entry, (odp_packet_t *)pkt_table,
 				      num_pkts);
@@ -590,19 +590,19 @@ static inline uint16_t input_cached(odp_event_t out_ev[], unsigned int max_num,
 				    odp_queue_t *out_queue)
 {
 	struct rte_event ev[max_num];
-	uint16_t idx = eventdev_local.cache.idx;
+	uint16_t idx = _odp_eventdev_local.cache.idx;
 	uint16_t i;
-	uint8_t first_queue = eventdev_local.cache.event[idx].queue_id;
+	uint8_t first_queue = _odp_eventdev_local.cache.event[idx].queue_id;
 
-	for (i = 0; i < max_num && eventdev_local.cache.count; i++) {
-		uint16_t idx = eventdev_local.cache.idx;
-		struct rte_event *event = &eventdev_local.cache.event[idx];
+	for (i = 0; i < max_num && _odp_eventdev_local.cache.count; i++) {
+		uint16_t idx = _odp_eventdev_local.cache.idx;
+		struct rte_event *event = &_odp_eventdev_local.cache.event[idx];
 
 		if (odp_unlikely(event->queue_id != first_queue))
 			break;
 
-		eventdev_local.cache.idx++;
-		eventdev_local.cache.count--;
+		_odp_eventdev_local.cache.idx++;
+		_odp_eventdev_local.cache.count--;
 		ev[i] = *event;
 	}
 
@@ -616,18 +616,18 @@ static inline int schedule_loop(odp_queue_t *out_queue, uint64_t wait,
 	struct rte_event ev[max_num];
 	int first = 1;
 	uint16_t num_deq;
-	uint8_t dev_id = eventdev_gbl->dev_id;
-	uint8_t port_id = eventdev_local.port_id;
+	uint8_t dev_id = _odp_eventdev_gbl->dev_id;
+	uint8_t port_id = _odp_eventdev_local.port_id;
 
-	if (odp_unlikely(port_id >= eventdev_gbl->num_event_ports)) {
+	if (odp_unlikely(port_id >= _odp_eventdev_gbl->num_event_ports)) {
 		ODP_ERR("Max %" PRIu8 " scheduled workers supported\n",
-			eventdev_gbl->num_event_ports);
+			_odp_eventdev_gbl->num_event_ports);
 		return 0;
 	}
 
 	/* Check that port is linked */
-	if (odp_unlikely(!eventdev_gbl->port[port_id].linked &&
-			 !eventdev_local.paused)) {
+	if (odp_unlikely(!_odp_eventdev_gbl->port[port_id].linked &&
+			 !_odp_eventdev_local.paused)) {
 		if (resume_scheduling(dev_id, port_id))
 			return 0;
 	}
@@ -635,7 +635,7 @@ static inline int schedule_loop(odp_queue_t *out_queue, uint64_t wait,
 	if (odp_unlikely(max_num > MAX_SCHED_BURST))
 		max_num = MAX_SCHED_BURST;
 
-	if (odp_unlikely(eventdev_local.cache.count)) {
+	if (odp_unlikely(_odp_eventdev_local.cache.count)) {
 		num_deq = input_cached(out_ev, max_num, out_queue);
 	} else {
 		while (1) {
@@ -705,19 +705,19 @@ static int schedule_multi_no_wait(odp_queue_t *out_queue, odp_event_t events[],
 
 static void schedule_pause(void)
 {
-	if (unlink_port(eventdev_gbl->dev_id,
-			eventdev_local.port_id, NULL, 0) < 0)
+	if (unlink_port(_odp_eventdev_gbl->dev_id,
+			_odp_eventdev_local.port_id, NULL, 0) < 0)
 		ODP_ERR("Unable to pause scheduling\n");
 
-	eventdev_local.paused = 1;
+	_odp_eventdev_local.paused = 1;
 }
 
 static void schedule_resume(void)
 {
-	if (resume_scheduling(eventdev_gbl->dev_id, eventdev_local.port_id))
+	if (resume_scheduling(_odp_eventdev_gbl->dev_id, _odp_eventdev_local.port_id))
 		ODP_ERR("Unable to resume scheduling\n");
 
-	eventdev_local.paused = 0;
+	_odp_eventdev_local.paused = 0;
 }
 
 static void schedule_release_atomic(void)
@@ -735,7 +735,7 @@ static uint64_t schedule_wait_time(uint64_t ns)
 
 static inline void grp_update_mask(int grp, const odp_thrmask_t *new_mask)
 {
-	odp_thrmask_copy(&eventdev_gbl->grp[grp].mask, new_mask);
+	odp_thrmask_copy(&_odp_eventdev_gbl->grp[grp].mask, new_mask);
 }
 
 static int schedule_thr_add(odp_schedule_group_t group, int thr)
@@ -749,12 +749,12 @@ static int schedule_thr_add(odp_schedule_group_t group, int thr)
 	odp_thrmask_zero(&mask);
 	odp_thrmask_set(&mask, thr);
 
-	odp_ticketlock_lock(&eventdev_gbl->grp_lock);
+	odp_ticketlock_lock(&_odp_eventdev_gbl->grp_lock);
 
-	odp_thrmask_or(&new_mask, &eventdev_gbl->grp[group].mask, &mask);
+	odp_thrmask_or(&new_mask, &_odp_eventdev_gbl->grp[group].mask, &mask);
 	grp_update_mask(group, &new_mask);
 
-	odp_ticketlock_unlock(&eventdev_gbl->grp_lock);
+	odp_ticketlock_unlock(&_odp_eventdev_gbl->grp_lock);
 
 	return 0;
 }
@@ -769,17 +769,17 @@ static int schedule_thr_rem(odp_schedule_group_t group, int thr)
 
 	odp_thrmask_zero(&mask);
 	odp_thrmask_set(&mask, thr);
-	odp_thrmask_xor(&new_mask, &mask, &eventdev_gbl->mask_all);
+	odp_thrmask_xor(&new_mask, &mask, &_odp_eventdev_gbl->mask_all);
 
-	odp_ticketlock_lock(&eventdev_gbl->grp_lock);
+	odp_ticketlock_lock(&_odp_eventdev_gbl->grp_lock);
 
-	odp_thrmask_and(&new_mask, &eventdev_gbl->grp[group].mask,
+	odp_thrmask_and(&new_mask, &_odp_eventdev_gbl->grp[group].mask,
 			&new_mask);
 	grp_update_mask(group, &new_mask);
 
-	unlink_port(eventdev_gbl->dev_id, thr, NULL, 0);
+	unlink_port(_odp_eventdev_gbl->dev_id, thr, NULL, 0);
 
-	odp_ticketlock_unlock(&eventdev_gbl->grp_lock);
+	odp_ticketlock_unlock(&_odp_eventdev_gbl->grp_lock);
 
 	return 0;
 }
@@ -791,7 +791,7 @@ static void schedule_prefetch(int num ODP_UNUSED)
 
 static int schedule_num_prio(void)
 {
-	return eventdev_gbl->num_prio;
+	return _odp_eventdev_gbl->num_prio;
 }
 
 static int schedule_num_grps(void)
@@ -805,11 +805,11 @@ static odp_schedule_group_t schedule_group_create(const char *name,
 	odp_schedule_group_t group = ODP_SCHED_GROUP_INVALID;
 	int i;
 
-	odp_ticketlock_lock(&eventdev_gbl->grp_lock);
+	odp_ticketlock_lock(&_odp_eventdev_gbl->grp_lock);
 
 	for (i = SCHED_GROUP_NAMED; i < NUM_SCHED_GRPS; i++) {
-		if (!eventdev_gbl->grp[i].allocated) {
-			char *grp_name = eventdev_gbl->grp[i].name;
+		if (!_odp_eventdev_gbl->grp[i].allocated) {
+			char *grp_name = _odp_eventdev_gbl->grp[i].name;
 
 			if (name == NULL) {
 				grp_name[0] = 0;
@@ -821,12 +821,12 @@ static odp_schedule_group_t schedule_group_create(const char *name,
 
 			grp_update_mask(i, mask);
 			group = (odp_schedule_group_t)i;
-			eventdev_gbl->grp[i].allocated = 1;
+			_odp_eventdev_gbl->grp[i].allocated = 1;
 			break;
 		}
 	}
 
-	odp_ticketlock_unlock(&eventdev_gbl->grp_lock);
+	odp_ticketlock_unlock(&_odp_eventdev_gbl->grp_lock);
 	return group;
 }
 
@@ -837,20 +837,20 @@ static int schedule_group_destroy(odp_schedule_group_t group)
 
 	odp_thrmask_zero(&zero);
 
-	odp_ticketlock_lock(&eventdev_gbl->grp_lock);
+	odp_ticketlock_lock(&_odp_eventdev_gbl->grp_lock);
 
 	if (group < NUM_SCHED_GRPS && group >= SCHED_GROUP_NAMED &&
-	    eventdev_gbl->grp[group].allocated) {
+	    _odp_eventdev_gbl->grp[group].allocated) {
 		grp_update_mask(group, &zero);
-		memset(eventdev_gbl->grp[group].name, 0,
+		memset(_odp_eventdev_gbl->grp[group].name, 0,
 		       ODP_SCHED_GROUP_NAME_LEN);
-		eventdev_gbl->grp[group].allocated = 0;
+		_odp_eventdev_gbl->grp[group].allocated = 0;
 		ret = 0;
 	} else {
 		ret = -1;
 	}
 
-	odp_ticketlock_unlock(&eventdev_gbl->grp_lock);
+	odp_ticketlock_unlock(&_odp_eventdev_gbl->grp_lock);
 	return ret;
 }
 
@@ -859,16 +859,16 @@ static odp_schedule_group_t schedule_group_lookup(const char *name)
 	odp_schedule_group_t group = ODP_SCHED_GROUP_INVALID;
 	int i;
 
-	odp_ticketlock_lock(&eventdev_gbl->grp_lock);
+	odp_ticketlock_lock(&_odp_eventdev_gbl->grp_lock);
 
 	for (i = SCHED_GROUP_NAMED; i < NUM_SCHED_GRPS; i++) {
-		if (strcmp(name, eventdev_gbl->grp[i].name) == 0) {
+		if (strcmp(name, _odp_eventdev_gbl->grp[i].name) == 0) {
 			group = (odp_schedule_group_t)i;
 			break;
 		}
 	}
 
-	odp_ticketlock_unlock(&eventdev_gbl->grp_lock);
+	odp_ticketlock_unlock(&_odp_eventdev_gbl->grp_lock);
 	return group;
 }
 
@@ -877,17 +877,17 @@ static int schedule_group_join(odp_schedule_group_t group,
 {
 	int ret = 0;
 
-	odp_ticketlock_lock(&eventdev_gbl->grp_lock);
+	odp_ticketlock_lock(&_odp_eventdev_gbl->grp_lock);
 
 	if (group < NUM_SCHED_GRPS && group >= SCHED_GROUP_NAMED &&
-	    eventdev_gbl->grp[group].allocated) {
+	    _odp_eventdev_gbl->grp[group].allocated) {
 		odp_thrmask_t new_mask;
 		odp_thrmask_t link_mask;
 
-		odp_thrmask_and(&link_mask, &eventdev_gbl->grp[group].mask,
+		odp_thrmask_and(&link_mask, &_odp_eventdev_gbl->grp[group].mask,
 				mask);
 		odp_thrmask_xor(&link_mask, &link_mask, mask);
-		odp_thrmask_or(&new_mask, &eventdev_gbl->grp[group].mask,
+		odp_thrmask_or(&new_mask, &_odp_eventdev_gbl->grp[group].mask,
 			       mask);
 		grp_update_mask(group, &new_mask);
 
@@ -896,7 +896,7 @@ static int schedule_group_join(odp_schedule_group_t group,
 		ret = -1;
 	}
 
-	odp_ticketlock_unlock(&eventdev_gbl->grp_lock);
+	odp_ticketlock_unlock(&_odp_eventdev_gbl->grp_lock);
 	return ret;
 }
 
@@ -907,16 +907,16 @@ static int schedule_group_leave(odp_schedule_group_t group,
 	odp_thrmask_t unlink_mask;
 	int ret = 0;
 
-	odp_thrmask_xor(&new_mask, mask, &eventdev_gbl->mask_all);
-	odp_thrmask_and(&unlink_mask, mask, &eventdev_gbl->mask_all);
+	odp_thrmask_xor(&new_mask, mask, &_odp_eventdev_gbl->mask_all);
+	odp_thrmask_and(&unlink_mask, mask, &_odp_eventdev_gbl->mask_all);
 
-	odp_ticketlock_lock(&eventdev_gbl->grp_lock);
+	odp_ticketlock_lock(&_odp_eventdev_gbl->grp_lock);
 
 	if (group < NUM_SCHED_GRPS && group >= SCHED_GROUP_NAMED &&
-	    eventdev_gbl->grp[group].allocated) {
-		odp_thrmask_and(&unlink_mask, &eventdev_gbl->grp[group].mask,
+	    _odp_eventdev_gbl->grp[group].allocated) {
+		odp_thrmask_and(&unlink_mask, &_odp_eventdev_gbl->grp[group].mask,
 				&unlink_mask);
-		odp_thrmask_and(&new_mask, &eventdev_gbl->grp[group].mask,
+		odp_thrmask_and(&new_mask, &_odp_eventdev_gbl->grp[group].mask,
 				&new_mask);
 		grp_update_mask(group, &new_mask);
 
@@ -925,7 +925,7 @@ static int schedule_group_leave(odp_schedule_group_t group,
 		ret = -1;
 	}
 
-	odp_ticketlock_unlock(&eventdev_gbl->grp_lock);
+	odp_ticketlock_unlock(&_odp_eventdev_gbl->grp_lock);
 	return ret;
 }
 
@@ -934,17 +934,17 @@ static int schedule_group_thrmask(odp_schedule_group_t group,
 {
 	int ret;
 
-	odp_ticketlock_lock(&eventdev_gbl->grp_lock);
+	odp_ticketlock_lock(&_odp_eventdev_gbl->grp_lock);
 
 	if (group < NUM_SCHED_GRPS && group >= SCHED_GROUP_NAMED &&
-	    eventdev_gbl->grp[group].allocated) {
-		*thrmask = eventdev_gbl->grp[group].mask;
+	    _odp_eventdev_gbl->grp[group].allocated) {
+		*thrmask = _odp_eventdev_gbl->grp[group].mask;
 		ret = 0;
 	} else {
 		ret = -1;
 	}
 
-	odp_ticketlock_unlock(&eventdev_gbl->grp_lock);
+	odp_ticketlock_unlock(&_odp_eventdev_gbl->grp_lock);
 	return ret;
 }
 
@@ -953,18 +953,18 @@ static int schedule_group_info(odp_schedule_group_t group,
 {
 	int ret;
 
-	odp_ticketlock_lock(&eventdev_gbl->grp_lock);
+	odp_ticketlock_lock(&_odp_eventdev_gbl->grp_lock);
 
 	if (group < NUM_SCHED_GRPS && group >= SCHED_GROUP_NAMED &&
-	    eventdev_gbl->grp[group].allocated) {
-		info->name    = eventdev_gbl->grp[group].name;
-		info->thrmask = eventdev_gbl->grp[group].mask;
+	    _odp_eventdev_gbl->grp[group].allocated) {
+		info->name    = _odp_eventdev_gbl->grp[group].name;
+		info->thrmask = _odp_eventdev_gbl->grp[group].mask;
 		ret = 0;
 	} else {
 		ret = -1;
 	}
 
-	odp_ticketlock_unlock(&eventdev_gbl->grp_lock);
+	odp_ticketlock_unlock(&_odp_eventdev_gbl->grp_lock);
 	return ret;
 }
 
@@ -1003,11 +1003,11 @@ static int schedule_capability(odp_schedule_capability_t *capa)
 
 	memset(capa, 0, sizeof(odp_schedule_capability_t));
 
-	max_sched = RTE_MAX(RTE_MAX(eventdev_gbl->event_queue.num_atomic,
-				    eventdev_gbl->event_queue.num_ordered),
-			    eventdev_gbl->event_queue.num_parallel);
+	max_sched = RTE_MAX(RTE_MAX(_odp_eventdev_gbl->event_queue.num_atomic,
+				    _odp_eventdev_gbl->event_queue.num_ordered),
+			    _odp_eventdev_gbl->event_queue.num_parallel);
 	capa->max_queues        = RTE_MIN(CONFIG_MAX_SCHED_QUEUES, max_sched);
-	capa->max_queue_size    = eventdev_gbl->config.nb_events_limit;
+	capa->max_queue_size    = _odp_eventdev_gbl->config.nb_events_limit;
 	capa->max_ordered_locks = schedule_max_ordered_locks();
 	capa->max_groups        = schedule_num_grps();
 	capa->max_prios         = odp_schedule_num_prio();
@@ -1036,7 +1036,7 @@ static int schedule_config(const odp_schedule_config_t *config)
 }
 
 /* Fill in scheduler interface */
-const schedule_fn_t schedule_eventdev_fn = {
+const schedule_fn_t _odp_schedule_eventdev_fn = {
 	.pktio_start = schedule_pktio_start,
 	.thr_add = schedule_thr_add,
 	.thr_rem = schedule_thr_rem,
@@ -1056,7 +1056,7 @@ const schedule_fn_t schedule_eventdev_fn = {
 };
 
 /* Fill in scheduler API calls */
-const schedule_api_t schedule_eventdev_api = {
+const schedule_api_t _odp_schedule_eventdev_api = {
 	.schedule_wait_time       = schedule_wait_time,
 	.schedule_capability      = schedule_capability,
 	.schedule_config_init     = schedule_config_init,

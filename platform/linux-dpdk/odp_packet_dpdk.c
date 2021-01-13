@@ -141,8 +141,8 @@ static inline pkt_dpdk_t *pkt_priv(pktio_entry_t *pktio_entry)
  * will be picked.
  * Array must be NULL terminated */
 const pktio_if_ops_t * const pktio_if_ops[]  = {
-	&dpdk_pktio_ops,
-	&null_pktio_ops,
+	&_odp_dpdk_pktio_ops,
+	&_odp_null_pktio_ops,
 	NULL
 };
 
@@ -466,8 +466,8 @@ static int dpdk_term_global(void)
 	int ret = 0;
 
 	/* Eventdev takes care of closing pktio devices */
-	if (!eventdev_gbl ||
-	    eventdev_gbl->rx_adapter.status == RX_ADAPTER_INIT) {
+	if (!_odp_eventdev_gbl ||
+	    _odp_eventdev_gbl->rx_adapter.status == RX_ADAPTER_INIT) {
 		uint16_t port_id;
 
 		if (dpdk_glb->loopback_ring) {
@@ -750,8 +750,8 @@ static int close_pkt_dpdk(pktio_entry_t *pktio_entry)
 {
 	pkt_dpdk_t * const pkt_dpdk = pkt_priv(pktio_entry);
 
-	if (eventdev_gbl &&
-	    eventdev_gbl->rx_adapter.status != RX_ADAPTER_INIT)
+	if (_odp_eventdev_gbl &&
+	    _odp_eventdev_gbl->rx_adapter.status != RX_ADAPTER_INIT)
 		rx_adapter_port_stop(pkt_dpdk->port_id);
 	else
 		rte_eth_dev_stop(pkt_dpdk->port_id);
@@ -1008,8 +1008,8 @@ int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int num)
 
 			/* DPDK ring pmd doesn't support packet parsing */
 			if (pkt_dpdk->flags.loopback) {
-				packet_parse_layer(pkt_hdr, parse_layer,
-						   pktio_entry->s.in_chksums);
+				_odp_packet_parse_layer(pkt_hdr, parse_layer,
+							pktio_entry->s.in_chksums);
 			} else {
 				if (_odp_dpdk_packet_parse_layer(pkt_hdr, mbuf,
 								 parse_layer,
@@ -1055,9 +1055,9 @@ int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int num)
 					continue;
 				}
 			}
-			if (cls_classify_packet(pktio_entry, data, pkt_len,
-						pkt_len, &new_pool, &parsed_hdr,
-						pkt_dpdk->flags.loopback)) {
+			if (_odp_cls_classify_packet(pktio_entry, data, pkt_len,
+						     pkt_len, &new_pool, &parsed_hdr,
+						     pkt_dpdk->flags.loopback)) {
 				failed++;
 				odp_packet_free(pkt);
 				continue;
@@ -1572,7 +1572,7 @@ static int stats_reset_pkt_dpdk(pktio_entry_t *pktio_entry)
 	return 0;
 }
 
-const pktio_if_ops_t dpdk_pktio_ops = {
+const pktio_if_ops_t _odp_dpdk_pktio_ops = {
 	.name = "odp-dpdk",
 	.print = NULL,
 	.init_global = dpdk_init_global,
