@@ -278,6 +278,8 @@ int odp_timer_capability(odp_timer_clk_src_t clk_src,
 	capa->max_tmo.res_hz  = MAX_RES_HZ;
 	capa->max_tmo.min_tmo = min_tmo;
 	capa->max_tmo.max_tmo = MAX_TMO_NS;
+	capa->queue_type_sched = true;
+	capa->queue_type_plain = true;
 
 	return 0;
 }
@@ -534,7 +536,7 @@ odp_timer_t odp_timer_alloc(odp_timer_pool_t tp,
 	timer->tmo_event = ODP_EVENT_INVALID;
 
 	/* Add timer to queue */
-	queue_fn->timer_add(queue);
+	_odp_queue_fn->timer_add(queue);
 
 	odp_ticketlock_lock(&timer_pool->lock);
 
@@ -575,7 +577,7 @@ retry:
 	}
 
 	/* Remove timer from queue */
-	queue_fn->timer_rem(timer->queue);
+	_odp_queue_fn->timer_rem(timer->queue);
 
 	odp_ticketlock_unlock(&timer->lock);
 

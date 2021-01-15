@@ -20,6 +20,7 @@ extern "C" {
 
 #include <odp/api/spinlock.h>
 #include <odp/api/classification.h>
+#include <odp/api/debug.h>
 #include <odp_pool_internal.h>
 #include <odp_packet_internal.h>
 #include <odp_packet_io_internal.h>
@@ -28,6 +29,8 @@ extern "C" {
 
 /* Maximum Class Of Service Entry */
 #define CLS_COS_MAX_ENTRY		64
+/* Invalid CoS index */
+#define CLS_COS_IDX_NONE		CLS_COS_MAX_ENTRY
 /* Maximum PMR Entry */
 #define CLS_PMR_MAX_ENTRY		256
 /* Maximum PMR Terms in a PMR Set */
@@ -48,6 +51,9 @@ extern "C" {
 #define CLS_COS_QUEUE_MAX		32
 /* Max number of implementation created queues */
 #define CLS_QUEUE_GROUP_MAX		(CLS_COS_MAX_ENTRY * CLS_COS_QUEUE_MAX)
+
+/* CoS index is stored in odp_packet_hdr_t */
+ODP_STATIC_ASSERT(CLS_COS_MAX_ENTRY <= UINT16_MAX, "CoS_does_not_fit_16_bits");
 
 typedef union {
 	/* All proto fileds */
@@ -123,8 +129,9 @@ typedef struct pmr_term_value {
 Class Of Service
 */
 struct cos_s {
-	odp_queue_t queue;			/* Associated Queue */
+	odp_queue_t queue;		/* Associated Queue */
 	odp_pool_t pool;		/* Associated Buffer pool */
+	odp_pktin_vector_config_t vector;	/* Packet vector config */
 	union pmr_u *pmr[CLS_PMR_PER_COS_MAX];	/* Chained PMR */
 	union cos_u *linked_cos[CLS_PMR_PER_COS_MAX]; /* Chained CoS with PMR*/
 	uint32_t valid;			/* validity Flag */

@@ -25,6 +25,90 @@ static const char *support_level(odp_support_t support)
 	}
 }
 
+static const char *cpu_arch_name(odp_system_info_t *sysinfo)
+{
+	odp_cpu_arch_t cpu_arch = sysinfo->cpu_arch;
+
+	switch (cpu_arch) {
+	case ODP_CPU_ARCH_ARM:
+		return "ARM";
+	case ODP_CPU_ARCH_MIPS:
+		return "MIPS";
+	case ODP_CPU_ARCH_PPC:
+		return "PPC";
+	case ODP_CPU_ARCH_RISCV:
+		return "RISC-V";
+	case ODP_CPU_ARCH_X86:
+		return "x86";
+	default:
+		return "Unknown";
+	}
+}
+
+static const char *arm_isa(odp_cpu_arch_arm_t isa)
+{
+	switch (isa) {
+	case ODP_CPU_ARCH_ARMV6:
+		return "ARMv6";
+	case ODP_CPU_ARCH_ARMV7:
+		return "ARMv7-A";
+	case ODP_CPU_ARCH_ARMV8_0:
+		return "ARMv8.0-A";
+	case ODP_CPU_ARCH_ARMV8_1:
+		return "ARMv8.1-A";
+	case ODP_CPU_ARCH_ARMV8_2:
+		return "ARMv8.2-A";
+	case ODP_CPU_ARCH_ARMV8_3:
+		return "ARMv8.3-A";
+	case ODP_CPU_ARCH_ARMV8_4:
+		return "ARMv8.4-A";
+	case ODP_CPU_ARCH_ARMV8_5:
+		return "ARMv8.5-A";
+	case ODP_CPU_ARCH_ARMV8_6:
+		return "ARMv8.6-A";
+	default:
+		return "Unknown";
+	}
+}
+
+static const char *x86_isa(odp_cpu_arch_x86_t isa)
+{
+	switch (isa) {
+	case ODP_CPU_ARCH_X86_I686:
+		return "x86_i686";
+	case ODP_CPU_ARCH_X86_64:
+		return "x86_64";
+	default:
+		return "Unknown";
+	}
+}
+
+static const char *cpu_arch_isa(odp_system_info_t *sysinfo, int isa_sw)
+{
+	odp_cpu_arch_t cpu_arch = sysinfo->cpu_arch;
+
+	switch (cpu_arch) {
+	case ODP_CPU_ARCH_ARM:
+		if (isa_sw)
+			return arm_isa(sysinfo->cpu_isa_sw.arm);
+		else
+			return arm_isa(sysinfo->cpu_isa_hw.arm);
+	case ODP_CPU_ARCH_MIPS:
+		return "Unknown";
+	case ODP_CPU_ARCH_PPC:
+		return "Unknown";
+	case ODP_CPU_ARCH_RISCV:
+		return "Unknown";
+	case ODP_CPU_ARCH_X86:
+		if (isa_sw)
+			return x86_isa(sysinfo->cpu_isa_sw.x86);
+		else
+			return x86_isa(sysinfo->cpu_isa_hw.x86);
+	default:
+		return "Unknown";
+	}
+}
+
 static const char *cipher_alg_name(odp_cipher_alg_t cipher)
 {
 	switch (cipher) {
@@ -233,17 +317,20 @@ int main(void)
 	int i, num_hp, num_hp_print;
 	int num_ava, num_work, num_ctrl;
 	odp_cpumask_t ava_mask, work_mask, ctrl_mask;
+	odp_system_info_t sysinfo;
 	odp_shm_capability_t shm_capa;
 	odp_pool_capability_t pool_capa;
 	odp_queue_capability_t queue_capa;
 	odp_timer_capability_t timer_capa;
 	odp_crypto_capability_t crypto_capa;
+	odp_ipsec_capability_t ipsec_capa;
 	odp_schedule_capability_t schedule_capa;
 	uint64_t huge_page[MAX_HUGE_PAGES];
 	char ava_mask_str[ODP_CPUMASK_STR_SIZE];
 	char work_mask_str[ODP_CPUMASK_STR_SIZE];
 	char ctrl_mask_str[ODP_CPUMASK_STR_SIZE];
 	int crypto_ret;
+	int ipsec_ret;
 
 	printf("\n");
 	printf("ODP system info example\n");
@@ -260,7 +347,20 @@ int main(void)
 		return -1;
 	}
 
+	printf("\n");
+	printf("odp_sys_info_print()\n");
+	printf("***********************************************************\n");
 	odp_sys_info_print();
+
+	printf("\n");
+	printf("odp_sys_config_print()\n");
+	printf("***********************************************************\n");
+	odp_sys_config_print();
+
+	if (odp_system_info(&sysinfo)) {
+		printf("system info call failed\n");
+		return -1;
+	}
 
 	memset(ava_mask_str, 0, ODP_CPUMASK_STR_SIZE);
 	num_ava = odp_cpumask_all_available(&ava_mask);
@@ -309,6 +409,10 @@ int main(void)
 	if (crypto_ret < 0)
 		printf("crypto capability failed\n");
 
+	ipsec_ret = odp_ipsec_capability(&ipsec_capa);
+	if (ipsec_ret < 0)
+		printf("IPsec capability failed\n");
+
 	printf("\n");
 	printf("S Y S T E M    I N F O R M A T I O N\n");
 	printf("***********************************************************\n");
@@ -317,6 +421,9 @@ int main(void)
 	printf("  ODP impl name:          %s\n", odp_version_impl_name());
 	printf("  ODP impl details:       %s\n", odp_version_impl_str());
 	printf("  CPU model:              %s\n", odp_cpu_model_str());
+	printf("  CPU arch:               %s\n", cpu_arch_name(&sysinfo));
+	printf("  CPU ISA version:        %s\n", cpu_arch_isa(&sysinfo, 0));
+	printf("  SW ISA version:         %s\n", cpu_arch_isa(&sysinfo, 1));
 	printf("  CPU max freq:           %" PRIu64 " hz\n", odp_cpu_hz_max());
 	printf("  Current CPU:            %i\n", odp_cpu_id());
 	printf("  Current CPU freq:       %" PRIu64 " hz\n", odp_cpu_hz());
@@ -435,6 +542,53 @@ int main(void)
 		printf("\n");
 		print_auth_caps(crypto_capa.auths);
 		printf("\n");
+	}
+
+	if (ipsec_ret == 0) {
+		printf("  IPSEC\n");
+		printf("    max SAs:                      %" PRIu32 "\n",
+		       ipsec_capa.max_num_sa);
+		printf("    sync mode support:            %s\n",
+		       support_level(ipsec_capa.op_mode_sync));
+		printf("    async mode support:           %s\n",
+		       support_level(ipsec_capa.op_mode_async));
+		printf("    inline inbound mode support:  %s\n",
+		       support_level(ipsec_capa.op_mode_inline_in));
+		printf("    inline outbound mode support: %s\n",
+		       support_level(ipsec_capa.op_mode_inline_out));
+		printf("    AH support:                   %s\n",
+		       support_level(ipsec_capa.proto_ah));
+		printf("    post-IPsec fragmentation:     %s\n",
+		       support_level(ipsec_capa.frag_after));
+		printf("    pre-IPsec fragmentation:      %s\n",
+		       support_level(ipsec_capa.frag_before));
+		printf("    post-IPsec classification:    %s\n",
+		       support_level(ipsec_capa.pipeline_cls));
+		printf("    retaining outer headers:      %s\n",
+		       support_level(ipsec_capa.retain_header));
+		printf("    inbound checksum offload support:\n");
+		printf("      IPv4 header checksum:       %s\n",
+		       support_level(ipsec_capa.chksums_in.chksum.ipv4));
+		printf("      UDP checksum:               %s\n",
+		       support_level(ipsec_capa.chksums_in.chksum.udp));
+		printf("      TCP checksum:               %s\n",
+		       support_level(ipsec_capa.chksums_in.chksum.tcp));
+		printf("      SCTP checksum:              %s\n",
+		       support_level(ipsec_capa.chksums_in.chksum.sctp));
+		printf("    max destination CoSes:        %" PRIu32 "\n",
+		       ipsec_capa.max_cls_cos);
+		printf("    max destination queues:       %" PRIu32 "\n",
+		       ipsec_capa.max_queues);
+		printf("    max anti-replay window size:  %" PRIu32 "\n",
+		       ipsec_capa.max_antireplay_ws);
+		printf("    inline TM pipelining:         %s\n",
+		       support_level(ipsec_capa.inline_ipsec_tm));
+		printf("    cipher algorithms:            ");
+		print_cipher_algos(ipsec_capa.ciphers);
+		printf("\n");
+		printf("    auth algorithms:              ");
+		print_auth_algos(ipsec_capa.auths);
+		printf("\n\n");
 	}
 
 	printf("  SHM MEMORY BLOCKS:\n");

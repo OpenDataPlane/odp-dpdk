@@ -151,8 +151,8 @@ typedef struct {
 	uint8_t started;
 } eventdev_local_t;
 
-extern eventdev_global_t *eventdev_gbl;
-extern __thread eventdev_local_t eventdev_local;
+extern eventdev_global_t *_odp_eventdev_gbl;
+extern __thread eventdev_local_t _odp_eventdev_local;
 
 int service_setup(uint32_t service_id);
 
@@ -180,7 +180,7 @@ static inline odp_queue_t queue_from_qentry(queue_entry_t *queue)
 
 static inline queue_entry_t *qentry_from_index(uint32_t queue_id)
 {
-	return &eventdev_gbl->queue[queue_id];
+	return &_odp_eventdev_gbl->queue[queue_id];
 }
 
 static inline queue_entry_t *qentry_from_handle(odp_queue_t handle)

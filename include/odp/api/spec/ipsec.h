@@ -21,6 +21,7 @@ extern "C" {
 #include <odp/api/crypto.h>
 #include <odp/api/support.h>
 #include <odp/api/packet_io.h>
+#include <odp/api/protocols.h>
 #include <odp/api/classification.h>
 #include <odp/api/traffic_mngr.h>
 
@@ -319,6 +320,14 @@ typedef struct odp_ipsec_config_t {
 
 	/** IPSEC outbound processing configuration */
 	odp_ipsec_outbound_config_t outbound;
+
+	/** Enable stats collection
+	 *
+	 *  Default value is false (stats collection disabled).
+	 *
+	 *  @see odp_ipsec_stats(), odp_ipsec_stats_multi()
+	 */
+	odp_bool_t stats_en;
 
 } odp_ipsec_config_t;
 
@@ -773,6 +782,105 @@ typedef struct odp_ipsec_sa_param_t {
 } odp_ipsec_sa_param_t;
 
 /**
+ * IPSEC stats content
+ */
+typedef struct odp_ipsec_stats_t {
+	/** Number of packets processed successfully */
+	uint64_t success;
+
+	/** Number of packets with protocol errors */
+	uint64_t proto_err;
+
+	/** Number of packets with authentication errors */
+	uint64_t auth_err;
+
+	/** Number of packets with antireplay check failures */
+	uint64_t antireplay_err;
+
+	/** Number of packets with algorithm errors */
+	uint64_t alg_err;
+
+	/** Number of packes with MTU errors */
+	uint64_t mtu_err;
+
+	/** Number of packets with hard lifetime(bytes) expired */
+	uint64_t hard_exp_bytes_err;
+
+	/** Number of packets with hard lifetime(packets) expired */
+	uint64_t hard_exp_pkts_err;
+} odp_ipsec_stats_t;
+
+/**
+ * IPSEC SA information
+ */
+typedef struct odp_ipsec_sa_info_t {
+	/** Copy of IPSEC Security Association (SA) parameters */
+	odp_ipsec_sa_param_t param;
+
+	/** IPSEC SA direction dependent parameters */
+	union {
+		/** Inbound specific parameters */
+		struct {
+			/** Additional SA lookup parameters. */
+			struct {
+				/** IP destination address (NETWORK ENDIAN) to
+				 *  be matched in addition to SPI value. */
+				uint8_t dst_addr[ODP_IPV6_ADDR_SIZE];
+			} lookup_param;
+
+			/** Antireplay window size
+			 *
+			 * Antireplay window size configured for the SA.
+			 * This value can be different from what application
+			 * had requested.
+			 */
+			uint32_t antireplay_ws;
+
+			/** Antireplay window top
+			 *
+			 * Sequence number representing a recent top of the
+			 * anti-replay window. There may be a delay before the
+			 * SA state is reflected in the value. The value will be
+			 * zero if no packets have been processed or if the
+			 * anti-replay service is not enabled.
+			 */
+			uint64_t antireplay_window_top;
+		} inbound;
+
+		/** Outbound specific parameters */
+		struct {
+			/** Sequence number
+			 *
+			 * Sequence number used for a recently processed packet.
+			 * There may be a delay before the SA state is reflected
+			 * in the value. When no packets have been processed,
+			 * the value will be zero.
+			 */
+			uint64_t seq_num;
+
+			/** Tunnel IP address */
+			union {
+				/** IPv4 */
+				struct {
+					/** IPv4 source address */
+					uint8_t src_addr[ODP_IPV4_ADDR_SIZE];
+					/** IPv4 destination address */
+					uint8_t dst_addr[ODP_IPV4_ADDR_SIZE];
+				} ipv4;
+
+				/** IPv6 */
+				struct {
+					/** IPv6 source address */
+					uint8_t src_addr[ODP_IPV6_ADDR_SIZE];
+					/** IPv6 destination address */
+					uint8_t dst_addr[ODP_IPV6_ADDR_SIZE];
+				} ipv6;
+			} tunnel;
+		} outbound;
+	};
+} odp_ipsec_sa_info_t;
+
+/**
  * Query IPSEC capabilities
  *
  * Outputs IPSEC capabilities on success.
@@ -1189,7 +1297,13 @@ typedef struct odp_ipsec_out_inline_param_t {
 	struct {
 		/** Points to first byte of outer headers to be copied in
 		 *  front of the outgoing IPSEC packet. Implementation copies
-		 *  the headers during odp_ipsec_out_inline() call. */
+		 *  the headers during odp_ipsec_out_inline() call.
+		 *
+		 *  Null value indicates that the outer headers are in the
+		 *  packet data, starting at L2 offset and ending at the byte
+		 *  before L3 offset. In this case, value of 'len' field must
+		 *  be greater than zero and set to L3 offset minus L2 offset.
+		 */
 		const uint8_t *ptr;
 
 		/** Outer header length in bytes */
@@ -1625,6 +1739,65 @@ int odp_ipsec_sa_mtu_update(odp_ipsec_sa_t sa, uint32_t mtu);
  * @retval NULL   On failure
  */
 void *odp_ipsec_sa_context(odp_ipsec_sa_t sa);
+
+/**
+ * Print global IPSEC configuration info
+ *
+ * Print implementation-defined information about the global IPSEC
+ * configuration.
+ */
+void odp_ipsec_print(void);
+
+/**
+ * Print IPSEC SA info
+ *
+ * @param sa      SA handle
+ *
+ * Print implementation-defined IPSEC SA debug information to the ODP log.
+ */
+void odp_ipsec_sa_print(odp_ipsec_sa_t sa);
+
+/**
+ * Get IPSEC stats for the IPSEC SA handle
+ *
+ * @param          sa       IPSEC SA handle
+ * @param[out]     stats    Stats output
+ *
+ * @retval 0 on success
+ * @retval <0 on failure
+ */
+int odp_ipsec_stats(odp_ipsec_sa_t sa, odp_ipsec_stats_t *stats);
+
+/**
+ * Get IPSEC stats for multiple IPSEC SA handles
+ *
+ * @param          sa       Array of IPSEC SA handles
+ * @param[out]     stats    Stats array for output
+ * @param          num      Number of SA handles
+ *
+ * @retval 0 on success
+ * @retval <0 on failure
+ */
+int odp_ipsec_stats_multi(odp_ipsec_sa_t sa[], odp_ipsec_stats_t stats[], int num);
+
+/**
+ * Retrieve information about an IPSEC SA
+ *
+ * The cipher and auth key data(including key extra) will not be exposed and
+ * the corresponding pointers will be set to NULL. The IP address pointers
+ * will point to the corresponding buffers available in the SA info structure.
+ *
+ * The user defined SA context pointer is an opaque field and hence the value
+ * provided during the SA creation will be returned.
+ *
+ * @param      sa       The IPSEC SA for which to retrieve information
+ * @param[out] sa_info  Pointer to caller allocated SA info structure to be
+ *                      filled in
+ *
+ * @retval 0            On success
+ * @retval <0           On failure
+ **/
+int odp_ipsec_sa_info(odp_ipsec_sa_t sa, odp_ipsec_sa_info_t *sa_info);
 
 /**
  * @}

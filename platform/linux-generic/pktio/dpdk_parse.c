@@ -19,6 +19,10 @@
 
 #include <rte_config.h>
 #include <rte_mbuf.h>
+/* ppc64 rte_memcpy.h (included through rte_mbuf.h) may define vector */
+#if defined(__PPC64__) && defined(vector)
+	#undef vector
+#endif
 
 #define IP4_CSUM_RESULT(ol_flags) (ol_flags & PKT_RX_IP_CKSUM_MASK)
 #define L4_CSUM_RESULT(ol_flags) (ol_flags & PKT_RX_L4_CKSUM_MASK)

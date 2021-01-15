@@ -33,9 +33,11 @@ odpapiplatinclude_HEADERS = \
 		  include/odp/api/plat/byteorder_inlines.h \
 		  include/odp/api/plat/cpu_inlines.h \
 		  include/odp/api/plat/event_inlines.h \
+		  include/odp/api/plat/event_vector_inline_types.h \
 		  include/odp/api/plat/packet_flag_inlines.h \
 		  include/odp/api/plat/packet_inline_types.h \
 		  include/odp/api/plat/packet_inlines.h \
+		  include/odp/api/plat/packet_vector_inlines.h \
 		  include/odp/api/plat/pktio_inlines.h \
 		  include/odp/api/plat/pool_inline_types.h \
 		  include/odp/api/plat/queue_inlines.h \
@@ -91,7 +93,6 @@ endif
 noinst_HEADERS = \
 		  include/odp_align_internal.h \
 		  include/odp_atomic_internal.h \
-		  include/odp_bitmap_internal.h \
 		  include/odp_bitset.h \
 		  include/odp_buffer_internal.h \
 		  include/odp_classification_datamodel.h \
@@ -146,6 +147,7 @@ noinst_HEADERS = \
 		  include/odp_timer_internal.h \
 		  include/odp_timer_wheel_internal.h \
 		  include/odp_traffic_mngr_internal.h \
+		  include/odp_event_vector_internal.h \
 		  include/protocols/eth.h \
 		  include/protocols/ip.h \
 		  include/protocols/ipsec.h \
@@ -159,7 +161,6 @@ BUILT_SOURCES = \
 __LIB__libodp_linux_la_SOURCES = \
 			   odp_atomic.c \
 			   odp_barrier.c \
-			   odp_bitmap.c \
 			   odp_buffer.c \
 			   odp_chksum.c \
 			   odp_classification.c \
@@ -186,6 +187,7 @@ __LIB__libodp_linux_la_SOURCES = \
 			   odp_libconfig.c \
 			   odp_name_table.c \
 			   odp_packet.c \
+			   odp_packet_vector.c \
 			   odp_packet_flags.c \
 			   odp_packet_io.c \
 			   odp_pkt_queue.c \

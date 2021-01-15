@@ -1,5 +1,5 @@
 /* Copyright (c) 2014-2018, Linaro Limited
- * Copyright (c) 2019, Nokia
+ * Copyright (c) 2019-2020, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -9,6 +9,7 @@
 #include <odp/api/align.h>
 #include <odp/api/queue.h>
 #include <odp/api/debug.h>
+#include <odp/api/pool.h>
 #include <odp_init_internal.h>
 #include <odp_debug_internal.h>
 #include <odp_packet_internal.h>
@@ -60,6 +61,11 @@ static const rss_key default_rss = {
 	0x6a, 0x42, 0xb7, 0x3b, 0xbe, 0xac, 0x01, 0xfa,
 	}
 };
+
+cos_t *_odp_cos_entry_from_idx(uint32_t ndx)
+{
+	return &cos_tbl->cos_entry[ndx];
+}
 
 static inline uint32_t _odp_cos_to_ndx(odp_cos_t cos)
 {
@@ -138,10 +144,13 @@ int _odp_classification_term_global(void)
 
 void odp_cls_cos_param_init(odp_cls_cos_param_t *param)
 {
+	memset(param, 0, sizeof(odp_cls_cos_param_t));
+
 	param->queue = ODP_QUEUE_INVALID;
 	param->pool = ODP_POOL_INVALID;
 	param->drop_policy = ODP_COS_DROP_NEVER;
 	param->num_queue = 1;
+	param->vector.enable = false;
 	odp_queue_param_init(&param->queue_param);
 }
 
@@ -229,6 +238,29 @@ odp_cos_t odp_cls_cos_create(const char *name, const odp_cls_cos_param_t *param)
 	if (param->num_queue > CLS_COS_QUEUE_MAX || param->num_queue < 1)
 		return ODP_COS_INVALID;
 
+	/* Validate packet vector parameters */
+	if (param->vector.enable) {
+		odp_pool_t pool = param->vector.pool;
+		odp_pool_info_t pool_info;
+
+		if (pool == ODP_POOL_INVALID || odp_pool_info(pool, &pool_info)) {
+			ODP_ERR("invalid packet vector pool\n");
+			return ODP_COS_INVALID;
+		}
+		if (pool_info.params.type != ODP_POOL_VECTOR) {
+			ODP_ERR("wrong pool type\n");
+			return ODP_COS_INVALID;
+		}
+		if (param->vector.max_size == 0) {
+			ODP_ERR("vector.max_size is zero\n");
+			return ODP_COS_INVALID;
+		}
+		if (param->vector.max_size > pool_info.params.vector.max_size) {
+			ODP_ERR("vector.max_size larger than pool max vector size\n");
+			return ODP_COS_INVALID;
+		}
+	}
+
 	drop_policy = param->drop_policy;
 
 	for (i = 0; i < CLS_COS_MAX_ENTRY; i++) {
@@ -280,6 +312,7 @@ odp_cos_t odp_cls_cos_create(const char *name, const odp_cls_cos_param_t *param)
 			cos->s.drop_policy = drop_policy;
 			odp_atomic_init_u32(&cos->s.num_rule, 0);
 			cos->s.index = i;
+			cos->s.vector = param->vector;
 			UNLOCK(&cos->s.lock);
 			return _odp_cos_from_ndx(i);
 		}
@@ -1462,7 +1495,7 @@ static cos_t *match_pmr_cos(cos_t *cos, const uint8_t *pkt_addr, pmr_t *pmr,
 	return NULL;
 }
 
-int pktio_classifier_init(pktio_entry_t *entry)
+int _odp_pktio_classifier_init(pktio_entry_t *entry)
 {
 	classifier_t *cls;
 
@@ -1548,9 +1581,9 @@ static uint32_t packet_rss_hash(odp_packet_hdr_t *pkt_hdr,
  *
  * @note *base is not released
  */
-int cls_classify_packet(pktio_entry_t *entry, const uint8_t *base,
-			uint16_t pkt_len, uint32_t seg_len, odp_pool_t *pool,
-			odp_packet_hdr_t *pkt_hdr, odp_bool_t parse)
+int _odp_cls_classify_packet(pktio_entry_t *entry, const uint8_t *base,
+			     uint16_t pkt_len, uint32_t seg_len, odp_pool_t *pool,
+			     odp_packet_hdr_t *pkt_hdr, odp_bool_t parse)
 {
 	cos_t *cos;
 	uint32_t tbl_index;
@@ -1562,9 +1595,9 @@ int cls_classify_packet(pktio_entry_t *entry, const uint8_t *base,
 		packet_parse_reset(pkt_hdr, 1);
 		packet_set_len(pkt_hdr, pkt_len);
 
-		packet_parse_common(&pkt_hdr->p, base, pkt_len, seg_len,
-				    ODP_PROTO_LAYER_ALL,
-				    entry->s.in_chksums);
+		_odp_packet_parse_common(&pkt_hdr->p, base, pkt_len, seg_len,
+					 ODP_PROTO_LAYER_ALL,
+					 entry->s.in_chksums);
 	}
 	cos = cls_select_cos(entry, base, pkt_hdr);
 
@@ -1579,6 +1612,7 @@ int cls_classify_packet(pktio_entry_t *entry, const uint8_t *base,
 
 	*pool = cos->s.pool;
 	pkt_hdr->p.input_flags.dst_queue = 1;
+	pkt_hdr->cos = cos->s.index;
 
 	if (!cos->s.queue_group) {
 		pkt_hdr->dst_queue = cos->s.queue;

@@ -33,10 +33,14 @@ extern "C" {
 #include <rte_config.h>
 #include <rte_mbuf.h>
 #include <rte_mempool.h>
-/* ppc64 rte_memcpy.h may overwrite bool with incompatible type */
+/* ppc64 rte_memcpy.h may overwrite bool with an incompatible type and define
+ * vector */
 #if defined(__PPC64__) && defined(bool)
 	#undef bool
 	#define bool _Bool
+#endif
+#if defined(__PPC64__) && defined(vector)
+	#undef vector
 #endif
 
 /* Use ticketlock instead of spinlock */
@@ -61,6 +65,7 @@ typedef struct ODP_ALIGNED_CACHE {
 	odp_pool_param_t	params;
 	odp_pool_t		pool_hdl;
 	struct rte_mempool	*rte_mempool;
+	uint32_t		pool_idx;
 	uint32_t		seg_len;
 
 } pool_t;
@@ -94,6 +99,8 @@ static inline void buffer_free_multi(odp_buffer_hdr_t *buf_hdr[], int num)
 	for (i = 0; i < num; i++)
 		rte_mbuf_raw_free((struct rte_mbuf *)(uintptr_t)buf_hdr[i]);
 }
+
+int _odp_buffer_is_valid(odp_buffer_t buf);
 
 #ifdef __cplusplus
 }

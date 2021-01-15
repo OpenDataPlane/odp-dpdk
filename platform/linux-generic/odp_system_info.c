@@ -392,7 +392,7 @@ int _odp_system_info_init(void)
 	if (file != NULL) {
 		/* Read CPU model, and set max cpu frequency
 		 * if not set from cpufreq. */
-		cpuinfo_parser(file, &odp_global_ro.system_info);
+		_odp_cpuinfo_parser(file, &odp_global_ro.system_info);
 		fclose(file);
 	} else {
 		_odp_dummy_cpuinfo(&odp_global_ro.system_info);
@@ -536,6 +536,7 @@ int odp_system_info(odp_system_info_t *info)
 
 	info->cpu_arch   = sys_info->cpu_arch;
 	info->cpu_isa_sw = sys_info->cpu_isa_sw;
+	info->cpu_isa_hw = sys_info->cpu_isa_hw;
 
 	return 0;
 }
@@ -576,7 +577,7 @@ void odp_sys_info_print(void)
 	str[len] = '\0';
 	ODP_PRINT("%s", str);
 
-	sys_info_print_arch();
+	_odp_sys_info_print_arch();
 }
 
 void odp_sys_config_print(void)

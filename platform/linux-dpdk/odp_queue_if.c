@@ -29,7 +29,7 @@ extern const queue_fn_t queue_basic_fn;
 extern const _odp_queue_api_fn_t queue_eventdev_api;
 extern const queue_fn_t queue_eventdev_fn;
 
-const queue_fn_t *queue_fn;
+const queue_fn_t *_odp_queue_fn;
 
 odp_queue_t odp_queue_create(const char *name, const odp_queue_param_t *param)
 {
@@ -109,20 +109,20 @@ int _odp_queue_init_global(void)
 		sched = _ODP_SCHEDULE_DEFAULT;
 
 	if (!strcmp(sched, "basic") || !strcmp(sched, "sp")) {
-		queue_fn = &queue_basic_fn;
+		_odp_queue_fn = &queue_basic_fn;
 		_odp_queue_api = &queue_basic_api;
 	} else if (!strcmp(sched, "eventdev")) {
-		queue_fn = &queue_eventdev_fn;
+		_odp_queue_fn = &queue_eventdev_fn;
 		_odp_queue_api = &queue_eventdev_api;
 	} else {
 		ODP_ABORT("Unknown scheduler specified via ODP_SCHEDULER\n");
 		return -1;
 	}
 
-	return queue_fn->init_global();
+	return _odp_queue_fn->init_global();
 }
 
 int _odp_queue_term_global(void)
 {
-	return queue_fn->term_global();
+	return _odp_queue_fn->term_global();
 }

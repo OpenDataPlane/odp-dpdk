@@ -169,8 +169,9 @@ static inline void packet_seg_copy_md(odp_packet_hdr_t *dst,
 	 *   .tailroom
 	 */
 
-	dst->input     = src->input;
+	dst->input = src->input;
 	dst->dst_queue = src->dst_queue;
+	dst->cos = src->cos;
 	dst->flow_hash = src->flow_hash;
 	dst->timestamp = src->timestamp;
 
@@ -1566,10 +1567,11 @@ void odp_packet_print(odp_packet_t pkt)
 	int len = 0;
 	int n = max_len - 1;
 	odp_packet_hdr_t *hdr = packet_hdr(pkt);
-	odp_buffer_t buf      = packet_to_buffer(pkt);
 
-	len += snprintf(&str[len], n - len, "Packet ");
-	len += odp_buffer_snprint(&str[len], n - len, buf);
+	len += snprintf(&str[len], n - len, "Packet\n------\n");
+	len += snprintf(&str[len], n - len, "  pool index   %u\n", hdr->buf_hdr.index.pool);
+	len += snprintf(&str[len], n - len, "  buf index    %u\n", hdr->buf_hdr.index.buffer);
+	len += snprintf(&str[len], n - len, "  ev subtype   %i\n", hdr->subtype);
 	len += snprintf(&str[len], n - len, "  input_flags  0x%" PRIx64 "\n",
 			hdr->p.input_flags.all);
 	if (hdr->p.input_flags.all) {
@@ -1649,7 +1651,7 @@ void odp_packet_print_data(odp_packet_t pkt, uint32_t offset,
 			"  buf index     %" PRIu32 "\n",
 			hdr->buf_hdr.index.buffer);
 	len += snprintf(&str[len], n - len,
-			"  seg_count      %" PRIu16 "\n", hdr->seg_count);
+			"  seg_count     %" PRIu16 "\n", hdr->seg_count);
 	len += snprintf(&str[len], n - len,
 			"  data len      %" PRIu32 "\n", data_len);
 	len += snprintf(&str[len], n - len,
@@ -1693,11 +1695,32 @@ void odp_packet_print_data(odp_packet_t pkt, uint32_t offset,
 
 int odp_packet_is_valid(odp_packet_t pkt)
 {
-	if (odp_buffer_is_valid(packet_to_buffer(pkt)) == 0)
+	odp_event_t ev;
+
+	if (pkt == ODP_PACKET_INVALID)
 		return 0;
 
-	if (odp_event_type(odp_packet_to_event(pkt)) != ODP_EVENT_PACKET)
+	if (_odp_buffer_is_valid(packet_to_buffer(pkt)) == 0)
 		return 0;
+
+	ev = odp_packet_to_event(pkt);
+
+	if (odp_event_type(ev) != ODP_EVENT_PACKET)
+		return 0;
+
+	switch (odp_event_subtype(ev)) {
+	case ODP_EVENT_PACKET_BASIC:
+		/* Fall through */
+	case ODP_EVENT_PACKET_COMP:
+		/* Fall through */
+	case ODP_EVENT_PACKET_CRYPTO:
+		/* Fall through */
+	case ODP_EVENT_PACKET_IPSEC:
+		/* Fall through */
+		break;
+	default:
+		return 0;
+	}
 
 	return 1;
 }
@@ -1720,6 +1743,7 @@ int _odp_packet_copy_md_to_packet(odp_packet_t srcpkt, odp_packet_t dstpkt)
 
 	dsthdr->input = srchdr->input;
 	dsthdr->dst_queue = srchdr->dst_queue;
+	dsthdr->cos = srchdr->cos;
 	dsthdr->cls_mark = srchdr->cls_mark;
 	dsthdr->buf_hdr.user_ptr = srchdr->buf_hdr.user_ptr;
 	if (dsthdr->buf_hdr.uarea_addr != NULL &&
@@ -1916,7 +1940,7 @@ static inline uint16_t parse_eth(packet_parser_t *prs, const uint8_t **parseptr,
 			goto error;
 		}
 		ethtype = odp_be_to_cpu_16(*((const uint16_t *)(uintptr_t)
-					      (parseptr + 6)));
+					      (*parseptr + 6)));
 		*offset   += 8;
 		*parseptr += 8;
 	}
@@ -2287,9 +2311,9 @@ int packet_parse_common_l3_l4(packet_parser_t *prs, const uint8_t *parseptr,
  * The function expects at least PACKET_PARSE_SEG_LEN bytes of data to be
  * available from the ptr. Also parse metadata must be already initialized.
  */
-int packet_parse_common(packet_parser_t *prs, const uint8_t *ptr,
-			uint32_t frame_len, uint32_t seg_len,
-			int layer, odp_proto_chksums_t chksums)
+int _odp_packet_parse_common(packet_parser_t *prs, const uint8_t *ptr,
+			     uint32_t frame_len, uint32_t seg_len,
+			     int layer, odp_proto_chksums_t chksums)
 {
 	uint32_t offset;
 	uint16_t ethtype;
@@ -2558,9 +2582,9 @@ static int packet_l4_chksum(odp_packet_hdr_t *pkt_hdr,
 /**
  * Simple packet parser
  */
-int packet_parse_layer(odp_packet_hdr_t *pkt_hdr,
-		       odp_proto_layer_t layer,
-		       odp_proto_chksums_t chksums)
+int _odp_packet_parse_layer(odp_packet_hdr_t *pkt_hdr,
+			    odp_proto_layer_t layer,
+			    odp_proto_chksums_t chksums)
 {
 	uint32_t seg_len = packet_first_seg_len(pkt_hdr);
 	const uint8_t *base = packet_data(pkt_hdr);

@@ -31,9 +31,11 @@ odpapiplatinclude_HEADERS = \
 		  include/odp/api/plat/byteorder_inlines.h \
 		  include/odp/api/plat/cpu_inlines.h \
 		  include/odp/api/plat/event_inlines.h \
+		  include/odp/api/plat/event_vector_inline_types.h \
 		  include/odp/api/plat/packet_flag_inlines.h \
 		  include/odp/api/plat/packet_inline_types.h \
 		  include/odp/api/plat/packet_inlines.h \
+		  include/odp/api/plat/packet_vector_inlines.h \
 		  include/odp/api/plat/pktio_inlines.h \
 		  include/odp/api/plat/pool_inline_types.h \
 		  include/odp/api/plat/queue_inlines.h \
@@ -90,7 +92,6 @@ noinst_HEADERS = \
 		  ${top_srcdir}/platform/linux-generic/include/odp_align_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_atomic_internal.h \
 		  include/odp_buffer_internal.h \
-		  ${top_srcdir}/platform/linux-generic/include/odp_bitmap_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_bitset.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_classification_internal.h \
 		  include/odp_config_internal.h \
@@ -134,6 +135,7 @@ noinst_HEADERS = \
 		  ${top_srcdir}/platform/linux-generic/include/odp_timer_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_timer_wheel_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_traffic_mngr_internal.h \
+		  ${top_srcdir}/platform/linux-generic/include/odp_event_vector_internal.h \
 		  include/protocols/eth.h \
 		  include/protocols/ip.h \
 		  include/protocols/ipsec.h \
@@ -149,7 +151,6 @@ BUILT_SOURCES = \
 __LIB__libodp_dpdk_la_SOURCES = \
 			   ../linux-generic/odp_atomic.c \
 			   ../linux-generic/odp_barrier.c \
-			   ../linux-generic/odp_bitmap.c \
 			   odp_buffer.c \
 			   ../linux-generic/odp_chksum.c \
 			   ../linux-generic/odp_classification.c \
@@ -174,6 +175,7 @@ __LIB__libodp_dpdk_la_SOURCES = \
 			   ../linux-generic/odp_libconfig.c \
 			   odp_packet.c \
 			   odp_packet_dpdk.c \
+			   ../linux-generic/odp_packet_vector.c \
 			   ../linux-generic/pktio/dpdk_parse.c \
 			   odp_packet_flags.c \
 			   ../linux-generic/odp_packet_io.c \

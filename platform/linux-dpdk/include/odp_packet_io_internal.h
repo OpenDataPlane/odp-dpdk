@@ -85,6 +85,7 @@ struct pktio_entry {
 	/* Statistics counters used outside drivers */
 	struct {
 		odp_atomic_u64_t in_discards;
+		odp_atomic_u64_t out_discards;
 	} stats_extra;
 	/* Latest Tx timestamp */
 	odp_atomic_u64_t tx_ts;
@@ -106,6 +107,7 @@ struct pktio_entry {
 	struct {
 		odp_queue_t        queue;
 		odp_pktin_queue_t  pktin;
+		odp_pktin_vector_config_t vector;
 	} in_queue[PKTIO_MAX_QUEUES];
 
 	struct {
@@ -184,7 +186,7 @@ typedef struct pktio_if_ops {
 				    const odp_pktout_queue_param_t *p);
 } pktio_if_ops_t;
 
-extern void *pktio_entry_ptr[];
+extern void *_odp_pktio_entry_ptr[];
 
 static inline pktio_entry_t *get_pktio_entry(odp_pktio_t pktio)
 {
@@ -201,7 +203,7 @@ static inline pktio_entry_t *get_pktio_entry(odp_pktio_t pktio)
 
 	idx = odp_pktio_index(pktio);
 
-	return pktio_entry_ptr[idx];
+	return _odp_pktio_entry_ptr[idx];
 }
 
 static inline int pktio_cls_enabled(pktio_entry_t *entry)
@@ -230,19 +232,19 @@ static inline void _odp_pktio_tx_ts_set(pktio_entry_t *entry)
 	odp_atomic_store_u64(&entry->s.tx_ts, ts_val.u64);
 }
 
-extern const pktio_if_ops_t null_pktio_ops;
-extern const pktio_if_ops_t dpdk_pktio_ops;
+extern const pktio_if_ops_t _odp_null_pktio_ops;
+extern const pktio_if_ops_t _odp_dpdk_pktio_ops;
 extern const pktio_if_ops_t * const pktio_if_ops[];
 
 /* Dummy function required by odp_pktin_recv_mq_tmo() */
 static inline int
-sock_recv_mq_tmo_try_int_driven(const struct odp_pktin_queue_t queues[],
-				unsigned num_q ODP_UNUSED,
-				unsigned *from ODP_UNUSED,
-				odp_packet_t packets[] ODP_UNUSED,
-				int num ODP_UNUSED,
-				uint64_t usecs ODP_UNUSED,
-				int *trial_successful) {
+_odp_sock_recv_mq_tmo_try_int_driven(const struct odp_pktin_queue_t queues[],
+				     unsigned int num_q ODP_UNUSED,
+				     unsigned int *from ODP_UNUSED,
+				     odp_packet_t packets[] ODP_UNUSED,
+				     int num ODP_UNUSED,
+				     uint64_t usecs ODP_UNUSED,
+				     int *trial_successful) {
 	(void)queues;
 
 	*trial_successful = 0;

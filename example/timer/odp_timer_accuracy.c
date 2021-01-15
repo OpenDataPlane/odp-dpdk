@@ -49,13 +49,15 @@ typedef struct test_log_t {
 
 typedef struct test_global_t {
 	struct {
-		unsigned long long int period_ns;
-		unsigned long long int res_ns;
-		unsigned long long int offset_ns;
-		unsigned long long int num;
-		unsigned long long int burst;
-		unsigned long long int burst_gap;
+		unsigned long long period_ns;
+		unsigned long long res_ns;
+		unsigned long long offset_ns;
+		unsigned long long max_tmo_ns;
+		unsigned long long num;
+		unsigned long long burst;
+		unsigned long long burst_gap;
 		int mode;
+		int clk_src;
 		int init;
 		int output;
 		int early_retry;
@@ -89,6 +91,7 @@ static void print_usage(void)
 	       "  -p, --period <nsec>     Timeout period in nsec. Default: 200 msec\n"
 	       "  -r, --resolution <nsec> Timeout resolution in nsec. Default: period / 10\n"
 	       "  -f, --first <nsec>      First timer offset in nsec. Default: 300 msec\n"
+	       "  -x, --max_tmo <nsec>    Maximum timeout in nsec. When 0, max tmo is calculated from other options. Default: 0\n"
 	       "  -n, --num <number>      Number of timeout periods. Default: 50\n"
 	       "  -b, --burst <number>    Number of timers per a timeout period. Default: 1\n"
 	       "  -g, --burst_gap <nsec>  Gap (in nsec) between timers within a burst. Default: 0\n"
@@ -99,6 +102,9 @@ static void print_usage(void)
 	       "  -o, --output <file>     Output file for measurement logs\n"
 	       "  -e, --early_retry <num> When timer restart fails due to ODP_TIMER_TOOEARLY, retry this many times\n"
 	       "                          with expiration time incremented by the period. Default: 0\n"
+	       "  -s, --clk_src           Clock source select (default 0):\n"
+	       "                            0: ODP_CLOCK_CPU\n"
+	       "                            1: ODP_CLOCK_EXT\n"
 	       "  -i, --init              Set global init parameters. Default: init params not set.\n"
 	       "  -h, --help              Display help and exit.\n\n");
 }
@@ -110,26 +116,30 @@ static int parse_options(int argc, char *argv[], test_global_t *test_global)
 		{"period",       required_argument, NULL, 'p'},
 		{"resolution",   required_argument, NULL, 'r'},
 		{"first",        required_argument, NULL, 'f'},
+		{"max_tmo",      required_argument, NULL, 'x'},
 		{"num",          required_argument, NULL, 'n'},
 		{"burst",        required_argument, NULL, 'b'},
 		{"burst_gap",    required_argument, NULL, 'g'},
 		{"mode",         required_argument, NULL, 'm'},
 		{"output",       required_argument, NULL, 'o'},
 		{"early_retry",  required_argument, NULL, 'e'},
+		{"clk_src",      required_argument, NULL, 's'},
 		{"init",         no_argument,       NULL, 'i'},
 		{"help",         no_argument,       NULL, 'h'},
 		{NULL, 0, NULL, 0}
 	};
-	const char *shortopts =  "+p:r:f:n:b:g:m:o:e:ih";
+	const char *shortopts =  "+p:r:f:x:n:b:g:m:o:e:s:ih";
 	int ret = 0;
 
 	test_global->opt.period_ns = 200 * ODP_TIME_MSEC_IN_NS;
 	test_global->opt.res_ns    = 0;
 	test_global->opt.offset_ns = 300 * ODP_TIME_MSEC_IN_NS;
+	test_global->opt.max_tmo_ns = 0;
 	test_global->opt.num       = 50;
 	test_global->opt.burst     = 1;
 	test_global->opt.burst_gap = 0;
 	test_global->opt.mode      = 0;
+	test_global->opt.clk_src   = 0;
 	test_global->opt.init      = 0;
 	test_global->opt.output    = 0;
 	test_global->opt.early_retry = 0;
@@ -150,6 +160,9 @@ static int parse_options(int argc, char *argv[], test_global_t *test_global)
 		case 'f':
 			test_global->opt.offset_ns = strtoull(optarg, NULL, 0);
 			break;
+		case 'x':
+			test_global->opt.max_tmo_ns = strtoull(optarg, NULL, 0);
+			break;
 		case 'n':
 			test_global->opt.num = strtoull(optarg, NULL, 0);
 			break;
@@ -169,6 +182,9 @@ static int parse_options(int argc, char *argv[], test_global_t *test_global)
 			break;
 		case 'e':
 			test_global->opt.early_retry = atoi(optarg);
+			break;
+		case 's':
+			test_global->opt.clk_src = atoi(optarg);
 			break;
 		case 'i':
 			test_global->opt.init = 1;
@@ -216,6 +232,7 @@ static int start_timers(test_global_t *test_global)
 	uint64_t i, j, idx, num_tmo, burst, burst_gap;
 	uint64_t tot_timers, alloc_timers;
 	int mode;
+	odp_timer_clk_src_t clk_src;
 
 	mode = test_global->opt.mode;
 	alloc_timers = test_global->alloc_timers;
@@ -263,7 +280,12 @@ static int start_timers(test_global_t *test_global)
 
 	test_global->timeout_pool = pool;
 
-	if (odp_timer_capability(ODP_CLOCK_CPU, &timer_capa)) {
+	if (test_global->opt.clk_src == 0)
+		clk_src = ODP_CLOCK_CPU;
+	else
+		clk_src = ODP_CLOCK_EXT;
+
+	if (odp_timer_capability(clk_src, &timer_capa)) {
 		printf("Timer capa failed\n");
 		return -1;
 	}
@@ -291,17 +313,32 @@ static int start_timers(test_global_t *test_global)
 
 	memset(&timer_param, 0, sizeof(odp_timer_pool_param_t));
 
-	timer_param.res_ns     = res_ns;
-	if (mode)
-		timer_param.min_tmo = period_ns / 10;
-	else
-		timer_param.min_tmo = offset_ns / 2;
+	timer_param.res_ns = res_ns;
 
-	timer_param.max_tmo    = offset_ns + ((num_tmo + 1) * period_ns);
+	if (mode == 0) {
+		timer_param.min_tmo = offset_ns / 2;
+		timer_param.max_tmo = offset_ns + ((num_tmo + 1) * period_ns);
+	} else {
+		/* periodic mode */
+		timer_param.min_tmo = period_ns / 10;
+		timer_param.max_tmo = offset_ns + (2 * period_ns);
+	}
+
+	if (test_global->opt.max_tmo_ns) {
+		if (test_global->opt.max_tmo_ns < timer_param.max_tmo) {
+			printf("Max tmo is too small. Must be at least %" PRIu64 " nsec.\n",
+			       timer_param.max_tmo);
+			return -1;
+		}
+
+		timer_param.max_tmo = test_global->opt.max_tmo_ns;
+	}
+
 	timer_param.num_timers = alloc_timers;
-	timer_param.clk_src    = ODP_CLOCK_CPU;
+	timer_param.clk_src    = clk_src;
 
 	printf("\nTest parameters:\n");
+	printf("  clock source:    %i\n", test_global->opt.clk_src);
 	printf("  resolution capa: %" PRIu64 " nsec\n", res_capa);
 	printf("  max timers capa: %" PRIu32 "\n", timer_capa.max_timers);
 	printf("  mode:            %i\n", mode);
@@ -368,10 +405,15 @@ static int start_timers(test_global_t *test_global)
 	}
 
 	idx = 0;
+
+	/* Record test start time and tick. Memory barriers forbid compiler and out-of-order
+	 * CPU to move samples apart. */
+	odp_mb_full();
 	start_tick = odp_timer_current_tick(timer_pool);
 	time       = odp_time_local();
-	start_ns   = odp_time_to_ns(time);
+	odp_mb_full();
 
+	start_ns = odp_time_to_ns(time);
 	test_global->start_tick = start_tick;
 	test_global->start_ns = start_ns;
 	test_global->period_tick = odp_timer_ns_to_tick(timer_pool, period_ns);
@@ -537,6 +579,9 @@ static void run_test(test_global_t *test_global)
 		ctx = odp_timeout_user_ptr(tmo);
 		tmo_ns = ctx->nsec;
 
+		if (log)
+			log[i].tmo_ns = tmo_ns;
+
 		if (time_ns > tmo_ns) {
 			diff_ns = time_ns - tmo_ns;
 			stat->num_after++;
@@ -545,10 +590,8 @@ static void run_test(test_global_t *test_global)
 				stat->nsec_after_min = diff_ns;
 			if (diff_ns > stat->nsec_after_max)
 				stat->nsec_after_max = diff_ns;
-			if (log) {
-				log[i].tmo_ns  = tmo_ns;
+			if (log)
 				log[i].diff_ns = diff_ns;
-			}
 
 		} else if (time_ns < tmo_ns) {
 			diff_ns = tmo_ns - time_ns;
@@ -558,10 +601,8 @@ static void run_test(test_global_t *test_global)
 				stat->nsec_before_min = diff_ns;
 			if (diff_ns > stat->nsec_before_max)
 				stat->nsec_before_max = diff_ns;
-			if (log) {
-				log[i].tmo_ns  = tmo_ns;
+			if (log)
 				log[i].diff_ns = -diff_ns;
-			}
 		} else {
 			stat->num_exact++;
 		}

@@ -15,11 +15,15 @@
 #if defined(__clang__)
 #undef RTE_TOOLCHAIN_GCC
 #endif
-/* ppc64 rte_memcpy.h may overwrite bool with incompatible type */
+/* ppc64 rte_memcpy.h may overwrite bool with an incompatible type and define
+ * vector */
 #include <rte_memcpy.h>
 #if defined(__PPC64__) && defined(bool)
 	#undef bool
 	#define bool _Bool
+#endif
+#if defined(__PPC64__) && defined(vector)
+	#undef vector
 #endif
 
 #ifndef _ODP_NO_INLINE

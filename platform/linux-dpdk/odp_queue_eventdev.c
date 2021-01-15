@@ -46,10 +46,10 @@
 #define NUM_PRIO 8
 
 /* Thread local eventdev context */
-__thread eventdev_local_t eventdev_local;
+__thread eventdev_local_t _odp_eventdev_local;
 
 /* Global eventdev context */
-eventdev_global_t *eventdev_gbl;
+eventdev_global_t *_odp_eventdev_gbl;
 
 extern _odp_queue_inline_offset_t _odp_queue_inline_offset;
 
@@ -67,15 +67,15 @@ static uint8_t event_queue_ids(odp_schedule_sync_t sync, uint8_t *first_id)
 {
 	*first_id = 0;
 	if (sync == ODP_SCHED_SYNC_ATOMIC)
-		return eventdev_gbl->event_queue.num_atomic;
+		return _odp_eventdev_gbl->event_queue.num_atomic;
 
-	*first_id += eventdev_gbl->event_queue.num_atomic;
+	*first_id += _odp_eventdev_gbl->event_queue.num_atomic;
 	if (sync == ODP_SCHED_SYNC_PARALLEL)
-		return eventdev_gbl->event_queue.num_parallel;
+		return _odp_eventdev_gbl->event_queue.num_parallel;
 
-	*first_id += eventdev_gbl->event_queue.num_parallel;
+	*first_id += _odp_eventdev_gbl->event_queue.num_parallel;
 	if (sync == ODP_SCHED_SYNC_ORDERED)
-		return eventdev_gbl->event_queue.num_ordered;
+		return _odp_eventdev_gbl->event_queue.num_ordered;
 
 	ODP_ABORT("Invalid schedule sync type\n");
 	return 0;
@@ -130,22 +130,22 @@ static int queue_capa(odp_queue_capability_t *capa, int sched ODP_UNUSED)
 	/* Reserve some queues for internal use */
 	capa->max_queues        = CONFIG_MAX_QUEUES;
 	capa->plain.max_num     = CONFIG_MAX_PLAIN_QUEUES;
-	capa->plain.max_size    = eventdev_gbl->plain_config.max_queue_size - 1;
+	capa->plain.max_size    = _odp_eventdev_gbl->plain_config.max_queue_size - 1;
 	capa->plain.lockfree.max_num  = 0;
 	capa->plain.lockfree.max_size = 0;
 
 #if ODP_DEPRECATED_API
 	uint16_t max_sched;
 
-	max_sched = RTE_MAX(RTE_MAX(eventdev_gbl->event_queue.num_atomic,
-				    eventdev_gbl->event_queue.num_ordered),
-			    eventdev_gbl->event_queue.num_parallel);
+	max_sched = RTE_MAX(RTE_MAX(_odp_eventdev_gbl->event_queue.num_atomic,
+				    _odp_eventdev_gbl->event_queue.num_ordered),
+			    _odp_eventdev_gbl->event_queue.num_parallel);
 	capa->sched.max_num     = RTE_MIN(CONFIG_MAX_SCHED_QUEUES, max_sched);
-	capa->sched.max_size    = eventdev_gbl->config.nb_events_limit;
+	capa->sched.max_size    = _odp_eventdev_gbl->config.nb_events_limit;
 
 	if (sched) {
-		capa->max_ordered_locks = sched_fn->max_ordered_locks();
-		capa->max_sched_groups  = sched_fn->num_grps();
+		capa->max_ordered_locks = _odp_sched_fn->max_ordered_locks();
+		capa->max_sched_groups  = _odp_sched_fn->num_grps();
 		capa->sched_prios       = odp_schedule_num_prio();
 	}
 #endif
@@ -298,7 +298,7 @@ static int queue_is_linked(uint8_t dev_id, uint8_t queue_id)
 {
 	uint8_t i;
 
-	for (i = 0; i < eventdev_gbl->config.nb_event_ports; i++) {
+	for (i = 0; i < _odp_eventdev_gbl->config.nb_event_ports; i++) {
 		uint8_t queues[RTE_EVENT_MAX_QUEUES_PER_DEV];
 		uint8_t priorities[RTE_EVENT_MAX_QUEUES_PER_DEV];
 		int num_links;
@@ -392,18 +392,18 @@ static int init_event_dev(void)
 		return -1;
 	}
 
-	if (read_config_file(eventdev_gbl))
+	if (read_config_file(_odp_eventdev_gbl))
 		return -1;
 
-	eventdev_gbl->dev_id = dev_id;
-	eventdev_gbl->rx_adapter.id = rx_adapter_id;
-	eventdev_gbl->rx_adapter.status = RX_ADAPTER_INIT;
-	odp_ticketlock_init(&eventdev_gbl->rx_adapter.lock);
-	odp_atomic_init_u32(&eventdev_gbl->num_started, 0);
+	_odp_eventdev_gbl->dev_id = dev_id;
+	_odp_eventdev_gbl->rx_adapter.id = rx_adapter_id;
+	_odp_eventdev_gbl->rx_adapter.status = RX_ADAPTER_INIT;
+	odp_ticketlock_init(&_odp_eventdev_gbl->rx_adapter.lock);
+	odp_atomic_init_u32(&_odp_eventdev_gbl->num_started, 0);
 
-	odp_ticketlock_init(&eventdev_gbl->port_lock);
+	odp_ticketlock_init(&_odp_eventdev_gbl->port_lock);
 	for (i = 0; i < ODP_THREAD_COUNT_MAX; i++)
-		eventdev_gbl->port[i].linked = 0;
+		_odp_eventdev_gbl->port[i].linked = 0;
 
 	if (rte_event_dev_info_get(dev_id, &info)) {
 		ODP_ERR("rte_event_dev_info_get failed\n");
@@ -411,26 +411,26 @@ static int init_event_dev(void)
 	}
 	print_dev_info(&info);
 
-	eventdev_gbl->num_prio = RTE_MIN(NUM_PRIO,
-					 info.max_event_queue_priority_levels);
+	_odp_eventdev_gbl->num_prio = RTE_MIN(NUM_PRIO,
+					      info.max_event_queue_priority_levels);
 	if (!(info.event_dev_cap & RTE_EVENT_DEV_CAP_QUEUE_QOS)) {
 		ODP_PRINT("  Only one QoS level supported!\n");
-		eventdev_gbl->num_prio = 1;
+		_odp_eventdev_gbl->num_prio = 1;
 	}
 
 	memset(&config, 0, sizeof(struct rte_event_dev_config));
 	config.dequeue_timeout_ns = 0;
 	config.nb_events_limit  = info.max_num_events;
-	config.nb_event_queues = alloc_queues(eventdev_gbl, &info);
+	config.nb_event_queues = alloc_queues(_odp_eventdev_gbl, &info);
 
 	config.nb_event_ports = RTE_MIN(ODP_THREAD_COUNT_MAX,
 					(int)info.max_event_ports);
 	/* RX adapter requires additional port which is reserved when
 	 * rte_event_eth_rx_adapter_queue_add() is called. */
 	config.nb_event_ports -= 1;
-	if (eventdev_gbl->num_event_ports &&
-	    eventdev_gbl->num_event_ports < config.nb_event_ports)
-		config.nb_event_ports = eventdev_gbl->num_event_ports;
+	if (_odp_eventdev_gbl->num_event_ports &&
+	    _odp_eventdev_gbl->num_event_ports < config.nb_event_ports)
+		config.nb_event_ports = _odp_eventdev_gbl->num_event_ports;
 
 	num_flows = (EVENT_QUEUE_FLOWS < info.max_event_queue_flows) ?
 			EVENT_QUEUE_FLOWS : info.max_event_queue_flows;
@@ -450,8 +450,8 @@ static int init_event_dev(void)
 		ODP_ERR("rte_event_dev_configure failed\n");
 		return -1;
 	}
-	eventdev_gbl->config = config;
-	eventdev_gbl->num_event_ports = config.nb_event_ports;
+	_odp_eventdev_gbl->config = config;
+	_odp_eventdev_gbl->num_event_ports = config.nb_event_ports;
 
 	if (configure_ports(dev_id, &config)) {
 		ODP_ERR("Configuring eventdev ports failed\n");
@@ -496,19 +496,19 @@ static int init_event_dev(void)
 	}
 
 	/* Scheduling groups */
-	odp_ticketlock_init(&eventdev_gbl->grp_lock);
+	odp_ticketlock_init(&_odp_eventdev_gbl->grp_lock);
 
 	for (i = 0; i < NUM_SCHED_GRPS; i++) {
-		memset(eventdev_gbl->grp[i].name, 0,
+		memset(_odp_eventdev_gbl->grp[i].name, 0,
 		       ODP_SCHED_GROUP_NAME_LEN);
-		odp_thrmask_zero(&eventdev_gbl->grp[i].mask);
+		odp_thrmask_zero(&_odp_eventdev_gbl->grp[i].mask);
 	}
 
-	eventdev_gbl->grp[ODP_SCHED_GROUP_ALL].allocated = 1;
-	eventdev_gbl->grp[ODP_SCHED_GROUP_WORKER].allocated = 1;
-	eventdev_gbl->grp[ODP_SCHED_GROUP_CONTROL].allocated = 1;
+	_odp_eventdev_gbl->grp[ODP_SCHED_GROUP_ALL].allocated = 1;
+	_odp_eventdev_gbl->grp[ODP_SCHED_GROUP_WORKER].allocated = 1;
+	_odp_eventdev_gbl->grp[ODP_SCHED_GROUP_CONTROL].allocated = 1;
 
-	odp_thrmask_setall(&eventdev_gbl->mask_all);
+	odp_thrmask_setall(&_odp_eventdev_gbl->mask_all);
 
 	return 0;
 }
@@ -532,13 +532,13 @@ static int queue_init_global(void)
 			      sizeof(eventdev_global_t),
 			      ODP_CACHE_LINE_SIZE, 0);
 
-	eventdev_gbl = odp_shm_addr(shm);
+	_odp_eventdev_gbl = odp_shm_addr(shm);
 
-	if (eventdev_gbl == NULL)
+	if (_odp_eventdev_gbl == NULL)
 		return -1;
 
-	memset(eventdev_gbl, 0, sizeof(eventdev_global_t));
-	eventdev_gbl->shm = shm;
+	memset(_odp_eventdev_gbl, 0, sizeof(eventdev_global_t));
+	_odp_eventdev_gbl->shm = shm;
 
 	if (init_event_dev())
 		return -1;
@@ -551,10 +551,10 @@ static int queue_init_global(void)
 		queue->s.index  = i;
 	}
 
-	max_queue_size = eventdev_gbl->config.nb_events_limit;
-	eventdev_gbl->plain_config.default_queue_size = DEFAULT_QUEUE_SIZE;
-	eventdev_gbl->plain_config.max_queue_size = MAX_QUEUE_SIZE;
-	eventdev_gbl->sched_config.max_queue_size = max_queue_size;
+	max_queue_size = _odp_eventdev_gbl->config.nb_events_limit;
+	_odp_eventdev_gbl->plain_config.default_queue_size = DEFAULT_QUEUE_SIZE;
+	_odp_eventdev_gbl->plain_config.max_queue_size = MAX_QUEUE_SIZE;
+	_odp_eventdev_gbl->sched_config.max_queue_size = max_queue_size;
 
 	queue_capa(&capa, 0);
 
@@ -571,12 +571,12 @@ static int queue_init_local(void)
 {
 	int thread_id = odp_thread_id();
 
-	memset(&eventdev_local, 0, sizeof(eventdev_local_t));
+	memset(&_odp_eventdev_local, 0, sizeof(eventdev_local_t));
 
 	ODP_ASSERT(thread_id <= UINT8_MAX);
-	eventdev_local.port_id = thread_id;
-	eventdev_local.paused = 0;
-	eventdev_local.started = 0;
+	_odp_eventdev_local.port_id = thread_id;
+	_odp_eventdev_local.paused = 0;
+	_odp_eventdev_local.started = 0;
 
 	return 0;
 }
@@ -605,17 +605,17 @@ static int queue_term_global(void)
 	if (rx_adapter_close())
 		ret = -1;
 
-	rte_event_dev_stop(eventdev_gbl->dev_id);
+	rte_event_dev_stop(_odp_eventdev_gbl->dev_id);
 
 	/* Fix for DPDK 17.11 sync bug */
 	sleep(1);
 
-	if (rte_event_dev_close(eventdev_gbl->dev_id)) {
+	if (rte_event_dev_close(_odp_eventdev_gbl->dev_id)) {
 		ODP_ERR("Failed to close event device\n");
 		ret = -1;
 	}
 
-	if (odp_shm_free(eventdev_gbl->shm)) {
+	if (odp_shm_free(_odp_eventdev_gbl->shm)) {
 		ODP_ERR("Shm free failed for evendev\n");
 		ret = -1;
 	}
@@ -679,10 +679,10 @@ static odp_queue_t queue_create(const char *name,
 			ODP_ERR("Bad queue priority: %i\n", param->sched.prio);
 			return ODP_QUEUE_INVALID;
 		}
-		if (param->size > eventdev_gbl->sched_config.max_queue_size)
+		if (param->size > _odp_eventdev_gbl->sched_config.max_queue_size)
 			return ODP_QUEUE_INVALID;
 	} else {
-		if (param->size > eventdev_gbl->plain_config.max_queue_size)
+		if (param->size > _odp_eventdev_gbl->plain_config.max_queue_size)
 			return ODP_QUEUE_INVALID;
 	}
 
@@ -738,8 +738,8 @@ static odp_queue_t queue_create(const char *name,
 	}
 
 	if (type == ODP_QUEUE_TYPE_SCHED) {
-		if (sched_fn->create_queue(queue->s.index,
-					   &queue->s.param.sched)) {
+		if (_odp_sched_fn->create_queue(queue->s.index,
+						&queue->s.param.sched)) {
 			queue->s.status = QUEUE_STATUS_FREE;
 			ODP_ERR("schedule queue init failed\n");
 			return ODP_QUEUE_INVALID;
@@ -779,7 +779,7 @@ static int queue_destroy(odp_queue_t handle)
 		break;
 	case QUEUE_STATUS_SCHED:
 		queue->s.status = QUEUE_STATUS_FREE;
-		sched_fn->destroy_queue(queue->s.index);
+		_odp_sched_fn->destroy_queue(queue->s.index);
 		break;
 	default:
 		ODP_ABORT("Unexpected queue status\n");
@@ -1073,8 +1073,8 @@ static inline int _sched_queue_enq_multi(odp_queue_t handle,
 	queue_entry_t *queue;
 	struct rte_event ev[CONFIG_BURST_SIZE];
 	uint16_t num_enq = 0;
-	uint8_t dev_id = eventdev_gbl->dev_id;
-	uint8_t port_id = eventdev_local.port_id;
+	uint8_t dev_id = _odp_eventdev_gbl->dev_id;
+	uint8_t port_id = _odp_eventdev_local.port_id;
 	uint8_t sched;
 	uint8_t queue_id;
 	uint8_t priority;
@@ -1096,9 +1096,9 @@ static inline int _sched_queue_enq_multi(odp_queue_t handle,
 
 	UNLOCK(queue);
 
-	if (odp_unlikely(port_id >= eventdev_gbl->num_event_ports)) {
+	if (odp_unlikely(port_id >= _odp_eventdev_gbl->num_event_ports)) {
 		ODP_ERR("Max %" PRIu8 " scheduled workers supported\n",
-			eventdev_gbl->num_event_ports);
+			_odp_eventdev_gbl->num_event_ports);
 		return 0;
 	}
 
@@ -1151,7 +1151,7 @@ static int queue_init(queue_entry_t *queue, const char *name,
 		queue->s.name[ODP_QUEUE_NAME_LEN - 1] = 0;
 	}
 	memcpy(&queue->s.param, param, sizeof(odp_queue_param_t));
-	if (queue->s.param.sched.lock_count > sched_fn->max_ordered_locks())
+	if (queue->s.param.sched.lock_count > _odp_sched_fn->max_ordered_locks())
 		return -1;
 
 	/* Convert ODP priority to eventdev priority:
@@ -1169,13 +1169,13 @@ static int queue_init(queue_entry_t *queue, const char *name,
 
 	queue_size = param->size;
 	if (queue_size == 0)
-		queue_size = eventdev_gbl->plain_config.default_queue_size;
+		queue_size = _odp_eventdev_gbl->plain_config.default_queue_size;
 
 	if (queue_size < MIN_QUEUE_SIZE)
 		queue_size = MIN_QUEUE_SIZE;
 
 	if (queue_type == ODP_QUEUE_TYPE_PLAIN &&
-	    queue_size > eventdev_gbl->plain_config.max_queue_size) {
+	    queue_size > _odp_eventdev_gbl->plain_config.max_queue_size) {
 		ODP_ERR("Too large queue size %u\n", queue_size);
 		return -1;
 	}
