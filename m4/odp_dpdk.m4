@@ -190,13 +190,23 @@ PKG_CONFIG=$_save_PKG_CONFIG[]dnl
 # -----------------------------------------------------------------------
 # Configure DPDK using pkg-config information
 AC_DEFUN([_ODP_DPDK_PKGCONFIG], [dnl
-PKG_CHECK_MODULES_STATIC([DPDK_STATIC], [libdpdk])
 DPDK_PKG=", libdpdk"
 AC_SUBST([DPDK_PKG])
-# applications don't need to be linked to anything, just rpath
-DPDK_LIBS_LT=""
-# FIXME: this might need to be changed to DPDK_LIBS_STATIC
-DPDK_LIBS_LIBODP="$DPDK_LIBS"
+
+# Check if linking against static DPDK lib
+echo "$DPDK_LIBS" | grep -q 'librte_eal.a'
+status=$?
+if test $status -eq 0 ; then
+    # Build long list of libraries for applications, which should not be
+    # rearranged by libtool
+    DPDK_LIBS_LIBODP=$(echo "$DPDK_LIBS" | sed -e 's/ /,/g' | sed 's/-Wl,//g')
+    DPDK_LIBS_LIBODP=$(echo "$DPDK_LIBS_LIBODP" | sed 's/-pthread/-lpthread/g')
+    DPDK_LIBS_LIBODP="-Wl,$DPDK_LIBS_LIBODP"
+    DPDK_LIBS_LT="$DPDK_LIBS_LIBODP"
+else
+    DPDK_LIBS_LIBODP="$DPDK_LIBS"
+    DPDK_LIBS_LT=""
+fi
 DPDK_LIBS=""
 ])
 
@@ -205,7 +215,7 @@ DPDK_LIBS=""
 # Check for DPDK availability
 AC_DEFUN([ODP_DPDK], [dnl
 AS_IF([test "x$1" = "xsystem"],
-      [PKG_CHECK_MODULES([DPDK], [libdpdk],
+      [PKG_CHECK_MODULES_STATIC([DPDK], [libdpdk],
 			 [AC_MSG_NOTICE([Using DPDK detected via pkg-config])
 			 _ODP_DPDK_PKGCONFIG
 			 m4_default([$2], [:])],
