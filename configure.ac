@@ -137,7 +137,7 @@ AS_IF([test "$GCC" == yes],
       )
 )
 
-ODP_CFLAGS="$ODP_CFLAGS -std=c99"
+ODP_CFLAGS="$ODP_CFLAGS -std=c99 -D_GNU_SOURCE"
 ODP_CXXFLAGS="$ODP_CXXFLAGS -std=c++11 -Wno-deprecated-register"
 
 # Extra flags for example to suppress certain warning types
