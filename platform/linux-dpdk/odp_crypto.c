@@ -1,5 +1,5 @@
 /* Copyright (c) 2017-2018, Linaro Limited
- * Copyright (c) 2020, Nokia
+ * Copyright (c) 2018-2021, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -622,6 +622,7 @@ int odp_crypto_capability(odp_crypto_capability_t *capability)
 
 	capability->sync_mode = ODP_SUPPORT_YES;
 	capability->async_mode = ODP_SUPPORT_PREFERRED;
+	capability->max_sessions = MAX_SESSIONS;
 
 	for (cdev_id = 0; cdev_id < cdev_count; cdev_id++) {
 		struct rte_cryptodev_info dev_info;
@@ -635,17 +636,11 @@ int odp_crypto_capability(odp_crypto_capability_t *capability)
 			capability->hw_auths = capability->auths;
 		}
 
-		/* Read from the device with the lowest max_nb_sessions */
-		if (capability->max_sessions > dev_info.sym.max_nb_sessions)
-			capability->max_sessions = dev_info.sym.max_nb_sessions;
-
-		if (capability->max_sessions == 0)
+		/* Report the lowest max_nb_sessions of all devices */
+		if (dev_info.sym.max_nb_sessions != 0 &&
+		    dev_info.sym.max_nb_sessions < capability->max_sessions)
 			capability->max_sessions = dev_info.sym.max_nb_sessions;
 	}
-
-	/* Make sure the session count doesn't exceed MAX_SESSIONS */
-	if (capability->max_sessions > MAX_SESSIONS)
-		capability->max_sessions = MAX_SESSIONS;
 
 	return 0;
 }
