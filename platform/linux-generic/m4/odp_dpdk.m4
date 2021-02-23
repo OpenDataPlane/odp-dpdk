@@ -34,7 +34,7 @@ AC_ARG_ENABLE([dpdk-zero-copy],
 ##########################################################################
 if test x$pktio_dpdk_support = xyes
 then
-    ODP_DPDK([$DPDK_PATH], [],
+    ODP_DPDK([$DPDK_PATH], [], [],
 	     [AC_MSG_FAILURE([can't find DPDK])])
 
     case "${host}" in
