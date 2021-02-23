@@ -157,8 +157,6 @@ AC_DEFUN([_ODP_DPDK_LEGACY_SYSTEM], [dnl
 	    [AC_MSG_NOTICE([Using shared DPDK library found at $DPDK_LIB_PATH])],
 	    [AC_MSG_NOTICE([Using static DPDK library found at $DPDK_LIB_PATH])])
     _ODP_DPDK_CHECK([$DPDK_CFLAGS], [$DPDK_LDFLAGS], [$1], [$2])
-    DPDK_PKG=""
-    AC_SUBST([DPDK_PKG])
 ])
 
 # _ODP_DPDK_LEGACY(PATH, ACTION-IF-FOUND, ACTION-IF-NOT-FOUND)
@@ -179,8 +177,6 @@ AC_DEFUN([_ODP_DPDK_LEGACY], [dnl
 	    [AC_MSG_NOTICE([Using shared DPDK library found at $DPDK_LIB_PATH])],
 	    [AC_MSG_NOTICE([Using static DPDK library found at $DPDK_LIB_PATH])])
     _ODP_DPDK_CHECK([$DPDK_CFLAGS], [$DPDK_LDFLAGS], [$2], [$3])
-    DPDK_PKG=""
-    AC_SUBST([DPDK_PKG])
 ])
 
 m4_ifndef([PKG_CHECK_MODULES_STATIC],
@@ -192,40 +188,55 @@ PKG_CHECK_MODULES($@)
 PKG_CONFIG=$_save_PKG_CONFIG[]dnl
 ])])dnl PKG_CHECK_MODULES_STATIC
 
-# _ODP_DPDK_PKGCONFIG
+# _ODP_DPDK_PKGCONFIG (DPDK_SHARED, ACTION-IF-FOUND, ACTION-IF-NOT-FOUND)
 # -----------------------------------------------------------------------
 # Configure DPDK using pkg-config information
 AC_DEFUN([_ODP_DPDK_PKGCONFIG], [dnl
-DPDK_PKG=", libdpdk"
-AC_SUBST([DPDK_PKG])
+use_pkg_config=no
+dpdk_shared="$1"
 
-# Check if linking against static DPDK lib
-echo "$DPDK_LIBS" | grep -q 'librte_eal.a'
-status=$?
-if test $status -eq 0 ; then
-    # Build long list of libraries for applications, which should not be
-    # rearranged by libtool
-    DPDK_LIBS_LIBODP=$(echo "$DPDK_LIBS" | sed -e 's/ /,/g' | sed 's/-Wl,//g')
-    DPDK_LIBS_LIBODP=$(echo "$DPDK_LIBS_LIBODP" | sed 's/-pthread/-lpthread/g')
-    DPDK_LIBS_LIBODP="-Wl,$DPDK_LIBS_LIBODP"
-    DPDK_LIBS_LT="$DPDK_LIBS_LIBODP"
+if test "x$dpdk_shared" = "xyes" ; then
+PKG_CHECK_MODULES([DPDK], [libdpdk],
+                  [AC_MSG_NOTICE([Using shared DPDK lib via pkg-config])
+                   use_pkg_config=yes
+                   m4_default([$2], [:])],
+                  [_ODP_DPDK_LEGACY_SYSTEM([m4_default([$2], [:])], [m4_default([$3], [:])])])
 else
-    DPDK_LIBS_LIBODP="$DPDK_LIBS"
-    DPDK_LIBS_LT=""
+PKG_CHECK_MODULES_STATIC([DPDK], [libdpdk],
+                         [AC_MSG_NOTICE([Using static DPDK lib via pkg-config])
+                          use_pkg_config=yes
+                          m4_default([$2], [:])],
+                         [_ODP_DPDK_LEGACY_SYSTEM([m4_default([$2], [:])], [m4_default([$3], [:])])])
 fi
-DPDK_LIBS=""
+
+if test "x$use_pkg_config" = "xyes"; then
+    if test "x$dpdk_shared" = "xyes"; then
+        DPDK_LIBS_LIBODP="$DPDK_LIBS"
+        DPDK_LIBS_LT="$DPDK_LIBS"
+        # Set RPATH if library path is found
+        DPDK_LIB_PATH=$(echo "$DPDK_LIBS" | grep -o -- '-L\S*' | sed 's/^-L//')
+        if test -n "$DPDK_LIB_PATH"; then
+            DPDK_LIBS_LIBODP+=" -Wl,-rpath,$DPDK_LIB_PATH"
+            DPDK_LIBS_LT+=" -R$DPDK_LIB_PATH"
+        fi
+    else
+        # Build a list of libraries, which should not be rearranged by libtool.
+        # This ensures that DPDK constructors are included properly.
+        DPDK_LIBS_LIBODP=$(echo "$DPDK_LIBS" | sed -e 's/ /,/g' | sed 's/-Wl,//g')
+        DPDK_LIBS_LIBODP=$(echo "$DPDK_LIBS_LIBODP" | sed 's/-pthread/-lpthread/g')
+        DPDK_LIBS_LIBODP="-Wl,$DPDK_LIBS_LIBODP"
+        DPDK_LIBS_LT="$DPDK_LIBS_LIBODP"
+    fi
+    DPDK_LIBS=$DPDK_LIBS_LIBODP
+fi
 ])
 
-# ODP_DPDK(DPDK_PATH, [ACTION-IF-FOUND], [ACTION-IF-NOT-FOUND])
-# -----------------------------------------------------------------------
+# ODP_DPDK(DPDK_PATH, DPDK_SHARED, [ACTION-IF-FOUND], [ACTION-IF-NOT-FOUND])
+# --------------------------------------------------------------------------
 # Check for DPDK availability
 AC_DEFUN([ODP_DPDK], [dnl
 AS_IF([test "x$1" = "xsystem"],
-      [PKG_CHECK_MODULES_STATIC([DPDK], [libdpdk],
-			 [AC_MSG_NOTICE([Using DPDK detected via pkg-config])
-			 _ODP_DPDK_PKGCONFIG
-			 m4_default([$2], [:])],
-			 [_ODP_DPDK_LEGACY_SYSTEM([m4_default([$2], [:])],
-						  [m4_default([$3], [:])])])],
-      [_ODP_DPDK_LEGACY($1, [m4_default([$2], [:])], [m4_default([$3], [:])])]
-      )])
+      [_ODP_DPDK_PKGCONFIG($2, [m4_default([$3], [:])], [m4_default([$4], [:])])],
+      [_ODP_DPDK_LEGACY($1, [m4_default([$3], [:])], [m4_default([$4], [:])])]
+    )
+])

@@ -21,12 +21,23 @@ AC_ARG_WITH([dpdk-path],
     [DPDK_PATH="$withval"],[DPDK_PATH=system])
 
 ##########################################################################
+# Use shared DPDK library
+##########################################################################
+dpdk_shared=no
+AC_ARG_ENABLE([dpdk-shared],
+    [AS_HELP_STRING([--enable-dpdk-shared],
+                    [use shared DPDK library [default=disabled] (linux-dpdk)])],
+    [if test x$enableval = xyes; then
+        dpdk_shared=yes
+    fi])
+
+##########################################################################
 # Check for DPDK availability
 #
 # DPDK pmd drivers are not linked unless the --whole-archive option is
 # used. No spaces are allowed between the --whole-arhive flags.
 ##########################################################################
-ODP_DPDK([$DPDK_PATH], [],
+ODP_DPDK([$DPDK_PATH], [$dpdk_shared], [],
 	 [AC_MSG_FAILURE([can't find DPDK])])
 AM_CONDITIONAL([ODP_PKTIO_PCAP], [test x$have_pmd_pcap = xyes])
 
