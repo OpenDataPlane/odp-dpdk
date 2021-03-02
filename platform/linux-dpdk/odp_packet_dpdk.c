@@ -694,7 +694,11 @@ static int setup_pkt_dpdk(odp_pktio_t pktio ODP_UNUSED,
 		return -1;
 	} else {
 		pkt_dpdk->port_id = atoi(netdev);
+	}
 
+	if (!rte_eth_dev_is_valid_port(pkt_dpdk->port_id)) {
+		ODP_ERR("Port id=%" PRIu16 " not attached\n", pkt_dpdk->port_id);
+		return -1;
 	}
 
 	if (dpdk_init_capability(pktio_entry, &dev_info)) {
