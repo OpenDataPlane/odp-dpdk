@@ -253,7 +253,7 @@ __LIB__libodp_dpdk_la_SOURCES += arch/default/odp_cpu_cycles.c \
 				 arch/aarch64/odp_sysinfo_parse.c
 odpapiabiarchinclude_HEADERS += arch/default/odp/api/abi/cpu_inlines.h \
 				arch/default/odp/api/abi/cpu_time.h \
-				arch/default/odp/api/abi/hash_crc32.h
+				arch/aarch64/odp/api/abi/hash_crc32.h
 if !ODP_ABI_COMPAT
 odpapiabiarchinclude_HEADERS += arch/aarch64/odp/api/abi/cpu.h
 endif
