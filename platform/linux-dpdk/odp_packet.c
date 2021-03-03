@@ -1075,10 +1075,10 @@ void odp_packet_print(odp_packet_t pkt)
 
 	seg = odp_packet_first_seg(pkt);
 
-	while (seg != ODP_PACKET_SEG_INVALID) {
+	for (int seg_idx = 0; seg != ODP_PACKET_SEG_INVALID; seg_idx++) {
 		len += snprintf(&str[len], n - len,
-				"    seg_len    %-4" PRIu32 "  seg_data %p\n",
-				odp_packet_seg_data_len(pkt, seg),
+				"    [%d] seg_len    %-4" PRIu32 "  seg_data %p\n",
+				seg_idx, odp_packet_seg_data_len(pkt, seg),
 				odp_packet_seg_data(pkt, seg));
 
 		seg = odp_packet_next_seg(pkt, seg);
