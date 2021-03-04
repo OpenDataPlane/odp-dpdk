@@ -100,9 +100,9 @@ extern "C" {
 #define CONFIG_PACKET_TAILROOM 0
 
 /*
- * Maximum number of segments per packet
+ * Maximum packet segment size including head- and tailrooms
  */
-#define CONFIG_PACKET_MAX_SEGS 60
+#define CONFIG_PACKET_SEG_SIZE (60 * 1024)
 
 /*
  * Minimum packet segment length
@@ -120,14 +120,13 @@ extern "C" {
  * defined segment length (seg_len in odp_pool_param_t) must not be larger than
  * this.
  */
-#define CONFIG_PACKET_SEG_LEN_MAX (CONFIG_PACKET_MAX_SEGS * \
-				   (CONFIG_PACKET_SEG_LEN_MIN - \
-				    CONFIG_PACKET_HEADROOM - \
-				    CONFIG_PACKET_TAILROOM))
+#define CONFIG_PACKET_MAX_SEG_LEN (CONFIG_PACKET_SEG_SIZE - \
+				   CONFIG_PACKET_HEADROOM - \
+				   CONFIG_PACKET_TAILROOM)
 
 /* Maximum number of shared memory blocks.
  *
- * This the the number of separate SHM areas that can be reserved concurrently
+ * This the number of separate SHM areas that can be reserved concurrently
  */
 #define ODP_CONFIG_SHM_BLOCKS (ODP_CONFIG_POOLS + 48)
 

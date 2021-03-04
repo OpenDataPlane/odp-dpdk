@@ -24,6 +24,7 @@
 #include <odp_config_internal.h>
 #include <odp/api/align.h>
 #include <odp/api/cpu.h>
+#include <odp_packet_internal.h>
 #include <errno.h>
 #include <pthread.h>
 #include <sched.h>
@@ -521,9 +522,9 @@ void odp_sys_config_print(void)
 	ODP_PRINT("ODP_CONFIG_BUFFER_ALIGN_MAX: %i\n", ODP_CONFIG_BUFFER_ALIGN_MAX);
 	ODP_PRINT("CONFIG_PACKET_HEADROOM:      %i\n", CONFIG_PACKET_HEADROOM);
 	ODP_PRINT("CONFIG_PACKET_TAILROOM:      %i\n", CONFIG_PACKET_TAILROOM);
-	ODP_PRINT("CONFIG_PACKET_MAX_SEGS:      %i\n", CONFIG_PACKET_MAX_SEGS);
+	ODP_PRINT("CONFIG_PACKET_SEG_SIZE:      %i\n", CONFIG_PACKET_SEG_SIZE);
 	ODP_PRINT("CONFIG_PACKET_SEG_LEN_MIN:   %i\n", CONFIG_PACKET_SEG_LEN_MIN);
-	ODP_PRINT("CONFIG_PACKET_SEG_LEN_MAX:   %i\n", CONFIG_PACKET_SEG_LEN_MAX);
+	ODP_PRINT("CONFIG_PACKET_MAX_SEG_LEN:   %i\n", CONFIG_PACKET_MAX_SEG_LEN);
 	ODP_PRINT("ODP_CONFIG_SHM_BLOCKS:       %i\n", ODP_CONFIG_SHM_BLOCKS);
 	ODP_PRINT("CONFIG_BURST_SIZE:           %i\n", CONFIG_BURST_SIZE);
 	ODP_PRINT("CONFIG_POOL_MAX_NUM:         %i\n", CONFIG_POOL_MAX_NUM);
