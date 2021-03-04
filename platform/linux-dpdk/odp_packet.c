@@ -1194,6 +1194,7 @@ int _odp_packet_copy_md_to_packet(odp_packet_t srcpkt, odp_packet_t dstpkt)
 	dsthdr->buf_hdr.mb.ol_flags = srchdr->buf_hdr.mb.ol_flags;
 	dsthdr->buf_hdr.mb.packet_type = srchdr->buf_hdr.mb.packet_type;
 	dsthdr->buf_hdr.mb.vlan_tci = srchdr->buf_hdr.mb.vlan_tci;
+	dsthdr->buf_hdr.mb.hash.rss = srchdr->buf_hdr.mb.hash.rss;
 	dsthdr->buf_hdr.mb.hash = srchdr->buf_hdr.mb.hash;
 	dsthdr->buf_hdr.mb.vlan_tci_outer = srchdr->buf_hdr.mb.vlan_tci_outer;
 	dsthdr->buf_hdr.mb.tx_offload = srchdr->buf_hdr.mb.tx_offload;
@@ -1202,6 +1203,17 @@ int _odp_packet_copy_md_to_packet(odp_packet_t srcpkt, odp_packet_t dstpkt)
 		memcpy(odp_packet_user_area(dstpkt),
 		       odp_packet_user_area(srcpkt),
 		       dst_size <= src_size ? dst_size : src_size);
+
+	if (srchdr->p.input_flags.timestamp)
+		dsthdr->timestamp = srchdr->timestamp;
+
+	if (srchdr->p.flags.lso) {
+		dsthdr->lso_max_payload = srchdr->lso_max_payload;
+		dsthdr->lso_profile_idx = srchdr->lso_profile_idx;
+	}
+
+	if (srchdr->p.flags.payload_off)
+		dsthdr->payload_offset = srchdr->payload_offset;
 
 	copy_packet_parser_metadata(srchdr, dsthdr);
 
@@ -2335,4 +2347,38 @@ void odp_packet_ts_request(odp_packet_t pkt, int enable)
 	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
 
 	pkt_hdr->p.flags.ts_set = !!enable;
+}
+
+void odp_packet_lso_request_clr(odp_packet_t pkt)
+{
+	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
+
+	pkt_hdr->p.flags.lso = 0;
+}
+
+int odp_packet_has_lso_request(odp_packet_t pkt)
+{
+	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
+
+	return pkt_hdr->p.flags.lso;
+}
+
+uint32_t odp_packet_payload_offset(odp_packet_t pkt)
+{
+	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
+
+	if (pkt_hdr->p.flags.payload_off)
+		return pkt_hdr->payload_offset;
+
+	return ODP_PACKET_OFFSET_INVALID;
+}
+
+int odp_packet_payload_offset_set(odp_packet_t pkt, uint32_t offset)
+{
+	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
+
+	pkt_hdr->p.flags.payload_off = 1;
+	pkt_hdr->payload_offset      = offset;
+
+	return 0;
 }

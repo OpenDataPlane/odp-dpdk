@@ -121,6 +121,15 @@ typedef struct {
 	/* Classifier handle index */
 	uint16_t cos;
 
+	/* Offset to payload start */
+	uint16_t payload_offset;
+
+	/* Max payload size in a LSO segment */
+	uint16_t lso_max_payload;
+
+	/* LSO profile index */
+	uint8_t lso_profile_idx;
+
 	/* Event subtype */
 	int8_t subtype;
 
