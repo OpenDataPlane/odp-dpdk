@@ -43,12 +43,6 @@ extern "C" {
 	#undef vector
 #endif
 
-ODP_STATIC_ASSERT(CONFIG_PACKET_SEG_LEN_MIN >= 256,
-		  "ODP Segment size must be a minimum of 256 bytes");
-
-ODP_STATIC_ASSERT(CONFIG_PACKET_MAX_SEGS < 256,
-		  "Maximum of 255 segments supported");
-
 /* Type size limits number of flow IDs supported */
 #define BUF_HDR_MAX_FLOW_ID 255
 

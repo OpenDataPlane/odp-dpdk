@@ -31,6 +31,7 @@ extern "C" {
 #include <odp/api/abi/packet.h>
 #include <protocols/eth.h>
 #include <odp_queue_if.h>
+#include <odp_config_internal.h>
 
 #include <rte_config.h>
 #if defined(__clang__)
@@ -93,6 +94,16 @@ typedef struct {
 	/* offset to L4 hdr (TCP, UDP, SCTP, also ICMP) */
 	uint16_t l4_offset;
 } packet_parser_t;
+
+/* Maximum number of segments per packet */
+#define PKT_MAX_SEGS 60
+
+ODP_STATIC_ASSERT(PKT_MAX_SEGS < 256, "Maximum of 255 segments supported");
+
+ODP_STATIC_ASSERT(CONFIG_PACKET_SEG_LEN_MIN >= 256,
+		  "ODP Segment size must be a minimum of 256 bytes");
+ODP_STATIC_ASSERT(CONFIG_PACKET_MAX_SEG_LEN <= UINT16_MAX,
+		  "ODP Segment size must fit in uint16_t");
 
 /**
  * Internal Packet header

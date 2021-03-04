@@ -261,9 +261,9 @@ int odp_pool_capability(odp_pool_capability_t *capa)
 	capa->pkt.min_headroom     = CONFIG_PACKET_HEADROOM;
 	capa->pkt.max_headroom     = CONFIG_PACKET_HEADROOM;
 	capa->pkt.min_tailroom     = CONFIG_PACKET_TAILROOM;
-	capa->pkt.max_segs_per_pkt = CONFIG_PACKET_MAX_SEGS;
+	capa->pkt.max_segs_per_pkt = PKT_MAX_SEGS;
 	capa->pkt.min_seg_len      = CONFIG_PACKET_SEG_LEN_MIN;
-	capa->pkt.max_seg_len      = CONFIG_PACKET_SEG_LEN_MAX;
+	capa->pkt.max_seg_len      = CONFIG_PACKET_MAX_SEG_LEN;
 	capa->pkt.max_uarea_size   = MAX_SIZE;
 	capa->pkt.min_cache_size   = 0;
 	capa->pkt.max_cache_size   = RTE_MEMPOOL_CACHE_MAX_SIZE;
