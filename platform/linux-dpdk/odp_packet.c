@@ -298,22 +298,9 @@ void *odp_packet_push_head(odp_packet_t pkt, uint32_t len)
 static void _copy_head_metadata(struct rte_mbuf *newhead,
 				struct rte_mbuf *oldhead)
 {
-	odp_packet_hdr_t *pkt_hdr = packet_hdr((odp_packet_t)newhead);
-	uint32_t saved_index = pkt_hdr->buf_hdr.index;
-
 	rte_mbuf_refcnt_set(newhead, rte_mbuf_refcnt_read(oldhead));
-	newhead->port = oldhead->port;
-	newhead->ol_flags = oldhead->ol_flags;
-	newhead->packet_type = oldhead->packet_type;
-	newhead->vlan_tci = oldhead->vlan_tci;
-	newhead->hash.rss = 0;
-	newhead->vlan_tci_outer = oldhead->vlan_tci_outer;
 
-	memcpy(&newhead->tx_offload, &oldhead->tx_offload,
-	       sizeof(odp_packet_hdr_t) -
-	       offsetof(struct rte_mbuf, tx_offload));
-	pkt_hdr->buf_hdr.index = saved_index;
-	pkt_hdr->buf_hdr.user_ptr = packet_hdr((odp_packet_t)oldhead)->buf_hdr.user_ptr;
+	_odp_packet_copy_md_to_packet((odp_packet_t)oldhead, (odp_packet_t)newhead);
 }
 
 int odp_packet_extend_head(odp_packet_t *pkt, uint32_t len, void **data_ptr,
