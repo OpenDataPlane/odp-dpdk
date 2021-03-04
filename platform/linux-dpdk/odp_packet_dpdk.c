@@ -1,5 +1,5 @@
 /* Copyright (c) 2013-2018, Linaro Limited
- * Copyright (c) 2019-2020, Nokia
+ * Copyright (c) 2019-2021, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -67,6 +67,14 @@
 /* Minimum RX burst size */
 #define DPDK_MIN_RX_BURST 4
 
+/* Limits for setting link MTU */
+#if RTE_VERSION >= RTE_VERSION_NUM(19, 11, 0, 0)
+#define DPDK_MTU_MIN (RTE_ETHER_MIN_MTU + _ODP_ETHHDR_LEN)
+#else
+#define DPDK_MTU_MIN (68 + _ODP_ETHHDR_LEN)
+#endif
+#define DPDK_MTU_MAX (9000 + _ODP_ETHHDR_LEN)
+
 /* Loopback interface ring size */
 #define LOOPBACK_RING_SIZE 512
 
@@ -92,6 +100,10 @@ typedef struct ODP_ALIGNED_CACHE {
 	uint16_t port_id;
 	/** Maximum transmission unit */
 	uint16_t mtu;
+	/** Maximum supported MTU value */
+	uint32_t mtu_max;
+	/** DPDK MTU has been modified */
+	odp_bool_t mtu_set;
 	struct {
 		/** No locking for rx */
 		uint8_t lockless_rx : 1;
@@ -248,6 +260,26 @@ static void rss_conf_to_hash_proto(struct rte_eth_rss_conf *rss_conf,
 				    ETH_RSS_NONFRAG_IPV6_OTHER |
 				    ETH_RSS_IPV6_EX;
 	rss_conf->rss_key = NULL;
+}
+
+static int dpdk_maxlen_set(pktio_entry_t *pktio_entry, uint32_t maxlen_input,
+			   uint32_t maxlen_output ODP_UNUSED)
+{
+	pkt_dpdk_t *pkt_dpdk = pkt_priv(pktio_entry);
+	uint16_t mtu;
+	int ret;
+
+	/* DPDK MTU value does not include Ethernet header */
+	mtu = maxlen_input - _ODP_ETHHDR_LEN;
+
+	ret = rte_eth_dev_set_mtu(pkt_dpdk->port_id, mtu);
+	if (odp_unlikely(ret))
+		ODP_ERR("rte_eth_dev_set_mtu() failed: %d\n", ret);
+
+	pkt_dpdk->mtu = maxlen_input;
+	pkt_dpdk->mtu_set = true;
+
+	return ret;
 }
 
 static int dpdk_setup_eth_dev(pktio_entry_t *pktio_entry,
@@ -500,7 +532,7 @@ static int dpdk_term_global(void)
 }
 
 static int dpdk_init_capability(pktio_entry_t *pktio_entry,
-				struct rte_eth_dev_info *dev_info)
+				const struct rte_eth_dev_info *dev_info)
 {
 	pkt_dpdk_t *pkt_dpdk = pkt_priv(pktio_entry);
 	odp_pktio_capability_t *capa = &pktio_entry->s.capa;
@@ -512,10 +544,8 @@ static int dpdk_init_capability(pktio_entry_t *pktio_entry,
 	int ptype_l4_udp = 0;
 	uint32_t ptype_mask = RTE_PTYPE_L3_MASK | RTE_PTYPE_L4_MASK;
 
-	memset(dev_info, 0, sizeof(struct rte_eth_dev_info));
 	memset(capa, 0, sizeof(odp_pktio_capability_t));
 
-	rte_eth_dev_info_get(pkt_dpdk->port_id, dev_info);
 	capa->max_input_queues = RTE_MIN(dev_info->max_rx_queues,
 					 PKTIO_MAX_QUEUES);
 
@@ -545,6 +575,20 @@ static int dpdk_init_capability(pktio_entry_t *pktio_entry,
 				ret);
 			return -1;
 		}
+	}
+
+	/* Check if setting MTU is supported */
+	ret = rte_eth_dev_set_mtu(pkt_dpdk->port_id, pkt_dpdk->mtu - _ODP_ETHHDR_LEN);
+	if (ret == 0) {
+		capa->set_op.op.maxlen = 1;
+		capa->maxlen.equal = true;
+		capa->maxlen.min_input = DPDK_MTU_MIN;
+		capa->maxlen.max_input = pkt_dpdk->mtu_max;
+		capa->maxlen.min_output = DPDK_MTU_MIN;
+		capa->maxlen.max_output = pkt_dpdk->mtu_max;
+	} else if (ret != -ENOTSUP) {
+		ODP_ERR("Failed to set interface MTU: %d\n", ret);
+		return -1;
 	}
 
 	ptype_cnt = rte_eth_dev_get_supported_ptypes(pkt_dpdk->port_id,
@@ -701,11 +745,9 @@ static int setup_pkt_dpdk(odp_pktio_t pktio ODP_UNUSED,
 		return -1;
 	}
 
-	if (dpdk_init_capability(pktio_entry, &dev_info)) {
-		ODP_DBG("Failed to initialize capabilities for interface: %s\n",
-			netdev);
-		return -1;
-	}
+	memset(&dev_info, 0, sizeof(struct rte_eth_dev_info));
+	rte_eth_dev_info_get(pkt_dpdk->port_id, &dev_info);
+
 
 	/* Initialize runtime options */
 	if (init_options(pktio_entry, &dev_info)) {
@@ -731,6 +773,13 @@ static int setup_pkt_dpdk(odp_pktio_t pktio ODP_UNUSED,
 		return -1;
 	}
 	pkt_dpdk->mtu = mtu + _ODP_ETHHDR_LEN;
+	pkt_dpdk->mtu_max = RTE_MAX(pkt_dpdk->mtu, DPDK_MTU_MAX);
+	pkt_dpdk->mtu_set = false;
+
+	if (dpdk_init_capability(pktio_entry, &dev_info)) {
+		ODP_ERR("Failed to initialize capability\n");
+		return -1;
+	}
 
 	/* Setup promiscuous mode and multicast */
 	promisc_mode_check(pkt_dpdk);
@@ -910,6 +959,16 @@ static int dpdk_start(pktio_entry_t *pktio_entry)
 	/* Setup RX queues */
 	if (dpdk_setup_eth_rx(pktio_entry, pkt_dpdk, &dev_info))
 		return -1;
+
+	/* Restore MTU value resetted by dpdk_setup_eth_rx() */
+	if (pkt_dpdk->mtu_set && pktio_entry->s.capa.set_op.op.maxlen) {
+		ret = dpdk_maxlen_set(pktio_entry, pkt_dpdk->mtu, 0);
+		if (ret) {
+			ODP_ERR("Restoring device MTU failed: err=%d, port=%" PRIu8 "\n",
+				ret, port_id);
+			return -1;
+		}
+	}
 
 	/* Add callback for loopback interface */
 	if (pkt_dpdk->flags.loopback) {
@@ -1592,6 +1651,7 @@ const pktio_if_ops_t _odp_dpdk_pktio_ops = {
 	.pktio_ts_from_ns = NULL,
 	.pktio_time = NULL,
 	.maxlen_get = dpdk_maxlen_get,
+	.maxlen_set = dpdk_maxlen_set,
 	.promisc_mode_set = promisc_mode_set_pkt_dpdk,
 	.promisc_mode_get = promisc_mode_get_pkt_dpdk,
 	.mac_get = mac_get_pkt_dpdk,
