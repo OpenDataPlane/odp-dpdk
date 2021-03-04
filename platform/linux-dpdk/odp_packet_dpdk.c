@@ -1343,7 +1343,7 @@ static uint32_t mtu_get_pkt_dpdk(pktio_entry_t *pktio_entry)
 	return mtu;
 }
 
-static uint32_t dpdk_frame_maxlen(pktio_entry_t *pktio_entry)
+static uint32_t dpdk_maxlen_get(pktio_entry_t *pktio_entry)
 {
 	pkt_dpdk_t *pkt_dpdk = pkt_priv(pktio_entry);
 
@@ -1591,7 +1591,7 @@ const pktio_if_ops_t _odp_dpdk_pktio_ops = {
 	.pktio_ts_res = NULL,
 	.pktio_ts_from_ns = NULL,
 	.pktio_time = NULL,
-	.mtu_get = dpdk_frame_maxlen,
+	.maxlen_get = dpdk_maxlen_get,
 	.promisc_mode_set = promisc_mode_set_pkt_dpdk,
 	.promisc_mode_get = promisc_mode_get_pkt_dpdk,
 	.mac_get = mac_get_pkt_dpdk,
