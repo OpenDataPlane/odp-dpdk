@@ -190,7 +190,10 @@ typedef struct odp_schedule_capability_t {
 	/** Maximum number of ordered locks per queue */
 	uint32_t max_ordered_locks;
 
-	/** Maximum number of scheduling groups */
+	/** Maximum number of scheduling groups. The value includes the enabled
+	 *  predefined scheduling groups (ODP_SCHED_GROUP_ALL,
+	 *  ODP_SCHED_GROUP_WORKER, and ODP_SCHED_GROUP_CONTROL). By default, an
+	 *  application can create 'max_groups' - 3 groups. */
 	uint32_t max_groups;
 
 	/** Number of scheduling priorities */
@@ -253,12 +256,37 @@ typedef struct odp_schedule_config_t {
 	 *  scheduling of the event and synchronization is maintained per flow
 	 *  within each queue.
 	 *
-	 *  Depeding on implementation, there may be much more flows supported
-	 *  than queues, as flows are lightweight entities.
+	 *  Depending on the implementation, there may be much more flows
+	 *  supported than queues, as flows are lightweight entities.
 	 *
 	 *  @see odp_schedule_capability_t, odp_event_flow_id()
 	 */
 	uint32_t max_flow_id;
+
+	/** Enable/disable predefined scheduling groups */
+	struct {
+		/** ODP_SCHED_GROUP_ALL
+		 *
+		 *  0: Disable group
+		 *  1: Enable group (default)
+		 */
+		odp_bool_t all;
+
+		/** ODP_SCHED_GROUP_CONTROL
+		 *
+		 *  0: Disable group
+		 *  1: Enable group (default)
+		 */
+		odp_bool_t control;
+
+		/** ODP_SCHED_GROUP_WORKER
+		 *
+		 *  0: Disable group
+		 *  1: Enable group (default)
+		 */
+		odp_bool_t worker;
+
+	} sched_group;
 
 } odp_schedule_config_t;
 

@@ -175,6 +175,14 @@ static inline void packet_seg_copy_md(odp_packet_hdr_t *dst,
 	dst->flow_hash = src->flow_hash;
 	dst->timestamp = src->timestamp;
 
+	if (src->p.flags.lso) {
+		dst->lso_max_payload = src->lso_max_payload;
+		dst->lso_profile_idx = src->lso_profile_idx;
+	}
+
+	if (src->p.flags.payload_off)
+		dst->payload_offset = src->payload_offset;
+
 	/* buffer header side packet metadata */
 	dst->buf_hdr.user_ptr   = src->buf_hdr.user_ptr;
 	dst->buf_hdr.uarea_addr = src->buf_hdr.uarea_addr;
@@ -1605,15 +1613,16 @@ void odp_packet_print(odp_packet_t pkt)
 
 	seg = odp_packet_first_seg(pkt);
 
-	while (seg != ODP_PACKET_SEG_INVALID) {
+	for (int seg_idx = 0; seg != ODP_PACKET_SEG_INVALID; seg_idx++) {
 		odp_packet_hdr_t *seg_hdr = packet_seg_to_hdr(seg);
 		odp_buffer_hdr_t *buf_hdr = &seg_hdr->buf_hdr;
 		char seg_str[max_len];
 		int str_len;
 
 		str_len = snprintf(&seg_str[0], max_len,
-				   "    seg_len    %-4" PRIu32 "  seg_data %p "
-				   "ref_cnt %u\n",
+				   "    [%d] seg_len %-4" PRIu32 "  seg_data %p "
+				   " ref_cnt %u\n",
+				   seg_idx,
 				   odp_packet_seg_data_len(pkt, seg),
 				   odp_packet_seg_data(pkt, seg),
 				   buffer_ref(buf_hdr));
@@ -1752,6 +1761,20 @@ int _odp_packet_copy_md_to_packet(odp_packet_t srcpkt, odp_packet_t dstpkt)
 		       dst_uarea_size <= src_uarea_size ? dst_uarea_size :
 		       src_uarea_size);
 	}
+
+	if (srchdr->p.input_flags.flow_hash)
+		dsthdr->flow_hash = srchdr->flow_hash;
+
+	if (srchdr->p.input_flags.timestamp)
+		dsthdr->timestamp = srchdr->timestamp;
+
+	if (srchdr->p.flags.lso) {
+		dsthdr->lso_max_payload = srchdr->lso_max_payload;
+		dsthdr->lso_profile_idx = srchdr->lso_profile_idx;
+	}
+
+	if (srchdr->p.flags.payload_off)
+		dsthdr->payload_offset = srchdr->payload_offset;
 
 	copy_packet_parser_metadata(srchdr, dsthdr);
 
@@ -2886,4 +2909,38 @@ void odp_packet_ts_request(odp_packet_t pkt, int enable)
 	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
 
 	pkt_hdr->p.flags.ts_set = !!enable;
+}
+
+void odp_packet_lso_request_clr(odp_packet_t pkt)
+{
+	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
+
+	pkt_hdr->p.flags.lso = 0;
+}
+
+int odp_packet_has_lso_request(odp_packet_t pkt)
+{
+	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
+
+	return pkt_hdr->p.flags.lso;
+}
+
+uint32_t odp_packet_payload_offset(odp_packet_t pkt)
+{
+	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
+
+	if (pkt_hdr->p.flags.payload_off)
+		return pkt_hdr->payload_offset;
+
+	return ODP_PACKET_OFFSET_INVALID;
+}
+
+int odp_packet_payload_offset_set(odp_packet_t pkt, uint32_t offset)
+{
+	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
+
+	pkt_hdr->p.flags.payload_off = 1;
+	pkt_hdr->payload_offset      = offset;
+
+	return 0;
 }

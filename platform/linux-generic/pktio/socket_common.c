@@ -72,6 +72,7 @@ int _odp_mac_addr_get_fd(int fd, const char *name, unsigned char mac_dst[])
  * ODP_PACKET_SOCKET_MMSG:
  * ODP_PACKET_SOCKET_MMAP:
  * ODP_PACKET_NETMAP:
+ * ODP_PACKET_TAP:
  */
 uint32_t _odp_mtu_get_fd(int fd, const char *name)
 {
@@ -82,7 +83,7 @@ uint32_t _odp_mtu_get_fd(int fd, const char *name)
 	ret = ioctl(fd, SIOCGIFMTU, &ifr);
 	if (ret < 0) {
 		__odp_errno = errno;
-		ODP_DBG("ioctl(SIOCGIFMTU): %s: \"%s\".\n", strerror(errno),
+		ODP_ERR("ioctl(SIOCGIFMTU): %s: \"%s\".\n", strerror(errno),
 			ifr.ifr_name);
 		return 0;
 	}
@@ -90,7 +91,10 @@ uint32_t _odp_mtu_get_fd(int fd, const char *name)
 }
 
 /*
+ * ODP_PACKET_SOCKET_MMAP:
+ * ODP_PACKET_SOCKET_MMSG:
  * ODP_PACKET_NETMAP:
+ * ODP_PACKET_TAP:
  */
 int _odp_mtu_set_fd(int fd, const char *name, int mtu)
 {
@@ -98,12 +102,12 @@ int _odp_mtu_set_fd(int fd, const char *name, int mtu)
 	int ret;
 
 	snprintf(ifr.ifr_name, IF_NAMESIZE, "%s", name);
-	ifr.ifr_mtu = mtu;
+	ifr.ifr_mtu = mtu - _ODP_ETHHDR_LEN;
 
 	ret = ioctl(fd, SIOCSIFMTU, &ifr);
 	if (ret < 0) {
 		__odp_errno = errno;
-		ODP_DBG("ioctl(SIOCSIFMTU): %s: \"%s\".\n", strerror(errno),
+		ODP_ERR("ioctl(SIOCSIFMTU): %s: \"%s\".\n", strerror(errno),
 			ifr.ifr_name);
 		return -1;
 	}
