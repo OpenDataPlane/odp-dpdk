@@ -153,7 +153,7 @@ int _odp_timer_init_global(const odp_init_t *params)
 		return 0;
 	}
 
-	shm = odp_shm_reserve("timer_global", sizeof(timer_global_t),
+	shm = odp_shm_reserve("_odp_timer_global", sizeof(timer_global_t),
 			      ODP_CACHE_LINE_SIZE, 0);
 
 	if (shm == ODP_SHM_INVALID) {
