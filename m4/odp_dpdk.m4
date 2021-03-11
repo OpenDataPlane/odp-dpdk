@@ -37,8 +37,13 @@ ODP_DPDK_PMDS([$DPDK_PMD_PATH])
 DPDK_LIB="-Wl,--whole-archive,-ldpdk,--no-whole-archive"
 AS_IF([test "x$DPDK_SHARED" = "xyes"], [dnl
     if test x$enable_static_applications != xyes; then
-      # applications don't need to be linked to anything, just rpath
-      DPDK_LIBS_LT="$DPDK_RPATH_LT"
+      if test $ODP_ABI_COMPAT -eq 1; then
+        # applications don't need to be linked to anything, just rpath
+        DPDK_LIBS_LT="$DPDK_RPATH_LT"
+      else
+        # dpdk symbols may be visible to applications
+        DPDK_LIBS_LT="$DPDK_LDFLAGS -ldpdk"
+      fi
     else
       # static linking flags will need -ldpdk
       DPDK_LIBS_LT="$DPDK_LDFLAGS $DPDK_LIB $DPDK_LIBS"
