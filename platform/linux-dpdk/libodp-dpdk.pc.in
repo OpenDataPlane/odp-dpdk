@@ -6,7 +6,8 @@ includedir=@includedir@
 Name: lib@ODP_LIB_NAME@
 Description: The ODP packet processing engine
 Version: @PKGCONFIG_VERSION@
-Requires.private: libconfig@DPDK_PKG@
+Requires: @DPDK_PKG_NON_ABI_COMPAT@
+Requires.private: libconfig@DPDK_PKG_ABI_COMPAT@
 Libs: -L${libdir} -l@ODP_LIB_NAME@ @DPDK_LIBS_NON_ABI_COMPAT@
 Libs.private: @DPDK_LIBS_ABI_COMPAT@ @OPENSSL_STATIC_LIBS@ @PTHREAD_LIBS@ @TIMER_LIBS@ -lpthread @ATOMIC_LIBS@
 Cflags: -I${includedir} @DPDK_CFLAGS@

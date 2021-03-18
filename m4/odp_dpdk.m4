@@ -156,8 +156,6 @@ AC_DEFUN([_ODP_DPDK_LEGACY_SYSTEM], [dnl
 	    [AC_MSG_NOTICE([Using shared DPDK library found at $DPDK_LIB_PATH])],
 	    [AC_MSG_NOTICE([Using static DPDK library found at $DPDK_LIB_PATH])])
     _ODP_DPDK_CHECK([$DPDK_CFLAGS], [$DPDK_LDFLAGS], [$1], [$2])
-    DPDK_PKG=""
-    AC_SUBST([DPDK_PKG])
 ])
 
 # _ODP_DPDK_LEGACY(PATH, ACTION-IF-FOUND, ACTION-IF-NOT-FOUND)
@@ -178,8 +176,6 @@ AC_DEFUN([_ODP_DPDK_LEGACY], [dnl
 	    [AC_MSG_NOTICE([Using shared DPDK library found at $DPDK_LIB_PATH])],
 	    [AC_MSG_NOTICE([Using static DPDK library found at $DPDK_LIB_PATH])])
     _ODP_DPDK_CHECK([$DPDK_CFLAGS], [$DPDK_LDFLAGS], [$2], [$3])
-    DPDK_PKG=""
-    AC_SUBST([DPDK_PKG])
 ])
 
 m4_ifndef([PKG_CHECK_MODULES_STATIC],
@@ -195,8 +191,15 @@ PKG_CONFIG=$_save_PKG_CONFIG[]dnl
 # -----------------------------------------------------------------------
 # Configure DPDK using pkg-config information
 AC_DEFUN([_ODP_DPDK_PKGCONFIG], [dnl
-DPDK_PKG=", libdpdk"
-AC_SUBST([DPDK_PKG])
+
+if test $ODP_ABI_COMPAT -eq 1; then
+    DPDK_PKG_ABI_COMPAT=", libdpdk"
+    AC_SUBST([DPDK_PKG_ABI_COMPAT])
+else
+    # dpdk symbols may be visible to applications
+    DPDK_PKG_NON_ABI_COMPAT="libdpdk"
+    AC_SUBST([DPDK_PKG_NON_ABI_COMPAT])
+fi
 
 # Check if linking against static DPDK lib
 echo "$DPDK_LIBS" | grep -q 'librte_eal.a'
