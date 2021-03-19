@@ -44,9 +44,7 @@
 #if defined(__clang__)
 #undef RTE_TOOLCHAIN_GCC
 #endif
-#include <rte_bus_vdev.h>
 #include <rte_ethdev.h>
-#include <rte_eth_ring.h>
 #include <rte_ip_frag.h>
 #include <rte_udp.h>
 #include <rte_tcp.h>
@@ -74,9 +72,6 @@
 #define DPDK_MTU_MIN (68 + _ODP_ETHHDR_LEN)
 #endif
 #define DPDK_MTU_MAX (9000 + _ODP_ETHHDR_LEN)
-
-/* Loopback interface ring size */
-#define LOOPBACK_RING_SIZE 512
 
 /* Number of packet buffers to prefetch in RX */
 #define NUM_RX_PREFETCH 4
@@ -109,8 +104,6 @@ typedef struct ODP_ALIGNED_CACHE {
 		uint8_t lockless_rx : 1;
 		/** No locking for tx */
 		uint8_t lockless_tx : 1;
-		/** Operates as loopback interface */
-		uint8_t loopback : 1;
 		/** Promiscuous mode defined with system call */
 		uint8_t vdev_sysc_promisc : 1;
 	} flags;
@@ -122,26 +115,10 @@ typedef struct ODP_ALIGNED_CACHE {
 	odp_ticketlock_t tx_lock[PKTIO_MAX_QUEUES] ODP_ALIGNED_CACHE;
 	/** Configuration options */
 	dpdk_opt_t opt;
-	/* RX callback functions */
-#if RTE_VERSION < RTE_VERSION_NUM(18, 05, 0, 0)
-	struct rte_eth_rxtx_callback *rx_callback[PKTIO_MAX_QUEUES];
-#else
-	const struct rte_eth_rxtx_callback *rx_callback[PKTIO_MAX_QUEUES];
-#endif
 } pkt_dpdk_t;
 
 ODP_STATIC_ASSERT(PKTIO_PRIVATE_SIZE >= sizeof(pkt_dpdk_t),
 		  "PKTIO_PRIVATE_SIZE too small");
-
-/* Global DPDK pktio data */
-typedef struct ODP_ALIGNED_CACHE {
-	odp_shm_t shm;			/* SHM handle for global data */
-	struct rte_ring *loopback_ring;	/* Loopback interface data ring */
-	uint16_t loopback_port_id;	/* Loopback interface port id */
-	uint8_t loopback_in_use;	/* Loopback interface in use */
-} dpdk_global_t;
-
-static dpdk_global_t *dpdk_glb;
 
 static inline pkt_dpdk_t *pkt_priv(pktio_entry_t *pktio_entry)
 {
@@ -153,6 +130,7 @@ static inline pkt_dpdk_t *pkt_priv(pktio_entry_t *pktio_entry)
  * will be picked.
  * Array must be NULL terminated */
 const pktio_if_ops_t * const pktio_if_ops[]  = {
+	&_odp_loopback_pktio_ops,
 	&_odp_dpdk_pktio_ops,
 	&_odp_null_pktio_ops,
 	NULL
@@ -477,58 +455,21 @@ static int dpdk_output_queues_config(pktio_entry_t *pktio_entry,
 
 static int dpdk_init_global(void)
 {
-	odp_shm_t shm;
-
-	shm = odp_shm_reserve("_odp_dpdk_gbl", sizeof(dpdk_global_t),
-			      sizeof(dpdk_global_t), 0);
-	if (shm == ODP_SHM_INVALID)
-		return -1;
-
-	dpdk_glb = odp_shm_addr(shm);
-
-	memset(dpdk_glb, 0, sizeof(dpdk_global_t));
-	dpdk_glb->shm = shm;
-	dpdk_glb->loopback_port_id = -1;
-
 	return 0;
 }
 
 static int dpdk_term_global(void)
 {
-	int ret = 0;
-
 	/* Eventdev takes care of closing pktio devices */
 	if (!_odp_eventdev_gbl ||
 	    _odp_eventdev_gbl->rx_adapter.status == RX_ADAPTER_INIT) {
 		uint16_t port_id;
 
-		if (dpdk_glb->loopback_ring) {
-			char name[RTE_ETH_NAME_MAX_LEN];
-
-			port_id = dpdk_glb->loopback_port_id;
-			if (rte_eth_dev_get_name_by_port(port_id, name)) {
-				ODP_ERR("Reading loopback interface name failed\n");
-				ret = -1;
-			} else {
-				if (rte_vdev_uninit(name)) {
-					ODP_ERR("Uninitializing loopback interface failed\n");
-					ret = -1;
-				}
-				rte_ring_free(dpdk_glb->loopback_ring);
-			}
-		}
-
 		RTE_ETH_FOREACH_DEV(port_id) {
 			rte_eth_dev_close(port_id);
 		}
 	}
-
-	if (odp_shm_free(dpdk_glb->shm)) {
-		ODP_ERR("shm free failed");
-		return -1;
-	}
-
-	return ret;
+	return 0;
 }
 
 static int dpdk_init_capability(pktio_entry_t *pktio_entry,
@@ -559,22 +500,15 @@ static int dpdk_init_capability(pktio_entry_t *pktio_entry,
 					  PKTIO_MAX_QUEUES);
 	capa->set_op.op.promisc_mode = 1;
 
-	/* Ring pmd doesn't support setting MAC or enabling promisc mode */
-	if (pkt_dpdk->flags.loopback) {
-		capa->set_op.op.mac_addr = 0;
-		capa->set_op.op.promisc_mode = 0;
-	} else {
-		/* Check if setting default MAC address is supporter */
-		rte_eth_macaddr_get(pkt_dpdk->port_id, &mac_addr);
-		ret = rte_eth_dev_default_mac_addr_set(pkt_dpdk->port_id,
-						       &mac_addr);
-		if (ret == 0) {
-			capa->set_op.op.mac_addr = 1;
-		} else if (ret != -ENOTSUP && ret != -EPERM) {
-			ODP_ERR("Failed to set interface default MAC: %d\n",
-				ret);
-			return -1;
-		}
+	/* Check if setting default MAC address is supported */
+	rte_eth_macaddr_get(pkt_dpdk->port_id, &mac_addr);
+	ret = rte_eth_dev_default_mac_addr_set(pkt_dpdk->port_id, &mac_addr);
+	if (ret == 0) {
+		capa->set_op.op.mac_addr = 1;
+	} else if (ret != -ENOTSUP && ret != -EPERM) {
+		ODP_ERR("Failed to set interface default MAC: %d\n",
+			ret);
+		return -1;
 	}
 
 	/* Check if setting MTU is supported */
@@ -656,43 +590,6 @@ static int dpdk_init_capability(pktio_entry_t *pktio_entry,
 	return 0;
 }
 
-static int dpdk_init_loopback(pkt_dpdk_t * const pkt_dpdk)
-{
-	struct rte_ring *ring;
-	int port_id;
-
-	if (dpdk_glb->loopback_in_use) {
-		ODP_ERR("Loopback interface reserved\n");
-		return -1;
-	}
-
-	if (!dpdk_glb->loopback_ring) {
-		ring = rte_ring_create("_odp_loopback_ring", LOOPBACK_RING_SIZE,
-				       rte_socket_id(), 0);
-		if (ring == NULL) {
-			ODP_ERR("Creating loopback ring failed\n");
-			return -1;
-		}
-
-		port_id = rte_eth_from_ring(ring);
-		if (port_id == -1) {
-			ODP_ERR("Creating loopback interface failed\n");
-			rte_ring_free(ring);
-			return -1;
-		}
-
-		dpdk_glb->loopback_ring = ring;
-		dpdk_glb->loopback_port_id = port_id;
-		pkt_dpdk->port_id = port_id;
-	} else {
-		pkt_dpdk->port_id = dpdk_glb->loopback_port_id;
-	}
-
-	pkt_dpdk->flags.loopback = 1;
-
-	return 0;
-}
-
 /* Some DPDK PMD virtual devices, like PCAP, do not support promisc
  * mode change. Use system call for them. */
 static void promisc_mode_check(pkt_dpdk_t *pkt_dpdk)
@@ -729,16 +626,11 @@ static int setup_pkt_dpdk(odp_pktio_t pktio ODP_UNUSED,
 	pkt_dpdk_t * const pkt_dpdk = pkt_priv(pktio_entry);
 	int i;
 
-	if (!strcmp(netdev, "loop")) {
-		if (dpdk_init_loopback(pkt_dpdk))
-			return -1;
-	} else if (!_dpdk_netdev_is_valid(netdev)) {
-		ODP_DBG("Interface name should only contain numbers!: %s\n",
-			netdev);
+	if (!_dpdk_netdev_is_valid(netdev)) {
+		ODP_DBG("Interface name should only contain numbers!: %s\n", netdev);
 		return -1;
-	} else {
-		pkt_dpdk->port_id = atoi(netdev);
 	}
+	pkt_dpdk->port_id = atoi(netdev);
 
 	if (!rte_eth_dev_is_valid_port(pkt_dpdk->port_id)) {
 		ODP_ERR("Port id=%" PRIu16 " not attached\n", pkt_dpdk->port_id);
@@ -747,7 +639,6 @@ static int setup_pkt_dpdk(odp_pktio_t pktio ODP_UNUSED,
 
 	memset(&dev_info, 0, sizeof(struct rte_eth_dev_info));
 	rte_eth_dev_info_get(pkt_dpdk->port_id, &dev_info);
-
 
 	/* Initialize runtime options */
 	if (init_options(pktio_entry, &dev_info)) {
@@ -793,9 +684,6 @@ static int setup_pkt_dpdk(odp_pktio_t pktio ODP_UNUSED,
 		odp_ticketlock_init(&pkt_dpdk->tx_lock[i]);
 	}
 
-	if (pkt_dpdk->flags.loopback)
-		dpdk_glb->loopback_in_use = 1;
-
 	return 0;
 }
 
@@ -808,9 +696,6 @@ static int close_pkt_dpdk(pktio_entry_t *pktio_entry)
 		rx_adapter_port_stop(pkt_dpdk->port_id);
 	else
 		rte_eth_dev_stop(pkt_dpdk->port_id);
-
-	if (pkt_dpdk->flags.loopback)
-		dpdk_glb->loopback_in_use = 0;
 
 	return 0;
 }
@@ -865,23 +750,6 @@ static int dpdk_setup_eth_rx(const pktio_entry_t *pktio_entry,
 	}
 
 	return 0;
-}
-
-/*
- * Callback function for setting mbuf port IDs. Port ID is required by eventev
- * RX adapter and ring pmd doesn't set it automatically.
- */
-static uint16_t dpdk_rx_cb(uint16_t port_id, uint16_t queue ODP_UNUSED,
-			   struct rte_mbuf *pkts[], uint16_t nb_pkts,
-			   uint16_t max_pkts ODP_UNUSED,
-			   void *user_param ODP_UNUSED)
-{
-	uint16_t i;
-
-	for (i = 0; i < nb_pkts; i++)
-		pkts[i]->port = port_id;
-
-	return nb_pkts;
 }
 
 static void dpdk_ptype_support_set(pktio_entry_t *pktio_entry, uint16_t port_id)
@@ -970,27 +838,6 @@ static int dpdk_start(pktio_entry_t *pktio_entry)
 		}
 	}
 
-	/* Add callback for loopback interface */
-	if (pkt_dpdk->flags.loopback) {
-		unsigned int i;
-
-		for (i = 0; i < pktio_entry->s.num_in_queue; i++) {
-#if RTE_VERSION < RTE_VERSION_NUM(18, 05, 0, 0)
-			struct rte_eth_rxtx_callback *callback;
-#else
-			const struct rte_eth_rxtx_callback *callback;
-#endif
-
-			callback = rte_eth_add_rx_callback(port_id, i,
-							   dpdk_rx_cb, NULL);
-			if (callback == NULL) {
-				ODP_ERR("Failed setting RX callback\n");
-				return -1;
-			}
-			pkt_dpdk->rx_callback[i] = callback;
-		}
-	}
-
 	/* Start device */
 	ret = rte_eth_dev_start(port_id);
 	if (ret < 0) {
@@ -1016,16 +863,6 @@ static int stop_pkt_dpdk(pktio_entry_t *pktio_entry)
 	for (i = 0; i < pktio_entry->s.num_out_queue; i++)
 		rte_eth_dev_tx_queue_stop(port_id, i);
 
-	if (!pkt_dpdk->flags.loopback)
-		return 0;
-
-	for (i = 0; i < pktio_entry->s.num_in_queue; i++) {
-		if (rte_eth_remove_rx_callback(port_id, i,
-					       pkt_dpdk->rx_callback[i])) {
-			ODP_ERR("Failed removing RX callback\n");
-			return -1;
-		}
-	}
 	return 0;
 }
 
@@ -1065,22 +902,13 @@ int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int num)
 
 		packet_init(pkt_hdr, input);
 
-		if (!pktio_cls_enabled(pktio_entry) &&
-		    parse_layer != ODP_PROTO_LAYER_NONE) {
+		if (!pktio_cls_enabled(pktio_entry) && parse_layer != ODP_PROTO_LAYER_NONE) {
 			uint32_t ptypes = pkt_dpdk->supported_ptypes;
 
-			/* DPDK ring pmd doesn't support packet parsing */
-			if (pkt_dpdk->flags.loopback) {
-				_odp_packet_parse_layer(pkt_hdr, parse_layer,
-							pktio_entry->s.in_chksums);
-			} else {
-				if (_odp_dpdk_packet_parse_layer(pkt_hdr, mbuf,
-								 parse_layer,
-								 ptypes,
-								 pktin_cfg)) {
-					odp_packet_free(pkt_table[i]);
-					continue;
-				}
+			if (_odp_dpdk_packet_parse_layer(pkt_hdr, mbuf, parse_layer,
+							 ptypes, pktin_cfg)) {
+				odp_packet_free(pkt_table[i]);
+				continue;
 			}
 		}
 		packet_set_ts(pkt_hdr, ts);
@@ -1106,21 +934,15 @@ int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int num)
 			packet_parse_reset(&parsed_hdr, 1);
 			packet_set_len(&parsed_hdr, pkt_len);
 
-			if (!pkt_dpdk->flags.loopback) {
-				int layer = ODP_PROTO_LAYER_ALL;
-
-				if (_odp_dpdk_packet_parse_common(&parsed_hdr.p,
-								  data, pkt_len,
-								  pkt_len, mbuf,
-								  layer, ptypes,
-								  pktin_cfg)) {
-					odp_packet_free(pkt);
-					continue;
-				}
+			if (_odp_dpdk_packet_parse_common(&parsed_hdr.p, data, pkt_len, pkt_len,
+							  mbuf, ODP_PROTO_LAYER_ALL, ptypes,
+							  pktin_cfg)) {
+				odp_packet_free(pkt);
+				continue;
 			}
+
 			if (_odp_cls_classify_packet(pktio_entry, data, pkt_len,
-						     pkt_len, &new_pool, &parsed_hdr,
-						     pkt_dpdk->flags.loopback)) {
+						     pkt_len, &new_pool, &parsed_hdr, 0)) {
 				failed++;
 				odp_packet_free(pkt);
 				continue;
@@ -1499,10 +1321,6 @@ static int promisc_mode_get_pkt_dpdk(pktio_entry_t *pktio_entry)
 {
 	pkt_dpdk_t * const pkt_dpdk = pkt_priv(pktio_entry);
 	uint16_t port_id = pkt_dpdk->port_id;
-
-	/* Loopback interface always in promisc mode */
-	if (pkt_dpdk->flags.loopback)
-		return 1;
 
 	if (pkt_dpdk->flags.vdev_sysc_promisc)
 		return _dpdk_vdev_promisc_mode(port_id);
