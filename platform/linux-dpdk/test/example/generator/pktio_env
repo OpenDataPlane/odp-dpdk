@@ -10,9 +10,9 @@
 # Generator uses a loop interface to validate udp mode.
 #
 # Network set-up
-# IF0 ---> loop
+# IF0 ---> null:0
 
-IF0=loop
+IF0=null:0
 
 if [ "$0" = "$BASH_SOURCE" ]; then
 	echo "Error: Platform specific env file has to be sourced."

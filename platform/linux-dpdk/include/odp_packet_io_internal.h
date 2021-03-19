@@ -47,7 +47,7 @@ ODP_STATIC_ASSERT(PKTIO_LSO_PROFILES < UINT8_MAX, "PKTIO_LSO_PROFILES_ERROR");
 /* Forward declaration */
 struct pktio_if_ops;
 
-#define PKTIO_PRIVATE_SIZE 2048
+#define PKTIO_PRIVATE_SIZE 1536
 
 struct pktio_entry {
 	const struct pktio_if_ops *ops; /**< Implementation specific methods */
@@ -250,6 +250,7 @@ static inline void _odp_pktio_tx_ts_set(pktio_entry_t *entry)
 	odp_atomic_store_u64(&entry->s.tx_ts, ts_val.u64);
 }
 
+extern const pktio_if_ops_t _odp_loopback_pktio_ops;
 extern const pktio_if_ops_t _odp_null_pktio_ops;
 extern const pktio_if_ops_t _odp_dpdk_pktio_ops;
 extern const pktio_if_ops_t * const pktio_if_ops[];
