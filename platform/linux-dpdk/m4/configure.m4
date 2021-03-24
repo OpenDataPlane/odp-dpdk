@@ -37,6 +37,8 @@ if test $ODP_ABI_COMPAT -eq 1; then
 else
 	DPDK_LIBS_NON_ABI_COMPAT=$DPDK_LIBS
 	AC_SUBST([DPDK_LIBS_NON_ABI_COMPAT])
+	# DPDK uses strnlen() internally
+	DPDK_CFLAGS="${DPDK_CFLAGS} -D_GNU_SOURCE"
 fi
 
 case "${host}" in
