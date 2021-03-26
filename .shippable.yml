@@ -14,8 +14,8 @@ integrations:
       on_pull_request: never
 
 env:
-    - CONF="--disable-test-perf"
-    - CONF="--disable-abi-compat --disable-test-perf"
+    - CONF="--enable-dpdk-shared --disable-test-perf"
+    - CONF="--enable-dpdk-shared --disable-abi-compat --disable-test-perf"
 
 build:
   ci:
