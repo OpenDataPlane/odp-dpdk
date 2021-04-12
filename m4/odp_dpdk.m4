@@ -217,7 +217,13 @@ if test "x$use_pkg_config" = "xyes"; then
         DPDK_LIB_PATH=$(echo "$DPDK_LIBS" | grep -o -- '-L\S*' | sed 's/^-L//')
         if test -n "$DPDK_LIB_PATH"; then
             DPDK_LIBS_LIBODP+=" -Wl,-rpath,$DPDK_LIB_PATH"
-            DPDK_LIBS_LT+=" -R$DPDK_LIB_PATH"
+            # Debian / Ubuntu has relatively recently made new-dtags the
+            # default, while others (e.g. Fedora) have not changed it. RPATH
+            # is extended recursively when resolving transitive dependencies,
+            # while RUNPATH (new-dtags) is not. We use RPATH to point to rte
+            # libraries so that they can be found when PMDs are loaded in
+            # rte_eal_init(). So we need to explicitly disable new-dtags.
+            DPDK_LIBS_LT+=" -Wl,--disable-new-dtags -R$DPDK_LIB_PATH"
         fi
     else
         # Build a list of libraries, which should not be rearranged by libtool.
