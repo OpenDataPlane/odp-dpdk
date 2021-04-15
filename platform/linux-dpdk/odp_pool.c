@@ -77,6 +77,8 @@ static inline odp_pool_t pool_index_to_handle(uint32_t pool_idx)
 
 struct mem_cb_arg_t {
 	uint8_t *addr;
+	uintptr_t min_data_addr;
+	uintptr_t max_data_addr;
 	odp_bool_t match;
 };
 
@@ -863,10 +865,24 @@ void odp_pool_print(odp_pool_t pool_hdl)
 	rte_mempool_dump(stdout, pool->rte_mempool);
 }
 
+static void mempool_addr_range(struct rte_mempool *mp ODP_UNUSED, void *opaque,
+			       struct rte_mempool_memhdr *memhdr,
+			       unsigned int mem_idx ODP_UNUSED)
+{
+	struct mem_cb_arg_t *args = (struct mem_cb_arg_t *)opaque;
+	uintptr_t min_addr = (uintptr_t)memhdr->addr;
+	uintptr_t max_addr = min_addr + memhdr->len - 1;
+
+	if (!args->min_data_addr || min_addr < args->min_data_addr)
+		args->min_data_addr = min_addr;
+	if (!args->max_data_addr || max_addr > args->max_data_addr)
+		args->max_data_addr = max_addr;
+}
+
 int odp_pool_info(odp_pool_t pool_hdl, odp_pool_info_t *info)
 {
 	pool_t *pool = pool_entry_from_hdl(pool_hdl);
-	struct rte_mempool_memhdr *hdr;
+	struct mem_cb_arg_t args;
 
 	if (pool == NULL || info == NULL)
 		return -1;
@@ -877,9 +893,10 @@ int odp_pool_info(odp_pool_t pool_hdl, odp_pool_info_t *info)
 	if (pool->params.type == ODP_POOL_PACKET)
 		info->pkt.max_num = pool->rte_mempool->size;
 
-	hdr = STAILQ_FIRST(&pool->rte_mempool->mem_list);
-	info->min_data_addr = (uintptr_t)hdr->addr;
-	info->max_data_addr = (uintptr_t)hdr->addr + hdr->len - 1;
+	memset(&args, 0, sizeof(struct mem_cb_arg_t));
+	rte_mempool_mem_iter(pool->rte_mempool, mempool_addr_range, &args);
+	info->min_data_addr = args.min_data_addr;
+	info->max_data_addr = args.max_data_addr;
 
 	return 0;
 }
