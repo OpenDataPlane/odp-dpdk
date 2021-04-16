@@ -31,7 +31,9 @@ fi
 
 validate_result()
 {
-	if [ `stat -c %s pcapout.pcap` -ne `stat -c %s  ${PCAP_IN}` ]; then
+	# DPDK PCAP vdev may add some extra data to the end of the output file
+	# in process mode if the interface is started after fork.
+	if [ `stat -c %s pcapout.pcap` -lt `stat -c %s  ${PCAP_IN}` ]; then
 		echo "File sizes disagree"
 		exit 1
 	fi
