@@ -1,5 +1,5 @@
 /* Copyright (c) 2013-2018, Linaro Limited
- * Copyright (c) 2019, Nokia
+ * Copyright (c) 2019-2021, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -18,6 +18,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <ctype.h>
+#include <inttypes.h>
 
 #include <rte_config.h>
 #include <rte_eal.h>
@@ -80,6 +81,20 @@ static int _odp_init_dpdk(const char *cmdline)
 {
 	int dpdk_argc;
 	int i, cmdlen;
+	const char *str;
+	uint32_t mem_prealloc;
+	int val = 0;
+
+	ODP_PRINT("DPDK config:\n");
+
+	str = "dpdk.process_mode_memory_mb";
+	if (!_odp_libconfig_lookup_int(str, &val)) {
+		ODP_ERR("Config option '%s' not found.\n", str);
+		return -1;
+	}
+	mem_prealloc = val;
+
+	ODP_PRINT("  %s: %" PRIu32 "\n\n", str, mem_prealloc);
 
 	if (cmdline == NULL) {
 		cmdline = getenv("ODP_PLATFORM_PARAMS");
@@ -87,12 +102,17 @@ static int _odp_init_dpdk(const char *cmdline)
 			cmdline = "";
 	}
 
-	cmdlen = snprintf(NULL, 0, "odpdpdk %s ", cmdline);
+	cmdlen = snprintf(NULL, 0, "odpdpdk -m %" PRIu32 " %s ", mem_prealloc, cmdline);
 
 	char full_cmdline[cmdlen];
 
-	/* first argument is facility log, simply bind it to odpdpdk for now.*/
-	cmdlen = snprintf(full_cmdline, cmdlen, "odpdpdk %s", cmdline);
+	/* First argument is facility log, simply bind it to odpdpdk for now. In
+	 * process mode DPDK memory has to be preallocated. */
+	if (odp_global_ro.init_param.mem_model == ODP_MEM_MODEL_PROCESS)
+		cmdlen = snprintf(full_cmdline, cmdlen, "odpdpdk -m %" PRIu32 " %s",
+				  mem_prealloc, cmdline);
+	else
+		cmdlen = snprintf(full_cmdline, cmdlen, "odpdpdk %s", cmdline);
 
 	for (i = 0, dpdk_argc = 1; i < cmdlen; ++i) {
 		if (isspace(full_cmdline[i]))
