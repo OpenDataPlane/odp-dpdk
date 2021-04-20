@@ -249,6 +249,16 @@ jobs:
         if: ${{ failure() }}
         run: find . -name "*.trs" | xargs grep -l '^.test-result. FAIL' | while read trs ; do echo FAILURE detected at $trs; cat ${trs%%.trs}.log ; done
 
+  Run_process_mode:
+    runs-on: ubuntu-18.04
+    steps:
+      - uses: actions/checkout@v2
+      - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}"
+               -e CONF="${CONF}" -e ODPH_PROC_MODE=1 $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH} /odp/scripts/ci/check.sh
+      - name: Failure log
+        if: ${{ failure() }}
+        run: find . -name "*.trs" | xargs grep -l '^.test-result. FAIL' | while read trs ; do echo FAILURE detected at $trs; cat ${trs%%.trs}.log ; done
+
   Run_dpdk-18_11:
     runs-on: ubuntu-18.04
     steps:
