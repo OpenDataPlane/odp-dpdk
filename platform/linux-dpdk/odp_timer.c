@@ -1,5 +1,5 @@
 /* Copyright (c) 2018, Linaro Limited
- * Copyright (c) 2019-2020, Nokia
+ * Copyright (c) 2019-2021, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -69,7 +69,7 @@ typedef struct {
 	odp_ticketlock_t     lock;
 	int                  state;
 	uint64_t             tick;
-	void                *user_ptr;
+	const void          *user_ptr;
 	odp_queue_t          queue;
 	odp_event_t          tmo_event;
 	struct timer_pool_s *timer_pool;
@@ -507,7 +507,7 @@ uint64_t odp_timer_pool_to_u64(odp_timer_pool_t tp)
 
 odp_timer_t odp_timer_alloc(odp_timer_pool_t tp,
 			    odp_queue_t queue,
-			    void *user_ptr)
+			    const void *user_ptr)
 {
 	uint32_t timer_idx;
 	timer_entry_t *timer;
@@ -811,7 +811,7 @@ void *odp_timeout_user_ptr(odp_timeout_t tmo)
 {
 	odp_timeout_hdr_t *timeout_hdr = timeout_to_hdr(tmo);
 
-	return timeout_hdr->user_ptr;
+	return (void *)(uintptr_t)timeout_hdr->user_ptr;
 }
 
 odp_timeout_t odp_timeout_alloc(odp_pool_t pool)
