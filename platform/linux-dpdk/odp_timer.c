@@ -829,3 +829,76 @@ void odp_timeout_free(odp_timeout_t tmo)
 
 	odp_buffer_free(odp_buffer_from_event(ev));
 }
+
+void odp_timer_pool_print(odp_timer_pool_t timer_pool)
+{
+	timer_pool_t *tp;
+
+	if (timer_pool == ODP_TIMER_POOL_INVALID) {
+		ODP_ERR("Bad timer pool handle\n");
+		return;
+	}
+
+	tp = timer_pool_from_hdl(timer_pool);
+
+	ODP_PRINT("\nTimer pool info\n");
+	ODP_PRINT("---------------\n");
+	ODP_PRINT("  timer pool     %p\n", tp);
+	ODP_PRINT("  name           %s\n", tp->name);
+	ODP_PRINT("  num timers     %u\n", tp->cur_timers);
+	ODP_PRINT("  hwm timers     %u\n", tp->hwm_timers);
+	ODP_PRINT("  num tp         %i\n", timer_global->num_timer_pools);
+	ODP_PRINT("\n");
+}
+
+void odp_timer_print(odp_timer_t timer_hdl)
+{
+	timer_entry_t *timer = timer_from_hdl(timer_hdl);
+
+	if (timer_hdl == ODP_TIMER_INVALID) {
+		ODP_ERR("Bad timer handle\n");
+		return;
+	}
+
+	ODP_PRINT("\nTimer info\n");
+	ODP_PRINT("----------\n");
+	ODP_PRINT("  timer pool     %p\n", timer->timer_pool);
+	ODP_PRINT("  timer index    %" PRIu32 "\n", timer->timer_idx);
+	ODP_PRINT("  dest queue     0x%" PRIx64 "\n", odp_queue_to_u64(timer->queue));
+	ODP_PRINT("  user ptr       %p\n", timer->user_ptr);
+	ODP_PRINT("  state          %s\n",
+		  (timer->state == NOT_TICKING) ? "not ticking" :
+		  (timer->state == EXPIRED ? "expired" : "ticking"));
+	ODP_PRINT("\n");
+}
+
+void odp_timeout_print(odp_timeout_t tmo)
+{
+	const odp_timeout_hdr_t *timeout_hdr = timeout_to_hdr(tmo);
+	odp_timer_t timer_hdl;
+	timer_pool_t *tp = NULL;
+	uint32_t idx = 0;
+
+	if (tmo == ODP_TIMEOUT_INVALID) {
+		ODP_ERR("Bad timeout handle\n");
+		return;
+	}
+
+	timer_hdl = timeout_hdr->timer;
+
+	if (timer_hdl != ODP_TIMER_INVALID) {
+		timer_entry_t *timer = timer_from_hdl(timer_hdl);
+
+		tp  = timer->timer_pool;
+		idx = timer->timer_idx;
+	}
+
+	ODP_PRINT("\nTimeout info\n");
+	ODP_PRINT("------------\n");
+	ODP_PRINT("  tmo handle     0x%" PRIx64 "\n", odp_timeout_to_u64(tmo));
+	ODP_PRINT("  timer pool     %p\n", tp);
+	ODP_PRINT("  timer index    %u\n", idx);
+	ODP_PRINT("  expiration     %" PRIu64 "\n", timeout_hdr->expiration);
+	ODP_PRINT("  user ptr       %p\n", timeout_hdr->user_ptr);
+	ODP_PRINT("\n");
+}
