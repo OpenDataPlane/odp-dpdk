@@ -78,12 +78,12 @@ typedef struct crypto_global_s {
 	uint8_t enabled_crypto_dev_ids[RTE_CRYPTO_MAX_DEVS];
 	uint16_t enabled_crypto_dev_qpairs[RTE_CRYPTO_MAX_DEVS];
 	odp_bool_t enabled_crypto_dev_qpairs_shared[RTE_CRYPTO_MAX_DEVS];
-	crypto_session_entry_t *free;
-	crypto_session_entry_t sessions[MAX_SESSIONS];
 	int is_crypto_dev_initialized;
 	struct rte_mempool *crypto_op_pool;
 	struct rte_mempool *session_mempool[RTE_MAX_NUMA_NODES];
 	odp_shm_t shm;
+	crypto_session_entry_t *free;
+	crypto_session_entry_t sessions[];
 } crypto_global_t;
 
 static crypto_global_t *global;
