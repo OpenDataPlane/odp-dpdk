@@ -63,6 +63,9 @@ typedef enum odp_ipsec_op_mode_t {
 	  * Packet input/output is connected directly to IPSEC inbound/outbound
 	  * processing. Application uses asynchronous or inline IPSEC
 	  * operations.
+	  *
+	  * Inline processed inbound packets are delivered to the application
+	  * in the same way as packets processed by odp_ipsec_in_enq().
 	  */
 	ODP_IPSEC_OP_MODE_INLINE,
 
@@ -70,6 +73,46 @@ typedef enum odp_ipsec_op_mode_t {
 	ODP_IPSEC_OP_MODE_DISABLED
 
 } odp_ipsec_op_mode_t;
+
+/**
+ * IPSEC TEST SA operation
+ */
+typedef enum odp_ipsec_test_sa_operation_t {
+	/** Update next sequence number
+	 *
+	 * The seq_num parameter is an outbound SA specific parameter.
+	 * Invoking the odp_ipsec_test_sa_update() API to update this
+	 * field on an inbound SA will cause the API to return failure.
+	 */
+	ODP_IPSEC_TEST_SA_UPDATE_SEQ_NUM = 0,
+
+	/** Update highest authenticated sequence number
+	 *
+	 * The antireplay_window_top parameter is inbound SA specific.
+	 * Invoking the odp_ipsec_test_sa_update() API to update this
+	 * field on an outbound SA will cause the API to return failure.
+	 */
+	ODP_IPSEC_TEST_SA_UPDATE_ANTIREPLAY_WINDOW_TOP
+
+} odp_ipsec_test_sa_operation_t;
+
+/**
+ * IPSEC TEST SA parameter
+ */
+typedef union odp_ipsec_test_sa_param_t {
+	/** Next sequence number
+	 *
+	 * @see ODP_IPSEC_TEST_SA_UPDATE_SEQ_NUM
+	 */
+	uint64_t seq_num;
+
+	/** Highest authenticated sequence number
+	 *
+	 * @see ODP_IPSEC_TEST_SA_UPDATE_ANTIREPLAY_WINDOW_TOP
+	 */
+	uint64_t antireplay_window_top;
+
+} odp_ipsec_test_sa_param_t;
 
 /**
  * Configuration options for IPSEC inbound processing
@@ -193,6 +236,28 @@ typedef struct odp_ipsec_outbound_config_t {
 } odp_ipsec_outbound_config_t;
 
 /**
+ * IPSEC TEST capability
+ */
+typedef struct odp_ipsec_test_capability_t {
+	/** Parameters supported for sa_update */
+	struct {
+		/** Next sequence number value
+		 *
+		 * @see ODP_IPSEC_TEST_SA_UPDATE_SEQ_NUM
+		 */
+		odp_bool_t seq_num;
+
+		/** Highest authenticated sequence number
+		 *
+		 * @see ODP_IPSEC_TEST_SA_UPDATE_ANTIREPLAY_WINDOW_TOP
+		 */
+		odp_bool_t antireplay_window_top;
+
+	} sa_operations;
+
+} odp_ipsec_test_capability_t;
+
+/**
  * IPSEC capability
  */
 typedef struct odp_ipsec_capability_t {
@@ -273,6 +338,11 @@ typedef struct odp_ipsec_capability_t {
 	 */
 	odp_support_t inline_ipsec_tm;
 
+	/** IPSEC TEST capabilities
+	 *
+	 * @see odp_ipsec_test_sa_update()
+	 */
+	odp_ipsec_test_capability_t test;
 } odp_ipsec_capability_t;
 
 /**
@@ -452,13 +522,13 @@ typedef struct odp_ipsec_ipv4_param_t {
 	/** IPv4 destination address (NETWORK ENDIAN) */
 	void *dst_addr;
 
-	/** IPv4 Differentiated Services Code Point */
+	/** IPv4 Differentiated Services Code Point. The default value is 0. */
 	uint8_t dscp;
 
-	/** IPv4 Don't Fragment bit */
+	/** IPv4 Don't Fragment bit. The default value is 0. */
 	uint8_t df;
 
-	/** IPv4 Time To Live */
+	/** IPv4 Time To Live. The default value is 255. */
 	uint8_t ttl;
 
 } odp_ipsec_ipv4_param_t;
@@ -471,13 +541,13 @@ typedef struct odp_ipsec_ipv6_param_t {
 	/** IPv6 destination address (NETWORK ENDIAN) */
 	void *dst_addr;
 
-	/** IPv6 flow label */
+	/** IPv6 flow label. The default value is 0. */
 	uint32_t flabel;
 
-	/** IPv6 Differentiated Services Code Point */
+	/** IPv6 Differentiated Services Code Point. The default value is 0. */
 	uint8_t dscp;
 
-	/** IPv6 hop limit */
+	/** IPv6 hop limit. The default value is 255. */
 	uint8_t hlimit;
 
 } odp_ipsec_ipv6_param_t;
@@ -491,11 +561,11 @@ typedef struct odp_ipsec_ipv6_param_t {
  * pointers and copied byte-by-byte from memory to the packet.
  */
 typedef struct odp_ipsec_tunnel_param_t {
-	/** Tunnel type: IPv4 or IPv6 */
+	/** Tunnel type: IPv4 or IPv6. The default is IPv4. */
 	odp_ipsec_tunnel_type_t type;
 
-	/** Variant mappings for tunnel parameters */
-	union {
+	/** Tunnel type specific parameters */
+	struct {
 		/** IPv4 header parameters */
 		odp_ipsec_ipv4_param_t ipv4;
 
@@ -511,7 +581,7 @@ typedef struct odp_ipsec_sa_opt_t {
 	/** Extended Sequence Numbers (ESN)
 	  *
 	  * * 1: Use extended (64 bit) sequence numbers
-	  * * 0: Use normal sequence numbers
+	  * * 0: Use normal sequence numbers (the default value)
 	  */
 	uint32_t esn : 1;
 
@@ -519,7 +589,7 @@ typedef struct odp_ipsec_sa_opt_t {
 	  *
 	  * * 1: Do UDP encapsulation/decapsulation so that IPSEC packets can
 	  *      traverse through NAT boxes.
-	  * * 0: No UDP encapsulation
+	  * * 0: No UDP encapsulation (the default value)
 	  */
 	uint32_t udp_encap : 1;
 
@@ -529,7 +599,7 @@ typedef struct odp_ipsec_sa_opt_t {
 	  *      the outer IP header in encapsulation, and vice versa in
 	  *      decapsulation.
 	  * * 0: Use values from odp_ipsec_tunnel_param_t in encapsulation and
-	  *      do not change DSCP field in decapsulation.
+	  *      do not change DSCP field in decapsulation (the default value).
 	  */
 	uint32_t copy_dscp : 1;
 
@@ -537,7 +607,7 @@ typedef struct odp_ipsec_sa_opt_t {
 	  *
 	  * * 1: Copy IPv6 flow label from inner IPv6 header to the
 	  *      outer IPv6 header.
-	  * * 0: Use value from odp_ipsec_tunnel_param_t
+	  * * 0: Use value from odp_ipsec_tunnel_param_t (the default value)
 	  */
 	uint32_t copy_flabel : 1;
 
@@ -545,7 +615,7 @@ typedef struct odp_ipsec_sa_opt_t {
 	  *
 	  * * 1: Copy the DF bit from the inner IPv4 header to the outer
 	  *      IPv4 header.
-	  * * 0: Use value from odp_ipsec_tunnel_param_t
+	  * * 0: Use value from odp_ipsec_tunnel_param_t (the default value)
 	  */
 	uint32_t copy_df : 1;
 
@@ -554,7 +624,7 @@ typedef struct odp_ipsec_sa_opt_t {
 	  * * 1: In tunnel mode, decrement inner packet IPv4 TTL or
 	  *      IPv6 Hop Limit after tunnel decapsulation, or before tunnel
 	  *      encapsulation.
-	  * * 0: Inner packet is not modified.
+	  * * 0: Inner packet is not modified (the default value)
 	  */
 	uint32_t dec_ttl : 1;
 
@@ -569,6 +639,8 @@ typedef struct odp_ipsec_sa_opt_t {
  * lifetime expiration is reported: only once, first N or all packets following
  * the limit crossing. Any number of limits may be used simultaneously.
  * Use zero when there is no limit.
+ *
+ * The default value is zero (i.e. no limit) for all the limits.
  */
 typedef struct odp_ipsec_lifetime_t {
 	/** Soft expiry limits for the session */
@@ -669,7 +741,7 @@ typedef struct odp_ipsec_sa_param_t {
 	/** IPSEC SA direction: inbound or outbound */
 	odp_ipsec_dir_t dir;
 
-	/** IPSEC protocol: ESP or AH */
+	/** IPSEC protocol: ESP or AH. The default value is ODP_IPSEC_ESP. */
 	odp_ipsec_protocol_t proto;
 
 	/** IPSEC protocol mode: transport or tunnel */
@@ -712,10 +784,12 @@ typedef struct odp_ipsec_sa_param_t {
 	uint32_t context_len;
 
 	/** IPSEC SA direction dependent parameters */
-	union {
+	struct {
 		/** Inbound specific parameters */
 		struct {
-			/** SA lookup mode */
+			/** SA lookup mode
+			 *  The default value is ODP_IPSEC_LOOKUP_DISABLED.
+			 */
 			odp_ipsec_lookup_mode_t lookup_mode;
 
 			/** Additional SA lookup parameters. Values are
@@ -732,7 +806,7 @@ typedef struct odp_ipsec_sa_param_t {
 			} lookup_param;
 
 			/** Minimum anti-replay window size. Use 0 to disable
-			 *  anti-replay service.
+			 *  anti-replay service. The default value is 0.
 			 */
 			uint32_t antireplay_ws;
 
@@ -765,7 +839,9 @@ typedef struct odp_ipsec_sa_param_t {
 			/** Parameters for tunnel mode */
 			odp_ipsec_tunnel_param_t tunnel;
 
-			/** Fragmentation mode */
+			/** Fragmentation mode
+			 *  The default value is ODP_IPSEC_FRAG_DISABLED.
+			 */
 			odp_ipsec_frag_mode_t frag_mode;
 
 			/** MTU for outbound IP fragmentation offload
@@ -814,7 +890,14 @@ typedef struct odp_ipsec_stats_t {
  * IPSEC SA information
  */
 typedef struct odp_ipsec_sa_info_t {
-	/** Copy of IPSEC Security Association (SA) parameters */
+	/** IPsec SA parameters
+	 *
+	 * This is not necessarily an exact copy of the actual parameter
+	 * structure used in SA creation. The fields that were relevant
+	 * for the SA in the creation phase will have the same values,
+	 * but other fields, such as tunnel parameters for a transport
+	 * mode SA, will have undefined values.
+	 */
 	odp_ipsec_sa_param_t param;
 
 	/** IPSEC SA direction dependent parameters */
@@ -1575,6 +1658,12 @@ int odp_ipsec_out(const odp_packet_t pkt_in[], int num_in,
  * may be processed simultaneously in both modes (initiated by this function
  * and inline operation).
  *
+ * Post-processing may be required after the reception of an IPsec packet
+ * event to complete IPsec processing for the packet. The post-processing
+ * happens in the odp_ipsec_result() function that must be called at least
+ * once before packet data or metadata (other than packet type and subtype)
+ * may be accessed.
+ *
  * @param          pkt      Packets to be processed
  * @param          num      Number of packets to be processed
  * @param          param    Inbound operation parameters
@@ -1610,6 +1699,12 @@ int odp_ipsec_in_enq(const odp_packet_t pkt[], int num,
  *
  * The function may be used also in inline processing mode, e.g. for IPSEC
  * packets for which inline processing is not possible.
+ *
+ * Post-processing may be required after the reception of an IPsec packet
+ * event to complete IPsec processing for the packet. The post-processing
+ * happens in the odp_ipsec_result() function that must be called at least
+ * once before packet data or metadata (other than packet type and subtype)
+ * may be accessed.
  *
  * @param          pkt      Packets to be processed
  * @param          num      Number of packets to be processed
@@ -1714,6 +1809,36 @@ int odp_ipsec_result(odp_ipsec_packet_result_t *result, odp_packet_t packet);
  * @see odp_ipsec_sa_disable()
  */
 int odp_ipsec_status(odp_ipsec_status_t *status, odp_event_t event);
+
+/**
+ * IPSEC test API for modifying internal state of an SA.
+ *
+ * This function is not meant to be used by normal applications but by special
+ * test applications that test or debug the operation of the underlying ODP
+ * implementation. Calling this function may degrade the performance of the
+ * calling thread, other threads or the IPSEC implementation in general.
+ *
+ * Calling this function for an SA at the same time when the SA is used for
+ * processing traffic or when the SA is being modified through other parts
+ * of IPSEC API may result in undefined behaviour.
+ *
+ * SA state update through this function may not be supported by all ODP
+ * implementations, ODP instances or SA instances or at every moment. This
+ * function may return failure for unspecified reasons even when the capability
+ * call indicated support for updating a particular parameter and previous
+ * similar calls succeeded.
+ *
+ * @param          sa            IPSEC SA to be updated
+ * @param          op            Specifies operation to be performed
+ * @param          param         Pointer to IPSEC TEST SA param structure to be
+ *                               used for the operation
+ *
+ * @return 0      On success
+ * @retval <0     On failure
+ */
+int odp_ipsec_test_sa_update(odp_ipsec_sa_t sa,
+			     odp_ipsec_test_sa_operation_t op,
+			     const odp_ipsec_test_sa_param_t *param);
 
 /**
  * Update MTU for outbound IP fragmentation

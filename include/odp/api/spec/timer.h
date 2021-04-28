@@ -383,8 +383,7 @@ int odp_timer_pool_info(odp_timer_pool_t timer_pool,
  * @return Timer handle on success
  * @retval ODP_TIMER_INVALID on failure and errno set.
  */
-odp_timer_t odp_timer_alloc(odp_timer_pool_t timer_pool, odp_queue_t queue,
-			    void *user_ptr);
+odp_timer_t odp_timer_alloc(odp_timer_pool_t timer_pool, odp_queue_t queue, const void *user_ptr);
 
 /**
  * Free a timer
@@ -564,6 +563,36 @@ odp_timeout_t odp_timeout_alloc(odp_pool_t pool);
  * @param tmo Timeout handle
  */
 void odp_timeout_free(odp_timeout_t tmo);
+
+/**
+ * Print timer pool debug information
+ *
+ * Prints implementation specific debug information about
+ * the timer pool to the ODP log.
+ *
+ * @param timer_pool  Timer pool handle
+ */
+void odp_timer_pool_print(odp_timer_pool_t timer_pool);
+
+/**
+ * Print timer debug information
+ *
+ * Prints implementation specific debug information about
+ * the timer to the ODP log.
+ *
+ * @param timer       Timer handle
+ */
+void odp_timer_print(odp_timer_t timer);
+
+/**
+ * Print timeout debug information
+ *
+ * Prints implementation specific debug information about
+ * the timeout to the ODP log.
+ *
+ * @param tmo         Timeout handle
+ */
+void odp_timeout_print(odp_timeout_t tmo);
 
 /**
  * Get printable value for an odp_timer_pool_t

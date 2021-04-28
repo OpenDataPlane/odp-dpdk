@@ -136,6 +136,7 @@ int odp_ipsec_capability(odp_ipsec_capability_t *capa)
 	capa->max_queues = queue_capa.max_queues;
 	capa->inline_ipsec_tm = ODP_SUPPORT_NO;
 
+	capa->test.sa_operations.seq_num = 1;
 	return 0;
 }
 
@@ -2040,6 +2041,26 @@ err:
 	return in_pkt;
 }
 
+int odp_ipsec_test_sa_update(odp_ipsec_sa_t sa,
+			     odp_ipsec_test_sa_operation_t sa_op,
+			     const odp_ipsec_test_sa_param_t *sa_param)
+{
+	ipsec_sa_t *ipsec_sa;
+
+	ipsec_sa = _odp_ipsec_sa_entry_from_hdl(sa);
+	ODP_ASSERT(NULL != ipsec_sa);
+
+	switch (sa_op) {
+	case ODP_IPSEC_TEST_SA_UPDATE_SEQ_NUM:
+		odp_atomic_store_u64(&ipsec_sa->hot.out.seq, sa_param->seq_num);
+		break;
+	default:
+		return -1;
+	}
+
+	return 0;
+}
+
 int odp_ipsec_result(odp_ipsec_packet_result_t *result, odp_packet_t packet)
 {
 	odp_ipsec_packet_result_t *res;
@@ -2142,7 +2163,7 @@ void odp_ipsec_print(void)
 {
 	ODP_PRINT("\nIPSEC print\n");
 	ODP_PRINT("-----------\n");
-	ODP_PRINT("  max number of SA %u\n", ipsec_config->max_num_sa);
+	ODP_PRINT("  max number of SA %u\n\n", ipsec_config->max_num_sa);
 }
 
 void odp_ipsec_sa_print(odp_ipsec_sa_t sa)
@@ -2151,5 +2172,5 @@ void odp_ipsec_sa_print(odp_ipsec_sa_t sa)
 
 	ODP_PRINT("\nIPSEC SA print\n");
 	ODP_PRINT("--------------\n");
-	ODP_PRINT("  SPI              %u\n", ipsec_sa->spi);
+	ODP_PRINT("  SPI              %u\n\n", ipsec_sa->spi);
 }
