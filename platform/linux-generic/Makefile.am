@@ -96,6 +96,7 @@ noinst_HEADERS = \
 		  include/odp_atomic_internal.h \
 		  include/odp_bitset.h \
 		  include/odp_buffer_internal.h \
+		  include/odp_chksum_internal.h \
 		  include/odp_classification_datamodel.h \
 		  include/odp_classification_internal.h \
 		  include/odp_config_internal.h \
@@ -289,7 +290,8 @@ odpapiabiarchinclude_HEADERS += arch/default/odp/api/abi/cpu_inlines.h \
 				arch/default/odp/api/abi/cpu_time.h \
 				arch/aarch64/odp/api/abi/hash_crc32.h
 if !ODP_ABI_COMPAT
-odpapiabiarchinclude_HEADERS += arch/aarch64/odp/api/abi/cpu.h
+odpapiabiarchinclude_HEADERS += arch/aarch64/odp/api/abi/atomic.h \
+		                arch/aarch64/odp/api/abi/cpu.h
 endif
 noinst_HEADERS += arch/aarch64/odp_atomic.h \
 		  arch/aarch64/odp_cpu.h \
@@ -352,6 +354,7 @@ if !ODP_ABI_COMPAT
 odpapiabiarchinclude_HEADERS += arch/x86/odp/api/abi/cpu.h
 endif
 noinst_HEADERS += arch/x86/cpu_flags.h \
+		  arch/x86/odp_cpu.h \
 		  arch/default/odp_cpu.h \
 		  arch/default/odp_cpu_idling.h
 endif

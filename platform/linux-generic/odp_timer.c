@@ -26,6 +26,7 @@
 #include <odp/api/align.h>
 #include <odp_align_internal.h>
 #include <odp/api/atomic.h>
+#include <odp/api/plat/atomic_inlines.h>
 #include <odp_atomic_internal.h>
 #include <odp/api/buffer.h>
 #include <odp/api/cpu.h>
@@ -106,7 +107,7 @@ ODP_STATIC_ASSERT(sizeof(tick_buf_t) == 16, "sizeof(tick_buf_t) == 16");
 #endif
 
 typedef struct {
-	void *user_ptr;
+	const void *user_ptr;
 	odp_queue_t queue;/* Used for free list when timer is free */
 
 } _odp_timer_t;
@@ -186,10 +187,7 @@ static __thread timer_local_t timer_local;
 static void itimer_init(timer_pool_t *tp);
 static void itimer_fini(timer_pool_t *tp);
 
-static void timer_init(_odp_timer_t *tim,
-		       tick_buf_t *tb,
-		       odp_queue_t _q,
-		       void *_up)
+static void timer_init(_odp_timer_t *tim, tick_buf_t *tb, odp_queue_t _q, const void *_up)
 {
 	tim->queue = _q;
 	tim->user_ptr = _up;
@@ -200,7 +198,7 @@ static void timer_init(_odp_timer_t *tim,
 #if __GCC_ATOMIC_LLONG_LOCK_FREE < 2
 	tb->exp_tck.v = TMO_INACTIVE;
 #else
-	_odp_atomic_u64_store_mm(&tb->exp_tck, TMO_INACTIVE, _ODP_MEMMODEL_RLS);
+	odp_atomic_store_rel_u64(&tb->exp_tck, TMO_INACTIVE);
 #endif
 }
 
@@ -487,9 +485,7 @@ static void odp_timer_pool_del(timer_pool_t *tp)
 		ODP_ABORT("Failed to free shared memory (%d)\n", rc);
 }
 
-static inline odp_timer_t timer_alloc(timer_pool_t *tp,
-				      odp_queue_t queue,
-				      void *user_ptr)
+static inline odp_timer_t timer_alloc(timer_pool_t *tp, odp_queue_t queue, const void *user_ptr)
 {
 	odp_timer_t hdl;
 
@@ -504,13 +500,12 @@ static inline odp_timer_t timer_alloc(timer_pool_t *tp,
 		tp->first_free = get_next_free(tim);
 		/* Initialize timer */
 		timer_init(tim, &tp->tick_buf[idx], queue, user_ptr);
-		if (odp_unlikely(tp->num_alloc >
-				 odp_atomic_load_u32(&tp->high_wm)))
+		if (odp_unlikely(tp->num_alloc > odp_atomic_load_u32(&tp->high_wm))) {
 			/* Update high_wm last with release model to
 			 * ensure timer initialization is visible */
-			_odp_atomic_u32_store_mm(&tp->high_wm,
-						 tp->num_alloc,
-						 _ODP_MEMMODEL_RLS);
+			odp_atomic_store_rel_u32(&tp->high_wm, tp->num_alloc);
+		}
+
 		hdl = tp_idx_to_handle(tp, idx);
 		/* Add timer to queue */
 		_odp_queue_fn->timer_add(queue);
@@ -602,8 +597,8 @@ static bool timer_reset(uint32_t idx, uint64_t abs_tck, odp_buffer_t *tmo_buf,
 		uint64_t old;
 		/* Swap in new expiration tick, get back old tick which
 		 * will indicate active/inactive timer state */
-		old = _odp_atomic_u64_xchg_mm(&tb->exp_tck, abs_tck,
-					      _ODP_MEMMODEL_RLX);
+		old = odp_atomic_xchg_u64(&tb->exp_tck, abs_tck);
+
 		if ((old & TMO_INACTIVE) != 0) {
 			/* Timer was inactive (cancelled or expired),
 			 * we can't reset a timer without a timeout buffer.
@@ -615,12 +610,7 @@ static bool timer_reset(uint32_t idx, uint64_t abs_tck, odp_buffer_t *tmo_buf,
 			 * reset or cancelled the timer. Without any
 			 * synchronization between the threads, we have a
 			 * data race and the behavior is undefined */
-			(void)_odp_atomic_u64_cmp_xchg_strong_mm(
-					&tb->exp_tck,
-					&abs_tck,
-					old,
-					_ODP_MEMMODEL_RLX,
-					_ODP_MEMMODEL_RLX);
+			(void)odp_atomic_cas_u64(&tb->exp_tck, &abs_tck, old);
 			success = false;
 		}
 #else /* Target supports neither 128-bit nor 64-bit CAS => use lock */
@@ -806,7 +796,7 @@ static inline void timer_expire(timer_pool_t *tp, uint32_t idx, uint64_t tick)
 	uint64_t exp_tck;
 #ifdef ODP_ATOMIC_U128
 	/* Atomic re-read for correctness */
-	exp_tck = _odp_atomic_u64_load_mm(&tb->exp_tck, _ODP_MEMMODEL_RLX);
+	exp_tck = odp_atomic_load_u64(&tb->exp_tck);
 	/* Re-check exp_tck */
 	if (odp_likely(exp_tck <= tick)) {
 		/* Attempt to grab timeout buffer, replace with inactive timer
@@ -888,8 +878,7 @@ static inline void timer_expire(timer_pool_t *tp, uint32_t idx, uint64_t tick)
 static inline void timer_pool_scan(timer_pool_t *tp, uint64_t tick)
 {
 	tick_buf_t *array = &tp->tick_buf[0];
-	uint32_t high_wm = _odp_atomic_u32_load_mm(&tp->high_wm,
-			_ODP_MEMMODEL_ACQ);
+	uint32_t high_wm = odp_atomic_load_acq_u32(&tp->high_wm);
 	uint32_t i;
 
 	ODP_ASSERT(high_wm <= tp->param.num_timers);
@@ -1364,9 +1353,7 @@ uint64_t odp_timer_pool_to_u64(odp_timer_pool_t tpid)
 	return _odp_pri(tpid);
 }
 
-odp_timer_t odp_timer_alloc(odp_timer_pool_t tpid,
-			    odp_queue_t queue,
-			    void *user_ptr)
+odp_timer_t odp_timer_alloc(odp_timer_pool_t tpid, odp_queue_t queue, const void *user_ptr)
 {
 	timer_pool_t *tp = timer_pool_from_hdl(tpid);
 
@@ -1497,7 +1484,7 @@ uint64_t odp_timeout_tick(odp_timeout_t tmo)
 
 void *odp_timeout_user_ptr(odp_timeout_t tmo)
 {
-	return timeout_hdr(tmo)->user_ptr;
+	return (void *)(uintptr_t)timeout_hdr(tmo)->user_ptr;
 }
 
 odp_timeout_t odp_timeout_alloc(odp_pool_t pool)
@@ -1514,6 +1501,81 @@ void odp_timeout_free(odp_timeout_t tmo)
 	odp_event_t ev = odp_timeout_to_event(tmo);
 
 	odp_buffer_free(odp_buffer_from_event(ev));
+}
+
+void odp_timer_pool_print(odp_timer_pool_t timer_pool)
+{
+	timer_pool_t *tp;
+
+	if (timer_pool == ODP_TIMER_POOL_INVALID) {
+		ODP_ERR("Bad timer pool handle\n");
+		return;
+	}
+
+	tp = timer_pool_from_hdl(timer_pool);
+
+	ODP_PRINT("\nTimer pool info\n");
+	ODP_PRINT("---------------\n");
+	ODP_PRINT("  timer pool     %p\n", tp);
+	ODP_PRINT("  tp index       %u\n", tp->tp_idx);
+	ODP_PRINT("  num timers     %u\n", tp->num_alloc);
+	ODP_PRINT("  num tp         %i\n", timer_global->num_timer_pools);
+	ODP_PRINT("  inline timers  %i\n", timer_global->use_inline_timers);
+	ODP_PRINT("\n");
+}
+
+void odp_timer_print(odp_timer_t timer)
+{
+	timer_pool_t *tp;
+	uint32_t idx;
+	_odp_timer_t *tim;
+
+	if (timer == ODP_TIMER_INVALID) {
+		ODP_ERR("Bad timer handle\n");
+		return;
+	}
+
+	tp  = handle_to_tp(timer);
+	idx = handle_to_idx(timer, tp);
+	tim = &tp->timers[idx];
+
+	ODP_PRINT("\nTimer info\n");
+	ODP_PRINT("----------\n");
+	ODP_PRINT("  timer pool     %p\n", tp);
+	ODP_PRINT("  timer index    %u\n", idx);
+	ODP_PRINT("  dest queue     0x%" PRIx64 "\n", odp_queue_to_u64(tim->queue));
+	ODP_PRINT("  user ptr       %p\n", tim->user_ptr);
+	ODP_PRINT("\n");
+}
+
+void odp_timeout_print(odp_timeout_t tmo)
+{
+	const odp_timeout_hdr_t *tmo_hdr;
+	odp_timer_t timer;
+	timer_pool_t *tp = NULL;
+	uint32_t idx = 0;
+
+	if (tmo == ODP_TIMEOUT_INVALID) {
+		ODP_ERR("Bad timeout handle\n");
+		return;
+	}
+
+	tmo_hdr = timeout_hdr(tmo);
+	timer = tmo_hdr->timer;
+
+	if (timer != ODP_TIMER_INVALID) {
+		tp  = handle_to_tp(timer);
+		idx = handle_to_idx(timer, tp);
+	}
+
+	ODP_PRINT("\nTimeout info\n");
+	ODP_PRINT("------------\n");
+	ODP_PRINT("  tmo handle     0x%" PRIx64 "\n", odp_timeout_to_u64(tmo));
+	ODP_PRINT("  timer pool     %p\n", tp);
+	ODP_PRINT("  timer index    %u\n", idx);
+	ODP_PRINT("  expiration     %" PRIu64 "\n", tmo_hdr->expiration);
+	ODP_PRINT("  user ptr       %p\n", tmo_hdr->user_ptr);
+	ODP_PRINT("\n");
 }
 
 int _odp_timer_init_global(const odp_init_t *params)

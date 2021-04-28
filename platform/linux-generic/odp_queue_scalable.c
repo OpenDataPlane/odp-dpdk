@@ -15,6 +15,7 @@
 #include <odp/api/sync.h>
 #include <odp/api/plat/sync_inlines.h>
 #include <odp/api/traffic_mngr.h>
+#include <odp/api/cpu.h>
 
 #include <odp_config_internal.h>
 #include <odp_debug_internal.h>
@@ -465,7 +466,7 @@ static int queue_destroy(odp_queue_t handle)
 		sevl();
 		while (wfe() && monitor32((uint32_t *)&q->qschst.numevts,
 					  __ATOMIC_RELAXED) != 0)
-			doze();
+			odp_cpu_pause();
 	}
 
 	if (q->schedq != NULL) {
@@ -573,7 +574,7 @@ static inline int _odp_queue_enq(sched_elem_t *q,
 		sevl();
 		while (wfe() && monitor32(&q->cons_write,
 					  __ATOMIC_RELAXED) != old_write)
-			doze();
+			odp_cpu_pause();
 	}
 
 	/* Signal consumers that events are available (release events)
@@ -803,7 +804,7 @@ inline int _odp_queue_deq(sched_elem_t *q, odp_buffer_hdr_t *buf_hdr[], int num)
 		sevl();
 		while (wfe() && monitor32(&q->prod_read,
 					  __ATOMIC_RELAXED) != old_read)
-			doze();
+			odp_cpu_pause();
 	}
 
 	/* Signal producers that empty slots are available
@@ -1013,6 +1014,76 @@ static void queue_print(odp_queue_t handle)
 	UNLOCK(&queue->s.lock);
 }
 
+static void queue_print_all(void)
+{
+	uint32_t i, index;
+	const char *name;
+	int status;
+	odp_queue_type_t type;
+	odp_nonblocking_t blocking;
+	odp_queue_op_mode_t enq_mode;
+	odp_queue_op_mode_t deq_mode;
+	odp_queue_order_t order;
+	const char *bl_str;
+	char type_c, enq_c, deq_c, order_c, sync_c;
+	const int col_width = 24;
+	int prio = 0;
+	odp_schedule_sync_t sync = ODP_SCHED_SYNC_PARALLEL;
+
+	ODP_PRINT("\nList of all queues\n");
+	ODP_PRINT("------------------\n");
+	ODP_PRINT(" idx %-*s type blk enq deq ord sync prio\n", col_width, "name");
+
+	for (i = 0; i < CONFIG_MAX_QUEUES; i++) {
+		queue_entry_t *queue = &queue_tbl->queue[i];
+
+		if (queue->s.status != QUEUE_STATUS_READY)
+			continue;
+
+		LOCK(&queue->s.lock);
+
+		status   = queue->s.status;
+		index    = queue->s.index;
+		name     = queue->s.name;
+		type     = queue->s.type;
+		blocking = queue->s.param.nonblocking;
+		enq_mode = queue->s.param.enq_mode;
+		deq_mode = queue->s.param.deq_mode;
+		order    = queue->s.param.order;
+
+		UNLOCK(&queue->s.lock);
+
+		if (status != QUEUE_STATUS_READY)
+			continue;
+
+		type_c = (type == ODP_QUEUE_TYPE_PLAIN) ? 'P' : 'S';
+
+		bl_str = (blocking == ODP_BLOCKING) ? "B" :
+			 ((blocking == ODP_NONBLOCKING_LF) ? "LF" : "WF");
+
+		enq_c = (enq_mode == ODP_QUEUE_OP_MT) ? 'S' :
+			((enq_mode == ODP_QUEUE_OP_MT_UNSAFE) ? 'U' : 'D');
+
+		deq_c = (deq_mode == ODP_QUEUE_OP_MT) ? 'S' :
+			((deq_mode == ODP_QUEUE_OP_MT_UNSAFE) ? 'U' : 'D');
+
+		order_c = (order == ODP_QUEUE_ORDER_KEEP) ? 'K' : 'I';
+
+		ODP_PRINT("%4u %-*s    %c  %2s", index, col_width, name, type_c, bl_str);
+		ODP_PRINT("   %c   %c   %c", enq_c, deq_c, order_c);
+
+		if (type == ODP_QUEUE_TYPE_SCHED) {
+			sync_c = (sync == ODP_SCHED_SYNC_PARALLEL) ? 'P' :
+				 ((sync == ODP_SCHED_SYNC_ATOMIC) ? 'A' : 'O');
+			ODP_PRINT("    %c %4i", sync_c, prio);
+		}
+
+		ODP_PRINT("\n");
+	}
+
+	ODP_PRINT("\n");
+}
+
 static uint64_t queue_to_u64(odp_queue_t hdl)
 {
 	return _odp_pri(hdl);
@@ -1099,7 +1170,8 @@ _odp_queue_api_fn_t _odp_queue_scalable_api = {
 	.queue_to_u64 = queue_to_u64,
 	.queue_param_init = queue_param_init,
 	.queue_info = queue_info,
-	.queue_print = queue_print
+	.queue_print = queue_print,
+	.queue_print_all = queue_print_all
 };
 
 /* Functions towards internal components */

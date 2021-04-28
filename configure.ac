@@ -3,7 +3,7 @@ AC_PREREQ([2.5])
 # ODP API version
 ##########################################################################
 m4_define([odpapi_generation_version], [1])
-m4_define([odpapi_major_version], [26])
+m4_define([odpapi_major_version], [27])
 m4_define([odpapi_minor_version], [0])
 m4_define([odpapi_point_version], [0])
 m4_define([odpapi_version],
@@ -22,7 +22,7 @@ AC_SUBST(ODP_VERSION_API_MINOR)
 ##########################################################################
 m4_define([odph_version_generation], [1])
 m4_define([odph_version_major], [0])
-m4_define([odph_version_minor], [5])
+m4_define([odph_version_minor], [6])
 
 m4_define([odph_version],
     [odph_version_generation.odph_version_major.odph_version_minor])
@@ -43,7 +43,7 @@ AS_IF([test "$ac_cv_env_CFLAGS_set" = ""], [user_cflags=0], [user_cflags=1])
 # Initialize automake
 AM_INIT_AUTOMAKE([1.9 tar-pax subdir-objects foreign nostdinc -Wall -Werror])
 AC_CONFIG_SRCDIR([include/odp/api/spec/init.h])
-AM_CONFIG_HEADER([include/odp/autoheader_build.h include/odp/autoheader_external.h include/odp/autoheader_internal.h])
+AM_CONFIG_HEADER([include/odp/autoheader_build.h include/odp/autoheader_external.h include/odp/autoheader_internal.h helper/include/odp/helper/autoheader_external.h])
 
 AC_USE_SYSTEM_EXTENSIONS
 AC_SYS_LARGEFILE
@@ -332,6 +332,7 @@ AM_CONDITIONAL([HAVE_DOXYGEN], [test "x${DOXYGEN}" = "xdoxygen"])
 AM_CONDITIONAL([user_guide], [test "x${user_guides}" = "xyes" ])
 AM_CONDITIONAL([HAVE_MSCGEN], [test "x${MSCGEN}" = "xmscgen"])
 AM_CONDITIONAL([helper_linux], [test x$helper_linux = xyes ])
+AM_CONDITIONAL([helper_cli], [test x$helper_cli = xyes ])
 AM_CONDITIONAL([ARCH_IS_ARM], [test "x${ARCH_DIR}" = "xarm"])
 AM_CONDITIONAL([ARCH_IS_AARCH64], [test "x${ARCH_DIR}" = "xaarch64"])
 AM_CONDITIONAL([ARCH_IS_DEFAULT], [test "x${ARCH_DIR}" = "xdefault"])
@@ -356,15 +357,6 @@ AS_IF([test "x$enable_debug" != "xno"], [ODP_DEBUG=1],
 AC_DEFINE_UNQUOTED([ODP_DEBUG], [$ODP_DEBUG],
 		   [Define to 1 to include additional debug code])
 
-AC_ARG_ENABLE([helper-debug],
-    [AS_HELP_STRING([--enable-helper-debug],
-		    [helpers include additional debugging code [default=disabled]])],
-    [], [AS_IF([test "x$enable_debug" = "xfull"], [enable_helper_debug=yes],
-    [enable_helper_debug=no])])
-AS_IF([test "x$enable_helper_debug" != "xno"], [ODPH_DEBUG=1], [ODPH_DEBUG=0])
-AC_DEFINE_UNQUOTED([ODPH_DEBUG], [$ODPH_DEBUG],
-		   [Define to 1 to include additional helper debug code])
-
 ##########################################################################
 # Enable/disable ODP_DEBUG_PRINT
 ##########################################################################
@@ -377,16 +369,6 @@ AS_IF([test "x$enable_debug_print" != "xno"], [ODP_DEBUG_PRINT=1],
       [ODP_DEBUG_PRINT=0])
 AC_DEFINE_UNQUOTED([ODP_DEBUG_PRINT], [$ODP_DEBUG_PRINT],
 		   [Define to 1 to display debug information])
-
-AC_ARG_ENABLE([helper-debug-print],
-    [AS_HELP_STRING([--enable-helper-debug-print],
-		    [display helper debugging information [default=disabled]])],
-    [], [AS_IF([test "x$enable_debug" = "xfull"], [enable_helper_debug_print=yes],
-	       [enable_helper_debug_print=no])])
-AS_IF([test "x$enable_helper_debug_print" != "xno"], [ODPH_DEBUG_PRINT=1],
-      [ODPH_DEBUG_PRINT=0])
-AC_DEFINE_UNQUOTED([ODPH_DEBUG_PRINT], [$ODPH_DEBUG_PRINT],
-		   [Define to 1 to display helper debug information])
 
 debug_settings="ODP_DEBUG=${ODP_DEBUG}, ODP_DEBUG_PRINT=${ODP_DEBUG_PRINT}, \
 ODPH_DEBUG=${ODPH_DEBUG}, ODPH_DEBUG_PRINT=${ODPH_DEBUG_PRINT}"
@@ -500,6 +482,7 @@ AC_MSG_RESULT([
 	ARCH_ABI		${ARCH_ABI}
 	with_platform:		${with_platform}
 	helper_linux:		${helper_linux}
+	helper_cli:		${helper_cli}
 	prefix:			${prefix}
 	sysconfdir:		${sysconfdir}
 	libdir:			${libdir}
