@@ -70,8 +70,7 @@ _ODP_INLINE int odp_packet_has_jumbo(odp_packet_t pkt)
 
 _ODP_INLINE int odp_packet_has_flow_hash(odp_packet_t pkt)
 {
-	return _odp_pkt_get(pkt, uint64_t, ol_flags) &
-			_odp_packet_inline.rss_flag;
+	return !!(_odp_pkt_get(pkt, uint64_t, ol_flags) & _odp_packet_inline.rss_flag);
 }
 
 _ODP_INLINE void odp_packet_has_flow_hash_clr(odp_packet_t pkt)
