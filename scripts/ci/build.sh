@@ -27,8 +27,11 @@ if [ -z "$ODP_LIB_NAME" ] ; then
 ODP_LIB_NAME=libodp-dpdk
 fi
 
+# Additional warning checks
+EXTRA_CHECKS="-Werror -Wall -Wextra -Wconversion -Wundef -Wpointer-arith -Wfloat-equal -Wpacked"
+
 CC="${CC:-${TARGET_ARCH}-gcc}"
-${CC} ${CFLAGS} ${OLDPWD}/example/hello/odp_hello.c -o odp_hello_inst_dynamic \
+${CC} ${CFLAGS} ${EXTRA_CHECKS} ${OLDPWD}/example/hello/odp_hello.c -o odp_hello_inst_dynamic \
 	`PKG_CONFIG_PATH=/opt/odp/lib/pkgconfig ${PKG_CONFIG} --cflags --libs ${ODP_LIB_NAME}` \
 	`${PKG_CONFIG} --cflags --libs libdpdk`
 
