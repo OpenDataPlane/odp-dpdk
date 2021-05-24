@@ -623,6 +623,8 @@ int odp_crypto_capability(odp_crypto_capability_t *capability)
 	capability->sync_mode = ODP_SUPPORT_YES;
 	capability->async_mode = ODP_SUPPORT_PREFERRED;
 	capability->max_sessions = MAX_SESSIONS;
+	capability->queue_type_plain = 1;
+	capability->queue_type_sched = 1;
 
 	for (cdev_id = 0; cdev_id < cdev_count; cdev_id++) {
 		struct rte_cryptodev_info dev_info;
