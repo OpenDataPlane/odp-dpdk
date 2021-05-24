@@ -9,7 +9,7 @@ env:
   CONTAINER_NAMESPACE: ghcr.io/opendataplane/odp-docker-images
   OS: ubuntu_20.04
   COVERITY_EMAIL: odp@lists.opendataplane.org
-  COVERITY_PROJECT: ODP
+  COVERITY_PROJECT: ODP-DPDK
 
 jobs:
   Coverity-analysis:
@@ -21,5 +21,5 @@ jobs:
                -e COVERITY_TOKEN="${{ secrets.COVERITY_TOKEN }}"
                -e COVERITY_EMAIL="${COVERITY_EMAIL}"
                -e COVERITY_PROJECT="${COVERITY_PROJECT}"
-               ${CONTAINER_NAMESPACE}/odp-ci-${OS}-${ARCH}-coverity-linux-generic
+               ${CONTAINER_NAMESPACE}/odp-ci-${OS}-${ARCH}-coverity-linux-dpdk
                /odp/scripts/ci/coverity.sh
