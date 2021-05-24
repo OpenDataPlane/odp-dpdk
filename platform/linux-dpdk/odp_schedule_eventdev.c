@@ -539,7 +539,12 @@ static inline uint16_t event_input(struct rte_event ev[], odp_event_t out_ev[],
 	uint16_t num_pkts = 0;
 	uint16_t num_events = 0;
 	uint16_t i;
-	uint8_t first_queue = ev[0].queue_id;
+	uint8_t first_queue;
+
+	if (odp_unlikely(nb_events == 0))
+		return 0;
+
+	first_queue = ev[0].queue_id;
 
 	for (i = 0; i < nb_events;  i++) {
 		struct rte_event *event = &ev[i];
