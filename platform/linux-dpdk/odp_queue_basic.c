@@ -1168,7 +1168,7 @@ static odp_event_t queue_api_deq(odp_queue_t handle)
 }
 
 /* API functions */
-_odp_queue_api_fn_t queue_basic_api = {
+_odp_queue_api_fn_t _odp_queue_basic_api = {
 	.queue_create = queue_create,
 	.queue_destroy = queue_destroy,
 	.queue_lookup = queue_lookup,
@@ -1192,7 +1192,7 @@ _odp_queue_api_fn_t queue_basic_api = {
 };
 
 /* Functions towards internal components */
-queue_fn_t queue_basic_fn = {
+queue_fn_t _odp_queue_basic_fn = {
 	.init_global = queue_init_global,
 	.term_global = queue_term_global,
 	.init_local = queue_init_local,

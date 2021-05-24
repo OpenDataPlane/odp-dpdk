@@ -154,15 +154,15 @@ typedef struct {
 extern eventdev_global_t *_odp_eventdev_gbl;
 extern __thread eventdev_local_t _odp_eventdev_local;
 
-int service_setup(uint32_t service_id);
+int _odp_service_setup(uint32_t service_id);
 
-int dummy_link_queues(uint8_t dev_id, uint8_t dummy_linked_queues[], int num);
+int _odp_dummy_link_queues(uint8_t dev_id, uint8_t dummy_linked_queues[], int num);
 
-int dummy_unlink_queues(uint8_t dev_id, uint8_t dummy_linked_queues[], int num);
+int _odp_dummy_unlink_queues(uint8_t dev_id, uint8_t dummy_linked_queues[], int num);
 
-void rx_adapter_port_stop(uint16_t port_id);
+void _odp_rx_adapter_port_stop(uint16_t port_id);
 
-int rx_adapter_close(void);
+int _odp_rx_adapter_close(void);
 
 static inline uint8_t event_schedule_type(odp_schedule_sync_t sync)
 {

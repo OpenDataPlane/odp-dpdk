@@ -118,7 +118,7 @@ typedef struct timer_local_t {
 } timer_local_t;
 
 /* Points to timer global data */
-timer_global_t *timer_global;
+static timer_global_t *timer_global;
 
 /* Timer thread local data */
 static __thread timer_local_t timer_local;
@@ -214,7 +214,7 @@ int _odp_timer_term_local(void)
 	return 0;
 }
 
-void _timer_run_inline(int dec)
+void _odp_timer_run_inline(int dec)
 {
 	int poll_interval = timer_global->poll_interval;
 	odp_time_t now;

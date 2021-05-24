@@ -129,7 +129,7 @@ static inline pkt_dpdk_t *pkt_priv(pktio_entry_t *pktio_entry)
  * Order matters. The first implementation to setup successfully
  * will be picked.
  * Array must be NULL terminated */
-const pktio_if_ops_t * const pktio_if_ops[]  = {
+const pktio_if_ops_t * const _odp_pktio_if_ops[]  = {
 	&_odp_loopback_pktio_ops,
 	&_odp_dpdk_pktio_ops,
 	&_odp_null_pktio_ops,
@@ -140,7 +140,7 @@ extern void *pktio_entry_ptr[ODP_CONFIG_PKTIO_ENTRIES];
 
 static uint32_t mtu_get_pkt_dpdk(pktio_entry_t *pktio_entry);
 
-uint16_t dpdk_pktio_port_id(pktio_entry_t *pktio_entry)
+uint16_t _odp_dpdk_pktio_port_id(pktio_entry_t *pktio_entry)
 {
 	const pkt_dpdk_t *pkt_dpdk = pkt_priv(pktio_entry);
 
@@ -693,7 +693,7 @@ static int close_pkt_dpdk(pktio_entry_t *pktio_entry)
 
 	if (_odp_eventdev_gbl &&
 	    _odp_eventdev_gbl->rx_adapter.status != RX_ADAPTER_INIT)
-		rx_adapter_port_stop(pkt_dpdk->port_id);
+		_odp_rx_adapter_port_stop(pkt_dpdk->port_id);
 	else
 		rte_eth_dev_stop(pkt_dpdk->port_id);
 
@@ -873,7 +873,7 @@ static inline void prefetch_pkt(odp_packet_t pkt)
 	odp_prefetch(&pkt_hdr->p);
 }
 
-int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int num)
+int _odp_input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int num)
 {
 	pkt_dpdk_t * const pkt_dpdk = pkt_priv(pktio_entry);
 	uint16_t i;
@@ -1012,10 +1012,10 @@ static int recv_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 		odp_ticketlock_unlock(&pkt_dpdk->rx_lock[index]);
 
 	/* Packets may also me received through eventdev, so don't add any
-	 * processing here. Instead, perform all processing in input_pkts()
+	 * processing here. Instead, perform all processing in _odp_input_pkts()
 	 * which is also called by eventdev. */
 	if (nb_rx)
-		return input_pkts(pktio_entry, pkt_table, nb_rx);
+		return _odp_input_pkts(pktio_entry, pkt_table, nb_rx);
 	return 0;
 }
 
@@ -1177,7 +1177,7 @@ static int send_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 			return -1;
 
 		if (odp_unlikely(mbuf->pkt_len > pkt_dpdk->mtu)) {
-			__odp_errno = EMSGSIZE;
+			_odp_errno = EMSGSIZE;
 			return -1;
 		}
 	} else if (odp_unlikely(tx_ts_idx && pkts >= tx_ts_idx)) {

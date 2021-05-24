@@ -234,9 +234,9 @@ static inline void pktio_cls_enabled_set(pktio_entry_t *entry, int ena)
 	entry->s.enabled.cls = !!ena;
 }
 
-uint16_t dpdk_pktio_port_id(pktio_entry_t *entry);
+uint16_t _odp_dpdk_pktio_port_id(pktio_entry_t *entry);
 
-int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int num);
+int _odp_input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int num);
 
 static inline int _odp_pktio_tx_ts_enabled(pktio_entry_t *entry)
 {
@@ -253,7 +253,7 @@ static inline void _odp_pktio_tx_ts_set(pktio_entry_t *entry)
 extern const pktio_if_ops_t _odp_loopback_pktio_ops;
 extern const pktio_if_ops_t _odp_null_pktio_ops;
 extern const pktio_if_ops_t _odp_dpdk_pktio_ops;
-extern const pktio_if_ops_t * const pktio_if_ops[];
+extern const pktio_if_ops_t * const _odp_pktio_if_ops[];
 
 /* Dummy function required by odp_pktin_recv_mq_tmo() */
 static inline int

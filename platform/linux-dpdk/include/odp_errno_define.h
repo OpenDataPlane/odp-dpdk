@@ -19,7 +19,7 @@ extern "C" {
 
 #include <rte_errno.h>
 
-#define __odp_errno (rte_errno)
+#define _odp_errno (rte_errno)
 
 #ifdef __cplusplus
 }

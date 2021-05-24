@@ -185,7 +185,7 @@ static void print_dev_info(const struct rte_event_dev_info *info)
 		  info->event_dev_cap);
 }
 
-int service_setup(uint32_t service_id)
+int _odp_service_setup(uint32_t service_id)
 {
 	uint32_t cores[RTE_MAX_LCORE];
 	uint32_t lcore = 0;
@@ -315,7 +315,7 @@ static int queue_is_linked(uint8_t dev_id, uint8_t queue_id)
 }
 
 /* Dummy link all unlinked queues to port zero to pass evendev start */
-int dummy_link_queues(uint8_t dev_id, uint8_t dummy_linked_queues[], int num)
+int _odp_dummy_link_queues(uint8_t dev_id, uint8_t dummy_linked_queues[], int num)
 {
 	uint8_t priority = RTE_EVENT_DEV_PRIORITY_NORMAL;
 	uint8_t queue_id;
@@ -337,7 +337,7 @@ int dummy_link_queues(uint8_t dev_id, uint8_t dummy_linked_queues[], int num)
 }
 
 /* Remove dummy links to port zero */
-int dummy_unlink_queues(uint8_t dev_id, uint8_t dummy_linked_queues[], int num)
+int _odp_dummy_unlink_queues(uint8_t dev_id, uint8_t dummy_linked_queues[], int num)
 {
 	int i;
 
@@ -465,8 +465,8 @@ static int init_event_dev(void)
 
 	/* Eventdev requires that each queue is linked to at least one
 	 * port at startup. */
-	num_dummy_links = dummy_link_queues(dev_id, dummy_links,
-					    config.nb_event_queues);
+	num_dummy_links = _odp_dummy_link_queues(dev_id, dummy_links,
+						 config.nb_event_queues);
 
 	if (!(info.event_dev_cap & RTE_EVENT_DEV_CAP_DISTRIBUTED_SCHED)) {
 		uint32_t service_id;
@@ -476,7 +476,7 @@ static int init_event_dev(void)
 			ODP_ERR("Unable to retrieve service ID\n");
 			return -1;
 		}
-		if (service_setup(service_id)) {
+		if (_odp_service_setup(service_id)) {
 			ODP_ERR("Failed to setup service core\n");
 			return -1;
 		}
@@ -489,7 +489,7 @@ static int init_event_dev(void)
 
 	/* Unlink all ports from queues. Thread specific ports will be linked
 	 * when the application calls schedule/enqueue for the first time. */
-	if (dummy_unlink_queues(dev_id, dummy_links, num_dummy_links)) {
+	if (_odp_dummy_unlink_queues(dev_id, dummy_links, num_dummy_links)) {
 		rte_event_dev_stop(dev_id);
 		rte_event_dev_close(dev_id);
 		return -1;
@@ -602,7 +602,7 @@ static int queue_term_global(void)
 		UNLOCK(queue);
 	}
 
-	if (rx_adapter_close())
+	if (_odp_rx_adapter_close())
 		ret = -1;
 
 	rte_event_dev_stop(_odp_eventdev_gbl->dev_id);
@@ -1345,7 +1345,7 @@ static odp_event_t queue_api_deq(odp_queue_t handle)
 }
 
 /* API functions */
-_odp_queue_api_fn_t queue_eventdev_api = {
+_odp_queue_api_fn_t _odp_queue_eventdev_api = {
 	.queue_create = queue_create,
 	.queue_destroy = queue_destroy,
 	.queue_lookup = queue_lookup,
@@ -1367,7 +1367,7 @@ _odp_queue_api_fn_t queue_eventdev_api = {
 };
 
 /* Functions towards internal components */
-queue_fn_t queue_eventdev_fn = {
+queue_fn_t _odp_queue_eventdev_fn = {
 	.init_global = queue_init_global,
 	.term_global = queue_term_global,
 	.init_local = queue_init_local,
