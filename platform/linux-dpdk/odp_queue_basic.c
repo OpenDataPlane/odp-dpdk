@@ -144,6 +144,7 @@ static int queue_init_global(void)
 	for (i = 0; i < CONFIG_MAX_QUEUES; i++) {
 		/* init locks */
 		queue_entry_t *queue = qentry_from_index(i);
+
 		LOCK_INIT(queue);
 		queue->s.index  = i;
 		queue->s.handle = (odp_queue_t)queue;
@@ -370,6 +371,7 @@ static int queue_destroy(odp_queue_t handle)
 {
 	int empty;
 	queue_entry_t *queue;
+
 	queue = qentry_from_handle(handle);
 
 	if (handle == ODP_QUEUE_INVALID)
