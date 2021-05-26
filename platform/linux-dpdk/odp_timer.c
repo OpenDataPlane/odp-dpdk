@@ -428,6 +428,7 @@ odp_timer_pool_t odp_timer_pool_create(const char *name,
 
 void odp_timer_pool_start(void)
 {
+	/* Nothing to do */
 }
 
 void odp_timer_pool_destroy(odp_timer_pool_t tp)

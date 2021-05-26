@@ -726,10 +726,12 @@ static void schedule_resume(void)
 
 static void schedule_release_atomic(void)
 {
+	/* Nothing to do */
 }
 
 static void schedule_release_ordered(void)
 {
+	/* Nothing to do */
 }
 
 static uint64_t schedule_wait_time(uint64_t ns)
@@ -788,9 +790,9 @@ static int schedule_thr_rem(odp_schedule_group_t group, int thr)
 	return 0;
 }
 
-/* This function is a no-op */
-static void schedule_prefetch(int num ODP_UNUSED)
+static void schedule_prefetch(int num)
 {
+	(void)num;
 }
 
 static int schedule_num_prio(void)
@@ -972,33 +974,41 @@ static int schedule_group_info(odp_schedule_group_t group,
 	return ret;
 }
 
-static void schedule_order_lock(uint32_t lock_index ODP_UNUSED)
+static void schedule_order_lock(uint32_t lock_index)
 {
+	(void)lock_index;
 }
 
-static void schedule_order_unlock(uint32_t lock_index ODP_UNUSED)
+static void schedule_order_unlock(uint32_t lock_index)
 {
+	(void)lock_index;
 }
 
-static void schedule_order_unlock_lock(uint32_t unlock_index ODP_UNUSED,
-				       uint32_t lock_index ODP_UNUSED)
+static void schedule_order_unlock_lock(uint32_t unlock_index,
+				       uint32_t lock_index)
 {
+	(void)unlock_index;
+	(void)lock_index;
 }
 
-static void schedule_order_lock_start(uint32_t lock_index ODP_UNUSED)
+static void schedule_order_lock_start(uint32_t lock_index)
 {
+	(void)lock_index;
 }
 
-static void schedule_order_lock_wait(uint32_t lock_index ODP_UNUSED)
+static void schedule_order_lock_wait(uint32_t lock_index)
 {
+	(void)lock_index;
 }
 
 static void order_lock(void)
 {
+	/* Nothing to do */
 }
 
 static void order_unlock(void)
 {
+	/* Nothing to do */
 }
 
 static int schedule_capability(odp_schedule_capability_t *capa)
