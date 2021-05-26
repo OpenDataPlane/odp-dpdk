@@ -12,6 +12,8 @@
 #error This file should not be included directly, please include odp_cpu.h
 #endif
 
+#include <limits.h>
+
 #ifdef CONFIG_DMBSTR
 
 #define atomic_store_release(loc, val, ro)		\
@@ -217,54 +219,108 @@ static inline __int128 __lockfree_load_16(__int128 *var, int mo)
 	return old;
 }
 
-#ifdef _ODP_LOCK_FREE_128BIT_ATOMICS
+typedef unsigned __int128 _u128_t;
 
-/**
- * @internal
- * Helper macro for lockless atomic CAS operations on 128-bit integers
- * @param[in,out] atom Pointer to the 128-bit atomic variable
- * @param oper CAS operation
- * @param old_val Old value
- * @param new_val New value to be swapped
- * @return 1 for success and 0 for fail
- */
-#define ATOMIC_CAS_OP_128(atom, oper, old_val, new_val, val) \
-({ \
-	odp_u128_t _val; \
-	odp_atomic_u128_t *_atom = atom; \
-	odp_u128_t *_old_val = old_val; \
-	odp_u128_t _new_val = new_val; \
-	odp_u128_t *ptr = (odp_u128_t *)(_atom); \
-	register uint64_t old0 __asm__ ("x0"); \
-	register uint64_t old1 __asm__ ("x1"); \
-	register uint64_t new0 __asm__ ("x2"); \
-	register uint64_t new1 __asm__ ("x3"); \
-	old0 = (uint64_t)(_old_val)->u64[0]; \
-	old1 = (uint64_t)(_old_val)->u64[1]; \
-	new0 = (uint64_t)(_new_val).u64[0]; \
-	new1 = (uint64_t)(_new_val).u64[1]; \
-	__asm__ volatile(oper " %[old0], %[old1], %[new0], %[new1], [%[ptr]]" \
-			: [old0] "+r" (old0), [old1] "+r" (old1) \
-			: [new0] "r"  (new0), [new1] "r"  (new1), \
-			[ptr] "r" (ptr) \
-			: "memory"); \
-	_val.u64[0] = old0; \
-	_val.u64[1] = old1; \
-	val = _val; \
-})
+static inline _u128_t lockfree_load_u128(_u128_t *atomic)
+{
+	return __lockfree_load_16((__int128 *)atomic, __ATOMIC_RELAXED);
+}
 
-#define ATOMIC_CAS_OP_128_NO_ORDER(atom, old_value, new_value, val) \
-	ATOMIC_CAS_OP_128(atom, "casp", old_value, new_value, val)
+static inline int lockfree_cas_acq_rel_u128(_u128_t *atomic,
+					    _u128_t old_val,
+					    _u128_t new_val)
+{
+	return __lockfree_compare_exchange_16((__int128 *)atomic,
+					      (__int128 *)&old_val,
+					      new_val,
+					      0,
+					      __ATOMIC_ACQ_REL,
+					      __ATOMIC_RELAXED);
+}
 
-#define ATOMIC_CAS_OP_128_ACQ(atom, old_value, new_value, val) \
-	ATOMIC_CAS_OP_128(atom, "caspa", old_value, new_value, val)
+static inline int lockfree_check_u128(void)
+{
+	return 1;
+}
 
-#define ATOMIC_CAS_OP_128_REL(atom, old_value, new_value, val) \
-	ATOMIC_CAS_OP_128(atom, "caspl", old_value, new_value, val)
+/** Atomic bit set operations with memory ordering */
+#if defined(__SIZEOF_INT128__) && __SIZEOF_INT128__ == 16
+typedef __int128 bitset_t;
+#define ATOM_BITSET_SIZE (CHAR_BIT * __SIZEOF_INT128__)
 
-#define ATOMIC_CAS_OP_128_ACQ_REL(atom, old_value, new_value, val) \
-	ATOMIC_CAS_OP_128(atom, "caspal", old_value, new_value, val)
+#elif __GCC_ATOMIC_LLONG_LOCK_FREE == 2 && \
+	__SIZEOF_LONG_LONG__ != __SIZEOF_LONG__
+typedef unsigned long long bitset_t;
+#define ATOM_BITSET_SIZE (CHAR_BIT * __SIZEOF_LONG_LONG__)
 
+#elif __GCC_ATOMIC_LONG_LOCK_FREE == 2 && __SIZEOF_LONG__ != __SIZEOF_INT__
+typedef unsigned long bitset_t;
+#define ATOM_BITSET_SIZE (CHAR_BIT * __SIZEOF_LONG__)
+
+#elif __GCC_ATOMIC_INT_LOCK_FREE == 2
+typedef unsigned int bitset_t;
+#define ATOM_BITSET_SIZE (CHAR_BIT * __SIZEOF_INT__)
+
+#else
+/* Target does not support lock-free atomic operations */
+typedef unsigned int bitset_t;
+#define ATOM_BITSET_SIZE (CHAR_BIT * __SIZEOF_INT__)
 #endif
+
+#if ATOM_BITSET_SIZE <= 32
+
+static inline bitset_t bitset_mask(uint32_t bit)
+{
+	return 1UL << bit;
+}
+
+#elif ATOM_BITSET_SIZE <= 64
+
+static inline bitset_t bitset_mask(uint32_t bit)
+{
+	return 1ULL << bit;
+}
+
+#elif ATOM_BITSET_SIZE <= 128
+
+static inline bitset_t bitset_mask(uint32_t bit)
+{
+	if (bit < 64)
+		return 1ULL << bit;
+	else
+		return (unsigned __int128)(1ULL << (bit - 64)) << 64;
+}
+
+#else
+#error Unsupported size of bit sets (ATOM_BITSET_SIZE)
+#endif
+
+static inline bitset_t atom_bitset_load(bitset_t *bs, int mo)
+{
+	return __lockfree_load_16(bs, mo);
+}
+
+static inline void atom_bitset_set(bitset_t *bs, uint32_t bit, int mo)
+{
+	(void)__lockfree_fetch_or_16(bs, bitset_mask(bit), mo);
+}
+
+static inline void atom_bitset_clr(bitset_t *bs, uint32_t bit, int mo)
+{
+	(void)__lockfree_fetch_and_16(bs, ~bitset_mask(bit), mo);
+}
+
+static inline bitset_t atom_bitset_xchg(bitset_t *bs, bitset_t neu, int mo)
+{
+	return __lockfree_exchange_16(bs, neu, mo);
+}
+
+static inline bitset_t atom_bitset_cmpxchg(bitset_t *bs, bitset_t *old,
+					   bitset_t neu, bool weak,
+					   int mo_success, int mo_failure)
+{
+	return __lockfree_compare_exchange_16(bs, old, neu, weak, mo_success,
+					      mo_failure);
+}
 
 #endif  /* PLATFORM_LINUXGENERIC_ARCH_ARM_ODP_ATOMIC_H */

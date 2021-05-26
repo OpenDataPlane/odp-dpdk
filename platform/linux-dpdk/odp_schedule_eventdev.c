@@ -242,8 +242,8 @@ static int rx_adapter_add_queues(uint8_t rx_adapter_id, uint8_t port_id,
 	int i;
 
 	/* SW eventdev requires that all queues have ports linked */
-	num_dummy_links = dummy_link_queues(_odp_eventdev_gbl->dev_id, dummy_links,
-					    num_dummy_links);
+	num_dummy_links = _odp_dummy_link_queues(_odp_eventdev_gbl->dev_id, dummy_links,
+						 num_dummy_links);
 
 	for (i = 0; i < num_pktin; i++) {
 		queue_entry_t *queue = qentry_from_handle(queues[i]);
@@ -277,14 +277,14 @@ static int rx_adapter_add_queues(uint8_t rx_adapter_id, uint8_t port_id,
 			break;
 	}
 
-	if (dummy_unlink_queues(_odp_eventdev_gbl->dev_id, dummy_links,
-				num_dummy_links))
+	if (_odp_dummy_unlink_queues(_odp_eventdev_gbl->dev_id, dummy_links,
+				     num_dummy_links))
 		return -1;
 
 	return ret;
 }
 
-int rx_adapter_close(void)
+int _odp_rx_adapter_close(void)
 {
 	uint16_t port_id;
 	uint8_t rx_adapter_id = _odp_eventdev_gbl->rx_adapter.id;
@@ -308,7 +308,7 @@ int rx_adapter_close(void)
 	return ret;
 }
 
-void rx_adapter_port_stop(uint16_t port_id)
+void _odp_rx_adapter_port_stop(uint16_t port_id)
 {
 	uint8_t rx_adapter_id = _odp_eventdev_gbl->rx_adapter.id;
 
@@ -415,7 +415,7 @@ static void schedule_pktio_start(int pktio_index, int num_pktin,
 				 int pktin_idx[], odp_queue_t queue[])
 {
 	pktio_entry_t *entry = get_pktio_entry(index_to_pktio(pktio_index));
-	uint16_t port_id = dpdk_pktio_port_id(entry);
+	uint16_t port_id = _odp_dpdk_pktio_port_id(entry);
 	uint8_t rx_adapter_id = _odp_eventdev_gbl->rx_adapter.id;
 
 	/* All eventdev pktio devices should to be started before calling
@@ -449,7 +449,7 @@ static void schedule_pktio_start(int pktio_index, int num_pktin,
 		if (ret && ret != -ESRCH) {
 			ODP_ABORT("Unable to retrieve service ID\n");
 		} else if (!ret) {
-			if (service_setup(service_id))
+			if (_odp_service_setup(service_id))
 				ODP_ABORT("Unable to start RX service\n");
 		}
 
@@ -539,7 +539,12 @@ static inline uint16_t event_input(struct rte_event ev[], odp_event_t out_ev[],
 	uint16_t num_pkts = 0;
 	uint16_t num_events = 0;
 	uint16_t i;
-	uint8_t first_queue = ev[0].queue_id;
+	uint8_t first_queue;
+
+	if (odp_unlikely(nb_events == 0))
+		return 0;
+
+	first_queue = ev[0].queue_id;
 
 	for (i = 0; i < nb_events;  i++) {
 		struct rte_event *event = &ev[i];
@@ -568,8 +573,7 @@ static inline uint16_t event_input(struct rte_event ev[], odp_event_t out_ev[],
 	if (num_pkts) {
 		pktio_entry_t *entry = _odp_eventdev_gbl->pktio[pkt_table[0]->port];
 
-		num_pkts = input_pkts(entry, (odp_packet_t *)pkt_table,
-				      num_pkts);
+		num_pkts = _odp_input_pkts(entry, (odp_packet_t *)pkt_table, num_pkts);
 
 		if (!odp_global_ro.init_param.not_used.feat.cls)
 			num_pkts = classify_pkts((odp_packet_t *)pkt_table,
@@ -722,10 +726,12 @@ static void schedule_resume(void)
 
 static void schedule_release_atomic(void)
 {
+	/* Nothing to do */
 }
 
 static void schedule_release_ordered(void)
 {
+	/* Nothing to do */
 }
 
 static uint64_t schedule_wait_time(uint64_t ns)
@@ -784,9 +790,9 @@ static int schedule_thr_rem(odp_schedule_group_t group, int thr)
 	return 0;
 }
 
-/* This function is a no-op */
-static void schedule_prefetch(int num ODP_UNUSED)
+static void schedule_prefetch(int num)
 {
+	(void)num;
 }
 
 static int schedule_num_prio(void)
@@ -968,33 +974,41 @@ static int schedule_group_info(odp_schedule_group_t group,
 	return ret;
 }
 
-static void schedule_order_lock(uint32_t lock_index ODP_UNUSED)
+static void schedule_order_lock(uint32_t lock_index)
 {
+	(void)lock_index;
 }
 
-static void schedule_order_unlock(uint32_t lock_index ODP_UNUSED)
+static void schedule_order_unlock(uint32_t lock_index)
 {
+	(void)lock_index;
 }
 
-static void schedule_order_unlock_lock(uint32_t unlock_index ODP_UNUSED,
-				       uint32_t lock_index ODP_UNUSED)
+static void schedule_order_unlock_lock(uint32_t unlock_index,
+				       uint32_t lock_index)
 {
+	(void)unlock_index;
+	(void)lock_index;
 }
 
-static void schedule_order_lock_start(uint32_t lock_index ODP_UNUSED)
+static void schedule_order_lock_start(uint32_t lock_index)
 {
+	(void)lock_index;
 }
 
-static void schedule_order_lock_wait(uint32_t lock_index ODP_UNUSED)
+static void schedule_order_lock_wait(uint32_t lock_index)
 {
+	(void)lock_index;
 }
 
 static void order_lock(void)
 {
+	/* Nothing to do */
 }
 
 static void order_unlock(void)
 {
+	/* Nothing to do */
 }
 
 static int schedule_capability(odp_schedule_capability_t *capa)

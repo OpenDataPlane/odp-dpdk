@@ -23,11 +23,11 @@ const _odp_queue_api_fn_t *_odp_queue_api;
 
 #include <odp/visibility_end.h>
 
-extern const _odp_queue_api_fn_t queue_basic_api;
-extern const queue_fn_t queue_basic_fn;
+extern const _odp_queue_api_fn_t _odp_queue_basic_api;
+extern const queue_fn_t _odp_queue_basic_fn;
 
-extern const _odp_queue_api_fn_t queue_eventdev_api;
-extern const queue_fn_t queue_eventdev_fn;
+extern const _odp_queue_api_fn_t _odp_queue_eventdev_api;
+extern const queue_fn_t _odp_queue_eventdev_fn;
 
 const queue_fn_t *_odp_queue_fn;
 
@@ -114,11 +114,11 @@ int _odp_queue_init_global(void)
 		sched = _ODP_SCHEDULE_DEFAULT;
 
 	if (!strcmp(sched, "basic") || !strcmp(sched, "sp")) {
-		_odp_queue_fn = &queue_basic_fn;
-		_odp_queue_api = &queue_basic_api;
+		_odp_queue_fn = &_odp_queue_basic_fn;
+		_odp_queue_api = &_odp_queue_basic_api;
 	} else if (!strcmp(sched, "eventdev")) {
-		_odp_queue_fn = &queue_eventdev_fn;
-		_odp_queue_api = &queue_eventdev_api;
+		_odp_queue_fn = &_odp_queue_eventdev_fn;
+		_odp_queue_api = &_odp_queue_eventdev_api;
 	} else {
 		ODP_ABORT("Unknown scheduler specified via ODP_SCHEDULER\n");
 		return -1;

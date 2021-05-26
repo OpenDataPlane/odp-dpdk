@@ -92,7 +92,7 @@ static inline pool_t *pool_entry_from_hdl(odp_pool_t pool_hdl)
 	return &_odp_pool_glb->pool[_odp_typeval(pool_hdl) - 1];
 }
 
-static inline void buffer_free_multi(odp_buffer_hdr_t *buf_hdr[], int num)
+static inline void _odp_buffer_free_multi(odp_buffer_hdr_t *buf_hdr[], int num)
 {
 	int i;
 

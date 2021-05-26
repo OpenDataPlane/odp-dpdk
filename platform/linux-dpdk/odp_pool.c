@@ -855,7 +855,7 @@ void odp_buffer_free(odp_buffer_t buf)
 
 void odp_buffer_free_multi(const odp_buffer_t buf[], int num)
 {
-	buffer_free_multi((odp_buffer_hdr_t **)(uintptr_t)buf, num);
+	_odp_buffer_free_multi((odp_buffer_hdr_t **)(uintptr_t)buf, num);
 }
 
 void odp_pool_print(odp_pool_t pool_hdl)

@@ -405,11 +405,11 @@ static inline odp_packet_hdr_t *alloc_segments(pool_t *pool, int num)
 	odp_packet_hdr_t *pkt_hdr[num];
 	int ret;
 
-	ret = buffer_alloc_multi(pool, (odp_buffer_hdr_t **)pkt_hdr, num);
+	ret = _odp_buffer_alloc_multi(pool, (odp_buffer_hdr_t **)pkt_hdr, num);
 
 	if (odp_unlikely(ret != num)) {
 		if (ret > 0)
-			buffer_free_multi((odp_buffer_hdr_t **)pkt_hdr, ret);
+			_odp_buffer_free_multi((odp_buffer_hdr_t **)pkt_hdr, ret);
 
 		return NULL;
 	}
@@ -523,13 +523,12 @@ static inline void packet_free_multi(odp_buffer_hdr_t *hdr[], int num)
 		/* Skip references and pack to be freed headers to array head */
 		if (odp_unlikely(num_ref))
 			hdr[i - num_ref] = hdr[i];
-
 	}
 
 	num -= num_ref;
 
 	if (odp_likely(num))
-		buffer_free_multi(hdr, num);
+		_odp_buffer_free_multi(hdr, num);
 }
 
 static inline void free_all_segments(odp_packet_hdr_t *pkt_hdr, int num)
@@ -626,8 +625,8 @@ static inline int packet_alloc(pool_t *pool, uint32_t len, int max_pkt,
 	odp_packet_hdr_t *hdr_next;
 	odp_packet_hdr_t *hdr;
 
-	num_buf = buffer_alloc_multi(pool, (odp_buffer_hdr_t **)pkt_hdr,
-				     max_buf);
+	num_buf = _odp_buffer_alloc_multi(pool, (odp_buffer_hdr_t **)pkt_hdr,
+					  max_buf);
 
 	/* Failed to allocate all segments */
 	if (odp_unlikely(num_buf != max_buf)) {
@@ -640,7 +639,7 @@ static inline int packet_alloc(pool_t *pool, uint32_t len, int max_pkt,
 			odp_buffer_hdr_t **p;
 
 			p = (odp_buffer_hdr_t **)&pkt_hdr[num_buf - num_free];
-			buffer_free_multi(p, num_free);
+			_odp_buffer_free_multi(p, num_free);
 		}
 
 		if (num == 0)
@@ -673,8 +672,8 @@ static inline int packet_alloc(pool_t *pool, uint32_t len, int max_pkt,
 	return num;
 }
 
-int packet_alloc_multi(odp_pool_t pool_hdl, uint32_t len,
-		       odp_packet_t pkt[], int max_num)
+int _odp_packet_alloc_multi(odp_pool_t pool_hdl, uint32_t len,
+			    odp_packet_t pkt[], int max_num)
 {
 	pool_t *pool = pool_entry_from_hdl(pool_hdl);
 	int num, num_seg;
@@ -692,7 +691,7 @@ odp_packet_t odp_packet_alloc(odp_pool_t pool_hdl, uint32_t len)
 	int num, num_seg;
 
 	if (odp_unlikely(pool->params.type != ODP_POOL_PACKET)) {
-		__odp_errno = EINVAL;
+		_odp_errno = EINVAL;
 		return ODP_PACKET_INVALID;
 	}
 
@@ -715,7 +714,7 @@ int odp_packet_alloc_multi(odp_pool_t pool_hdl, uint32_t len,
 	int num, num_seg;
 
 	if (odp_unlikely(pool->params.type != ODP_POOL_PACKET)) {
-		__odp_errno = EINVAL;
+		_odp_errno = EINVAL;
 		return -1;
 	}
 
@@ -2879,4 +2878,57 @@ int odp_packet_payload_offset_set(odp_packet_t pkt, uint32_t offset)
 	pkt_hdr->payload_offset      = offset;
 
 	return 0;
+}
+
+void odp_packet_aging_tmo_set(odp_packet_t pkt, uint64_t tmo_ns)
+{
+	(void)pkt;
+	(void)tmo_ns;
+}
+
+uint64_t odp_packet_aging_tmo(odp_packet_t pkt)
+{
+	(void)pkt;
+	return 0;
+}
+
+int odp_packet_tx_compl_request(odp_packet_t pkt, const odp_packet_tx_compl_opt_t *opt)
+{
+	(void)pkt;
+	(void)opt;
+
+	return -1;
+}
+
+int odp_packet_has_tx_compl_request(odp_packet_t pkt)
+{
+	(void)pkt;
+
+	return 0;
+}
+
+odp_packet_tx_compl_t odp_packet_tx_compl_from_event(odp_event_t ev)
+{
+	(void)ev;
+
+	return ODP_PACKET_TX_COMPL_INVALID;
+}
+
+odp_event_t odp_packet_tx_compl_to_event(odp_packet_tx_compl_t tx_compl)
+{
+	(void)tx_compl;
+
+	return ODP_EVENT_INVALID;
+}
+
+void odp_packet_tx_compl_free(odp_packet_tx_compl_t tx_compl)
+{
+	(void)tx_compl;
+}
+
+void *odp_packet_tx_compl_user_ptr(odp_packet_tx_compl_t tx_compl)
+{
+	(void)tx_compl;
+
+	return NULL;
 }

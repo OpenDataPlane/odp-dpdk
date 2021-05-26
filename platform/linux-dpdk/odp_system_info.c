@@ -172,7 +172,8 @@ static char *get_hugepage_dir(uint64_t hugepage_sz)
 					retval = strdup(tokens[MOUNTPT]);
 					break;
 				}
-			} else { /* there is an explicit page size, so check it */
+			} else {
+				/* there is an explicit page size, so check it */
 				pagesz = rte_str_to_size(&pagesz_str[pagesize_opt_len]);
 				if (pagesz == hugepage_sz) {
 					retval = strdup(tokens[MOUNTPT]);

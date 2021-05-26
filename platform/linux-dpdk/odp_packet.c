@@ -61,18 +61,18 @@ const _odp_packet_inline_offset_t _odp_packet_inline ODP_ALIGNED_CACHE = {
 #include <odp/visibility_end.h>
 
 /* Catch if DPDK mbuf members sizes have changed */
-struct rte_mbuf dummy;
-ODP_STATIC_ASSERT(sizeof(dummy.data_off) == sizeof(uint16_t),
+struct rte_mbuf _odp_dummy_mbuf;
+ODP_STATIC_ASSERT(sizeof(_odp_dummy_mbuf.data_off) == sizeof(uint16_t),
 		  "data_off should be uint16_t");
-ODP_STATIC_ASSERT(sizeof(dummy.pkt_len) == sizeof(uint32_t),
+ODP_STATIC_ASSERT(sizeof(_odp_dummy_mbuf.pkt_len) == sizeof(uint32_t),
 		  "pkt_len should be uint32_t");
-ODP_STATIC_ASSERT(sizeof(dummy.data_len) == sizeof(uint16_t),
+ODP_STATIC_ASSERT(sizeof(_odp_dummy_mbuf.data_len) == sizeof(uint16_t),
 		  "data_len should be uint16_t");
-ODP_STATIC_ASSERT(sizeof(dummy.nb_segs) == sizeof(uint16_t),
+ODP_STATIC_ASSERT(sizeof(_odp_dummy_mbuf.nb_segs) == sizeof(uint16_t),
 		  "nb_segs should be uint16_t");
-ODP_STATIC_ASSERT(sizeof(dummy.hash.rss) == sizeof(uint32_t),
+ODP_STATIC_ASSERT(sizeof(_odp_dummy_mbuf.hash.rss) == sizeof(uint32_t),
 		  "hash.rss should be uint32_t");
-ODP_STATIC_ASSERT(sizeof(dummy.ol_flags) == sizeof(uint64_t),
+ODP_STATIC_ASSERT(sizeof(_odp_dummy_mbuf.ol_flags) == sizeof(uint64_t),
 		  "ol_flags should be uint64_t");
 
 /* Check that invalid values are the same. Some versions of Clang have trouble
@@ -118,7 +118,7 @@ static odp_packet_t packet_alloc(pool_t *pool, uint32_t len)
 		struct rte_mbuf *mbuf = rte_pktmbuf_alloc(pool->rte_mempool);
 
 		if (odp_unlikely(mbuf == NULL)) {
-			__odp_errno = ENOMEM;
+			_odp_errno = ENOMEM;
 			return ODP_PACKET_INVALID;
 		}
 		pkt_hdr = (odp_packet_hdr_t *)mbuf;
@@ -133,13 +133,13 @@ static odp_packet_t packet_alloc(pool_t *pool, uint32_t len)
 
 		/* Check num_seg here so rte_pktmbuf_chain() always succeeds */
 		if (odp_unlikely(num_seg > RTE_MBUF_MAX_NB_SEGS)) {
-			__odp_errno = EOVERFLOW;
+			_odp_errno = EOVERFLOW;
 			return ODP_PACKET_INVALID;
 		}
 
 		ret = rte_pktmbuf_alloc_bulk(pool->rte_mempool, mbufs, num_seg);
 		if (odp_unlikely(ret)) {
-			__odp_errno = ENOMEM;
+			_odp_errno = ENOMEM;
 			return ODP_PACKET_INVALID;
 		}
 
@@ -171,7 +171,7 @@ odp_packet_t odp_packet_alloc(odp_pool_t pool_hdl, uint32_t len)
 	pool_t *pool = pool_entry_from_hdl(pool_hdl);
 
 	if (odp_unlikely(pool->params.type != ODP_POOL_PACKET)) {
-		__odp_errno = EINVAL;
+		_odp_errno = EINVAL;
 		return ODP_PACKET_INVALID;
 	}
 
@@ -188,7 +188,7 @@ int odp_packet_alloc_multi(odp_pool_t pool_hdl, uint32_t len,
 	pool_t *pool = pool_entry_from_hdl(pool_hdl);
 
 	if (odp_unlikely(pool->params.type != ODP_POOL_PACKET)) {
-		__odp_errno = EINVAL;
+		_odp_errno = EINVAL;
 		return -1;
 	}
 
@@ -198,7 +198,7 @@ int odp_packet_alloc_multi(odp_pool_t pool_hdl, uint32_t len,
 	for (i = 0; i < num; i++) {
 		pkt[i] = packet_alloc(pool, len);
 		if (odp_unlikely(pkt[i] == ODP_PACKET_INVALID))
-			return (i == 0 && __odp_errno != ENOMEM) ? -1 : i;
+			return (i == 0 && _odp_errno != ENOMEM) ? -1 : i;
 	}
 	return i;
 }
@@ -2320,4 +2320,57 @@ int odp_packet_payload_offset_set(odp_packet_t pkt, uint32_t offset)
 	pkt_hdr->payload_offset      = offset;
 
 	return 0;
+}
+
+void odp_packet_aging_tmo_set(odp_packet_t pkt, uint64_t tmo_ns)
+{
+	(void)pkt;
+	(void)tmo_ns;
+}
+
+uint64_t odp_packet_aging_tmo(odp_packet_t pkt)
+{
+	(void)pkt;
+	return 0;
+}
+
+int odp_packet_tx_compl_request(odp_packet_t pkt, const odp_packet_tx_compl_opt_t *opt)
+{
+	(void)pkt;
+	(void)opt;
+
+	return -1;
+}
+
+int odp_packet_has_tx_compl_request(odp_packet_t pkt)
+{
+	(void)pkt;
+
+	return 0;
+}
+
+odp_packet_tx_compl_t odp_packet_tx_compl_from_event(odp_event_t ev)
+{
+	(void)ev;
+
+	return ODP_PACKET_TX_COMPL_INVALID;
+}
+
+odp_event_t odp_packet_tx_compl_to_event(odp_packet_tx_compl_t tx_compl)
+{
+	(void)tx_compl;
+
+	return ODP_EVENT_INVALID;
+}
+
+void odp_packet_tx_compl_free(odp_packet_tx_compl_t tx_compl)
+{
+	(void)tx_compl;
+}
+
+void *odp_packet_tx_compl_user_ptr(odp_packet_tx_compl_t tx_compl)
+{
+	(void)tx_compl;
+
+	return NULL;
 }

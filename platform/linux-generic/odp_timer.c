@@ -510,7 +510,7 @@ static inline odp_timer_t timer_alloc(timer_pool_t *tp, odp_queue_t queue, const
 		/* Add timer to queue */
 		_odp_queue_fn->timer_add(queue);
 	} else {
-		__odp_errno = ENFILE; /* Reusing file table overflow */
+		_odp_errno = ENFILE; /* Reusing file table overflow */
 		hdl = ODP_TIMER_INVALID;
 	}
 	odp_spinlock_unlock(&tp->lock);
@@ -583,12 +583,9 @@ static bool timer_reset(uint32_t idx, uint64_t abs_tck, odp_buffer_t *tmo_buf,
 
 			/* Atomic CAS will fail if we experienced torn reads,
 			 * retry update sequence until CAS succeeds */
-		} while (!_odp_atomic_u128_cmp_xchg_mm(
-					(_odp_atomic_u128_t *)tb,
-					(_uint128_t *)&old,
-					(_uint128_t *)&new,
-					_ODP_MEMMODEL_RLS,
-					_ODP_MEMMODEL_RLX));
+		} while (!_odp_atomic_u128_cmp_xchg_mm((_odp_atomic_u128_t *)tb,
+						       (_uint128_t *)&old, (_uint128_t *)&new,
+						       _ODP_MEMMODEL_RLS, _ODP_MEMMODEL_RLX));
 #elif __GCC_ATOMIC_LLONG_LOCK_FREE >= 2 && \
 	defined __GCC_HAVE_SYNC_COMPARE_AND_SWAP_8
 	/* Target supports lock-free 64-bit CAS (and probably exchange) */
@@ -816,10 +813,9 @@ static inline void timer_expire(timer_pool_t *tp, uint32_t idx, uint64_t tick)
 		new.exp_tck.v = exp_tck | TMO_INACTIVE;
 		new.tmo_buf = ODP_BUFFER_INVALID;
 
-		int succ = _odp_atomic_u128_cmp_xchg_mm(
-				(_odp_atomic_u128_t *)tb,
-				(_uint128_t *)&old, (_uint128_t *)&new,
-				_ODP_MEMMODEL_RLS, _ODP_MEMMODEL_RLX);
+		int succ = _odp_atomic_u128_cmp_xchg_mm((_odp_atomic_u128_t *)tb,
+							(_uint128_t *)&old, (_uint128_t *)&new,
+							_ODP_MEMMODEL_RLS, _ODP_MEMMODEL_RLX);
 		if (succ)
 			tmo_buf = old.tmo_buf;
 		/* Else CAS failed, something changed => skip timer
@@ -966,7 +962,7 @@ static inline void timer_pool_scan_inline(int num, odp_time_t now)
 	}
 }
 
-void _timer_run_inline(int dec)
+void _odp_timer_run_inline(int dec)
 {
 	odp_time_t now;
 	int num = timer_global->highest_tp_idx + 1;
@@ -1284,19 +1280,19 @@ odp_timer_pool_t odp_timer_pool_create(const char *name,
 
 	if ((param->res_ns && param->res_hz) ||
 	    (param->res_ns == 0 && param->res_hz == 0)) {
-		__odp_errno = EINVAL;
+		_odp_errno = EINVAL;
 		return ODP_TIMER_POOL_INVALID;
 	}
 
 	if (param->res_hz == 0 &&
 	    param->res_ns < timer_global->highest_res_ns) {
-		__odp_errno = EINVAL;
+		_odp_errno = EINVAL;
 		return ODP_TIMER_POOL_INVALID;
 	}
 
 	if (param->res_ns == 0 &&
 	    param->res_hz > timer_global->highest_res_hz) {
-		__odp_errno = EINVAL;
+		_odp_errno = EINVAL;
 		return ODP_TIMER_POOL_INVALID;
 	}
 

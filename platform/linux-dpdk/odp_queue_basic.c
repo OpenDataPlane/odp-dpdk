@@ -144,6 +144,7 @@ static int queue_init_global(void)
 	for (i = 0; i < CONFIG_MAX_QUEUES; i++) {
 		/* init locks */
 		queue_entry_t *queue = qentry_from_index(i);
+
 		LOCK_INIT(queue);
 		queue->s.index  = i;
 		queue->s.handle = (odp_queue_t)queue;
@@ -370,6 +371,7 @@ static int queue_destroy(odp_queue_t handle)
 {
 	int empty;
 	queue_entry_t *queue;
+
 	queue = qentry_from_handle(handle);
 
 	if (handle == ODP_QUEUE_INVALID)
@@ -1168,7 +1170,7 @@ static odp_event_t queue_api_deq(odp_queue_t handle)
 }
 
 /* API functions */
-_odp_queue_api_fn_t queue_basic_api = {
+_odp_queue_api_fn_t _odp_queue_basic_api = {
 	.queue_create = queue_create,
 	.queue_destroy = queue_destroy,
 	.queue_lookup = queue_lookup,
@@ -1192,7 +1194,7 @@ _odp_queue_api_fn_t queue_basic_api = {
 };
 
 /* Functions towards internal components */
-queue_fn_t queue_basic_fn = {
+queue_fn_t _odp_queue_basic_fn = {
 	.init_global = queue_init_global,
 	.term_global = queue_term_global,
 	.init_local = queue_init_local,

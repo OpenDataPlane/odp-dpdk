@@ -1,4 +1,5 @@
 /* Copyright (c) 2014-2018, Linaro Limited
+ * Copyright (c) 2021, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -119,6 +120,19 @@ static int queue_suite_term(void)
 }
 
 static void queue_test_capa(void)
+{
+	odp_queue_capability_t capa;
+
+	memset(&capa, 0, sizeof(odp_queue_capability_t));
+	CU_ASSERT_FATAL(odp_queue_capability(&capa) == 0);
+
+	CU_ASSERT(capa.max_queues > 0);
+	CU_ASSERT(capa.max_queues >= capa.plain.max_num);
+	CU_ASSERT(capa.max_queues >= capa.plain.lockfree.max_num);
+	CU_ASSERT(capa.max_queues >= capa.plain.waitfree.max_num);
+}
+
+static void queue_test_max_plain(void)
 {
 	odp_queue_capability_t capa;
 	odp_queue_param_t qparams;
@@ -600,6 +614,7 @@ static void queue_test_param(void)
 	CU_ASSERT(qparams.sched.sync == ODP_SCHED_SYNC_PARALLEL);
 	CU_ASSERT(qparams.sched.group == ODP_SCHED_GROUP_ALL);
 	CU_ASSERT(qparams.sched.lock_count == 0);
+	CU_ASSERT(qparams.order == ODP_QUEUE_ORDER_KEEP);
 	CU_ASSERT(qparams.nonblocking == ODP_BLOCKING);
 	CU_ASSERT(qparams.context == NULL);
 	CU_ASSERT(qparams.context_len == 0);
@@ -612,7 +627,7 @@ static void queue_test_param(void)
 	qparams.sched.group = ODP_SCHED_GROUP_WORKER;
 
 	queue = odp_queue_create("test_queue", &qparams);
-	CU_ASSERT(ODP_QUEUE_INVALID != queue);
+	CU_ASSERT_FATAL(ODP_QUEUE_INVALID != queue);
 	CU_ASSERT(odp_queue_to_u64(queue) !=
 		  odp_queue_to_u64(ODP_QUEUE_INVALID));
 	CU_ASSERT(queue == odp_queue_lookup("test_queue"));
@@ -631,7 +646,7 @@ static void queue_test_param(void)
 	/* Create queue with no name */
 	odp_queue_param_init(&qparams);
 	null_queue = odp_queue_create(NULL, &qparams);
-	CU_ASSERT(ODP_QUEUE_INVALID != null_queue);
+	CU_ASSERT_FATAL(ODP_QUEUE_INVALID != null_queue);
 	CU_ASSERT(odp_queue_context(null_queue) == NULL);
 
 	/* Plain type queue */
@@ -641,7 +656,7 @@ static void queue_test_param(void)
 	qparams.context_len = sizeof(queue_context);
 
 	queue = odp_queue_create("test_queue", &qparams);
-	CU_ASSERT(ODP_QUEUE_INVALID != queue);
+	CU_ASSERT_FATAL(ODP_QUEUE_INVALID != queue);
 	CU_ASSERT(queue == odp_queue_lookup("test_queue"));
 	CU_ASSERT(ODP_QUEUE_TYPE_PLAIN == odp_queue_type(queue));
 	CU_ASSERT(&queue_context == odp_queue_context(queue));
@@ -712,7 +727,7 @@ static void queue_test_info(void)
 
 	/* Create a plain queue and set context */
 	q_plain = odp_queue_create(nq_plain, NULL);
-	CU_ASSERT(ODP_QUEUE_INVALID != q_plain);
+	CU_ASSERT_FATAL(ODP_QUEUE_INVALID != q_plain);
 	CU_ASSERT(odp_queue_context_set(q_plain, q_plain_ctx,
 					sizeof(q_plain_ctx)) == 0);
 
@@ -730,7 +745,7 @@ static void queue_test_info(void)
 		printf("\n    Ordered locks NOT supported\n");
 	param.context = q_order_ctx;
 	q_order = odp_queue_create(nq_order, &param);
-	CU_ASSERT(ODP_QUEUE_INVALID != q_order);
+	CU_ASSERT_FATAL(ODP_QUEUE_INVALID != q_order);
 
 	/* Check info and call print for a plain queue */
 	CU_ASSERT(odp_queue_info(q_plain, &info) == 0);
@@ -967,6 +982,7 @@ static void queue_test_mt_plain_nonblock_lf(void)
 odp_testinfo_t queue_suite[] = {
 	ODP_TEST_INFO(queue_test_capa),
 	ODP_TEST_INFO(queue_test_mode),
+	ODP_TEST_INFO(queue_test_max_plain),
 	ODP_TEST_INFO(queue_test_burst),
 	ODP_TEST_INFO(queue_test_burst_spmc),
 	ODP_TEST_INFO(queue_test_burst_mpsc),

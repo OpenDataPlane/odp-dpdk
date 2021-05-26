@@ -3,7 +3,7 @@ AC_PREREQ([2.5])
 # ODP API version
 ##########################################################################
 m4_define([odpapi_generation_version], [1])
-m4_define([odpapi_major_version], [27])
+m4_define([odpapi_major_version], [28])
 m4_define([odpapi_minor_version], [0])
 m4_define([odpapi_point_version], [0])
 m4_define([odpapi_version],
@@ -43,7 +43,7 @@ AS_IF([test "$ac_cv_env_CFLAGS_set" = ""], [user_cflags=0], [user_cflags=1])
 # Initialize automake
 AM_INIT_AUTOMAKE([1.9 tar-pax subdir-objects foreign nostdinc -Wall -Werror])
 AC_CONFIG_SRCDIR([include/odp/api/spec/init.h])
-AM_CONFIG_HEADER([include/odp/autoheader_build.h include/odp/autoheader_external.h include/odp/autoheader_internal.h helper/include/odp/helper/autoheader_external.h])
+AC_CONFIG_HEADERS([include/odp/autoheader_build.h include/odp/autoheader_external.h include/odp/autoheader_internal.h helper/include/odp/helper/autoheader_external.h])
 
 AC_USE_SYSTEM_EXTENSIONS
 AC_SYS_LARGEFILE
@@ -138,7 +138,7 @@ AS_IF([test "$GCC" == yes],
 )
 
 ODP_CFLAGS="$ODP_CFLAGS -std=c99 -D_GNU_SOURCE"
-ODP_CXXFLAGS="$ODP_CXXFLAGS -std=c++11 -Wno-deprecated-register"
+ODP_CXXFLAGS="$ODP_CXXFLAGS -std=c++11"
 
 # Extra flags for example to suppress certain warning types
 ODP_CFLAGS="$ODP_CFLAGS $ODP_CFLAGS_EXTRA"
@@ -240,11 +240,10 @@ AC_ARG_ENABLE([abi-compat],
 	ODP_LIBSO_VERSION=0:0:0
 
 	# do not use -march=native with clang (due to possible failures on
-	# clang optimizations) or when user have defined CFLAGS (may contain
-	# another -march option).
+	# clang optimizations).
 	$CC --version | grep -q clang
 
-	if test $? -ne 0 -a $user_cflags -eq 0; then
+	if test $? -ne 0; then
 		ODP_CHECK_CFLAG([-march=native])
 	fi
     fi])
@@ -445,9 +444,9 @@ DX_INIT_DOXYGEN($PACKAGE_NAME,
 ##########################################################################
 # Default include setup
 ##########################################################################
-CFLAGS="$CFLAGS $ODP_CFLAGS $EXTRA_CFLAGS"
-CXXFLAGS="$CXXFLAGS $ODP_CXXFLAGS"
-LDFLAGS="$LDFLAGS $ODP_LTO_FLAGS"
+CFLAGS="$ODP_CFLAGS $CFLAGS"
+CXXFLAGS="$ODP_CXXFLAGS $CXXFLAGS"
+LDFLAGS="$ODP_LTO_FLAGS $LDFLAGS"
 
 AC_CONFIG_FILES([Makefile])
 AC_CONFIG_FILES([include/Makefile

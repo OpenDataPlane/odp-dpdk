@@ -181,7 +181,6 @@ static int queue_init(queue_entry_t *queue, const char *name,
 		sched_elem->schedq =
 			_odp_sched_queue_add(param->sched.group, prio);
 		ODP_ASSERT(sched_elem->schedq != NULL);
-
 	}
 
 	return 0;
@@ -218,9 +217,7 @@ static int queue_init_global(void)
 
 	/* Add the reorder window size */
 	pool_size += sizeof(reorder_window_t) * CONFIG_MAX_QUEUES;
-	/* Choose min_alloc and max_alloc such that buddy allocator is
-	 * is selected.
-	 */
+	/* Choose min_alloc and max_alloc such that buddy allocator is selected. */
 	min_alloc = 0;
 	max_alloc = CONFIG_SCAL_QUEUE_SIZE * sizeof(odp_buffer_hdr_t *);
 	queue_shm_pool = _odp_ishm_pool_create("queue_shm_pool",
@@ -674,8 +671,7 @@ static int _queue_enq_multi(odp_queue_t handle, odp_buffer_hdr_t *buf_hdr[],
 
 static int _queue_enq(odp_queue_t handle, odp_buffer_hdr_t *buf_hdr)
 {
-	return odp_likely(
-		_queue_enq_multi(handle, &buf_hdr, 1) == 1) ? 0 : -1;
+	return odp_likely(_queue_enq_multi(handle, &buf_hdr, 1) == 1) ? 0 : -1;
 }
 
 static int queue_enq_multi(odp_queue_t handle, const odp_event_t ev[], int num)
@@ -734,8 +730,7 @@ int _odp_queue_deq_sc(sched_elem_t *q, odp_event_t *evp, int num)
 	mask = q->cons_mask;
 	ring = q->cons_ring;
 	do {
-		*evp++ = odp_buffer_to_event(
-				buf_from_buf_hdr(ring[old_read & mask]));
+		*evp++ = odp_buffer_to_event(buf_from_buf_hdr(ring[old_read & mask]));
 	} while (++old_read != new_read);
 
 	/* Signal producers that empty slots are available
@@ -828,8 +823,7 @@ inline int _odp_queue_deq_mc(sched_elem_t *q, odp_event_t *evp, int num)
 	ret = _odp_queue_deq(q, hdr_tbl, num);
 	if (odp_likely(ret != 0)) {
 		for (evt_idx = 0; evt_idx < num; evt_idx++)
-			evp[evt_idx] = odp_buffer_to_event(
-					buf_from_buf_hdr(hdr_tbl[evt_idx]));
+			evp[evt_idx] = odp_buffer_to_event(buf_from_buf_hdr(hdr_tbl[evt_idx]));
 	}
 
 	return ret;
@@ -1024,11 +1018,11 @@ static void queue_print_all(void)
 	odp_queue_op_mode_t enq_mode;
 	odp_queue_op_mode_t deq_mode;
 	odp_queue_order_t order;
+	odp_schedule_sync_t sync;
+	int prio;
 	const char *bl_str;
 	char type_c, enq_c, deq_c, order_c, sync_c;
 	const int col_width = 24;
-	int prio = 0;
-	odp_schedule_sync_t sync = ODP_SCHED_SYNC_PARALLEL;
 
 	ODP_PRINT("\nList of all queues\n");
 	ODP_PRINT("------------------\n");
@@ -1050,6 +1044,8 @@ static void queue_print_all(void)
 		enq_mode = queue->s.param.enq_mode;
 		deq_mode = queue->s.param.deq_mode;
 		order    = queue->s.param.order;
+		prio     = queue->s.param.sched.prio;
+		sync     = queue->s.param.sched.sync;
 
 		UNLOCK(&queue->s.lock);
 
