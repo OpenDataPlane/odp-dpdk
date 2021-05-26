@@ -188,6 +188,16 @@ extern "C" {
  */
 
 /**
+ * @typedef odp_packet_tx_compl_t
+ * ODP Packet Tx completion
+ */
+
+/**
+ * @def ODP_PACKET_TX_COMPL_INVALID
+ * Invalid packet Tx completion
+ */
+
+/**
  * Protocol
  */
 typedef enum odp_proto_t {
@@ -2140,6 +2150,92 @@ uint32_t odp_packet_payload_offset(odp_packet_t pkt);
  */
 int odp_packet_payload_offset_set(odp_packet_t pkt, uint32_t offset);
 
+/**
+ * Enable or disable Tx packet aging
+ *
+ * Enable or disable Tx packet drop based on packet age. When enabled, packet will be dropped
+ * if it is in Tx pktout queue or traffic shapers/schedulers for longer than timeout set.
+ *
+ * When tmo_ns is
+ * !0: Aging is enabled
+ *  0: Aging is disabled
+ *
+ * Aging is disabled by default. Maximum tmo value is defined by max_tx_aging_tmo_ns capa.
+ *
+ * @param pkt     Packet handle
+ * @param tmo_ns  Packet aging drop timeout in nsec. When 0, aging drop is disabled (default).
+ *
+ * @see odp_pktio_capability_t::max_tx_aging_tmo_ns
+ */
+void odp_packet_aging_tmo_set(odp_packet_t pkt, uint64_t tmo_ns);
+
+/**
+ * Check if packet has Tx aging drop enabled
+ *
+ * @param pkt Packet handle
+ *
+ * @return Aging drop timeout if enabled.
+ * @retval >0  Aging drop timeout in nano seconds and implies aging drop is enabled.
+ * @retval  0  If Aging drop is disabled.
+ */
+uint64_t odp_packet_aging_tmo(odp_packet_t pkt);
+
+/** Packet Tx completion mode */
+typedef enum odp_packet_tx_compl_mode_t {
+	/** Packet Tx completion event is disabled
+	 *
+	 * When mode is disabled, all other fields of odp_packet_tx_compl_opt_t are ignored.
+	 */
+	ODP_PACKET_TX_COMPL_DISABLED,
+	/** Packet Tx completion event is sent for all packets (both transmitted and dropped) */
+	ODP_PACKET_TX_COMPL_ALL,
+} odp_packet_tx_compl_mode_t;
+
+/**
+ * Tx completion request options
+ */
+typedef struct odp_packet_tx_compl_opt_t {
+	/** Queue handle
+	 *
+	 * Tx completion event will be posted to ODP queue identified by this handle.
+	 */
+	odp_queue_t queue;
+
+	/** Packet Tx completion event mode */
+	odp_packet_tx_compl_mode_t mode;
+
+} odp_packet_tx_compl_opt_t;
+
+/**
+ * Request Tx completion event.
+ *
+ * Enables or disables TX completion event request for the packet. When
+ * enabled, an event of type ODP_EVENT_PACKET_TX_COMPL will be sent to the
+ * destination queue based on the TX completion mode. The event is sent only
+ * after pktio interface has finished processing the packet. A previously
+ * enabled request can be disabled by setting the mode to
+ * ODP_PACKET_TX_COMPL_DISABLED.
+ *
+ * TX completion event request is disabled by default.
+ *
+ * @param pkt     Packet handle
+ * @param opt     Points to TX completion event generation options
+ *
+ * @retval 0  On success
+ * @retval <0 On failure
+ */
+int odp_packet_tx_compl_request(odp_packet_t pkt, const odp_packet_tx_compl_opt_t *opt);
+
+/**
+ * Check if TX completion event is requested for the packet
+ *
+ * @param pkt     Packet handle
+ *
+ * @retval non-zero  TX completion event is requested
+ * @retval 0         TX completion event is not requested
+ */
+int odp_packet_has_tx_compl_request(odp_packet_t pkt);
+
 /*
  *
  * Packet vector handling routines
@@ -2314,6 +2410,61 @@ void odp_packet_vector_print(odp_packet_vector_t pktv);
  * odp_packet_vector_t handle.
  */
 uint64_t odp_packet_vector_to_u64(odp_packet_vector_t hdl);
+
+/*
+ *
+ * Packet Tx completion event handling routines
+ * ********************************************************
+ */
+
+/**
+ * Get packet Tx completion handle from event
+ *
+ * Converts an ODP_EVENT_PACKET_TX_COMPL type event to packet Tx completion
+ * handle.
+ *
+ * @param ev Event handle
+ *
+ * @return Packet Tx completion handle
+ *
+ * @see odp_event_type()
+ */
+odp_packet_tx_compl_t odp_packet_tx_compl_from_event(odp_event_t ev);
+
+/** Convert packet Tx completion to event
+  *
+  * @param tx_compl Packet Tx completion
+  *
+  * @return Event handle
+  */
+odp_event_t odp_packet_tx_compl_to_event(odp_packet_tx_compl_t tx_compl);
+
+/**
+ * Free packet Tx completion
+ *
+ * Frees the packet Tx completion back to platform. It frees packet Tx
+ * completion that gets allocated as part of packet Tx completion request
+ * for a given packet.
+ *
+ * @param tx_compl Packet Tx completion handle
+ *
+ * @see odp_packet_tx_completion_request()
+ */
+void odp_packet_tx_compl_free(odp_packet_tx_compl_t tx_compl);
+
+/**
+ * User context pointer
+ *
+ * Return user context pointer from packet Tx completion event.
+ * This is the same value set to packet using odp_packet_user_ptr_set().
+ *
+ * @param tx_compl  Packet Tx completion handle
+ *
+ * @return User context pointer
+ *
+ * @see odp_packet_user_ptr_set()
+ */
+void *odp_packet_tx_compl_user_ptr(odp_packet_tx_compl_t tx_compl);
 
 /*
  *

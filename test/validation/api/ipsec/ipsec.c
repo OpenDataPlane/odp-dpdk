@@ -1,5 +1,5 @@
 /* Copyright (c) 2017-2018, Linaro Limited
- * Copyright (c) 2019-2020, Nokia
+ * Copyright (c) 2018-2021, Nokia
  * Copyright (c) 2020, Marvell
  * All rights reserved.
  *
@@ -16,9 +16,9 @@
 #include "test_vectors.h"
 
 struct suite_context_s suite_context;
+static odp_ipsec_capability_t capa;
 
 #define PKT_POOL_NUM  64
-#define PKT_POOL_LEN  (1 * 1024)
 
 #define PACKET_USER_PTR	((void *)0x1212fefe)
 #define IPSEC_SA_CTX	((void *)0xfefefafa)
@@ -124,11 +124,6 @@ int ipsec_check(odp_bool_t ah,
 		odp_auth_alg_t auth,
 		uint32_t auth_bits)
 {
-	odp_ipsec_capability_t capa;
-
-	if (odp_ipsec_capability(&capa) < 0)
-		return ODP_TEST_INACTIVE;
-
 	if ((ODP_IPSEC_OP_MODE_SYNC == suite_context.inbound_op_mode &&
 	     ODP_SUPPORT_NO == capa.op_mode_sync) ||
 	    (ODP_IPSEC_OP_MODE_SYNC == suite_context.outbound_op_mode &&
@@ -288,9 +283,10 @@ void ipsec_sa_param_fill(odp_ipsec_sa_param_t *param,
 	odp_ipsec_sa_param_init(param);
 	param->dir = in ? ODP_IPSEC_DIR_INBOUND :
 			  ODP_IPSEC_DIR_OUTBOUND;
-	if (in)
+	if (in) {
 		param->inbound.lookup_mode = ODP_IPSEC_LOOKUP_SPI;
-
+		param->inbound.antireplay_ws = capa.max_antireplay_ws;
+	}
 	param->proto = ah ? ODP_IPSEC_AH :
 			    ODP_IPSEC_ESP;
 
@@ -321,6 +317,18 @@ void ipsec_sa_param_fill(odp_ipsec_sa_param_t *param,
 
 	if (auth_key_extra)
 		param->crypto.auth_key_extra = *auth_key_extra;
+
+	/*
+	 * Let's use arbitrary non-zero life time values to get life time
+	 * checking code paths exercised. Let's not use very small values
+	 * to avoid unexpected expiration with implementations that do
+	 * not have packet-accurate life time checking but may report
+	 * expiration a bit early.
+	 */
+	param->lifetime.soft_limit.bytes = 900 * 1000;
+	param->lifetime.hard_limit.bytes = 1000 * 1000;
+	param->lifetime.soft_limit.packets = 9000 * 1000;
+	param->lifetime.hard_limit.packets = 10000 * 1000;
 }
 
 void ipsec_sa_destroy(odp_ipsec_sa_t sa)
@@ -817,6 +825,35 @@ static void ipsec_pkt_auth_err_set(odp_packet_t pkt)
 	odp_packet_copy_from_mem(pkt, len - sizeof(data), sizeof(data), &data);
 }
 
+static void ipsec_pkt_v4_check_udp_encap(odp_packet_t pkt)
+{
+	uint32_t l3_off = odp_packet_l3_offset(pkt);
+	odph_ipv4hdr_t ip;
+
+	odp_packet_copy_to_mem(pkt, l3_off, sizeof(ip), &ip);
+
+	CU_ASSERT(ip.proto == ODPH_IPPROTO_UDP);
+}
+
+static void ipsec_pkt_v6_check_udp_encap(odp_packet_t pkt)
+{
+	uint32_t l3_off = odp_packet_l3_offset(pkt);
+	odph_ipv6hdr_ext_t ext;
+	odph_ipv6hdr_t ip;
+	uint8_t next_hdr;
+
+	odp_packet_copy_to_mem(pkt, l3_off, sizeof(ip), &ip);
+
+	next_hdr = ip.next_hdr;
+
+	if (ip.next_hdr == ODPH_IPPROTO_HOPOPTS) {
+		odp_packet_copy_to_mem(pkt, l3_off + sizeof(ip), sizeof(ext), &ext);
+		next_hdr = ext.next_hdr;
+	}
+
+	CU_ASSERT(next_hdr == ODPH_IPPROTO_UDP);
+}
+
 void ipsec_check_in_one(const ipsec_test_part *part, odp_ipsec_sa_t sa)
 {
 	int num_out = part->num_pkt;
@@ -961,6 +998,14 @@ void ipsec_check_out_in_one(const ipsec_test_part *part,
 		if (part->flags.stats == IPSEC_TEST_STATS_AUTH_ERR)
 			ipsec_pkt_auth_err_set(pkto[i]);
 
+		if (part->flags.udp_encap) {
+			if ((!part->flags.tunnel && part->flags.v6) ||
+			    (part->flags.tunnel && part->flags.tunnel_is_v6))
+				ipsec_pkt_v6_check_udp_encap(pkto[i]);
+			else
+				ipsec_pkt_v4_check_udp_encap(pkto[i]);
+		}
+
 		pkt_in.len = odp_packet_len(pkto[i]);
 		pkt_in.l2_offset = odp_packet_l2_offset(pkto[i]);
 		pkt_in.l3_offset = odp_packet_l3_offset(pkto[i]);
@@ -1049,19 +1094,19 @@ int ipsec_init(odp_instance_t *inst, odp_ipsec_op_mode_t mode)
 	}
 
 	odp_pool_param_init(&params);
-	params.pkt.seg_len = PKT_POOL_LEN;
-	params.pkt.len     = PKT_POOL_LEN;
+	params.pkt.seg_len = MAX_PKT_LEN;
+	params.pkt.len     = MAX_PKT_LEN;
 	params.pkt.num     = PKT_POOL_NUM;
 	params.type        = ODP_POOL_PACKET;
 
 	if (pool_capa.pkt.max_seg_len &&
-	    PKT_POOL_LEN > pool_capa.pkt.max_seg_len) {
+	    MAX_PKT_LEN > pool_capa.pkt.max_seg_len) {
 		fprintf(stderr, "Warning: small packet segment length\n");
 		params.pkt.seg_len = pool_capa.pkt.max_seg_len;
 	}
 
 	if (pool_capa.pkt.max_len &&
-	    PKT_POOL_LEN > pool_capa.pkt.max_len) {
+	    MAX_PKT_LEN > pool_capa.pkt.max_len) {
 		fprintf(stderr, "Pool max packet length too small\n");
 		return -1;
 	}
@@ -1094,7 +1139,6 @@ int ipsec_init(odp_instance_t *inst, odp_ipsec_op_mode_t mode)
 
 int ipsec_config(odp_instance_t ODP_UNUSED inst)
 {
-	odp_ipsec_capability_t capa;
 	odp_ipsec_config_t ipsec_config;
 
 	if (odp_ipsec_capability(&capa) < 0)
@@ -1118,6 +1162,7 @@ int ipsec_config(odp_instance_t ODP_UNUSED inst)
 		return 0;
 
 	odp_ipsec_config_init(&ipsec_config);
+	ipsec_config.max_num_sa = capa.max_num_sa;
 	ipsec_config.inbound_mode = suite_context.inbound_op_mode;
 	ipsec_config.outbound_mode = suite_context.outbound_op_mode;
 	ipsec_config.outbound.all_chksum = ~0;

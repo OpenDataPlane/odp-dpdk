@@ -772,7 +772,6 @@ static void lso_send_ipv4(int use_opt)
 
 		ODPH_DBG("    LSO segment[%i] payload:  %u bytes\n", i, payload_len);
 
-		CU_ASSERT(odp_packet_has_ipv4(packet[i]));
 		CU_ASSERT(odp_packet_has_ipfrag(packet[i]));
 		CU_ASSERT(odp_packet_has_error(packet[i]) == 0);
 		CU_ASSERT(payload_len <= IPV4_MAX_PAYLOAD);

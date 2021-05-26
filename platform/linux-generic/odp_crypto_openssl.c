@@ -37,7 +37,7 @@
 #define _ODP_HAVE_CHACHA20_POLY1305 0
 #endif
 
-#define MAX_SESSIONS 32
+#define MAX_SESSIONS 4000
 #define AES_BLOCK_SIZE 16
 #define AES_KEY_LENGTH 16
 
@@ -314,9 +314,9 @@ null_crypto_routine(odp_packet_t pkt ODP_UNUSED,
 }
 
 static void
-null_crypto_init_routine(odp_crypto_generic_session_t *session ODP_UNUSED)
+null_crypto_init_routine(odp_crypto_generic_session_t *session)
 {
-	return;
+	(void)session;
 }
 
 /* Mimic new OpenSSL 1.1.y API */
@@ -1849,6 +1849,8 @@ int odp_crypto_capability(odp_crypto_capability_t *capa)
 
 	capa->sync_mode = ODP_SUPPORT_PREFERRED;
 	capa->async_mode = ODP_SUPPORT_YES;
+	capa->queue_type_plain = 1;
+	capa->queue_type_sched = 1;
 
 	capa->ciphers.bit.null       = 1;
 	capa->ciphers.bit.trides_cbc = 1;

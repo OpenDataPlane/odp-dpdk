@@ -120,12 +120,14 @@ int _odp_classification_init_global(void)
 	for (i = 0; i < CLS_COS_MAX_ENTRY; i++) {
 		/* init locks */
 		cos_t *cos = get_cos_entry_internal(_odp_cos_from_ndx(i));
+
 		LOCK_INIT(&cos->s.lock);
 	}
 
 	for (i = 0; i < CLS_PMR_MAX_ENTRY; i++) {
 		/* init locks */
 		pmr_t *pmr = get_pmr_entry_internal(_odp_pmr_from_ndx(i));
+
 		LOCK_INIT(&pmr->s.lock);
 	}
 
@@ -290,8 +292,7 @@ odp_cos_t odp_cls_cos_create(const char *name, const odp_cls_cos_param_t *param)
 							   param->hash_proto);
 				tbl_index = i * CLS_COS_QUEUE_MAX;
 				for (j = 0; j < param->num_queue; j++) {
-					queue = odp_queue_create(NULL, &cos->s.
-								 queue_param);
+					queue = odp_queue_create(NULL, &cos->s.queue_param);
 					if (queue == ODP_QUEUE_INVALID) {
 						/* unwind the queues */
 						_cls_queue_unwind(tbl_index, j);
@@ -1780,4 +1781,102 @@ uint64_t odp_cos_to_u64(odp_cos_t hdl)
 uint64_t odp_pmr_to_u64(odp_pmr_t hdl)
 {
 	return _odp_pri(hdl);
+}
+
+static
+void print_cos_ident(struct cos_s *cos)
+{
+	if (strlen(cos->name))
+		ODP_PRINT("%s", cos->name);
+
+	ODP_PRINT("(%" PRIu64 ")\n",
+		  odp_cos_to_u64(_odp_cos_from_ndx(cos->index)));
+}
+
+static
+void print_queue_ident(odp_queue_t q)
+{
+	odp_queue_info_t info;
+
+	if (!odp_queue_info(q, &info) && strlen(info.name))
+		ODP_PRINT("%s", info.name);
+	else
+		ODP_PRINT("%" PRIx64, odp_queue_to_u64(q));
+
+	ODP_PRINT("\n");
+}
+
+static
+void print_hex(const void *vp, int len)
+{
+	const uint8_t *p = vp;
+
+	for (int i = 0; i < len; i++)
+		ODP_PRINT("%02x", *p++);
+}
+
+static
+void cls_print_cos(struct cos_s *cos)
+{
+	uint32_t num_rule = odp_atomic_load_u32(&cos->num_rule);
+	bool first = true;
+
+	ODP_PRINT("cos: ");
+	print_cos_ident(cos);
+	ODP_PRINT("    queue: ");
+	print_queue_ident(cos->queue);
+
+	for (uint32_t j = 0; j < num_rule; j++) {
+		struct pmr_s *pmr = &cos->pmr[j]->s;
+
+		LOCK(&pmr->lock);
+		for (uint32_t k = 0; k < pmr->num_pmr; k++) {
+			pmr_term_value_t *v = &pmr->pmr_term_value[k];
+
+			if (first)
+				ODP_PRINT("    rules: ");
+			else
+				ODP_PRINT("           ");
+
+			first = false;
+
+			ODP_PRINT("%s: ", format_pmr_name(v->term));
+
+			if (v->term == ODP_PMR_CUSTOM_FRAME ||
+			    v->term == ODP_PMR_CUSTOM_L3)
+				ODP_PRINT("offset:%" PRIu32 " ", v->offset);
+
+			if (v->range_term) {
+				ODP_PRINT("<range>");
+			} else {
+				print_hex(v->match.value_u8, v->val_sz);
+				ODP_PRINT(" ");
+				print_hex(v->match.mask_u8, v->val_sz);
+			}
+
+			ODP_PRINT(" -> ");
+
+			if (pmr->mark)
+				ODP_PRINT("mark:%" PRIu16 " ", pmr->mark);
+
+			print_cos_ident(&cos->linked_cos[j]->s);
+		}
+		UNLOCK(&pmr->lock);
+	}
+}
+
+void odp_cls_print_all(void)
+{
+	ODP_PRINT("\n"
+		  "Classifier info\n"
+		  "---------------\n\n");
+
+	for (uint32_t i = 0; i < CLS_COS_MAX_ENTRY; i++) {
+		struct cos_s *cos = &cos_tbl->cos_entry[i].s;
+
+		LOCK(&cos->lock);
+		if (cos->valid)
+			cls_print_cos(cos);
+		UNLOCK(&cos->lock);
+	}
 }

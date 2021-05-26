@@ -393,7 +393,10 @@ static int hp_get_cached(uint64_t len)
 {
 	int fd;
 
-	if (NULL == hpc || hpc->idx < 0 || len != hpc->len)
+	if (hpc == NULL)
+		return -1;
+
+	if (hpc->idx < 0 || len != hpc->len)
 		return -1;
 
 	fd = hpc->fd[hpc->idx];
@@ -404,12 +407,17 @@ static int hp_get_cached(uint64_t len)
 
 static int hp_put_cached(int fd)
 {
-	if (NULL == hpc || odp_unlikely(++hpc->idx >= hpc->total)) {
-		hpc->idx--;
+	if (hpc == NULL) {
+		ODP_ERR("Bad hpc state\n");
+		return -1;
+	}
+
+	if (odp_unlikely((hpc->idx + 1) >= hpc->total)) {
 		ODP_ERR("Trying to put more FD than allowed: %d\n", fd);
 		return -1;
 	}
 
+	hpc->idx++;
 	hpc->fd[hpc->idx] = fd;
 
 	return 0;
@@ -428,7 +436,7 @@ static void *alloc_fragment(uintptr_t size, int block_index, intptr_t align,
 	ishm_fragment_t *fragmnt;
 	*best_fragmnt = NULL;
 	ishm_fragment_t *rem_fragmnt;
-	uintptr_t border;/* possible start of new fragment (next alignement)  */
+	uintptr_t border;/* possible start of new fragment (next alignment)  */
 	intptr_t left;	 /* room remaining after, if the segment is allocated */
 	uintptr_t remainder = odp_global_ro.shm_max_memory;
 
@@ -1120,7 +1128,7 @@ int _odp_ishm_reserve(const char *name, uint64_t size, int fd,
 		 * can request more: If the user requirement exceeds the page
 		 * size then we have to make sure the block will be mapped at
 		 * the same address every where, otherwise alignment may be
-		 * be wrong for some process */
+		 * wrong for some process */
 		hp_align = align;
 		if (hp_align <= page_hp_size)
 			hp_align = page_hp_size;
@@ -1177,7 +1185,7 @@ int _odp_ishm_reserve(const char *name, uint64_t size, int fd,
 		 * can request more: If the user requirement exceeds the page
 		 * size then we have to make sure the block will be mapped at
 		 * the same address every where, otherwise alignment may be
-		 * be wrong for some process */
+		 * wrong for some process */
 		if (align <= odp_sys_page_size())
 			align = odp_sys_page_size();
 		else
@@ -2058,7 +2066,6 @@ int _odp_ishm_status(const char *title)
 		  "", len_total / 1024 / 1024,
 		  "", lost_total / 1024 / 1024);
 
-
 	/* display the virtual space allocations... : */
 	ODP_PRINT("\nishm virtual space:\n");
 	for (fragmnt = ishm_ftbl->used_fragmnts;
@@ -2080,7 +2087,7 @@ int _odp_ishm_status(const char *title)
 
 		/* some other sanity checks: */
 		if (fragmnt->prev != previous)
-				ODP_ERR("chaining error\n");
+			ODP_ERR("chaining error\n");
 
 		if (fragmnt != ishm_ftbl->used_fragmnts) {
 			if ((uintptr_t)fragmnt->start != last_address + 1)

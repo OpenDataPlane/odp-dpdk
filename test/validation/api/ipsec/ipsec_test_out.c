@@ -1,6 +1,6 @@
 /* Copyright (c) 2017-2018, Linaro Limited
  * Copyright (c) 2020, Marvell
- * Copyright (c) 2020, Nokia
+ * Copyright (c) 2020-2021, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -395,6 +395,18 @@ static void test_out_in_common(ipsec_test_flags *flags,
 			       const odp_crypto_key_t *cipher_key_extra,
 			       const odp_crypto_key_t *auth_key_extra)
 {
+	odp_ipsec_tunnel_param_t *tun_ptr = NULL;
+	odp_ipsec_tunnel_param_t tunnel;
+	uint32_t src_v4 = IPV4ADDR(10, 0, 111, 2);
+	uint32_t dst_v4 = IPV4ADDR(10, 0, 222, 2);
+	uint8_t src_v6[16] = {
+		0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00,
+		0x02, 0x11, 0x43, 0xff, 0xfe, 0x4a, 0xd7, 0x0a,
+	};
+	uint8_t dst_v6[16] = {
+		0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x16,
+	};
 	odp_ipsec_sa_param_t param;
 	odp_ipsec_stats_t stats;
 	odp_ipsec_sa_t sa_out;
@@ -407,21 +419,45 @@ static void test_out_in_common(ipsec_test_flags *flags,
 	    (auth == ODP_AUTH_ALG_NULL))
 		return;
 
+	if (flags->tunnel) {
+		if (flags->tunnel_is_v6) {
+			memset(&tunnel, 0, sizeof(odp_ipsec_tunnel_param_t));
+			tunnel.type = ODP_IPSEC_TUNNEL_IPV6;
+			tunnel.ipv6.src_addr = &src_v6;
+			tunnel.ipv6.dst_addr = &dst_v6;
+			tunnel.ipv6.hlimit = 64;
+			tun_ptr = &tunnel;
+		} else {
+			memset(&tunnel, 0, sizeof(odp_ipsec_tunnel_param_t));
+			tunnel.type = ODP_IPSEC_TUNNEL_IPV4;
+			tunnel.ipv4.src_addr = &src_v4;
+			tunnel.ipv4.dst_addr = &dst_v4;
+			tunnel.ipv4.ttl = 64;
+			tun_ptr = &tunnel;
+		}
+	}
+
 	ipsec_sa_param_fill(&param,
-			    false, flags->ah, 123, NULL,
+			    false, flags->ah, 123, tun_ptr,
 			    cipher, cipher_key,
 			    auth, auth_key,
 			    cipher_key_extra, auth_key_extra);
+
+	if (flags->udp_encap)
+		param.opt.udp_encap = 1;
 
 	sa_out = odp_ipsec_sa_create(&param);
 
 	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa_out);
 
 	ipsec_sa_param_fill(&param,
-			    true, flags->ah, 123, NULL,
+			    true, flags->ah, 123, tun_ptr,
 			    cipher, cipher_key,
 			    auth, auth_key,
 			    cipher_key_extra, auth_key_extra);
+
+	if (flags->udp_encap)
+		param.opt.udp_encap = 1;
 
 	sa_in = odp_ipsec_sa_create(&param);
 
@@ -445,6 +481,16 @@ static void test_out_in_common(ipsec_test_flags *flags,
 			  .pkt_res = &pkt_ipv4_icmp_0 },
 		},
 	};
+
+	if (flags->v6) {
+		test.pkt_in = &pkt_ipv6_icmp_0;
+		test.out[0].l3_type = ODP_PROTO_L3_TYPE_IPV6;
+		test.out[0].l4_type = ODP_PROTO_L4_TYPE_ICMPV6;
+		test.out[0].pkt_res = &pkt_ipv6_icmp_0;
+		test.in[0].l3_type = ODP_PROTO_L3_TYPE_IPV6;
+		test.in[0].l4_type = ODP_PROTO_L4_TYPE_ICMPV6;
+		test.in[0].pkt_res = &pkt_ipv6_icmp_0;
+	}
 
 	test.flags = *flags;
 
@@ -1495,6 +1541,167 @@ static void test_ipsec_stats(void)
 	printf("\n  ");
 }
 
+static void test_udp_encap(void)
+{
+	ipsec_test_flags flags;
+
+	memset(&flags, 0, sizeof(flags));
+	flags.udp_encap = 1;
+	flags.tunnel = 0;
+
+	printf("\n        IPv4 Transport");
+	flags.v6 = 0;
+	test_esp_out_in_all(&flags);
+
+	printf("\n        IPv6 Transport");
+	flags.v6 = 1;
+	test_esp_out_in_all(&flags);
+
+	flags.tunnel = 1;
+
+	printf("\n        IPv4-in-IPv4 Tunnel");
+	flags.v6 = 0;
+	flags.tunnel_is_v6 = 0;
+	test_esp_out_in_all(&flags);
+
+	printf("\n        IPv4-in-IPv6 Tunnel");
+	flags.v6 = 0;
+	flags.tunnel_is_v6 = 1;
+	test_esp_out_in_all(&flags);
+
+	printf("\n        IPv6-in-IPv4 Tunnel");
+	flags.v6 = 1;
+	flags.tunnel_is_v6 = 0;
+	test_esp_out_in_all(&flags);
+
+	printf("\n        IPv6-in-IPv6 Tunnel");
+	flags.v6 = 1;
+	flags.tunnel_is_v6 = 1;
+	test_esp_out_in_all(&flags);
+
+	printf("\n  ");
+}
+
+static void test_max_num_sa(void)
+{
+	odp_ipsec_capability_t capa;
+	uint32_t sa_pairs;
+	odp_bool_t odd = false;
+	uint32_t n;
+	uint8_t cipher_key_data[128 / 8]; /* 128 bit key for AES */
+	uint8_t auth_key_data[160 / 8];   /* 160 bit key for SHA-1 */
+	odp_crypto_key_t cipher_key;
+	odp_crypto_key_t auth_key;
+	uint32_t tun_src;
+	uint32_t tun_dst;
+	odp_ipsec_tunnel_param_t tun = {
+		.type = ODP_IPSEC_TUNNEL_IPV4,
+		.ipv4.src_addr = &tun_src,
+		.ipv4.dst_addr = &tun_dst,
+		.ipv4.ttl = 64,
+	};
+	odp_ipsec_sa_param_t param;
+	const uint32_t spi_start = 256;
+	odp_ipsec_sa_t sa_odd = ODP_IPSEC_SA_INVALID;
+	ipsec_test_part test = {
+		.pkt_in = &pkt_ipv4_icmp_0,
+		.flags = {
+			/* Test lookup now that we have lots of SAs */
+			.lookup = 1,
+		},
+		.num_pkt = 1,
+		.out = {
+			{ .status.warn.all = 0,
+			  .status.error.all = 0,
+			  .l3_type = ODP_PROTO_L3_TYPE_IPV4,
+			  .l4_type = ODP_PROTO_L4_TYPE_ICMPV4,
+			  .pkt_res = &pkt_ipv4_icmp_0 },
+		},
+		.in = {
+			{ .status.warn.all = 0,
+			  .status.error.all = 0,
+			  .l3_type = ODP_PROTO_L3_TYPE_IPV4,
+			  .l4_type = ODP_PROTO_L4_TYPE_ICMPV4,
+			  .pkt_res = &pkt_ipv4_icmp_0 },
+		},
+	};
+
+	CU_ASSERT_FATAL(odp_ipsec_capability(&capa) == 0);
+	sa_pairs = capa.max_num_sa / 2;
+	if (capa.max_num_sa > 2 && capa.max_num_sa % 2)
+		odd = true;
+
+	odp_ipsec_sa_t sa_out[sa_pairs];
+	odp_ipsec_sa_t sa_in[sa_pairs];
+
+	memset(cipher_key_data, 0xa5, sizeof(cipher_key_data));
+	cipher_key.data = cipher_key_data;
+	cipher_key.length = sizeof(cipher_key_data);
+
+	memset(auth_key_data, 0x5a, sizeof(auth_key_data));
+	auth_key.data = auth_key_data;
+	auth_key.length = sizeof(auth_key_data);
+
+	for (n = 0; n < sa_pairs; n++) {
+		/* Make keys unique */
+		if (cipher_key.length > sizeof(n))
+			memcpy(cipher_key.data, &n, sizeof(n));
+		if (auth_key.length > sizeof(n))
+			memcpy(auth_key.data, &n, sizeof(n));
+
+		/* These are for outbound SAs only */
+		tun_src = 0x0a000000 + n;
+		tun_dst = 0x0a800000 + n;
+
+		ipsec_sa_param_fill(&param,
+				    false, false, spi_start + n, &tun,
+				    ODP_CIPHER_ALG_AES_CBC, &cipher_key,
+				    ODP_AUTH_ALG_SHA1_HMAC, &auth_key,
+				    NULL, NULL);
+		sa_out[n] = odp_ipsec_sa_create(&param);
+		CU_ASSERT_FATAL(sa_out[n] != ODP_IPSEC_SA_INVALID);
+
+		ipsec_sa_param_fill(&param,
+				    true, false, spi_start + n, &tun,
+				    ODP_CIPHER_ALG_AES_CBC, &cipher_key,
+				    ODP_AUTH_ALG_SHA1_HMAC, &auth_key,
+				    NULL, NULL);
+		sa_in[n] = odp_ipsec_sa_create(&param);
+		CU_ASSERT_FATAL(sa_in[n] != ODP_IPSEC_SA_INVALID);
+	}
+
+	n = sa_pairs - 1;
+	if (odd) {
+		/*
+		 * We have an odd number of max SAs. Let's create a similar
+		 * SA as the last created outbound SA and test it against
+		 * the last created inbound SA.
+		 */
+		tun_src = 0x0a000000 + n;
+		tun_dst = 0x0a800000 + n;
+
+		ipsec_sa_param_fill(&param,
+				    false, false, spi_start + n, &tun,
+				    ODP_CIPHER_ALG_AES_CBC, &cipher_key,
+				    ODP_AUTH_ALG_SHA1_HMAC, &auth_key,
+				    NULL, NULL);
+		sa_odd = odp_ipsec_sa_create(&param);
+		CU_ASSERT_FATAL(sa_odd != ODP_IPSEC_SA_INVALID);
+
+		ipsec_check_out_in_one(&test, sa_odd, sa_in[n]);
+	}
+
+	for (n = 0; n < sa_pairs; n++)
+		ipsec_check_out_in_one(&test, sa_out[n], sa_in[n]);
+
+	for (n = 0; n < sa_pairs; n++) {
+		ipsec_sa_destroy(sa_out[n]);
+		ipsec_sa_destroy(sa_in[n]);
+	}
+	if (odd)
+		ipsec_sa_destroy(sa_odd);
+}
+
 odp_testinfo_t ipsec_out_suite[] = {
 	ODP_TEST_INFO(ipsec_test_capability),
 	ODP_TEST_INFO(ipsec_test_default_values),
@@ -1555,5 +1762,8 @@ odp_testinfo_t ipsec_out_suite[] = {
 				  is_out_mode_inline),
 	ODP_TEST_INFO(test_ah_out_in_all),
 	ODP_TEST_INFO(test_ipsec_stats),
+	ODP_TEST_INFO(test_udp_encap),
+	ODP_TEST_INFO_CONDITIONAL(test_max_num_sa,
+				  ipsec_check_esp_aes_cbc_128_sha1),
 	ODP_TEST_INFO_NULL,
 };
