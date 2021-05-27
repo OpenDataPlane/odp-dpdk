@@ -4,6 +4,7 @@ ODP_LIB_NAME="odp-dpdk"
 ODP_VISIBILITY
 ODP_ATOMIC
 
+m4_include([platform/linux-dpdk/m4/odp_cpu.m4])
 m4_include([platform/linux-dpdk/m4/odp_libconfig.m4])
 m4_include([platform/linux-dpdk/m4/odp_pcapng.m4])
 m4_include([platform/linux-dpdk/m4/odp_scheduler.m4])
