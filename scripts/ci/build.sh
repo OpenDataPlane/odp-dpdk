@@ -29,6 +29,10 @@ fi
 
 # Additional warning checks
 EXTRA_CHECKS="-Werror -Wall -Wextra -Wconversion -Wundef -Wpointer-arith -Wfloat-equal -Wpacked"
+# Ignore clang warning about large atomic operations causing significant performance penalty
+if [ "${CC#clang}" != "${CC}" ] ; then
+	EXTRA_CHECKS="${EXTRA_CHECKS} -Wno-unknown-warning-option -Wno-atomic-alignment"
+fi
 
 CC="${CC:-${TARGET_ARCH}-gcc}"
 ${CC} ${CFLAGS} ${EXTRA_CHECKS} ${OLDPWD}/example/hello/odp_hello.c -o odp_hello_inst_dynamic \
