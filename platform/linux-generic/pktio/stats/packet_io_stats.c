@@ -4,6 +4,7 @@
  * SPDX-License-Identifier:     BSD-3-Clause
  */
 
+#include <odp/api/deprecated.h>
 #include <odp_packet_io_stats.h>
 #include <odp_ethtool_stats.h>
 #include <odp_sysfs_stats.h>
@@ -61,17 +62,22 @@ int _odp_sock_stats_fd(pktio_entry_t *pktio_entry,
 
 	stats->in_octets = cur_stats.in_octets -
 				pktio_entry->s.stats.in_octets;
+	stats->in_packets = cur_stats.in_packets -
+				pktio_entry->s.stats.in_packets;
 	stats->in_ucast_pkts = cur_stats.in_ucast_pkts -
 				pktio_entry->s.stats.in_ucast_pkts;
 	stats->in_discards = cur_stats.in_discards -
 				pktio_entry->s.stats.in_discards;
 	stats->in_errors = cur_stats.in_errors -
 				pktio_entry->s.stats.in_errors;
+#if ODP_DEPRECATED_API
 	stats->in_unknown_protos = cur_stats.in_unknown_protos -
 				pktio_entry->s.stats.in_unknown_protos;
-
+#endif
 	stats->out_octets = cur_stats.out_octets -
 				pktio_entry->s.stats.out_octets;
+	stats->out_packets = cur_stats.out_packets -
+				pktio_entry->s.stats.out_packets;
 	stats->out_ucast_pkts = cur_stats.out_ucast_pkts -
 				pktio_entry->s.stats.out_ucast_pkts;
 	stats->out_discards = cur_stats.out_discards -

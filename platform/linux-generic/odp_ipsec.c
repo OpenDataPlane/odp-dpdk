@@ -138,6 +138,13 @@ int odp_ipsec_capability(odp_ipsec_capability_t *capa)
 	capa->inline_ipsec_tm = ODP_SUPPORT_NO;
 
 	capa->test.sa_operations.seq_num = 1;
+
+	capa->reassembly.ip = false;
+	capa->reassembly.ipv4 = false;
+	capa->reassembly.ipv6 = false;
+	capa->reass_async = false;
+	capa->reass_inline = false;
+
 	return 0;
 }
 
@@ -1016,8 +1023,6 @@ static int ipsec_out_tunnel_ipv4(odp_packet_t *pkt,
 	odp_packet_copy_from_mem(*pkt, state->ip_offset,
 				 _ODP_IPV4HDR_LEN, &out_ip);
 
-	odp_packet_l4_offset_set(*pkt, state->ip_offset + _ODP_IPV4HDR_LEN);
-
 	state->ip = odp_packet_l3_ptr(*pkt, NULL);
 	state->ip_hdr_len = _ODP_IPV4HDR_LEN;
 	if (state->is_ipv4)
@@ -1076,8 +1081,6 @@ static int ipsec_out_tunnel_ipv6(odp_packet_t *pkt,
 
 	odp_packet_copy_from_mem(*pkt, state->ip_offset,
 				 sizeof(out_ip), &out_ip);
-
-	odp_packet_l4_offset_set(*pkt, state->ip_offset + _ODP_IPV6HDR_LEN);
 
 	state->ip = odp_packet_l3_ptr(*pkt, NULL);
 	state->ip_hdr_len = _ODP_IPV6HDR_LEN;
@@ -2082,6 +2085,8 @@ int odp_ipsec_result(odp_ipsec_packet_result_t *result, odp_packet_t packet)
 
 odp_packet_t odp_ipsec_packet_from_event(odp_event_t ev)
 {
+	ODP_ASSERT(odp_event_type(ev) == ODP_EVENT_PACKET);
+	ODP_ASSERT(odp_event_subtype(ev) == ODP_EVENT_PACKET_IPSEC);
 	return odp_packet_from_event(ev);
 }
 

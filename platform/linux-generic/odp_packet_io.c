@@ -1812,7 +1812,7 @@ int odp_pktio_capability(odp_pktio_t pktio, odp_pktio_capability_t *capa)
 		capa->lso.max_profiles_per_pktio = PKTIO_LSO_PROFILES;
 		capa->lso.max_packet_segments    = PKT_MAX_SEGS;
 		capa->lso.max_segments           = PKTIO_LSO_MAX_SEGMENTS;
-		capa->lso.max_payload_len        = mtu - PKTIO_LSO_MAX_PAYLOAD_OFFSET;
+		capa->lso.max_payload_len        = mtu - PKTIO_LSO_MIN_PAYLOAD_OFFSET;
 		capa->lso.max_payload_offset     = PKTIO_LSO_MAX_PAYLOAD_OFFSET;
 		capa->lso.max_num_custom         = ODP_LSO_MAX_CUSTOM;
 		capa->lso.proto.ipv4             = 1;
@@ -1829,6 +1829,10 @@ int odp_pktio_capability(odp_pktio_t pktio, odp_pktio_capability_t *capa)
 		capa->vector.max_tmo_ns = 0;
 		capa->vector.min_tmo_ns = 0;
 	}
+
+	capa->reassembly.ip = false;
+	capa->reassembly.ipv4 = false;
+	capa->reassembly.ipv6 = false;
 
 	return ret;
 }
@@ -2685,10 +2689,14 @@ int odp_packet_lso_request(odp_packet_t pkt, const odp_packet_lso_opt_t *lso_opt
 		return -1;
 	}
 
+	if (odp_packet_payload_offset_set(pkt, payload_offset)) {
+		ODP_ERR("Payload offset set failed\n");
+		return -1;
+	}
+
 	pkt_hdr->p.flags.lso     = 1;
 	pkt_hdr->lso_max_payload = lso_opt->max_payload_len;
 	pkt_hdr->lso_profile_idx = lso_prof->index;
-	odp_packet_payload_offset_set(pkt, payload_offset);
 
 	return 0;
 }
@@ -2827,6 +2835,12 @@ static int pktout_send_lso(odp_pktout_queue_t queue, odp_packet_t packet,
 	if (left_over_len) {
 		left_over = 1;
 		num_pkt++;
+	}
+
+	if (num_pkt > PKTIO_LSO_MAX_SEGMENTS) {
+		ODP_ERR("Too many LSO segments %i. Maximum is %i\n", num_pkt,
+			PKTIO_LSO_MAX_SEGMENTS);
+		return -1;
 	}
 
 	/* Alloc packets */
