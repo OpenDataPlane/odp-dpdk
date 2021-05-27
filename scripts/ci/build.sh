@@ -28,10 +28,14 @@ ODP_LIB_NAME=libodp-dpdk
 fi
 
 # Additional warning checks
-EXTRA_CHECKS="-Werror -Wall -Wextra -Wconversion -Wundef -Wpointer-arith -Wfloat-equal -Wpacked"
+EXTRA_CHECKS="-Werror -Wall -Wextra -Wconversion -Wfloat-equal -Wpacked"
 # Ignore clang warning about large atomic operations causing significant performance penalty
 if [ "${CC#clang}" != "${CC}" ] ; then
 	EXTRA_CHECKS="${EXTRA_CHECKS} -Wno-unknown-warning-option -Wno-atomic-alignment"
+fi
+# Ignore warnings from aarch64 DPDK internals
+if [ "${TARGET_ARCH}" == "aarch64-linux-gnu" ] ; then
+	EXTRA_CHECKS="${EXTRA_CHECKS} -Wno-conversion -Wno-packed"
 fi
 
 CC="${CC:-${TARGET_ARCH}-gcc}"
