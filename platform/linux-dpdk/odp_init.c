@@ -13,6 +13,7 @@
 #include <odp_init_internal.h>
 #include <odp_schedule_if.h>
 #include <odp_libconfig_internal.h>
+#include <odp/api/plat/thread_inlines.h>
 #include <odp_shm_internal.h>
 #include <string.h>
 #include <stdio.h>
@@ -692,4 +693,9 @@ init_fail:
 int odp_term_local(void)
 {
 	return term_local(ALL_INIT);
+}
+
+void odp_log_thread_fn_set(odp_log_func_t func)
+{
+	_odp_this_thread->log_fn = func;
 }
