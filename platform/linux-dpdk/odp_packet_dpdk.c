@@ -1419,10 +1419,12 @@ static void stats_convert(struct rte_eth_stats *rte_stats,
 			  odp_pktio_stats_t *stats)
 {
 	stats->in_octets = rte_stats->ibytes;
+	stats->in_packets = rte_stats->ipackets;
 	stats->in_ucast_pkts = 0;
 	stats->in_discards = rte_stats->imissed;
 	stats->in_errors = rte_stats->ierrors;
 	stats->out_octets = rte_stats->obytes;
+	stats->out_packets = rte_stats->opackets;
 	stats->out_ucast_pkts = 0;
 	stats->out_discards = 0;
 	stats->out_errors = rte_stats->oerrors;
