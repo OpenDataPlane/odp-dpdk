@@ -13,6 +13,7 @@
 #include <odp_init_internal.h>
 #include <odp_schedule_if.h>
 #include <odp_libconfig_internal.h>
+#include <odp/api/plat/thread_inlines.h>
 #include <odp_shm_internal.h>
 #include <string.h>
 #include <stdio.h>
@@ -247,9 +248,6 @@ static int term_global(enum init_stage stage)
 		}
 		/* Fall through */
 
-	case RANDOM_INIT:
-		/* Fall through */
-
 	case TIMER_INIT:
 		if (_odp_timer_term_global()) {
 			ODP_ERR("ODP timer term failed.\n");
@@ -352,8 +350,8 @@ static int term_global(enum init_stage stage)
 		}
 		/* Fall through */
 
-	case NO_INIT:
-		;
+	default:
+		break;
 	}
 
 	return rc;
@@ -480,9 +478,6 @@ int odp_init_global(odp_instance_t *instance,
 	}
 	stage = TIMER_INIT;
 
-	/* No init needed */
-	stage = RANDOM_INIT;
-
 	if (_odp_crypto_init_global()) {
 		ODP_ERR("ODP crypto init failed.\n");
 		goto init_failed;
@@ -607,7 +602,7 @@ static int term_local(enum init_stage stage)
 			rc = -1;
 		} else {
 			if (!rc)
-				rc = rc_thd;
+				rc = (rc_thd == 0) ? 0 : 1;
 		}
 		/* Fall through */
 
@@ -698,4 +693,9 @@ init_fail:
 int odp_term_local(void)
 {
 	return term_local(ALL_INIT);
+}
+
+void odp_log_thread_fn_set(odp_log_func_t func)
+{
+	_odp_this_thread->log_fn = func;
 }

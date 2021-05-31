@@ -279,8 +279,14 @@ static int parse_options(int argc, char *argv[], test_global_t *global)
 		sizeof(test_options->ipv4_src_s) - 1);
 	strncpy(test_options->ipv4_dst_s, "192.168.0.2",
 		sizeof(test_options->ipv4_dst_s) - 1);
-	odph_ipv4_addr_parse(&test_options->ipv4_src, test_options->ipv4_src_s);
-	odph_ipv4_addr_parse(&test_options->ipv4_dst, test_options->ipv4_dst_s);
+	if (odph_ipv4_addr_parse(&test_options->ipv4_src, test_options->ipv4_src_s)) {
+		ODPH_ERR("Address parse failed\n");
+		return -1;
+	}
+	if (odph_ipv4_addr_parse(&test_options->ipv4_dst, test_options->ipv4_dst_s)) {
+		ODPH_ERR("Address parse failed\n");
+		return -1;
+	}
 	test_options->udp_src = 10000;
 	test_options->udp_dst = 20000;
 	test_options->c_mode.udp_src = 0;
@@ -1729,6 +1735,7 @@ static void sig_handler(int signo)
 
 int main(int argc, char **argv)
 {
+	odph_helper_options_t helper_options;
 	odp_instance_t instance;
 	odp_init_t init;
 	test_global_t *global;
@@ -1738,6 +1745,13 @@ int main(int argc, char **argv)
 
 	signal(SIGINT, sig_handler);
 
+	/* Let helper collect its own arguments (e.g. --odph_proc) */
+	argc = odph_parse_options(argc, argv);
+	if (odph_options(&helper_options)) {
+		ODPH_ERR("Error: reading ODP helper options failed.\n");
+		exit(EXIT_FAILURE);
+	}
+
 	/* List features not to be used */
 	odp_init_param_init(&init);
 	init.not_used.feat.cls      = 1;
@@ -1746,6 +1760,8 @@ int main(int argc, char **argv)
 	init.not_used.feat.ipsec    = 1;
 	init.not_used.feat.timer    = 1;
 	init.not_used.feat.tm       = 1;
+
+	init.mem_model = helper_options.mem_model;
 
 	/* Init ODP before calling anything else */
 	if (odp_init_global(&instance, &init, NULL)) {
