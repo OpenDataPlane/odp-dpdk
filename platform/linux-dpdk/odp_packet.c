@@ -89,6 +89,11 @@ static inline odp_buffer_t packet_to_buffer(odp_packet_t pkt)
 	return (odp_buffer_t)pkt;
 }
 
+static inline odp_packet_hdr_t *packet_seg_to_hdr(odp_packet_seg_t seg)
+{
+	return (odp_packet_hdr_t *)(uintptr_t)seg;
+}
+
 /* Calculate the number of segments */
 static inline int num_segments(uint32_t len, uint32_t seg_len)
 {
@@ -191,7 +196,7 @@ odp_packet_t odp_packet_alloc(odp_pool_t pool_hdl, uint32_t len)
 {
 	pool_t *pool = pool_entry_from_hdl(pool_hdl);
 
-	if (odp_unlikely(pool->params.type != ODP_POOL_PACKET)) {
+	if (odp_unlikely(pool->type != ODP_POOL_PACKET)) {
 		_odp_errno = EINVAL;
 		return ODP_PACKET_INVALID;
 	}
@@ -208,7 +213,7 @@ int odp_packet_alloc_multi(odp_pool_t pool_hdl, uint32_t len,
 	int i;
 	pool_t *pool = pool_entry_from_hdl(pool_hdl);
 
-	if (odp_unlikely(pool->params.type != ODP_POOL_PACKET)) {
+	if (odp_unlikely(pool->type != ODP_POOL_PACKET)) {
 		_odp_errno = EINVAL;
 		return -1;
 	}
@@ -2409,4 +2414,157 @@ int odp_packet_reass_partial_state(odp_packet_t pkt, odp_packet_t frags[],
 	(void)frags;
 	(void)res;
 	return -ENOTSUP;
+}
+
+static inline odp_packet_hdr_t *buf_to_hdr(odp_packet_buf_t buf)
+{
+	return (odp_packet_hdr_t *)(uintptr_t)buf;
+}
+
+void *odp_packet_buf_head(odp_packet_buf_t pkt_buf)
+{
+	odp_packet_hdr_t *pkt_hdr = (odp_packet_hdr_t *)(uintptr_t)pkt_buf;
+	pool_t *pool = pkt_hdr->buf_hdr.pool_ptr;
+
+	if (pool->pool_ext == 0) {
+		ODP_ERR("Not an external memory pool\n");
+		return NULL;
+	}
+
+	return (uint8_t *)pkt_hdr + pool->hdr_size;
+}
+
+uint32_t odp_packet_buf_size(odp_packet_buf_t pkt_buf)
+{
+	odp_packet_hdr_t *pkt_hdr = (odp_packet_hdr_t *)(uintptr_t)pkt_buf;
+	pool_t *pool = pkt_hdr->buf_hdr.pool_ptr;
+
+	return pool->seg_len;
+}
+
+uint32_t odp_packet_buf_data_offset(odp_packet_buf_t pkt_buf)
+{
+	void *data = odp_packet_seg_data(ODP_PACKET_INVALID,
+					 (odp_packet_seg_t)pkt_buf);
+	void *head = odp_packet_buf_head(pkt_buf);
+
+	return (uintptr_t)data - (uintptr_t)head;
+}
+
+uint32_t odp_packet_buf_data_len(odp_packet_buf_t pkt_buf)
+{
+	return odp_packet_seg_data_len(ODP_PACKET_INVALID,
+				       (odp_packet_seg_t)pkt_buf);
+}
+
+void odp_packet_buf_data_set(odp_packet_buf_t pkt_buf, uint32_t data_offset,
+			     uint32_t data_len)
+{
+	buf_to_hdr(pkt_buf)->buf_hdr.mb.data_off = data_offset;
+	buf_to_hdr(pkt_buf)->buf_hdr.mb.data_len = data_len;
+}
+
+odp_packet_buf_t odp_packet_buf_from_head(odp_pool_t pool_hdl, void *head)
+{
+	pool_t *pool = pool_entry_from_hdl(pool_hdl);
+
+	if (pool->type != ODP_POOL_PACKET) {
+		ODP_ERR("Not a packet pool\n");
+		return ODP_PACKET_BUF_INVALID;
+	}
+
+	if (pool->pool_ext == 0) {
+		ODP_ERR("Not an external memory pool\n");
+		return ODP_PACKET_BUF_INVALID;
+	}
+
+	return (odp_packet_buf_t)((uintptr_t)head - pool->hdr_size);
+}
+
+uint32_t odp_packet_disassemble(odp_packet_t pkt, odp_packet_buf_t pkt_buf[],
+				uint32_t num)
+{
+	uint32_t i;
+	odp_packet_seg_t seg;
+	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
+	pool_t *pool = pkt_hdr->buf_hdr.pool_ptr;
+	uint32_t num_segs = odp_packet_num_segs(pkt);
+
+	if (pool->type != ODP_POOL_PACKET) {
+		ODP_ERR("Not a packet pool\n");
+		return 0;
+	}
+
+	if (pool->pool_ext == 0) {
+		ODP_ERR("Not an external memory pool\n");
+		return 0;
+	}
+
+	if (num < num_segs) {
+		ODP_ERR("Not enough buffer handles %u. Packet has %u segments.\n",
+			num, num_segs);
+		return 0;
+	}
+
+	seg = odp_packet_first_seg(pkt);
+
+	for (i = 0; i < num_segs; i++) {
+		pkt_buf[i] = (odp_packet_buf_t)(uintptr_t)packet_seg_to_hdr(seg);
+		seg = odp_packet_next_seg(pkt, seg);
+	}
+
+	return num_segs;
+}
+
+odp_packet_t odp_packet_reassemble(odp_pool_t pool_hdl,
+				   odp_packet_buf_t pkt_buf[], uint32_t num)
+{
+	uint32_t i, data_len;
+	odp_packet_hdr_t *cur_seg, *next_seg;
+	odp_packet_hdr_t *pkt_hdr = (odp_packet_hdr_t *)(uintptr_t)pkt_buf[0];
+	uint32_t headroom = odp_packet_buf_data_offset(pkt_buf[0]);
+
+	pool_t *pool = pool_entry_from_hdl(pool_hdl);
+
+	if (pool->type != ODP_POOL_PACKET) {
+		ODP_ERR("Not a packet pool\n");
+		return ODP_PACKET_INVALID;
+	}
+
+	if (pool->pool_ext == 0) {
+		ODP_ERR("Not an external memory pool\n");
+		return ODP_PACKET_INVALID;
+	}
+
+	if (num == 0) {
+		ODP_ERR("Bad number of buffers: %u\n", num);
+		return ODP_PACKET_INVALID;
+	}
+
+	cur_seg = pkt_hdr;
+	data_len = 0;
+
+	for (i = 0; i < num; i++) {
+		struct rte_mbuf *mb;
+
+		next_seg = NULL;
+		if (i < num - 1)
+			next_seg = (odp_packet_hdr_t *)(uintptr_t)pkt_buf[i + 1];
+
+		data_len += cur_seg->buf_hdr.mb.data_len;
+		mb = (struct rte_mbuf *)(uintptr_t)cur_seg;
+		mb->next = (struct rte_mbuf *)next_seg;
+		cur_seg = next_seg;
+	}
+
+	pkt_hdr->buf_hdr.mb.nb_segs = num;
+	pkt_hdr->buf_hdr.mb.pkt_len = data_len;
+	pkt_hdr->buf_hdr.mb.data_off = headroom;
+
+	/* Reset metadata */
+	pkt_hdr->subtype = ODP_EVENT_PACKET_BASIC;
+	pkt_hdr->input = ODP_PKTIO_INVALID;
+	packet_parse_reset(pkt_hdr, 1);
+
+	return packet_handle(pkt_hdr);
 }

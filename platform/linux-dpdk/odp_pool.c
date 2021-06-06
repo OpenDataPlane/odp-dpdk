@@ -32,8 +32,8 @@
 
 #include <rte_config.h>
 #include <rte_errno.h>
-#include <rte_version.h>
 #include <rte_mempool.h>
+#include <rte_mbuf_pool_ops.h>
 /* ppc64 rte_memcpy.h (included through rte_mempool.h) may define vector */
 #if defined(__PPC64__) && defined(vector)
 	#undef vector
@@ -763,6 +763,7 @@ odp_pool_t odp_pool_create(const char *name, const odp_pool_param_t *params)
 		}
 
 		pool->rte_mempool = mp;
+		pool->type = params->type;
 		pool->params = *params;
 		ODP_DBG("Header/element/trailer size: %u/%u/%u, "
 			"total pool size: %lu\n",
@@ -803,9 +804,9 @@ static inline int buffer_alloc_multi(pool_t *pool, odp_buffer_hdr_t *buf_hdr[],
 	int i;
 	struct rte_mempool *mp = pool->rte_mempool;
 
-	ODP_ASSERT(pool->params.type == ODP_POOL_BUFFER ||
-		   pool->params.type == ODP_POOL_TIMEOUT ||
-		   pool->params.type == ODP_POOL_VECTOR);
+	ODP_ASSERT(pool->type == ODP_POOL_BUFFER ||
+		   pool->type == ODP_POOL_TIMEOUT ||
+		   pool->type == ODP_POOL_VECTOR);
 
 	for (i = 0; i < num; i++) {
 		struct rte_mbuf *mbuf;
@@ -887,8 +888,16 @@ int odp_pool_info(odp_pool_t pool_hdl, odp_pool_info_t *info)
 	if (pool == NULL || info == NULL)
 		return -1;
 
+	memset(info, 0, sizeof(odp_pool_info_t));
+
 	info->name = pool->name;
-	info->params = pool->params;
+
+	if (pool->pool_ext) {
+		info->pool_ext = 1;
+		info->pool_ext_param = pool->ext_param;
+	} else {
+		info->params = pool->params;
+	}
 
 	if (pool->params.type == ODP_POOL_PACKET)
 		info->pkt.max_num = pool->rte_mempool->size;
@@ -985,5 +994,286 @@ int odp_pool_stats(odp_pool_t pool_hdl, odp_pool_stats_t *stats)
 
 int odp_pool_stats_reset(odp_pool_t pool_hdl ODP_UNUSED)
 {
+	return 0;
+}
+
+/*
+ * No actual head pointer alignment requirement. Anyway, require even byte
+ * address.
+ */
+#define EXT_MIN_HEAD_ALIGN 2
+#define EXT_UAREA_SIZE 32
+
+int odp_pool_ext_capability(odp_pool_type_t type,
+			    odp_pool_ext_capability_t *capa)
+{
+	odp_pool_stats_opt_t supported_stats;
+
+	if (type != ODP_POOL_PACKET)
+		return -1;
+
+	supported_stats.all = 0;
+
+	memset(capa, 0, sizeof(odp_pool_ext_capability_t));
+
+	capa->type = type;
+	capa->max_pools = ODP_CONFIG_POOLS - 1;
+	capa->min_cache_size = 0;
+	capa->max_cache_size = RTE_MEMPOOL_CACHE_MAX_SIZE;
+	capa->stats.all = supported_stats.all;
+
+	capa->pkt.max_num_buf = _odp_pool_glb->config.pkt_max_num;
+	capa->pkt.max_buf_size = MAX_SIZE;
+	capa->pkt.odp_header_size = sizeof(odp_packet_hdr_t) + EXT_UAREA_SIZE;
+	capa->pkt.odp_trailer_size = 0;
+	capa->pkt.min_buf_align = ODP_CACHE_LINE_SIZE;
+	capa->pkt.min_head_align = EXT_MIN_HEAD_ALIGN;
+	capa->pkt.buf_size_aligned = 0;
+	capa->pkt.max_headroom = CONFIG_PACKET_HEADROOM;
+	capa->pkt.max_headroom_size = CONFIG_PACKET_HEADROOM;
+	capa->pkt.max_segs_per_pkt = PKT_MAX_SEGS;
+	capa->pkt.max_uarea_size = EXT_UAREA_SIZE;
+
+	return 0;
+}
+
+void odp_pool_ext_param_init(odp_pool_type_t type, odp_pool_ext_param_t *param)
+{
+	uint32_t default_cache_size = RTE_MEMPOOL_CACHE_MAX_SIZE;
+
+	memset(param, 0, sizeof(odp_pool_ext_param_t));
+
+	if (type != ODP_POOL_PACKET)
+		return;
+
+	param->type = ODP_POOL_PACKET;
+	param->cache_size = default_cache_size;
+	param->pkt.headroom = CONFIG_PACKET_HEADROOM;
+}
+
+static int check_pool_ext_param(const odp_pool_ext_param_t *param)
+{
+	uint32_t head_offset = sizeof(odp_packet_hdr_t) +
+			       param->pkt.uarea_size +
+			       param->pkt.app_header_size;
+
+	if (param->type != ODP_POOL_PACKET)
+		return -1;
+
+	if (param->cache_size > RTE_MEMPOOL_CACHE_MAX_SIZE) {
+		ODP_ERR("Too large cache size %u\n", param->cache_size);
+		return -1;
+	}
+
+	if (param->stats.all) {
+		ODP_ERR("Pool statistics not supported\n");
+		return -1;
+	}
+
+	if (param->pkt.num_buf > _odp_pool_glb->config.pkt_max_num) {
+		ODP_ERR("Too many packet buffers\n");
+		return -1;
+	}
+
+	if (param->pkt.buf_size > MAX_SIZE) {
+		ODP_ERR("Too large packet buffer size %u\n",
+			param->pkt.buf_size);
+		return -1;
+	}
+
+	if (param->pkt.uarea_size > EXT_UAREA_SIZE) {
+		ODP_ERR("Too large user area size %u\n", param->pkt.uarea_size);
+		return -1;
+	}
+
+	if (param->pkt.headroom > CONFIG_PACKET_HEADROOM) {
+		ODP_ERR("Too large headroom size\n");
+		return -1;
+	}
+
+	if (head_offset % EXT_MIN_HEAD_ALIGN) {
+		ODP_ERR("Head pointer not %u byte aligned\n", EXT_MIN_HEAD_ALIGN);
+		return -1;
+	}
+
+	return 0;
+}
+
+odp_pool_t odp_pool_ext_create(const char *name,
+			       const odp_pool_ext_param_t *params)
+{
+	odp_pool_t pool_hdl = ODP_POOL_INVALID;
+	unsigned int i, cache_size;
+	size_t hdr_size, priv_size;
+	pool_t *pool;
+	uint32_t buf_size, blk_size;
+	char pool_name[ODP_POOL_NAME_LEN];
+	char rte_name[RTE_MEMPOOL_NAMESIZE];
+
+	if (check_pool_ext_param(params))
+		return ODP_POOL_INVALID;
+
+	if (name == NULL) {
+		pool_name[0] = 0;
+	} else {
+		strncpy(pool_name, name, ODP_POOL_NAME_LEN - 1);
+		pool_name[ODP_POOL_NAME_LEN - 1] = 0;
+	}
+
+	/* Find an unused buffer pool slot and initialize it as requested */
+	for (i = 0; i < ODP_CONFIG_POOLS; i++) {
+		uint32_t num;
+		struct rte_mempool *mp;
+
+		pool = pool_entry(i);
+
+		LOCK(&pool->lock);
+		if (pool->rte_mempool != NULL) {
+			UNLOCK(&pool->lock);
+			continue;
+		}
+
+		hdr_size = sizeof(odp_packet_hdr_t) + params->pkt.uarea_size +
+			   params->pkt.app_header_size;
+		priv_size = hdr_size - sizeof(struct rte_mbuf);
+		buf_size = params->pkt.buf_size;
+		blk_size = buf_size - hdr_size;
+		num = params->pkt.num_buf;
+
+		ODP_DBG("type: packet, name: %s, num: %u, len: %u, blk_size: %u, "
+			"uarea_size: %d, hdr_size: %d\n",
+			pool_name, num, buf_size, blk_size,
+			params->pkt.uarea_size, hdr_size);
+
+		cache_size = params->cache_size;
+		cache_size = calc_cache_size(num, cache_size);
+
+		format_pool_name(pool_name, rte_name);
+
+		mp = rte_mempool_create_empty(name, num, blk_size, cache_size,
+					      priv_size, rte_socket_id(), 0);
+
+		if (mp == NULL) {
+			ODP_ERR("Failed to create empty DPDK packet pool\n");
+			goto error;
+		}
+
+		if (rte_mempool_set_ops_byname(mp, rte_mbuf_best_mempool_ops(),
+					       NULL)) {
+			ODP_ERR("Failed setting mempool operations\n");
+			goto error;
+		}
+
+		struct rte_pktmbuf_pool_private mbp_priv = {
+			.mbuf_data_room_size = blk_size,
+			.mbuf_priv_size = priv_size,
+		};
+
+		rte_pktmbuf_pool_init(mp, &mbp_priv);
+
+		/*
+		 * It seems that rte_mempool_ops_alloc() is not always
+		 * available.
+		 */
+		if (rte_mempool_get_ops(mp->ops_index)->alloc(mp)) {
+			ODP_ERR("Mempool alloc operation failed\n");
+			goto error;
+		}
+
+		pool->ext_param = *params;
+		pool->hdr_size = hdr_size;
+		pool->num = num;
+		pool->num_populated = 0;
+		pool->params.pkt.uarea_size = params->pkt.uarea_size;
+		pool->params.type = params->type;
+		pool->pool_ext = 1;
+		pool->rte_mempool = mp;
+		pool->seg_len = blk_size;
+		pool->type = params->type;
+		strcpy(pool->name, pool_name);
+
+		ODP_DBG("Header/element/trailer size: %u/%u/%u, "
+			"total pool size: %lu\n",
+			mp->header_size, mp->elt_size, mp->trailer_size,
+			(unsigned long)((mp->header_size + mp->elt_size +
+					 mp->trailer_size) *
+					num));
+		UNLOCK(&pool->lock);
+		pool_hdl = pool->pool_hdl;
+		break;
+	}
+
+	return pool_hdl;
+
+error:
+	UNLOCK(&pool->lock);
+	return ODP_POOL_INVALID;
+}
+
+int odp_pool_ext_populate(odp_pool_t pool_hdl, void *buf[], uint32_t buf_size,
+			  uint32_t num, uint32_t flags)
+{
+	pool_t *pool;
+	uint32_t num_populated;
+
+	if (pool_hdl == ODP_POOL_INVALID) {
+		ODP_ERR("Bad pool handle\n");
+		return -1;
+	}
+
+	pool = pool_entry_from_hdl(pool_hdl);
+
+	if (pool->type != ODP_POOL_PACKET || pool->pool_ext == 0) {
+		ODP_ERR("Bad pool type\n");
+		return -1;
+	}
+
+	if (buf_size != pool->ext_param.pkt.buf_size) {
+		ODP_ERR("Bad buffer size\n");
+		return -1;
+	}
+
+	num_populated = pool->num_populated;
+
+	if (num_populated + num > pool->num) {
+		ODP_ERR("Trying to over populate the pool\n");
+		return -1;
+	}
+
+	if ((num_populated + num == pool->num) &&
+	    !(flags & ODP_POOL_POPULATE_DONE)) {
+		ODP_ERR("Missing ODP_POOL_POPULATE_DONE flag\n");
+		return -1;
+	}
+
+	if ((num_populated + num < pool->num) && flags) {
+		ODP_ERR("Unexpected flags: 0x%x\n", flags);
+		return -1;
+	}
+
+	struct rte_mempool *mp = pool->rte_mempool;
+
+	for (uint32_t i = 0; i < num; i++) {
+		struct rte_mbuf *mb = (struct rte_mbuf *)buf[i];
+		struct odp_pool_ext_param_t *params = &pool->ext_param;
+		struct mbuf_ctor_arg mb_ctor_arg;
+
+		rte_mempool_ops_enqueue_bulk(mp, (void *const *)&mb, 1);
+
+		mb_ctor_arg.pkt_uarea_size = params->pkt.uarea_size;
+		mb_ctor_arg.seg_buf_offset = sizeof(odp_packet_hdr_t) +
+					     params->pkt.uarea_size +
+					     params->pkt.app_header_size;
+		mb_ctor_arg.seg_buf_size = pool->seg_len;
+		mb_ctor_arg.type = params->type;
+		mb_ctor_arg.event_type = pool->type;
+		mb_ctor_arg.pool = pool;
+		odp_dpdk_mbuf_ctor(mp, (void *)&mb_ctor_arg, (void *)mb,
+				   mp->populated_size);
+
+		mp->populated_size++;
+		pool->num_populated++;
+	}
+
 	return 0;
 }
