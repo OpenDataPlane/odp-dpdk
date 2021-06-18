@@ -131,8 +131,8 @@ static inline pkt_dpdk_t *pkt_priv(pktio_entry_t *pktio_entry)
  * Array must be NULL terminated */
 const pktio_if_ops_t * const _odp_pktio_if_ops[]  = {
 	&_odp_loopback_pktio_ops,
-	&_odp_dpdk_pktio_ops,
 	&_odp_null_pktio_ops,
+	&_odp_dpdk_pktio_ops,
 	NULL
 };
 
@@ -603,12 +603,16 @@ static int setup_pkt_dpdk(odp_pktio_t pktio ODP_UNUSED,
 	struct rte_eth_dev_info dev_info;
 	pkt_dpdk_t * const pkt_dpdk = pkt_priv(pktio_entry);
 	int i;
+	uint16_t port_id;
 
-	if (!_dpdk_netdev_is_valid(netdev)) {
-		ODP_DBG("Interface name should only contain numbers!: %s\n", netdev);
+	if (!rte_eth_dev_get_port_by_name(netdev, &port_id))
+		pkt_dpdk->port_id = port_id;
+	else if (_dpdk_netdev_is_valid(netdev))
+		pkt_dpdk->port_id = atoi(netdev);
+	else {
+		ODP_ERR("Invalid interface name!: %s\n", netdev);
 		return -1;
 	}
-	pkt_dpdk->port_id = atoi(netdev);
 
 	if (!rte_eth_dev_is_valid_port(pkt_dpdk->port_id)) {
 		ODP_ERR("Port id=%" PRIu16 " not attached\n", pkt_dpdk->port_id);
