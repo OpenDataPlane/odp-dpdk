@@ -139,8 +139,29 @@ static odp_packet_t packet_alloc(pool_t *pool, uint32_t len)
 
 		ret = rte_pktmbuf_alloc_bulk(pool->rte_mempool, mbufs, num_seg);
 		if (odp_unlikely(ret)) {
-			_odp_errno = ENOMEM;
-			return ODP_PACKET_INVALID;
+			/*
+			 * rte_pktmbuf_alloc_bulk() fails when allocating the
+			 * last buffers from the pool, if some of them, but not
+			 * all, are in the cache.
+			 *
+			 * Try to allocate the buffers one by one.
+			 */
+			for (i = 0; i < num_seg; i++) {
+				mbufs[i] = rte_pktmbuf_alloc(pool->rte_mempool);
+				if (!mbufs[i]) {
+					/*
+					 * Failed to allocate the number of
+					 * buffers that we wanted. Free the ones
+					 * we managed to allocate, if any, and
+					 * return error.
+					 */
+					while (i > 0)
+						rte_pktmbuf_free(mbufs[--i]);
+
+					_odp_errno = ENOMEM;
+					return ODP_PACKET_INVALID;
+				}
+			}
 		}
 
 		head = mbufs[0];
