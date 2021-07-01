@@ -655,7 +655,7 @@ retry:
 		ODP_DBG("  cur_tick %" PRIu64 ", abs_tick %" PRIu64 "\n",
 			cur_tick, abs_tick);
 		ODP_DBG("  num_retry %i\n", num_retry);
-		return ODP_TIMER_TOOEARLY;
+		return ODP_TIMER_TOO_NEAR;
 	}
 
 	odp_ticketlock_lock(&timer->lock);
@@ -665,7 +665,7 @@ retry:
 			odp_ticketlock_unlock(&timer->lock);
 			/* Event missing, or timer already expired and
 			 * enqueued the event. */
-			return ODP_TIMER_NOEVENT;
+			return ODP_TIMER_FAIL;
 	}
 
 	if (odp_unlikely(rte_timer_reset(&timer->rte_timer, rel_tick, SINGLE,
@@ -699,7 +699,7 @@ retry:
 		/* Timer was just about to expire. Too late to reset this timer.
 		 * Return code is NOEVENT, even when application did give
 		 * an event. */
-		return ODP_TIMER_NOEVENT;
+		return ODP_TIMER_FAIL;
 	}
 
 	if (event) {
