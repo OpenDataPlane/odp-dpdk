@@ -259,8 +259,8 @@ int odp_timer_capability(odp_timer_clk_src_t clk_src,
 {
 	uint64_t min_tmo = tmo_ticks_to_ns_round_up(MIN_TMO_CYCLES);
 
-	if (clk_src != ODP_CLOCK_CPU) {
-		ODP_ERR("Clock source not supported\n");
+	if (clk_src != ODP_CLOCK_DEFAULT) {
+		ODP_ERR("Only ODP_CLOCK_DEFAULT supported. Requested %i.\n", clk_src);
 		return -1;
 	}
 
@@ -289,8 +289,8 @@ int odp_timer_res_capability(odp_timer_clk_src_t clk_src,
 {
 	uint64_t min_tmo = tmo_ticks_to_ns_round_up(MIN_TMO_CYCLES);
 
-	if (clk_src != ODP_CLOCK_CPU) {
-		ODP_ERR("Only CPU clock source supported\n");
+	if (clk_src != ODP_CLOCK_DEFAULT) {
+		ODP_ERR("Only ODP_CLOCK_DEFAULT supported. Requested %i.\n", clk_src);
 		return -1;
 	}
 
