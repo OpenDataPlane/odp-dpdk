@@ -1,6 +1,12 @@
 include $(top_srcdir)/test/Makefile.inc
 TESTS_ENVIRONMENT += TEST_DIR=${top_builddir}/test/validation
 
+if WITH_OPENSSL
+TESTS_ENVIRONMENT += WITH_OPENSSL=1
+else
+TESTS_ENVIRONMENT += WITH_OPENSSL=0
+endif
+
 SUBDIRS =
 
 if test_vald
