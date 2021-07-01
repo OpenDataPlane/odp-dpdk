@@ -274,6 +274,10 @@ _odp_sock_recv_mq_tmo_try_int_driven(const struct odp_pktin_queue_t queues[],
 	return 0;
 }
 
+/* Setup PKTOUT with single queue for TM */
+int _odp_pktio_pktout_tm_config(odp_pktio_t pktio_hdl,
+				odp_pktout_queue_t *queue, bool reconf);
+
 #ifdef __cplusplus
 }
 #endif
