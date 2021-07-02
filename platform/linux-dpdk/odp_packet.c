@@ -400,6 +400,7 @@ int odp_packet_trunc_head(odp_packet_t *pkt, uint32_t len, void **data_ptr,
 		_copy_head_metadata(newhead, mb);
 		prev->next = NULL;
 		rte_pktmbuf_free(mb);
+		mb = newhead;
 		*pkt = (odp_packet_t)newhead;
 		packet_hdr(*pkt)->buf_hdr.totsize -= totsize_change;
 	} else {
