@@ -224,6 +224,10 @@ typedef struct {
 	 * all support TM shaping, */
 	odp_bool_t tm_node_shaper_supported;
 
+	/** tm_node_shaper_packet_mode indicates that tm_nodes at this level
+	 * support shaper in packet mode */
+	odp_bool_t tm_node_shaper_packet_mode;
+
 	/** tm_node_wred_supported indicates that the tm_nodes at this level
 	 * support some form of Random Early Detection. */
 	odp_bool_t tm_node_wred_supported;
@@ -285,6 +289,10 @@ typedef struct {
 	 * expected to do. */
 	odp_bool_t tm_queue_shaper_supported;
 
+	/** tm_queue_shaper_packet_mode indicates that tm_queues support
+	 * shaper in packet mode */
+	odp_bool_t tm_queue_shaper_packet_mode;
+
 	/** tm_queue_wred_supported indicates that the tm_queues support some
 	 * form of Random Early Detection. */
 	odp_bool_t tm_queue_wred_supported;
@@ -331,6 +339,52 @@ typedef struct {
 	/** The per_level array specifies the TM system capabilities that
 	 * can vary based upon the tm_node level. */
 	odp_tm_level_capabilities_t per_level[ODP_TM_MAX_LEVELS];
+
+	/** dynamic_topology_update indicates support for TM system dynamic
+	 * topology update. A dynamic topology update is defined as update to
+	 * a TM system topology while TM system is not in stopped state.
+	 * When TRUE, application can update topology dynamically
+	 * without bringing the TM system to stopped state. When FALSE,
+	 * application has to call odp_tm_stop() before updating the
+	 * topology and odp_tm_start() after completing the update.
+	 */
+	odp_bool_t dynamic_topology_update;
+
+	/** dynamic_shaper_update indicates support for TM system's dynamic
+	 * shaper profile changes. When TRUE, application can update shaper
+	 * profile of a TM queue or TM node dynamically.
+	 * When FALSE, it implies that TM system should be brought to
+	 * stopped state before changing the shaper profile or updating
+	 * the parameters of the shaper profile of any TM node or TM queue.
+	 */
+	odp_bool_t dynamic_shaper_update;
+
+	/** dynamic_sched_update indicates support for TM system's dynamic
+	 * sched profile changes. When TRUE, application can update sched
+	 * profile of a TM queue or TM node dynamically.
+	 * When FALSE, it implies that TM system should be brought to
+	 * stopped state before changing the sched profile or updating
+	 * the parameters of the sched profile of any TM node or TM queue.
+	 */
+	odp_bool_t dynamic_sched_update;
+
+	/** dynamic_wred_update indicates support for TM system's dynamic
+	 * wred profile changes. When TRUE, application can update wred
+	 * profile of a TM queue or TM node dynamically.
+	 * When FALSE, it implies that TM system should be brought to
+	 * stopped state before changing the wred profile or updating
+	 * the parameters of the wred profile of any TM node or TM queue.
+	 */
+	odp_bool_t dynamic_wred_update;
+
+	/** dynamic_threshold_update indicates support for TM system's dynamic
+	 * threshold profile changes. When TRUE, application can update
+	 * threshold profile of a TM queue or TM node dynamically.
+	 * When FALSE, it implies that TM system should be brought to
+	 * stopped state before changing the threshold profile or updating
+	 * the parameters of the threshold profile of any TM node or TM queue.
+	 */
+	odp_bool_t dynamic_threshold_update;
 } odp_tm_capabilities_t;
 
 /** Per Level Requirements
@@ -605,6 +659,48 @@ odp_tm_t odp_tm_find(const char            *name,
  */
 int odp_tm_capability(odp_tm_t odp_tm, odp_tm_capabilities_t *capabilities);
 
+/**
+ * Start a TM system
+ *
+ * odp_tm_start() needs to be used to start an already created or found TM
+ * system. By default, all the TM systems are in stopped state.
+ *
+ * @param tm  TM system to be started
+ *
+ * @retval 0  on success
+ * @retval <0 on failure
+ */
+int odp_tm_start(odp_tm_t tm);
+
+/**
+ * Stop a TM system
+ *
+ * odp_tm_stop() can to used to stop a TM system that is already started for the
+ * purpose of reconfiguration that cannot be done dynamically.
+ *
+ * When TM is in the stopped state,
+ * - New packets must not be sent to the TM either directly by TM API or indirectly
+ *   via IPsec outbound inline API. New packets can only be enqueued after
+ *   starting the TM system using odp_tm_start().
+ * - Packets already inflight inside TM or IPSec for transmit may get silently dropped
+ *   or may get transmitted with unspecified TM treatment.
+ *
+ * A following call to odp_tm_start() restarts TM system and its scheduling/shaping
+ * on existing and new packets.
+ *
+ * @param tm  TM system to be stopped
+ *
+ * @retval 0  on success
+ * @retval <0 on failure
+ *
+ * @see odp_tm_capabilities_t::dynamic_topology_update
+ * @see odp_tm_capabilities_t::dynamic_shaper_update
+ * @see odp_tm_capabilities_t::dynamic_sched_update
+ * @see odp_tm_capabilities_t::dynamic_wred_update
+ * @see odp_tm_capabilities_t::dynamic_threshold_update
+ */
+int odp_tm_stop(odp_tm_t tm);
+
 /** Destroy a TM system.
  *
  * odp_tm_destroy() may be used to destroy TM systems created via
@@ -746,20 +842,34 @@ typedef enum {
  */
 typedef struct {
 	/** The committed information rate for this shaper profile.  The units
-	 * for this integer are always in bits per second. */
-	uint64_t commit_bps;
+	 * for this integer is in bits per second when packet_mode is
+	 * not TRUE while packets per second when packet mode is TRUE.
+	 */
+	union {
+		/**< @deprecated Use commit_rate instead */
+		uint64_t ODP_DEPRECATE(commit_bps);
+		uint64_t commit_rate; /**< Commit information rate */
+	};
 
 	/** The peak information rate for this shaper profile.  The units for
-	 * this integer are always in bits per second. */
-	uint64_t peak_bps;
+	 * this integer is in bits per second when packet_mode is
+	 * not TRUE while in packets per second when packet mode is TRUE.
+	 */
+	union {
+		/**< @deprecated Use peak_rate instead */
+		uint64_t ODP_DEPRECATE(peak_bps);
+		uint64_t peak_rate; /**< Peak information rate */
+	};
 
 	/** The commit burst tolerance for this shaper profile.  The units for
-	 * this field are always bits.  This value sets an upper limit for the
+	 * this field is bits when packet_mode is not TRUE and packets when
+	 * packet_mode is TRUE.  This value sets an upper limit for the
 	 * size of the commitCnt. */
 	uint32_t commit_burst;
 
 	/** The peak burst tolerance for this shaper profile.  The units for
-	 * this field are always bits.  This value sets an upper limit for the
+	 * this field in bits when packet_mode is not TRUE and packets
+	 * when packet_mode is TRUE. This value sets an upper limit for the
 	 * size of the peakCnt. */
 	uint32_t peak_burst;
 
@@ -771,7 +881,9 @@ typedef struct {
 	 * to a value approximating the "time" (in units of bytes) taken by
 	 * the Ethernet preamble and Inter Frame Gap.  Traditionally this
 	 * would be the value 20 (8 + 12), but in same cases can be as low as
-	 * 9 (4 + 5). */
+	 * 9 (4 + 5).
+	 * This field is ignored when packet_mode is TRUE.
+	 */
 	int8_t shaper_len_adjust;
 
 	/** If dual_rate is TRUE it indicates the desire for the
@@ -780,6 +892,12 @@ typedef struct {
 	 * implementation specific, but in any case require a non-zero set of
 	 * both commit and peak parameters. */
 	odp_bool_t dual_rate;
+
+	/** If packet_mode is TRUE it indicates that shaper should work
+	 * in packet mode ignoring lengths of packet and hence shaping
+	 * traffic in packet's per second as opposed to bits per second.
+	 */
+	odp_bool_t packet_mode;
 } odp_tm_shaper_params_t;
 
 /** odp_tm_shaper_params_init() must be called to initialize any

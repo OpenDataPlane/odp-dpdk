@@ -113,6 +113,8 @@
 
 #define TM_PERCENT(percent) ((uint32_t)(100 * percent))
 
+#define ARRAY_SIZE(a) (sizeof((a)) / sizeof((a)[0]))
+
 typedef enum {
 	SHAPER_PROFILE, SCHED_PROFILE, THRESHOLD_PROFILE, WRED_PROFILE
 } profile_kind_t;
@@ -281,6 +283,11 @@ static uint32_t        num_odp_tm_systems;
 
 static odp_tm_capabilities_t tm_capabilities;
 
+static bool dynamic_shaper_update = true;
+static bool dynamic_sched_update = true;
+static bool dynamic_threshold_update = true;
+static bool dynamic_wred_update = true;
+
 static odp_tm_shaper_t    shaper_profiles[NUM_SHAPER_PROFILES];
 static odp_tm_sched_t     sched_profiles[NUM_SCHED_PROFILES];
 static odp_tm_threshold_t threshold_profiles[NUM_THRESHOLD_PROFILES];
@@ -317,8 +324,8 @@ static uint32_t num_ifaces;
 static odp_pool_t pools[MAX_NUM_IFACES] = {ODP_POOL_INVALID, ODP_POOL_INVALID};
 
 static odp_pktio_t pktios[MAX_NUM_IFACES];
+static odp_bool_t pktio_started[MAX_NUM_IFACES];
 static odp_pktin_queue_t pktins[MAX_NUM_IFACES];
-static odp_pktout_queue_t pktouts[MAX_NUM_IFACES];
 static odp_pktin_queue_t rcv_pktin;
 static odp_pktio_t xmt_pktio;
 
@@ -327,6 +334,8 @@ static odph_ethaddr_t dst_mac;
 
 static uint32_t cpu_unique_id;
 static uint32_t cpu_tcp_seq_num;
+
+static int8_t suite_inactive;
 
 static void busy_wait(uint64_t nanoseconds)
 {
@@ -481,7 +490,6 @@ static int open_pktios(void)
 
 	odp_pktio_param_init(&pktio_param);
 	pktio_param.in_mode  = ODP_PKTIN_MODE_DIRECT;
-	pktio_param.out_mode = ODP_PKTOUT_MODE_DIRECT;
 
 	for (iface = 0; iface < num_ifaces; iface++) {
 		snprintf(pool_name, sizeof(pool_name), "pkt_pool_%s",
@@ -494,10 +502,37 @@ static int open_pktios(void)
 		}
 
 		pools[iface] = pkt_pool;
-		pktio = odp_pktio_open(iface_name[iface], pkt_pool,
-				       &pktio_param);
-		if (pktio == ODP_PKTIO_INVALID)
-			pktio = odp_pktio_lookup(iface_name[iface]);
+
+		/* Zero'th device is always PKTOUT TM as we use it from XMIT */
+		if (iface == 0) {
+			pktio_param.out_mode = ODP_PKTOUT_MODE_TM;
+
+			pktio = odp_pktio_open(iface_name[iface], pkt_pool,
+					       &pktio_param);
+
+			/* On failure check if pktio can be opened in non-TM mode.
+			 * If non-TM mode works, then we can assume that PKTIO
+			 * does not support TM
+			 */
+			if (pktio == ODP_PKTIO_INVALID) {
+				pktio_param.out_mode = ODP_PKTOUT_MODE_DIRECT;
+				pktio = odp_pktio_open(iface_name[iface], pkt_pool,
+						       &pktio_param);
+
+				/* Return >0 to indicate no TM support */
+				if (pktio != ODP_PKTIO_INVALID) {
+					odp_pktio_close(pktio);
+					return 1;
+				}
+			}
+		} else {
+			pktio_param.out_mode = ODP_PKTOUT_MODE_DISABLED;
+
+			pktio = odp_pktio_open(iface_name[iface], pkt_pool,
+					       &pktio_param);
+		}
+
+		pktios[iface] = pktio;
 		if (pktio == ODP_PKTIO_INVALID) {
 			ODPH_ERR("odp_pktio_open() failed\n");
 			return -1;
@@ -505,22 +540,13 @@ static int open_pktios(void)
 
 		/* Set defaults for PktIn and PktOut queues */
 		(void)odp_pktin_queue_config(pktio, NULL);
-		(void)odp_pktout_queue_config(pktio, NULL);
 		rc = odp_pktio_promisc_mode_set(pktio, true);
 		if (rc != 0)
 			printf("****** promisc_mode_set failed  ******\n");
 
-		pktios[iface] = pktio;
-
 		if (odp_pktin_queue(pktio, &pktins[iface], 1) != 1) {
 			odp_pktio_close(pktio);
 			ODPH_ERR("odp_pktio_open() failed: no pktin queue\n");
-			return -1;
-		}
-
-		if (odp_pktout_queue(pktio, &pktouts[iface], 1) != 1) {
-			odp_pktio_close(pktio);
-			ODPH_ERR("odp_pktio_open() failed: no pktout queue\n");
 			return -1;
 		}
 
@@ -547,6 +573,7 @@ static int open_pktios(void)
 			ODPH_ERR("odp_pktio_start() failed\n");
 			return -1;
 		}
+		pktio_started[1] = true;
 	} else {
 		xmt_pktio = pktios[0];
 		rcv_pktin  = pktins[0];
@@ -557,6 +584,7 @@ static int open_pktios(void)
 		ODPH_ERR("odp_pktio_start() failed\n");
 		return -1;
 	}
+	pktio_started[0] = true;
 
 	/* Now wait until the link or links are up. */
 	rc = wait_linkup(pktios[0]);
@@ -1658,9 +1686,23 @@ static int create_tm_system(void)
 		return -1;
 	}
 
+	/* Update dynamic capability flags from created tm system */
+	dynamic_shaper_update = tm_capabilities.dynamic_shaper_update;
+	dynamic_sched_update = tm_capabilities.dynamic_sched_update;
+	dynamic_threshold_update = tm_capabilities.dynamic_threshold_update;
+	dynamic_wred_update = tm_capabilities.dynamic_wred_update;
+
 	found_odp_tm = odp_tm_find(tm_name, &requirements, &egress);
 	if ((found_odp_tm == ODP_TM_INVALID) || (found_odp_tm != odp_tm)) {
 		ODPH_ERR("odp_tm_find() failed\n");
+		return -1;
+	}
+
+	/* Start TM system */
+	CU_ASSERT((rc = odp_tm_start(odp_tm)) == 0);
+	if (rc != 0) {
+		ODPH_ERR("odp_tm_start() failed for tm: %" PRIx64 "\n",
+			 odp_tm_to_u64(odp_tm));
 		return -1;
 	}
 
@@ -2042,11 +2084,16 @@ static int destroy_tm_systems(void)
 
 	/* Close/free the TM systems. */
 	for (idx = 0; idx < num_odp_tm_systems; idx++) {
+		if (odp_tm_stop(odp_tm_systems[idx]) != 0)
+			return -1;
+
 		if (destroy_tm_subtree(root_node_descs[idx]) != 0)
 			return -1;
 
 		if (odp_tm_destroy(odp_tm_systems[idx]) != 0)
 			return -1;
+
+		odp_tm_systems[idx] = ODP_TM_INVALID;
 	}
 
 	/* Close/free the TM profiles. */
@@ -2058,7 +2105,9 @@ static int destroy_tm_systems(void)
 
 static int traffic_mngr_suite_init(void)
 {
+	odp_tm_capabilities_t capabilities_array[MAX_CAPABILITIES];
 	uint32_t payload_len, copy_len;
+	int ret, i;
 
 	/* Initialize some global variables. */
 	num_pkts_made   = 0;
@@ -2094,9 +2143,45 @@ static int traffic_mngr_suite_init(void)
 		       iface_name[0], iface_name[1]);
 	}
 
-	if (open_pktios() != 0)
+	pktios[0] = ODP_PKTIO_INVALID;
+	pktios[1] = ODP_PKTIO_INVALID;
+
+	ret = open_pktios();
+	if (ret < 0)
 		return -1;
 
+	/* Positive return indicates, that pktio open failed with out mode as TM
+	 * but succeeded with direct mode.
+	 */
+	if (ret > 0)
+		goto skip_tests;
+
+	/* Fetch initial dynamic update capabilities, it will be updated
+	 * later after TM system is created.
+	 */
+	ret = odp_tm_capabilities(capabilities_array, MAX_CAPABILITIES);
+	if (ret <= 0)
+		return -1;
+
+	for (i = 0; i < ret; i++) {
+		if (!capabilities_array[i].dynamic_shaper_update)
+			dynamic_shaper_update = false;
+
+		if (!capabilities_array[i].dynamic_sched_update)
+			dynamic_sched_update = false;
+
+		if (!capabilities_array[i].dynamic_threshold_update)
+			dynamic_threshold_update = false;
+
+		if (!capabilities_array[i].dynamic_wred_update)
+			dynamic_wred_update = false;
+	}
+
+	return 0;
+skip_tests:
+	/* Mark all tests as inactive under this suite */
+	odp_cunit_set_inactive();
+	suite_inactive++;
 	return 0;
 }
 
@@ -2107,14 +2192,22 @@ static int traffic_mngr_suite_term(void)
 	/* Close the pktios and associated packet pools. */
 	free_rcvd_pkts();
 	for (iface = 0; iface < num_ifaces; iface++) {
-		if (odp_pktio_stop(pktios[iface]) != 0)
-			return -1;
+		/* Skip pktios not initialized */
+		if (pktios[iface] != ODP_PKTIO_INVALID) {
+			if (pktio_started[iface] &&
+			    odp_pktio_stop(pktios[iface]) != 0)
+				return -1;
 
-		if (odp_pktio_close(pktios[iface]) != 0)
-			return -1;
+			if (odp_pktio_close(pktios[iface]) != 0)
+				return -1;
+			pktios[iface] = ODP_PKTIO_INVALID;
+			pktio_started[iface] = false;
+		}
 
 		if (odp_pool_destroy(pools[iface]) != 0)
 			return -1;
+
+		pools[iface] = ODP_POOL_INVALID;
 	}
 
 	if (odp_cunit_print_inactive())
@@ -2138,9 +2231,9 @@ static void check_shaper_profile(char *shaper_name, uint32_t shaper_idx)
 	memset(&shaper_params, 0, sizeof(shaper_params));
 	rc = odp_tm_shaper_params_read(profile, &shaper_params);
 	CU_ASSERT(rc == 0);
-	CU_ASSERT(approx_eq64(shaper_params.commit_bps,
+	CU_ASSERT(approx_eq64(shaper_params.commit_rate,
 			      shaper_idx * MIN_COMMIT_BW));
-	CU_ASSERT(approx_eq64(shaper_params.peak_bps,
+	CU_ASSERT(approx_eq64(shaper_params.peak_rate,
 			      shaper_idx * MIN_PEAK_BW));
 	CU_ASSERT(approx_eq32(shaper_params.commit_burst,
 			      shaper_idx * MIN_COMMIT_BURST));
@@ -2165,8 +2258,8 @@ static void traffic_mngr_test_shaper_profile(void)
 	for (idx = 1; idx <= NUM_SHAPER_TEST_PROFILES; idx++) {
 		snprintf(shaper_name, sizeof(shaper_name),
 			 "shaper_profile_%" PRIu32, idx);
-		shaper_params.commit_bps   = idx * MIN_COMMIT_BW;
-		shaper_params.peak_bps     = idx * MIN_PEAK_BW;
+		shaper_params.commit_rate  = idx * MIN_COMMIT_BW;
+		shaper_params.peak_rate    = idx * MIN_PEAK_BW;
 		shaper_params.commit_burst = idx * MIN_COMMIT_BURST;
 		shaper_params.peak_burst   = idx * MIN_PEAK_BURST;
 
@@ -2415,6 +2508,7 @@ static int set_shaper(const char    *node_name,
 	odp_tm_shaper_params_t shaper_params;
 	odp_tm_shaper_t        shaper_profile;
 	odp_tm_node_t          tm_node;
+	int rc;
 
 	tm_node = find_tm_node(0, node_name);
 	if (tm_node == ODP_TM_INVALID) {
@@ -2424,12 +2518,19 @@ static int set_shaper(const char    *node_name,
 	}
 
 	odp_tm_shaper_params_init(&shaper_params);
-	shaper_params.commit_bps        = commit_bps;
-	shaper_params.peak_bps          = 0;
+	shaper_params.commit_rate       = commit_bps;
+	shaper_params.peak_rate         = 0;
 	shaper_params.commit_burst      = commit_burst_in_bits;
 	shaper_params.peak_burst        = 0;
 	shaper_params.shaper_len_adjust = 0;
 	shaper_params.dual_rate         = 0;
+
+	if (!dynamic_shaper_update) {
+		/* Stop TM system before update when dynamic update is not
+		 * supported.
+		 */
+		CU_ASSERT_FATAL(odp_tm_stop(odp_tm_systems[0]) == 0);
+	}
 
 	/* First see if a shaper profile already exists with this name, in
 	 * which case we use that profile, else create a new one. */
@@ -2443,7 +2544,13 @@ static int set_shaper(const char    *node_name,
 		num_shaper_profiles++;
 	}
 
-	return odp_tm_node_shaper_config(tm_node, shaper_profile);
+	rc = odp_tm_node_shaper_config(tm_node, shaper_profile);
+
+	if (!dynamic_shaper_update) {
+		/* Start TM system, post update */
+		CU_ASSERT_FATAL(odp_tm_start(odp_tm_systems[0]) == 0);
+	}
+	return rc;
 }
 
 static int traffic_mngr_check_shaper(void)
@@ -2617,6 +2724,13 @@ static int set_sched_fanin(const char         *node_name,
 	if (node_desc == NULL)
 		return -1;
 
+	if (!dynamic_sched_update) {
+		/* Stop TM system before update when dynamic update is not
+		 * supported.
+		 */
+		CU_ASSERT_FATAL(odp_tm_stop(odp_tm_systems[0]) == 0);
+	}
+
 	fanin_cnt = MIN(node_desc->num_children, FANIN_RATIO);
 	for (fanin = 0; fanin < fanin_cnt; fanin++) {
 		odp_tm_sched_params_init(&sched_params);
@@ -2653,10 +2767,15 @@ static int set_sched_fanin(const char         *node_name,
 		rc = odp_tm_node_sched_config(tm_node, fanin_node,
 					      sched_profile);
 		if (rc != 0)
-			return -1;
+			goto exit;
 	}
 
-	return 0;
+exit:
+	if (!dynamic_sched_update) {
+		/* Start TM system, post update */
+		CU_ASSERT_FATAL(odp_tm_start(odp_tm_systems[0]) == 0);
+	}
+	return rc;
 }
 
 static int test_sched_queue_priority(const char *shaper_name,
@@ -2711,8 +2830,13 @@ static int test_sched_queue_priority(const char *shaper_name,
 
 	busy_wait(100 * ODP_TIME_MSEC_IN_NS);
 
-	/* Disable the shaper, so as to get the pkts out quicker. */
-	set_shaper(node_name, shaper_name, 0, 0);
+	/* Disable the shaper, so as to get the pkts out quicker.
+	 * We cannot do this if dynamic shaper update is not supported. Without
+	 * dynamic update support set_shaper() can cause packet drops due to
+	 * start/stop.
+	 */
+	if (dynamic_shaper_update)
+		set_shaper(node_name, shaper_name, 0, 0);
 
 	num_rcv_pkts = receive_pkts(odp_tm_systems[0], rcv_pktin,
 				    pkt_cnt + 4, 64 * 1000);
@@ -2730,6 +2854,8 @@ static int test_sched_queue_priority(const char *shaper_name,
 
 	CU_ASSERT(pkts_in_order == pkt_cnt);
 
+	/* Disable shaper in case it is still enabled */
+	set_shaper(node_name, shaper_name, 0, 0);
 	flush_leftover_pkts(odp_tm_systems[0], rcv_pktin);
 	CU_ASSERT(odp_tm_is_idle(odp_tm_systems[0]));
 	return 0;
@@ -2817,8 +2943,13 @@ static int test_sched_node_priority(const char *shaper_name,
 
 	busy_wait(100 * ODP_TIME_MSEC_IN_NS);
 
-	/* Disable the shaper, so as to get the pkts out quicker. */
-	set_shaper(node_name, shaper_name, 0, 0);
+	/* Disable the shaper, so as to get the pkts out quicker.
+	 * We cannot do this if dynamic shaper update is not supported. Without
+	 * dynamic update support set_shaper() can cause packet drops due to
+	 * start/stop.
+	 */
+	if (dynamic_shaper_update)
+		set_shaper(node_name, shaper_name, 0, 0);
 
 	num_rcv_pkts = receive_pkts(odp_tm_systems[0], rcv_pktin,
 				    pkts_sent, 64 * 1000);
@@ -2830,6 +2961,8 @@ static int test_sched_node_priority(const char *shaper_name,
 						 0, false, false);
 	CU_ASSERT(pkts_in_order == total_pkt_cnt);
 
+	/* Disable shaper in case it is still enabled */
+	set_shaper(node_name, shaper_name, 0, 0);
 	flush_leftover_pkts(odp_tm_systems[0], rcv_pktin);
 	CU_ASSERT(odp_tm_is_idle(odp_tm_systems[0]));
 	return 0;
@@ -2910,8 +3043,13 @@ static int test_sched_wfq(const char         *sched_base_name,
 
 	busy_wait(1000000);   /* wait 1 millisecond */
 
-	/* Disable the shaper, so as to get the pkts out quicker. */
-	set_shaper(node_name, shaper_name, 0, 0);
+	/* Disable the shaper, so as to get the pkts out quicker.
+	 * We cannot do this if dynamic shaper update is not supported. Without
+	 * dynamic update support set_shaper() can cause packet drops due to
+	 * start/stop.
+	 */
+	if (dynamic_shaper_update)
+		set_shaper(node_name, shaper_name, 0, 0);
 
 	num_rcv_pkts = receive_pkts(odp_tm_systems[0], rcv_pktin,
 				    pkt_cnt + 4, 64 * 1000);
@@ -2923,6 +3061,8 @@ static int test_sched_wfq(const char         *sched_base_name,
 		CU_ASSERT(rcv_rate_stats(&rcv_stats[fanin], pkt_class) == 0);
 	}
 
+	/* Disable shaper in case it is still enabled */
+	set_shaper(node_name, shaper_name, 0, 0);
 	flush_leftover_pkts(odp_tm_systems[0], rcv_pktin);
 	CU_ASSERT(odp_tm_is_idle(odp_tm_systems[0]));
 	return 0;
@@ -2935,6 +3075,13 @@ static int set_queue_thresholds(odp_tm_queue_t             tm_queue,
 	odp_tm_threshold_t threshold_profile;
 	int ret;
 
+	if (!dynamic_threshold_update) {
+		/* Stop TM system before update when dynamic update is not
+		 * supported.
+		 */
+		CU_ASSERT_FATAL(odp_tm_stop(odp_tm_systems[0]) == 0);
+	}
+
 	/* First see if a threshold profile already exists with this name, in
 	 * which case we use that profile, else create a new one. */
 	threshold_profile = odp_tm_thresholds_lookup(threshold_name);
@@ -2942,17 +3089,25 @@ static int set_queue_thresholds(odp_tm_queue_t             tm_queue,
 		ret = odp_tm_thresholds_params_update(threshold_profile,
 						      threshold_params);
 		if (ret)
-			return ret;
+			goto exit;
 	} else {
 		threshold_profile = odp_tm_threshold_create(threshold_name,
 							    threshold_params);
-		if (threshold_profile == ODP_TM_INVALID)
-			return -1;
+		if (threshold_profile == ODP_TM_INVALID) {
+			ret = -1;
+			goto exit;
+		}
 		threshold_profiles[num_threshold_profiles] = threshold_profile;
 		num_threshold_profiles++;
 	}
 
-	return odp_tm_queue_threshold_config(tm_queue, threshold_profile);
+	ret = odp_tm_queue_threshold_config(tm_queue, threshold_profile);
+exit:
+	if (!dynamic_threshold_update) {
+		/* Start TM system, post update */
+		CU_ASSERT_FATAL(odp_tm_start(odp_tm_systems[0]) == 0);
+	}
+	return ret;
 }
 
 static int test_threshold(const char *threshold_name,
@@ -3049,6 +3204,7 @@ static int set_queue_wred(odp_tm_queue_t   tm_queue,
 {
 	odp_tm_wred_params_t wred_params;
 	odp_tm_wred_t        wred_profile;
+	int rc;
 
 	odp_tm_wred_params_init(&wred_params);
 	if (use_dual_slope) {
@@ -3065,6 +3221,13 @@ static int set_queue_wred(odp_tm_queue_t   tm_queue,
 
 	wred_params.enable_wred       = true;
 	wred_params.use_byte_fullness = use_byte_fullness;
+
+	if (!dynamic_wred_update) {
+		/* Stop TM system before update when dynamic update is not
+		 * supported.
+		 */
+		CU_ASSERT_FATAL(odp_tm_stop(odp_tm_systems[0]) == 0);
+	}
 
 	/* First see if a wred profile already exists with this name, in
 	 * which case we use that profile, else create a new one. */
@@ -3084,7 +3247,14 @@ static int set_queue_wred(odp_tm_queue_t   tm_queue,
 		}
 	}
 
-	return odp_tm_queue_wred_config(tm_queue, pkt_color, wred_profile);
+	rc = odp_tm_queue_wred_config(tm_queue, pkt_color, wred_profile);
+
+	if (!dynamic_wred_update) {
+		/* Start TM system, post update */
+		CU_ASSERT_FATAL(odp_tm_start(odp_tm_systems[0]) == 0);
+	}
+	return rc;
+
 }
 
 static int test_byte_wred(const char      *wred_name,
@@ -3149,8 +3319,14 @@ static int test_byte_wred(const char      *wred_name,
 
 	pkts_sent = send_pkts(tm_queue, num_test_pkts);
 
-	/* Disable the shaper, so as to get the pkts out quicker. */
-	set_shaper(node_name, shaper_name, 0, 0);
+	/* Disable the shaper, so as to get the pkts out quicker.
+	 * We cannot do this if dynamic shaper update is not supported. Without
+	 * dynamic update support set_shaper() can cause packet drops due to
+	 * start/stop.
+	 */
+	if (dynamic_shaper_update)
+		set_shaper(node_name, shaper_name, 0, 0);
+
 	num_rcv_pkts = receive_pkts(odp_tm_systems[0], rcv_pktin,
 				    num_fill_pkts + pkts_sent, 64 * 1000);
 
@@ -3160,6 +3336,8 @@ static int test_byte_wred(const char      *wred_name,
 	if (wred_pkt_cnts == NULL)
 		return -1;
 
+	/* Disable shaper in case it is still enabled */
+	set_shaper(node_name, shaper_name, 0, 0);
 	flush_leftover_pkts(odp_tm_systems[0], rcv_pktin);
 	CU_ASSERT(odp_tm_is_idle(odp_tm_systems[0]));
 
@@ -3234,8 +3412,14 @@ static int test_pkt_wred(const char      *wred_name,
 
 	pkts_sent = send_pkts(tm_queue, num_test_pkts);
 
-	/* Disable the shaper, so as to get the pkts out quicker. */
-	set_shaper(node_name, shaper_name, 0, 0);
+	/* Disable the shaper, so as to get the pkts out quicker.
+	 * We cannot do this if dynamic shaper update is not supported. Without
+	 * dynamic update support set_shaper() can cause packet drops due to
+	 * start/stop.
+	 */
+	if (dynamic_shaper_update)
+		set_shaper(node_name, shaper_name, 0, 0);
+
 	ret = receive_pkts(odp_tm_systems[0], rcv_pktin,
 			   num_fill_pkts + pkts_sent, 64 * 1000);
 	if (ret < 0)
@@ -3249,6 +3433,8 @@ static int test_pkt_wred(const char      *wred_name,
 	if (wred_pkt_cnts == NULL)
 		return -1;
 
+	/* Disable shaper in case it is still enabled */
+	set_shaper(node_name, shaper_name, 0, 0);
 	flush_leftover_pkts(odp_tm_systems[0], rcv_pktin);
 	CU_ASSERT(odp_tm_is_idle(odp_tm_systems[0]));
 
@@ -4099,5 +4285,8 @@ int main(int argc, char *argv[])
 	if (ret == 0)
 		ret = odp_cunit_run();
 
+	/* Exit with 77 in order to indicate that test is skipped completely */
+	if (!ret && suite_inactive == (ARRAY_SIZE(traffic_mngr_suites) - 1))
+		return 77;
 	return ret;
 }

@@ -4,7 +4,7 @@ set -e
 cd "$(dirname "$0")"/../..
 ./bootstrap
 ./configure \
-	--host=${TARGET_ARCH} --build=x86_64-linux-gnu \
+	--host=${TARGET_ARCH} --build=${BUILD_ARCH:-x86_64-linux-gnu} \
 	--prefix=/opt/odp \
 	${CONF}
 
@@ -47,7 +47,7 @@ sysctl vm.nr_hugepages=1000
 mkdir -p /mnt/huge
 mount -t hugetlbfs nodev /mnt/huge
 
-if [ "$TARGET_ARCH" = "x86_64-linux-gnu" ]
+if [ -z "$TARGET_ARCH" ] || [ "$TARGET_ARCH" == "$BUILD_ARCH" ]
 then
 	LD_LIBRARY_PATH="/opt/odp/lib:$LD_LIBRARY_PATH" ./odp_hello_inst_dynamic
 fi

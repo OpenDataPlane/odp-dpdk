@@ -1,5 +1,5 @@
 /* Copyright (c) 2013-2018, Linaro Limited
- * Copyright (c) 2019-2020, Nokia
+ * Copyright (c) 2019-2021, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -244,7 +244,7 @@ static inline timer_pool_t *handle_to_tp(odp_timer_t hdl)
 		if (odp_likely(tp != NULL))
 			return timer_global->timer_pool[tp_idx];
 	}
-	ODP_ABORT("Invalid timer handle %#x\n", hdl);
+	ODP_ABORT("Invalid timer handle %p\n", hdl);
 }
 
 static inline uint32_t handle_to_idx(odp_timer_t hdl,
@@ -255,7 +255,7 @@ static inline uint32_t handle_to_idx(odp_timer_t hdl,
 	__builtin_prefetch(&tp->tick_buf[idx], 0, 0);
 	if (odp_likely(idx < odp_atomic_load_u32(&tp->high_wm)))
 		return idx;
-	ODP_ABORT("Invalid timer handle %#x\n", hdl);
+	ODP_ABORT("Invalid timer handle %p\n", hdl);
 }
 
 static inline odp_timer_t tp_idx_to_handle(timer_pool_t *tp,
@@ -399,7 +399,7 @@ static odp_timer_pool_t timer_pool_new(const char *name,
 	odp_ticketlock_unlock(&timer_global->lock);
 
 	if (!odp_global_rw->inline_timers) {
-		if (tp->param.clk_src == ODP_CLOCK_CPU)
+		if (tp->param.clk_src == ODP_CLOCK_DEFAULT)
 			itimer_init(tp);
 	} else {
 		/* Update the highest index for inline timer scan */
@@ -441,7 +441,7 @@ static void odp_timer_pool_del(timer_pool_t *tp)
 
 	if (!odp_global_rw->inline_timers) {
 		/* Stop POSIX itimer signals */
-		if (tp->param.clk_src == ODP_CLOCK_CPU)
+		if (tp->param.clk_src == ODP_CLOCK_DEFAULT)
 			itimer_fini(tp);
 
 		stop_timer_thread(tp);
@@ -1220,8 +1220,8 @@ static void itimer_fini(timer_pool_t *tp)
 int odp_timer_capability(odp_timer_clk_src_t clk_src,
 			 odp_timer_capability_t *capa)
 {
-	if (clk_src != ODP_CLOCK_CPU) {
-		ODP_ERR("Only CPU clock source supported\n");
+	if (clk_src != ODP_CLOCK_DEFAULT) {
+		ODP_ERR("Only ODP_CLOCK_DEFAULT supported. Requested %i.\n", clk_src);
 		return -1;
 	}
 
@@ -1248,8 +1248,8 @@ int odp_timer_capability(odp_timer_clk_src_t clk_src,
 int odp_timer_res_capability(odp_timer_clk_src_t clk_src,
 			     odp_timer_res_capability_t *res_capa)
 {
-	if (clk_src != ODP_CLOCK_CPU) {
-		ODP_ERR("Only CPU clock source supported\n");
+	if (clk_src != ODP_CLOCK_DEFAULT) {
+		ODP_ERR("Only ODP_CLOCK_DEFAULT supported. Requested %i.\n", clk_src);
 		return -1;
 	}
 
@@ -1385,13 +1385,13 @@ int odp_timer_set_abs(odp_timer_t hdl,
 	uint32_t idx = handle_to_idx(hdl, tp);
 
 	if (odp_unlikely(abs_tck < cur_tick + tp->min_rel_tck))
-		return ODP_TIMER_TOOEARLY;
+		return ODP_TIMER_TOO_NEAR;
 	if (odp_unlikely(abs_tck > cur_tick + tp->max_rel_tck))
-		return ODP_TIMER_TOOLATE;
+		return ODP_TIMER_TOO_FAR;
 	if (timer_reset(idx, abs_tck, (odp_buffer_t *)tmo_ev, tp))
 		return ODP_TIMER_SUCCESS;
 	else
-		return ODP_TIMER_NOEVENT;
+		return ODP_TIMER_FAIL;
 }
 
 int odp_timer_set_rel(odp_timer_t hdl,
@@ -1404,13 +1404,13 @@ int odp_timer_set_rel(odp_timer_t hdl,
 	uint32_t idx = handle_to_idx(hdl, tp);
 
 	if (odp_unlikely(rel_tck < tp->min_rel_tck))
-		return ODP_TIMER_TOOEARLY;
+		return ODP_TIMER_TOO_NEAR;
 	if (odp_unlikely(rel_tck > tp->max_rel_tck))
-		return ODP_TIMER_TOOLATE;
+		return ODP_TIMER_TOO_FAR;
 	if (timer_reset(idx, abs_tck, (odp_buffer_t *)tmo_ev, tp))
 		return ODP_TIMER_SUCCESS;
 	else
-		return ODP_TIMER_NOEVENT;
+		return ODP_TIMER_FAIL;
 }
 
 int odp_timer_cancel(odp_timer_t hdl, odp_event_t *tmo_ev)

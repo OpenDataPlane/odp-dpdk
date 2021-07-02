@@ -1,4 +1,5 @@
 /* Copyright (c) 2017-2018, Linaro Limited
+ * Copyright (c) 2018, 2020-2021, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:	BSD-3-Clause
@@ -169,7 +170,7 @@ struct ipsec_sa_s {
 
 		struct {
 			odp_ipsec_frag_mode_t frag_mode;
-			uint32_t mtu;
+			odp_atomic_u32_t mtu;
 
 			union {
 			struct {
@@ -196,13 +197,15 @@ struct ipsec_sa_s {
 		odp_atomic_u64_t hard_exp_pkts_err;
 
 		/*
-		 * Track error packets after lifetime check is done.
+		 * Track error packets and bytes after lifetime check is done.
 		 * Required since, the stats tracking lifetime is being
 		 * used for SA success packets stats.
 		 */
 		odp_atomic_u64_t post_lifetime_err_pkts;
+		odp_atomic_u64_t post_lifetime_err_bytes;
 	} stats;
 
+	uint32_t next_sa;
 	odp_ipsec_sa_param_t param;
 };
 
@@ -302,10 +305,16 @@ uint16_t _odp_ipsec_sa_alloc_ipv4_id(ipsec_sa_t *ipsec_sa);
 int _odp_ipsec_try_inline(odp_packet_t *pkt);
 
 /**
- * Get number of packets successfully processed by the SA
+ * Populate number of packets and bytes of data successfully processed by the SA
+ * in the odp_ipsec_stats_t structure passed.
  *
  */
-uint64_t _odp_ipsec_sa_stats_pkts(ipsec_sa_t *sa);
+void _odp_ipsec_sa_stats_pkts(ipsec_sa_t *sa, odp_ipsec_stats_t *stats);
+
+/**
+  * Return true if IPsec operates in sync mode in the given direction.
+  */
+odp_bool_t _odp_ipsec_is_sync_mode(odp_ipsec_dir_t dir);
 
 /**
  * @}

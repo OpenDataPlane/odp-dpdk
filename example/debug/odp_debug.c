@@ -346,6 +346,7 @@ static int timer_debug(void)
 	odp_pool_t pool;
 	odp_pool_param_t pool_param;
 	odp_timeout_t timeout;
+	odp_timer_res_capability_t timer_res_capa;
 	odp_timer_capability_t timer_capa;
 	odp_timer_pool_t timer_pool;
 	odp_timer_pool_param_t timer_param;
@@ -374,7 +375,7 @@ static int timer_debug(void)
 		return -1;
 	}
 
-	if (odp_timer_capability(ODP_CLOCK_CPU, &timer_capa)) {
+	if (odp_timer_capability(ODP_CLOCK_DEFAULT, &timer_capa)) {
 		ODPH_ERR("Timer capa failed\n");
 		return -1;
 	}
@@ -382,15 +383,22 @@ static int timer_debug(void)
 	if (timer_capa.max_tmo.max_tmo < max_tmo)
 		max_tmo = timer_capa.max_tmo.max_tmo;
 
-	if (timer_capa.max_tmo.res_ns > res)
-		res = timer_capa.max_tmo.res_ns;
+	memset(&timer_res_capa, 0, sizeof(odp_timer_res_capability_t));
+	timer_res_capa.max_tmo = max_tmo;
+	if (odp_timer_res_capability(ODP_CLOCK_DEFAULT, &timer_res_capa)) {
+		ODPH_ERR("Timer resolution capability failed\n");
+		return -1;
+	}
+
+	if (timer_res_capa.res_ns > res)
+		res = timer_res_capa.res_ns;
 
 	memset(&timer_param, 0, sizeof(timer_param));
 	timer_param.res_ns  = res;
 	timer_param.min_tmo = max_tmo / 10;
 	timer_param.max_tmo = max_tmo;
 	timer_param.num_timers = 10;
-	timer_param.clk_src = ODP_CLOCK_CPU;
+	timer_param.clk_src = ODP_CLOCK_DEFAULT;
 
 	timer_pool = odp_timer_pool_create("debug_timer", &timer_param);
 
