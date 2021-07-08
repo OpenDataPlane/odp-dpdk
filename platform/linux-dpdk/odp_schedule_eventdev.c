@@ -1049,6 +1049,20 @@ static int schedule_config(const odp_schedule_config_t *config)
 	return 0;
 }
 
+static void schedule_print(void)
+{
+	odp_schedule_capability_t capa;
+
+	(void)schedule_capability(&capa);
+
+	ODP_PRINT("\nScheduler debug info\n");
+	ODP_PRINT("--------------------\n");
+	ODP_PRINT("  scheduler:         eventdev\n");
+	ODP_PRINT("  max groups:        %u\n", capa.max_groups);
+	ODP_PRINT("  max priorities:    %u\n", capa.max_prios);
+	ODP_PRINT("\n");
+}
+
 /* Fill in scheduler interface */
 const schedule_fn_t _odp_schedule_eventdev_fn = {
 	.pktio_start = schedule_pktio_start,
@@ -1099,5 +1113,6 @@ const schedule_api_t _odp_schedule_eventdev_api = {
 	.schedule_order_unlock    = schedule_order_unlock,
 	.schedule_order_unlock_lock  = schedule_order_unlock_lock,
 	.schedule_order_lock_start   = schedule_order_lock_start,
-	.schedule_order_lock_wait    = schedule_order_lock_wait
+	.schedule_order_lock_wait    = schedule_order_lock_wait,
+	.schedule_print = schedule_print
 };
