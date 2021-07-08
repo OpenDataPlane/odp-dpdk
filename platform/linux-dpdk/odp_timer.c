@@ -492,12 +492,31 @@ uint64_t odp_timer_current_tick(odp_timer_pool_t tp)
 int odp_timer_pool_info(odp_timer_pool_t tp,
 			odp_timer_pool_info_t *info)
 {
-	timer_pool_t *timer_pool = timer_pool_from_hdl(tp);
+	timer_pool_t *timer_pool;
+	uint64_t freq_hz = rte_get_timer_hz();
 
+	if (odp_unlikely(tp == ODP_TIMER_POOL_INVALID)) {
+		ODP_ERR("Invalid timer pool.\n");
+		return -1;
+	}
+
+	timer_pool = timer_pool_from_hdl(tp);
+
+	memset(info, 0, sizeof(odp_timer_pool_info_t));
 	info->param      = timer_pool->param;
 	info->cur_timers = timer_pool->cur_timers;
 	info->hwm_timers = timer_pool->hwm_timers;
 	info->name       = timer_pool->name;
+
+	info->tick_info.freq.integer = freq_hz;
+	info->tick_info.nsec.integer = SEC_IN_NS / freq_hz;
+	if (SEC_IN_NS % freq_hz) {
+		info->tick_info.nsec.numer = SEC_IN_NS - (info->tick_info.nsec.integer * freq_hz);
+		info->tick_info.nsec.denom = freq_hz;
+	}
+	/* Leave source clock information to zero as there is no direct link
+	 * between a source clock signal and a timer tick. */
+
 	return 0;
 }
 
