@@ -37,7 +37,7 @@ typedef struct {
 	uint64_t num_exact;
 	uint64_t num_after;
 
-	uint64_t num_tooearly;
+	uint64_t num_too_near;
 
 } test_stat_t;
 
@@ -103,11 +103,11 @@ static void print_usage(void)
 	       "                            1: Set first burst of timers at init. Restart timers during test with absolute time.\n"
 	       "                            2: Set first burst of timers at init. Restart timers during test with relative time.\n"
 	       "  -o, --output <file>     Output file for measurement logs\n"
-	       "  -e, --early_retry <num> When timer restart fails due to ODP_TIMER_TOOEARLY, retry this many times\n"
+	       "  -e, --early_retry <num> When timer restart fails due to ODP_TIMER_TOO_NEAR, retry this many times\n"
 	       "                          with expiration time incremented by the period. Default: 0\n"
 	       "  -s, --clk_src           Clock source select (default 0):\n"
-	       "                            0: ODP_CLOCK_CPU\n"
-	       "                            1: ODP_CLOCK_EXT\n"
+	       "                            0: ODP_CLOCK_DEFAULT\n"
+	       "                            1: ODP_CLOCK_SRC_1, ...\n"
 	       "  -i, --init              Set global init parameters. Default: init params not set.\n"
 	       "  -h, --help              Display help and exit.\n\n");
 }
@@ -144,7 +144,7 @@ static int parse_options(int argc, char *argv[], test_global_t *test_global)
 	test_global->opt.burst     = 1;
 	test_global->opt.burst_gap = 0;
 	test_global->opt.mode      = 0;
-	test_global->opt.clk_src   = 0;
+	test_global->opt.clk_src   = ODP_CLOCK_DEFAULT;
 	test_global->opt.init      = 0;
 	test_global->opt.output    = 0;
 	test_global->opt.early_retry = 0;
@@ -289,11 +289,7 @@ static int start_timers(test_global_t *test_global)
 	}
 
 	test_global->timeout_pool = pool;
-
-	if (test_global->opt.clk_src == 0)
-		clk_src = ODP_CLOCK_CPU;
-	else
-		clk_src = ODP_CLOCK_EXT;
+	clk_src = test_global->opt.clk_src;
 
 	if (odp_timer_capability(clk_src, &timer_capa)) {
 		printf("Timer capa failed\n");
@@ -565,7 +561,7 @@ static void print_stat(test_global_t *test_global)
 	printf("  num exact:  %12" PRIu64 "  /  %.2f%%\n",
 	       stat->num_exact, 100.0 * stat->num_exact / tot_timers);
 	printf("  num retry:  %12" PRIu64 "  /  %.2f%%\n",
-	       stat->num_tooearly, 100.0 * stat->num_tooearly / tot_timers);
+	       stat->num_too_near, 100.0 * stat->num_too_near / tot_timers);
 	printf("  error after (nsec):\n");
 	printf("         min: %12" PRIu64 "  /  %.3fx resolution\n",
 	       stat->nsec_after_min, (double)stat->nsec_after_min / res_ns);
@@ -674,8 +670,8 @@ static void run_test(test_global_t *test_global)
 					ret = odp_timer_set_rel(tim, tick, &ev);
 				}
 
-				if (ret == ODP_TIMER_TOOEARLY)
-					stat->num_tooearly++;
+				if (ret == ODP_TIMER_TOO_NEAR)
+					stat->num_too_near++;
 				else
 					break;
 			}

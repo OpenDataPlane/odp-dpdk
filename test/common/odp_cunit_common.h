@@ -105,6 +105,10 @@ void odp_cunit_register_global_term(int (*func_term_ptr)(odp_instance_t inst));
 
 int odp_cunit_ret(int val);
 int odp_cunit_print_inactive(void);
+int odp_cunit_set_inactive(void);
+
+/* Check from CI_SKIP environment variable if the test case should be skipped by CI */
+int odp_cunit_ci_skip(const char *test_name);
 
 /*
  * Wrapper for CU_ASSERT_FATAL implementation to show the compiler that

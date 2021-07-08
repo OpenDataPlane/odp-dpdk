@@ -22,6 +22,7 @@
 #include <odp/api/std_types.h>
 #include <protocols/eth.h>
 #include <protocols/ip.h>
+#include <odp_packet_io_internal.h>
 #include <odp_traffic_mngr_internal.h>
 #include <odp/api/plat/packet_inlines.h>
 #include <odp/api/plat/byteorder_inlines.h>
@@ -610,8 +611,8 @@ static void tm_shaper_params_cvt_to(const odp_tm_shaper_params_t *shaper_params,
 	uint32_t min_time_delta;
 	int64_t  commit_burst, peak_burst;
 
-	commit_rate = tm_bps_to_rate(shaper_params->commit_bps);
-	if ((shaper_params->commit_bps == 0) || (commit_rate == 0)) {
+	commit_rate = tm_bps_to_rate(shaper_params->commit_rate);
+	if ((shaper_params->commit_rate == 0) || (commit_rate == 0)) {
 		tm_shaper_params->max_commit_time_delta = 0;
 		tm_shaper_params->max_peak_time_delta   = 0;
 		tm_shaper_params->commit_rate           = 0;
@@ -628,8 +629,8 @@ static void tm_shaper_params_cvt_to(const odp_tm_shaper_params_t *shaper_params,
 	max_commit_time_delta = tm_max_time_delta(commit_rate);
 	commit_burst = (int64_t)shaper_params->commit_burst;
 
-	peak_rate = tm_bps_to_rate(shaper_params->peak_bps);
-	if ((shaper_params->peak_bps == 0) || (peak_rate == 0)) {
+	peak_rate = tm_bps_to_rate(shaper_params->peak_rate);
+	if ((shaper_params->peak_rate == 0) || (peak_rate == 0)) {
 		peak_rate = 0;
 		max_peak_time_delta = 0;
 		peak_burst = 0;
@@ -669,8 +670,8 @@ static void tm_shaper_params_cvt_from(tm_shaper_params_t     *tm_shaper_params,
 	commit_burst = tm_shaper_params->max_commit >> (26 - 3);
 	peak_burst = tm_shaper_params->max_peak >> (26 - 3);
 
-	odp_shaper_params->commit_bps = commit_bps;
-	odp_shaper_params->peak_bps = peak_bps;
+	odp_shaper_params->commit_rate = commit_bps;
+	odp_shaper_params->peak_rate = peak_bps;
 	odp_shaper_params->commit_burst = (uint32_t)commit_burst;
 	odp_shaper_params->peak_burst = (uint32_t)peak_burst;
 	odp_shaper_params->shaper_len_adjust = tm_shaper_params->len_adjust;
@@ -2565,6 +2566,12 @@ int odp_tm_capabilities(odp_tm_capabilities_t capabilities[] ODP_UNUSED,
 	cap_ptr->ecn_marking_supported         = true;
 	cap_ptr->drop_prec_marking_supported   = true;
 
+	cap_ptr->dynamic_topology_update  = true;
+	cap_ptr->dynamic_shaper_update    = true;
+	cap_ptr->dynamic_sched_update     = true;
+	cap_ptr->dynamic_wred_update      = true;
+	cap_ptr->dynamic_threshold_update = true;
+
 	for (color = 0; color < ODP_NUM_PACKET_COLORS; color++)
 		cap_ptr->marking_colors_supported[color] = true;
 
@@ -2617,6 +2624,12 @@ static void tm_system_capabilities_set(odp_tm_capabilities_t *cap_ptr,
 	cap_ptr->ecn_marking_supported         = req_ptr->ecn_marking_needed;
 	cap_ptr->drop_prec_marking_supported   =
 					req_ptr->drop_prec_marking_needed;
+
+	cap_ptr->dynamic_topology_update  = true;
+	cap_ptr->dynamic_shaper_update    = true;
+	cap_ptr->dynamic_sched_update     = true;
+	cap_ptr->dynamic_wred_update      = true;
+	cap_ptr->dynamic_threshold_update = true;
 
 	for (color = 0; color < ODP_NUM_PACKET_COLORS; color++)
 		cap_ptr->marking_colors_supported[color] =
@@ -2919,15 +2932,20 @@ odp_tm_t odp_tm_create(const char            *name,
 		return ODP_TM_INVALID;
 	}
 
+	odp_ticketlock_lock(&tm_glb->create_lock);
+
 	/* If we are using pktio output (usual case) get the first associated
 	 * pktout_queue for this pktio and fail if there isn't one.
 	 */
-	if (egress->egress_kind == ODP_TM_EGRESS_PKT_IO &&
-	    odp_pktout_queue(egress->pktio, &pktout, 1) != 1)
-		return ODP_TM_INVALID;
+	if (egress->egress_kind == ODP_TM_EGRESS_PKT_IO) {
+		rc = _odp_pktio_pktout_tm_config(egress->pktio, &pktout, false);
+		if (rc) {
+			odp_ticketlock_unlock(&tm_glb->create_lock);
+			return ODP_TM_INVALID;
+		}
+	}
 
 	/* Allocate tm_system_t record. */
-	odp_ticketlock_lock(&tm_glb->create_lock);
 	tm_system = tm_system_alloc();
 	if (!tm_system) {
 		odp_ticketlock_unlock(&tm_glb->create_lock);
@@ -3042,6 +3060,22 @@ int odp_tm_capability(odp_tm_t odp_tm, odp_tm_capabilities_t *capabilities)
 	return 0;
 }
 
+int odp_tm_start(odp_tm_t odp_tm)
+{
+	(void)odp_tm;
+
+	/* Nothing more to do after TM create */
+	return 0;
+}
+
+int odp_tm_stop(odp_tm_t odp_tm)
+{
+	(void)odp_tm;
+
+	/* Nothing more to do for topology changes */
+	return 0;
+}
+
 int odp_tm_destroy(odp_tm_t odp_tm)
 {
 	tm_system_t *tm_system;
@@ -3065,6 +3099,7 @@ int odp_tm_destroy(odp_tm_t odp_tm)
 	_odp_queue_pool_destroy(tm_system->_odp_int_queue_pool);
 	_odp_timer_wheel_destroy(tm_system->_odp_int_timer_wheel);
 
+	_odp_int_name_tbl_delete(tm_system->name_tbl_id);
 	tm_system_free(tm_system);
 	return 0;
 }
@@ -3203,6 +3238,10 @@ odp_tm_shaper_t odp_tm_shaper_create(const char *name,
 	tm_shaper_params_t *profile_obj;
 	odp_tm_shaper_t     shaper_handle;
 	_odp_int_name_t     name_tbl_id;
+
+	/* We don't support shaper in packet mode */
+	if (params->packet_mode)
+		return ODP_TM_INVALID;
 
 	profile_obj = tm_common_profile_create(name, TM_SHAPER_PROFILE,
 					       &shaper_handle, &name_tbl_id);
@@ -3573,7 +3612,7 @@ int odp_tm_wred_destroy(odp_tm_wred_t wred_profile)
 		return -1;
 
 	return tm_common_profile_destroy(wred_profile,
-					 ODP_INVALID_NAME);
+					 wred_params->name_tbl_id);
 }
 
 int odp_tm_wred_params_read(odp_tm_wred_t wred_profile,
@@ -4685,10 +4724,10 @@ void odp_tm_stats_print(odp_tm_t odp_tm)
 
 	ODP_PRINT("odp_tm_stats_print - tm_system=0x%" PRIX64 " tm_idx=%u\n",
 		  odp_tm, tm_system->tm_idx);
-	ODP_PRINT("  input_work_queue size=%u current cnt=%u peak cnt=%u\n",
-		  INPUT_WORK_RING_SIZE, input_work_queue->queue_cnt,
+	ODP_PRINT("  input_work_queue size=%u current cnt=%" PRIu64 " peak cnt=%" PRIu32 "\n",
+		  INPUT_WORK_RING_SIZE, odp_atomic_load_u64(&input_work_queue->queue_cnt),
 		  input_work_queue->peak_cnt);
-	ODP_PRINT("  input_work_queue enqueues=%" PRIu64 " dequeues=% " PRIu64
+	ODP_PRINT("  input_work_queue enqueues=%" PRIu64 " dequeues=%" PRIu64
 		  " fail_cnt=%" PRIu64 "\n", input_work_queue->total_enqueues,
 		  input_work_queue->total_dequeues,
 		  input_work_queue->enqueue_fail_cnt);

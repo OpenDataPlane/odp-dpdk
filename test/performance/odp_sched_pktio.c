@@ -490,7 +490,7 @@ static int worker_thread_timers(void *arg)
 			ret = odp_timer_set_rel(timer, tick, NULL);
 
 			if (odp_unlikely(ret != ODP_TIMER_SUCCESS &&
-					 ret != ODP_TIMER_NOEVENT)) {
+					 ret != ODP_TIMER_FAIL)) {
 				/* Tick period is too short or long. Normally,
 				 * reset either succeeds or fails due to timer
 				 * expiration, in which case timeout event will
@@ -1253,7 +1253,7 @@ static int create_timers(test_global_t *test_global)
 	if (test_global->opt.timeout_us == 0)
 		return 0;
 
-	if (odp_timer_capability(ODP_CLOCK_CPU, &timer_capa)) {
+	if (odp_timer_capability(ODP_CLOCK_DEFAULT, &timer_capa)) {
 		printf("Timer capa failed\n");
 		return -1;
 	}
@@ -1272,7 +1272,7 @@ static int create_timers(test_global_t *test_global)
 	timer_param.min_tmo    = timeout_ns;
 	timer_param.max_tmo    = timeout_ns;
 	timer_param.num_timers = num_timer;
-	timer_param.clk_src    = ODP_CLOCK_CPU;
+	timer_param.clk_src    = ODP_CLOCK_DEFAULT;
 
 	timer_pool = odp_timer_pool_create("sched_pktio_timer", &timer_param);
 

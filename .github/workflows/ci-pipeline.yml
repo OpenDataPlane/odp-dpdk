@@ -1,4 +1,4 @@
-name: CI
+name: CI x86_64
 
 on: [push, pull_request]
 env:
@@ -58,15 +58,14 @@ jobs:
         make doxygen-doc 2>&1 | tee ./doxygen.log
         ! fgrep -rq warning ./doxygen.log
 
-  Build_x86_64:
+  Build:
     runs-on: ubuntu-18.04
-    env:
-      ARCH: x86_64
     strategy:
       fail-fast: false
       matrix:
         cc: [gcc, clang]
-        conf: ['', 'CFLAGS=-O3', 'CFLAGS=-O1', 'CFLAGS=-O0 --enable-debug=full', '--enable-lto', '--enable-lto --enable-abi-compat', '--enable-pcapng-support']
+        conf: ['', 'CFLAGS=-O3', 'CFLAGS=-O1', 'CFLAGS=-O0 --enable-debug=full', '--enable-lto',
+               '--enable-lto --enable-abi-compat', '--enable-pcapng-support']
         exclude:
           - cc: clang
             conf: '--enable-lto'
@@ -135,8 +134,6 @@ jobs:
 
   Build_OS:
     runs-on: ubuntu-18.04
-    env:
-      ARCH: x86_64
     strategy:
       fail-fast: false
       matrix:
@@ -151,7 +148,6 @@ jobs:
   Build_gcc-10:
     runs-on: ubuntu-18.04
     env:
-      ARCH: x86_64
       CC: gcc-10
       OS: ubuntu_20.04
     strategy:
@@ -214,18 +210,19 @@ jobs:
       if: ${{ failure() }}
       run: find . -name "*.trs" | xargs grep -l '^.test-result. FAIL' | while read trs ; do echo FAILURE detected at $trs; cat ${trs%%.trs}.log ; done
 
-  Run_x86_64:
+  Run:
     runs-on: ubuntu-18.04
-    env:
-      ARCH: x86_64
     strategy:
       fail-fast: false
       matrix:
         cc: [gcc, clang]
-        conf: ['', '--enable-abi-compat', '--enable-deprecated', '--disable-static-applications', '--disable-host-optimization', '--disable-host-optimization --enable-abi-compat', '--without-openssl --without-pcap']
+        conf: ['', '--enable-abi-compat', '--enable-deprecated --enable-debug=full',
+               '--disable-static-applications',
+               '--disable-host-optimization', '--disable-host-optimization --enable-abi-compat',
+               '--without-openssl --without-pcap']
     steps:
       - uses: actions/checkout@v2
-      - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${{matrix.cc}}"
+      - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${{matrix.cc}}" -e ARCH="${ARCH}"
                -e CXX=g++-10 -e CONF="${{matrix.conf}}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH} /odp/scripts/ci/check.sh
       - name: Failure log
         if: ${{ failure() }}
@@ -240,22 +237,18 @@ jobs:
         os: ['ubuntu_20.04']
     steps:
       - uses: actions/checkout@v2
-      - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${{matrix.cc}}"
+      - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${{matrix.cc}}" -e ARCH="${ARCH}"
                -e CONF="${CONF}" $CONTAINER_NAMESPACE/odp-ci-${{matrix.os}}-${ARCH} /odp/scripts/ci/check.sh
       - name: Failure log
         if: ${{ failure() }}
         run: find . -name "*.trs" | xargs grep -l '^.test-result. FAIL' | while read trs ; do echo FAILURE detected at $trs; cat ${trs%%.trs}.log ; done
 
-  Run_scheduler:
+  Run_scheduler_sp:
     runs-on: ubuntu-18.04
-    strategy:
-      fail-fast: false
-      matrix:
-        scheduler: ['sp']
     steps:
       - uses: actions/checkout@v2
-      - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}"
-               -e CONF="${CONF}" -e ODP_SCHEDULER=${{matrix.scheduler}} $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH} /odp/scripts/ci/check.sh
+      - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}" -e ARCH="${ARCH}"
+               -e CONF="${CONF}" -e ODP_SCHEDULER=sp $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH} /odp/scripts/ci/check.sh
       - name: Failure log
         if: ${{ failure() }}
         run: find . -name "*.trs" | xargs grep -l '^.test-result. FAIL' | while read trs ; do echo FAILURE detected at $trs; cat ${trs%%.trs}.log ; done
@@ -264,7 +257,7 @@ jobs:
     runs-on: ubuntu-18.04
     steps:
       - uses: actions/checkout@v2
-      - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}"
+      - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}" -e ARCH="${ARCH}"
                -e CONF="${CONF}" -e ODPH_PROC_MODE=1 $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH} /odp/scripts/ci/check.sh
       - name: Failure log
         if: ${{ failure() }}
@@ -274,7 +267,7 @@ jobs:
     runs-on: ubuntu-18.04
     steps:
       - uses: actions/checkout@v2
-      - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}"
+      - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}" -e ARCH="${ARCH}"
                -e CONF="${CONF}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-dpdk_18.11 /odp/scripts/ci/check.sh
       - name: Failure log
         if: ${{ failure() }}
@@ -287,7 +280,7 @@ jobs:
       OS: ubuntu_20.04
     steps:
       - uses: actions/checkout@v2
-      - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}"
+      - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}" -e ARCH="${ARCH}"
                -e CONF="${CONF}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-dpdk_20.11 /odp/scripts/ci/check.sh
       - name: Failure log
         if: ${{ failure() }}

@@ -679,7 +679,7 @@ odp_pool_t odp_pool_create(const char *name, const odp_pool_param_t *params)
 			event_type = ODP_EVENT_PACKET;
 
 			ODP_DBG("type: packet, name: %s, num: %u, len: %u, blk_size: %u, "
-				"uarea_size: %d, hdr_size: %d\n", pool_name, num, params->pkt.len,
+				"uarea_size: %d, hdr_size: %zu\n", pool_name, num, params->pkt.len,
 				blk_size, params->pkt.uarea_size, hdr_size);
 			break;
 		case ODP_POOL_TIMEOUT:

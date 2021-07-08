@@ -1,4 +1,5 @@
 /* Copyright (c) 2013-2018, Linaro Limited
+ * Copyright (c) 2021, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -17,6 +18,7 @@
 #include <odp/api/plat/time_inlines.h>
 
 #include <rte_config.h>
+#include <rte_atomic.h>
 #include <rte_cycles.h>
 
 ODP_STATIC_ASSERT(_ODP_TIMESPEC_SIZE >= (sizeof(struct timespec)),
@@ -148,6 +150,16 @@ static inline odp_time_t time_cur_dpdk(void)
 	return time;
 }
 
+static inline odp_time_t time_cur_dpdk_strict(void)
+{
+	odp_time_t time;
+
+	rte_mb();
+	time.u64 = rte_get_timer_cycles() - _odp_time_glob.hw_start;
+
+	return time;
+}
+
 static inline uint64_t time_res_dpdk(void)
 {
 	return rte_get_timer_hz();
@@ -259,6 +271,7 @@ int _odp_time_init_global(void)
 
 	if (is_dpdk_timer_cycles_support()) {
 		_odp_time_glob.handler.time_cur = time_cur_dpdk;
+		_odp_time_glob.handler.time_cur_strict = time_cur_dpdk_strict;
 		_odp_time_glob.handler.time_res = time_res_dpdk;
 		_odp_time_glob.hw_freq_hz = time_res_dpdk();
 		_odp_time_glob.use_hw = 1;
@@ -270,6 +283,7 @@ int _odp_time_init_global(void)
 	}
 
 	_odp_time_glob.handler.time_cur = _odp_time_cur_gen;
+	_odp_time_glob.handler.time_cur_strict = _odp_time_cur_gen_strict;
 	_odp_time_glob.handler.time_res = time_res;
 
 	if (_odp_cpu_has_global_time()) {

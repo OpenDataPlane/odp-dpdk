@@ -22,9 +22,24 @@
 
 #include <string.h>
 
-#define IPSEC_SA_STATE_DISABLE	0x40000000
-#define IPSEC_SA_STATE_FREE	0xc0000000
-#define IPSEC_SA_STATE_RESERVED	0x80000000
+/*
+ * SA state consists of state value in the high order bits of ipsec_sa_t::state
+ * and use counter in the low order bits.
+ *
+ * An SA cannot be destroyed if its use count is higher than one. Use counter
+ * is needed for the case SA lookup is done by us and not the application.
+ * In the latter case we rely on the fact that the application may not pass
+ * the SA as a parameter to an IPsec operation concurrently with a call
+ * to odp_ipsec_sa_disable().
+ *
+ * SAs that are free or being disabled cannot be found in SA lookup by ODP.
+ */
+#define IPSEC_SA_STATE_ACTIVE   0x00000000 /* SA is in use */
+#define IPSEC_SA_STATE_DISABLE	0x40000000 /* SA is being disabled */
+#define IPSEC_SA_STATE_FREE	0xc0000000 /* SA is unused and free */
+#define IPSEC_SA_STATE_MASK     0xc0000000 /* mask of state bits */
+
+#define SA_IDX_NONE UINT32_MAX
 
 /*
  * We do not have global IPv4 ID counter that is accessed for every outbound
@@ -68,7 +83,7 @@ typedef struct sa_thread_local_s {
 	 * Bytes that can be processed in this thread before looking at
 	 * the SA-global byte counter and checking hard and soft limits.
 	 */
-	uint32_t byte_quota;
+	odp_atomic_u32_t byte_quota;
 	/*
 	 * Life time status when this thread last checked the global
 	 * counter(s).
@@ -88,6 +103,10 @@ typedef struct ipsec_sa_table_t {
 		ring_mpmc_t ipv4_id_ring;
 		uint32_t ipv4_id_data[IPV4_ID_RING_SIZE] ODP_ALIGNED_CACHE;
 	} hot;
+	struct {
+		uint32_t head;
+		odp_spinlock_t lock;
+	} sa_freelist;
 	uint32_t max_num_sa;
 	odp_shm_t shm;
 	ipsec_thread_local_t per_thread[];
@@ -130,7 +149,7 @@ static void init_sa_thread_local(ipsec_sa_t *sa)
 	for (n = 0; n < thread_count_max; n++) {
 		sa_tl = &ipsec_sa_tbl->per_thread[n].sa[sa->ipsec_sa_idx];
 		odp_atomic_init_u32(&sa_tl->packet_quota, 0);
-		sa_tl->byte_quota = 0;
+		odp_atomic_init_u32(&sa_tl->byte_quota, 0);
 		sa_tl->lifetime_status.all = 0;
 	}
 }
@@ -199,10 +218,15 @@ int _odp_ipsec_sad_init_global(void)
 
 		ipsec_sa->ipsec_sa_hdl = ipsec_sa_index_to_handle(i);
 		ipsec_sa->ipsec_sa_idx = i;
+		ipsec_sa->next_sa = i + 1;
+		if (i == ipsec_sa_tbl->max_num_sa - 1)
+			ipsec_sa->next_sa = SA_IDX_NONE;
 		odp_atomic_init_u32(&ipsec_sa->state, IPSEC_SA_STATE_FREE);
 		odp_atomic_init_u64(&ipsec_sa->hot.bytes, 0);
 		odp_atomic_init_u64(&ipsec_sa->hot.packets, 0);
 	}
+	ipsec_sa_tbl->sa_freelist.head = 0;
+	odp_spinlock_init(&ipsec_sa_tbl->sa_freelist.lock);
 
 	return 0;
 }
@@ -245,31 +269,32 @@ uint32_t _odp_ipsec_max_num_sa(void)
 
 static ipsec_sa_t *ipsec_sa_reserve(void)
 {
-	uint32_t i;
-	ipsec_sa_t *ipsec_sa;
+	ipsec_sa_t *ipsec_sa = NULL;
+	uint32_t sa_idx;
 
-	for (i = 0; i < ipsec_sa_tbl->max_num_sa; i++) {
-		uint32_t state = IPSEC_SA_STATE_FREE;
-
-		ipsec_sa = ipsec_sa_entry(i);
-
-		if (odp_atomic_cas_acq_u32(&ipsec_sa->state, &state,
-					   IPSEC_SA_STATE_RESERVED))
-			return ipsec_sa;
+	odp_spinlock_lock(&ipsec_sa_tbl->sa_freelist.lock);
+	sa_idx = ipsec_sa_tbl->sa_freelist.head;
+	if (sa_idx != SA_IDX_NONE) {
+		ipsec_sa = ipsec_sa_entry(sa_idx);
+		ipsec_sa_tbl->sa_freelist.head = ipsec_sa->next_sa;
 	}
-
-	return NULL;
+	odp_spinlock_unlock(&ipsec_sa_tbl->sa_freelist.lock);
+	return ipsec_sa;
 }
 
 static void ipsec_sa_release(ipsec_sa_t *ipsec_sa)
 {
-	odp_atomic_store_rel_u32(&ipsec_sa->state, IPSEC_SA_STATE_FREE);
+	odp_spinlock_lock(&ipsec_sa_tbl->sa_freelist.lock);
+	ipsec_sa->next_sa = ipsec_sa_tbl->sa_freelist.head;
+	ipsec_sa_tbl->sa_freelist.head = ipsec_sa->ipsec_sa_idx;
+	odp_atomic_store_u32(&ipsec_sa->state, IPSEC_SA_STATE_FREE);
+	odp_spinlock_unlock(&ipsec_sa_tbl->sa_freelist.lock);
 }
 
 /* Mark reserved SA as available now */
 static void ipsec_sa_publish(ipsec_sa_t *ipsec_sa)
 {
-	odp_atomic_store_rel_u32(&ipsec_sa->state, 0);
+	odp_atomic_store_rel_u32(&ipsec_sa->state, IPSEC_SA_STATE_ACTIVE);
 }
 
 static int ipsec_sa_lock(ipsec_sa_t *ipsec_sa)
@@ -280,11 +305,9 @@ static int ipsec_sa_lock(ipsec_sa_t *ipsec_sa)
 	while (0 == cas) {
 		/*
 		 * This can be called from lookup path, so we really need this
-		 * check. Thanks to the way flags are defined we actually test
-		 * that the SA is not DISABLED, FREE or RESERVED using just one
-		 * condition.
+		 * check.
 		 */
-		if (state & IPSEC_SA_STATE_FREE)
+		if ((state & IPSEC_SA_STATE_MASK) != IPSEC_SA_STATE_ACTIVE)
 			return -1;
 
 		cas = odp_atomic_cas_acq_u32(&ipsec_sa->state, &state,
@@ -440,6 +463,10 @@ odp_ipsec_sa_t odp_ipsec_sa_create(const odp_ipsec_sa_param_t *param)
 	ipsec_sa->spi = param->spi;
 	ipsec_sa->context = param->context;
 	ipsec_sa->queue = param->dest_queue;
+	if (_odp_ipsec_is_sync_mode(param->dir)) {
+		/* Invalid queue indicates sync mode */
+		ipsec_sa->queue = ODP_QUEUE_INVALID;
+	}
 	ipsec_sa->mode = param->mode;
 	ipsec_sa->flags = 0;
 	if (param->opt.esn) {
@@ -469,7 +496,7 @@ odp_ipsec_sa_t odp_ipsec_sa_create(const odp_ipsec_sa_param_t *param)
 		ipsec_sa->lookup_mode = ODP_IPSEC_LOOKUP_DISABLED;
 		odp_atomic_init_u64(&ipsec_sa->hot.out.seq, 1);
 		ipsec_sa->out.frag_mode = param->outbound.frag_mode;
-		ipsec_sa->out.mtu = param->outbound.mtu;
+		odp_atomic_init_u32(&ipsec_sa->out.mtu, param->outbound.mtu);
 	}
 	ipsec_sa->dec_ttl = param->opt.dec_ttl;
 	ipsec_sa->copy_dscp = param->opt.copy_dscp;
@@ -492,6 +519,7 @@ odp_ipsec_sa_t odp_ipsec_sa_create(const odp_ipsec_sa_param_t *param)
 	odp_atomic_init_u64(&ipsec_sa->stats.hard_exp_bytes_err, 0);
 	odp_atomic_init_u64(&ipsec_sa->stats.hard_exp_pkts_err, 0);
 	odp_atomic_init_u64(&ipsec_sa->stats.post_lifetime_err_pkts, 0);
+	odp_atomic_init_u64(&ipsec_sa->stats.post_lifetime_err_bytes, 0);
 
 	/* Copy application provided parameter values. */
 	ipsec_sa->param = *param;
@@ -770,13 +798,9 @@ int odp_ipsec_sa_mtu_update(odp_ipsec_sa_t sa, uint32_t mtu)
 {
 	ipsec_sa_t *ipsec_sa;
 
-	ipsec_sa = _odp_ipsec_sa_use(sa);
+	ipsec_sa = ipsec_sa_entry_from_hdl(sa);
 	ODP_ASSERT(NULL != ipsec_sa);
-
-	ipsec_sa->out.mtu = mtu;
-
-	_odp_ipsec_sa_unuse(ipsec_sa);
-
+	odp_atomic_store_u32(&ipsec_sa->out.mtu, mtu);
 	return 0;
 }
 
@@ -835,6 +859,7 @@ int _odp_ipsec_sa_lifetime_update(ipsec_sa_t *ipsec_sa, uint32_t len,
 {
 	sa_thread_local_t *sa_tl = ipsec_sa_thread_local(ipsec_sa);
 	uint64_t packets, bytes;
+	uint32_t tl_byte_quota;
 	uint32_t tl_pkt_quota;
 
 	tl_pkt_quota = odp_atomic_load_u32(&sa_tl->packet_quota);
@@ -855,11 +880,12 @@ int _odp_ipsec_sa_lifetime_update(ipsec_sa_t *ipsec_sa, uint32_t len,
 	tl_pkt_quota--;
 	odp_atomic_store_u32(&sa_tl->packet_quota, tl_pkt_quota);
 
-	if (odp_unlikely(sa_tl->byte_quota < len)) {
+	tl_byte_quota = odp_atomic_load_u32(&sa_tl->byte_quota);
+	if (odp_unlikely(tl_byte_quota < len)) {
 		bytes = odp_atomic_fetch_add_u64(&ipsec_sa->hot.bytes,
 						 len + SA_LIFE_BYTES_PREALLOC);
 		bytes += len + SA_LIFE_BYTES_PREALLOC;
-		sa_tl->byte_quota += len + SA_LIFE_BYTES_PREALLOC;
+		tl_byte_quota += len + SA_LIFE_BYTES_PREALLOC;
 
 		if (ipsec_sa->soft_limit_bytes > 0 &&
 		    bytes >= ipsec_sa->soft_limit_bytes)
@@ -869,7 +895,9 @@ int _odp_ipsec_sa_lifetime_update(ipsec_sa_t *ipsec_sa, uint32_t len,
 		    bytes >= ipsec_sa->hard_limit_bytes)
 			sa_tl->lifetime_status.error.hard_exp_bytes = 1;
 	}
-	sa_tl->byte_quota -= len;
+	tl_byte_quota -= len;
+	odp_atomic_store_u32(&sa_tl->byte_quota, tl_byte_quota);
+
 
 	status->all |= sa_tl->lifetime_status.all;
 
@@ -908,9 +936,6 @@ int _odp_ipsec_sa_replay_update(ipsec_sa_t *ipsec_sa, uint32_t seq,
 {
 	int cas = 0;
 	uint64_t state, new_state;
-
-	if (!ipsec_sa->antireplay)
-		return 0;
 
 	state = odp_atomic_load_u64(&ipsec_sa->hot.in.antireplay);
 
@@ -973,9 +998,10 @@ uint16_t _odp_ipsec_sa_alloc_ipv4_id(ipsec_sa_t *ipsec_sa)
 	return tl->next_ipv4_id++;
 }
 
-uint64_t _odp_ipsec_sa_stats_pkts(ipsec_sa_t *sa)
+void _odp_ipsec_sa_stats_pkts(ipsec_sa_t *sa, odp_ipsec_stats_t *stats)
 {
 	int thread_count_max = odp_thread_count_max();
+	uint64_t tl_byte_quota = 0;
 	uint64_t tl_pkt_quota = 0;
 	sa_thread_local_t *sa_tl;
 	int n;
@@ -994,11 +1020,20 @@ uint64_t _odp_ipsec_sa_stats_pkts(ipsec_sa_t *sa)
 	for (n = 0; n < thread_count_max; n++) {
 		sa_tl = &ipsec_sa_tbl->per_thread[n].sa[sa->ipsec_sa_idx];
 		tl_pkt_quota += odp_atomic_load_u32(&sa_tl->packet_quota);
+		tl_byte_quota += odp_atomic_load_u32(&sa_tl->byte_quota);
 	}
 
-	return odp_atomic_load_u64(&sa->hot.packets)
+	stats->success =
+		odp_atomic_load_u64(&sa->hot.packets)
 	       - odp_atomic_load_u64(&sa->stats.post_lifetime_err_pkts)
 	       - tl_pkt_quota;
+
+	stats->success_bytes =
+		odp_atomic_load_u64(&sa->hot.bytes)
+	       - odp_atomic_load_u64(&sa->stats.post_lifetime_err_bytes)
+	       - tl_byte_quota;
+
+	return;
 }
 
 static void ipsec_out_sa_info(ipsec_sa_t *ipsec_sa, odp_ipsec_sa_info_t *sa_info)

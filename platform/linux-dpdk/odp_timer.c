@@ -259,8 +259,8 @@ int odp_timer_capability(odp_timer_clk_src_t clk_src,
 {
 	uint64_t min_tmo = tmo_ticks_to_ns_round_up(MIN_TMO_CYCLES);
 
-	if (clk_src != ODP_CLOCK_CPU) {
-		ODP_ERR("Clock source not supported\n");
+	if (clk_src != ODP_CLOCK_DEFAULT) {
+		ODP_ERR("Only ODP_CLOCK_DEFAULT supported. Requested %i.\n", clk_src);
 		return -1;
 	}
 
@@ -289,8 +289,8 @@ int odp_timer_res_capability(odp_timer_clk_src_t clk_src,
 {
 	uint64_t min_tmo = tmo_ticks_to_ns_round_up(MIN_TMO_CYCLES);
 
-	if (clk_src != ODP_CLOCK_CPU) {
-		ODP_ERR("Only CPU clock source supported\n");
+	if (clk_src != ODP_CLOCK_DEFAULT) {
+		ODP_ERR("Only ODP_CLOCK_DEFAULT supported. Requested %i.\n", clk_src);
 		return -1;
 	}
 
@@ -655,7 +655,7 @@ retry:
 		ODP_DBG("  cur_tick %" PRIu64 ", abs_tick %" PRIu64 "\n",
 			cur_tick, abs_tick);
 		ODP_DBG("  num_retry %i\n", num_retry);
-		return ODP_TIMER_TOOEARLY;
+		return ODP_TIMER_TOO_NEAR;
 	}
 
 	odp_ticketlock_lock(&timer->lock);
@@ -665,7 +665,7 @@ retry:
 			odp_ticketlock_unlock(&timer->lock);
 			/* Event missing, or timer already expired and
 			 * enqueued the event. */
-			return ODP_TIMER_NOEVENT;
+			return ODP_TIMER_FAIL;
 	}
 
 	if (odp_unlikely(rte_timer_reset(&timer->rte_timer, rel_tick, SINGLE,
@@ -699,7 +699,7 @@ retry:
 		/* Timer was just about to expire. Too late to reset this timer.
 		 * Return code is NOEVENT, even when application did give
 		 * an event. */
-		return ODP_TIMER_NOEVENT;
+		return ODP_TIMER_FAIL;
 	}
 
 	if (event) {

@@ -95,7 +95,7 @@ static uint64_t default_huge_page_size(void)
 
 	while (fgets(str, sizeof(str), file) != NULL) {
 		if (sscanf(str, "Hugepagesize:   %8lu kB", &sz) == 1) {
-			ODP_DBG("defaut hp size is %" PRIu64 " kB\n", sz);
+			ODP_DBG("default hp size is %lu kB\n", sz);
 			fclose(file);
 			return (uint64_t)sz * 1024;
 		}
