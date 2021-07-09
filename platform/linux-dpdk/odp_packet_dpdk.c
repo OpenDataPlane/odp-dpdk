@@ -1469,7 +1469,85 @@ static int stats_pkt_dpdk(pktio_entry_t *pktio_entry, odp_pktio_stats_t *stats)
 
 static int stats_reset_pkt_dpdk(pktio_entry_t *pktio_entry)
 {
-	rte_eth_stats_reset(pkt_priv(pktio_entry)->port_id);
+	uint16_t port_id = pkt_priv(pktio_entry)->port_id;
+
+	(void)rte_eth_stats_reset(port_id);
+	(void)rte_eth_xstats_reset(port_id);
+	return 0;
+}
+
+static int dpdk_extra_stat_info(pktio_entry_t *pktio_entry,
+				odp_pktio_extra_stat_info_t info[], int num)
+{
+	uint16_t port_id = pkt_priv(pktio_entry)->port_id;
+	int num_stats, ret, i;
+
+	num_stats = rte_eth_xstats_get_names(port_id, NULL, 0);
+	if (num_stats < 0) {
+		ODP_ERR("rte_eth_xstats_get_names() failed: %d\n", num_stats);
+		return num_stats;
+	} else if (info == NULL || num == 0 || num_stats == 0) {
+		return num_stats;
+	}
+
+	struct rte_eth_xstat_name xstats_names[num_stats];
+
+	ret = rte_eth_xstats_get_names(port_id, xstats_names, num_stats);
+	if (ret < 0 || ret > num_stats) {
+		ODP_ERR("rte_eth_xstats_get_names() failed: %d\n", ret);
+		return -1;
+	}
+	num_stats = ret;
+
+	for (i = 0; i < num && i < num_stats; i++)
+		strncpy(info[i].name, xstats_names[i].name,
+			ODP_PKTIO_STATS_EXTRA_NAME_LEN - 1);
+
+	return num_stats;
+}
+
+static int dpdk_extra_stats(pktio_entry_t *pktio_entry,
+			    uint64_t stats[], int num)
+{
+	uint16_t port_id = pkt_priv(pktio_entry)->port_id;
+	int num_stats, ret, i;
+
+	num_stats = rte_eth_xstats_get(port_id, NULL, 0);
+	if (num_stats < 0) {
+		ODP_ERR("rte_eth_xstats_get() failed: %d\n", num_stats);
+		return num_stats;
+	} else if (stats == NULL || num == 0 || num_stats == 0) {
+		return num_stats;
+	}
+
+	struct rte_eth_xstat xstats[num_stats];
+
+	ret = rte_eth_xstats_get(port_id, xstats, num_stats);
+	if (ret < 0 || ret > num_stats) {
+		ODP_ERR("rte_eth_xstats_get() failed: %d\n", ret);
+		return -1;
+	}
+	num_stats = ret;
+
+	for (i = 0; i < num && i < num_stats; i++)
+		stats[i] = xstats[i].value;
+
+	return num_stats;
+}
+
+static int dpdk_extra_stat_counter(pktio_entry_t *pktio_entry, uint32_t id,
+				   uint64_t *stat)
+{
+	uint16_t port_id = pkt_priv(pktio_entry)->port_id;
+	uint64_t xstat_id = id;
+	int ret;
+
+	ret = rte_eth_xstats_get_by_id(port_id, &xstat_id, stat, 1);
+	if (ret != 1) {
+		ODP_ERR("rte_eth_xstats_get_by_id() failed: %d\n", ret);
+		return -1;
+	}
+
 	return 0;
 }
 
@@ -1540,6 +1618,9 @@ const pktio_if_ops_t _odp_dpdk_pktio_ops = {
 	.stats_reset = stats_reset_pkt_dpdk,
 	.pktin_queue_stats = dpdk_pktin_stats,
 	.pktout_queue_stats = dpdk_pktout_stats,
+	.extra_stat_info = dpdk_extra_stat_info,
+	.extra_stats = dpdk_extra_stats,
+	.extra_stat_counter = dpdk_extra_stat_counter,
 	.pktio_ts_res = NULL,
 	.pktio_ts_from_ns = NULL,
 	.pktio_time = NULL,
