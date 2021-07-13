@@ -315,6 +315,10 @@ static odp_pktio_t setup_pktio_entry(const char *name, odp_pool_t pool,
 		return ODP_PKTIO_INVALID;
 	}
 
+	snprintf(pktio_entry->s.name,
+		 sizeof(pktio_entry->s.name), "%s", if_name);
+	snprintf(pktio_entry->s.full_name,
+		 sizeof(pktio_entry->s.full_name), "%s", name);
 	pktio_entry->s.pool = pool;
 	memcpy(&pktio_entry->s.param, param, sizeof(odp_pktio_param_t));
 	pktio_entry->s.handle = hdl;
@@ -347,10 +351,6 @@ static odp_pktio_t setup_pktio_entry(const char *name, odp_pool_t pool,
 		return ODP_PKTIO_INVALID;
 	}
 
-	snprintf(pktio_entry->s.name,
-		 sizeof(pktio_entry->s.name), "%s", if_name);
-	snprintf(pktio_entry->s.full_name,
-		 sizeof(pktio_entry->s.full_name), "%s", name);
 	pktio_entry->s.state = PKTIO_STATE_OPENED;
 	pktio_entry->s.ops = _odp_pktio_if_ops[pktio_if];
 	unlock_entry(pktio_entry);
@@ -1534,6 +1534,7 @@ void odp_pktio_config_init(odp_pktio_config_t *config)
 	memset(config, 0, sizeof(odp_pktio_config_t));
 
 	config->parser.layer = ODP_PROTO_LAYER_ALL;
+	config->reassembly.max_num_frags = 2;
 }
 
 int odp_pktio_info(odp_pktio_t hdl, odp_pktio_info_t *info)
@@ -1901,6 +1902,277 @@ int odp_pktio_stats_reset(odp_pktio_t pktio)
 	return ret;
 }
 
+int odp_pktin_queue_stats(odp_pktin_queue_t queue,
+			  odp_pktin_queue_stats_t *stats)
+{
+	pktio_entry_t *entry;
+	odp_pktin_mode_t mode;
+	int ret = -1;
+
+	entry = get_pktio_entry(queue.pktio);
+	if (entry == NULL) {
+		ODP_ERR("pktio entry %" PRIuPTR " does not exist\n", (uintptr_t)queue.pktio);
+		return -1;
+	}
+
+	lock_entry(entry);
+
+	if (odp_unlikely(is_free(entry))) {
+		unlock_entry(entry);
+		ODP_ERR("pktio entry already freed\n");
+		return -1;
+	}
+
+	mode = entry->s.param.in_mode;
+	if (odp_unlikely(mode != ODP_PKTIN_MODE_DIRECT)) {
+		unlock_entry(entry);
+		ODP_ERR("invalid packet input mode: %d\n", mode);
+		return -1;
+	}
+
+	if (entry->s.ops->pktin_queue_stats)
+		ret = entry->s.ops->pktin_queue_stats(entry, queue.index, stats);
+
+	unlock_entry(entry);
+
+	return ret;
+}
+
+int odp_pktin_event_queue_stats(odp_pktio_t pktio, odp_queue_t queue,
+				odp_pktin_queue_stats_t *stats)
+{
+	pktio_entry_t *entry;
+	odp_pktin_mode_t mode;
+	odp_pktin_queue_t pktin_queue;
+	int ret = -1;
+
+	entry = get_pktio_entry(pktio);
+	if (entry == NULL) {
+		ODP_ERR("pktio entry %" PRIuPTR " does not exist\n", (uintptr_t)pktio);
+		return -1;
+	}
+
+	lock_entry(entry);
+
+	if (odp_unlikely(is_free(entry))) {
+		unlock_entry(entry);
+		ODP_ERR("pktio entry already freed\n");
+		return -1;
+	}
+
+	mode = entry->s.param.in_mode;
+	if (odp_unlikely(mode != ODP_PKTIN_MODE_SCHED && mode != ODP_PKTIN_MODE_QUEUE)) {
+		unlock_entry(entry);
+		ODP_ERR("invalid packet input mode: %d\n", mode);
+		return -1;
+	}
+
+	pktin_queue = _odp_queue_fn->get_pktin(queue);
+
+	if (entry->s.ops->pktin_queue_stats)
+		ret = entry->s.ops->pktin_queue_stats(entry, pktin_queue.index, stats);
+
+	unlock_entry(entry);
+
+	return ret;
+}
+
+int odp_pktout_queue_stats(odp_pktout_queue_t queue,
+			   odp_pktout_queue_stats_t *stats)
+{
+	pktio_entry_t *entry;
+	odp_pktout_mode_t mode;
+	int ret = -1;
+
+	entry = get_pktio_entry(queue.pktio);
+	if (entry == NULL) {
+		ODP_ERR("pktio entry %" PRIuPTR " does not exist\n", (uintptr_t)queue.pktio);
+		return -1;
+	}
+
+	lock_entry(entry);
+
+	if (odp_unlikely(is_free(entry))) {
+		unlock_entry(entry);
+		ODP_ERR("pktio entry already freed\n");
+		return -1;
+	}
+
+	mode = entry->s.param.out_mode;
+	if (odp_unlikely(mode != ODP_PKTOUT_MODE_DIRECT)) {
+		unlock_entry(entry);
+		ODP_ERR("invalid packet output mode: %d\n", mode);
+		return -1;
+	}
+
+	if (entry->s.ops->pktout_queue_stats)
+		ret = entry->s.ops->pktout_queue_stats(entry, queue.index, stats);
+
+	unlock_entry(entry);
+
+	return ret;
+}
+
+int odp_pktout_event_queue_stats(odp_pktio_t pktio, odp_queue_t queue,
+				 odp_pktout_queue_stats_t *stats)
+{
+	pktio_entry_t *entry;
+	odp_pktout_mode_t mode;
+	odp_pktout_queue_t pktout_queue;
+	int ret = -1;
+
+	entry = get_pktio_entry(pktio);
+	if (entry == NULL) {
+		ODP_ERR("pktio entry %" PRIuPTR " does not exist\n", (uintptr_t)pktio);
+		return -1;
+	}
+
+	lock_entry(entry);
+
+	if (odp_unlikely(is_free(entry))) {
+		unlock_entry(entry);
+		ODP_ERR("pktio entry already freed\n");
+		return -1;
+	}
+
+	mode = entry->s.param.out_mode;
+	if (odp_unlikely(mode != ODP_PKTOUT_MODE_QUEUE)) {
+		unlock_entry(entry);
+		ODP_ERR("invalid packet output mode: %d\n", mode);
+		return -1;
+	}
+
+	pktout_queue = _odp_queue_fn->get_pktout(queue);
+
+	if (entry->s.ops->pktout_queue_stats)
+		ret = entry->s.ops->pktout_queue_stats(entry, pktout_queue.index, stats);
+
+	unlock_entry(entry);
+
+	return ret;
+}
+
+int odp_pktio_extra_stat_info(odp_pktio_t pktio,
+			      odp_pktio_extra_stat_info_t info[], int num)
+{
+	pktio_entry_t *entry;
+	int ret = 0;
+
+	entry = get_pktio_entry(pktio);
+	if (entry == NULL) {
+		ODP_ERR("pktio entry %" PRIuPTR " does not exist\n", (uintptr_t)pktio);
+		return -1;
+	}
+
+	lock_entry(entry);
+
+	if (odp_unlikely(is_free(entry))) {
+		unlock_entry(entry);
+		ODP_ERR("already freed pktio\n");
+		return -1;
+	}
+
+	if (entry->s.ops->extra_stat_info)
+		ret = entry->s.ops->extra_stat_info(entry, info, num);
+
+	unlock_entry(entry);
+
+	return ret;
+}
+
+int odp_pktio_extra_stats(odp_pktio_t pktio, uint64_t stats[], int num)
+{
+	pktio_entry_t *entry;
+	int ret = 0;
+
+	entry = get_pktio_entry(pktio);
+	if (entry == NULL) {
+		ODP_ERR("pktio entry %" PRIuPTR " does not exist\n", (uintptr_t)pktio);
+		return -1;
+	}
+
+	lock_entry(entry);
+
+	if (odp_unlikely(is_free(entry))) {
+		unlock_entry(entry);
+		ODP_ERR("already freed pktio\n");
+		return -1;
+	}
+
+	if (entry->s.ops->extra_stats)
+		ret = entry->s.ops->extra_stats(entry, stats, num);
+
+	unlock_entry(entry);
+
+	return ret;
+}
+
+int odp_pktio_extra_stat_counter(odp_pktio_t pktio, uint32_t id, uint64_t *stat)
+{
+	pktio_entry_t *entry;
+	int ret = -1;
+
+	entry = get_pktio_entry(pktio);
+	if (entry == NULL) {
+		ODP_ERR("pktio entry %" PRIuPTR " does not exist\n", (uintptr_t)pktio);
+		return -1;
+	}
+
+	lock_entry(entry);
+
+	if (odp_unlikely(is_free(entry))) {
+		unlock_entry(entry);
+		ODP_ERR("already freed pktio\n");
+		return -1;
+	}
+
+	if (entry->s.ops->extra_stat_counter)
+		ret = entry->s.ops->extra_stat_counter(entry, id, stat);
+
+	unlock_entry(entry);
+
+	return ret;
+}
+
+void odp_pktio_extra_stats_print(odp_pktio_t pktio)
+{
+	int num_info, num_stats, i;
+
+	num_info = odp_pktio_extra_stat_info(pktio, NULL, 0);
+	if (num_info <= 0)
+		return;
+
+	num_stats = odp_pktio_extra_stats(pktio, NULL, 0);
+	if (num_stats <= 0)
+		return;
+
+	if (num_info != num_stats) {
+		ODP_ERR("extra statistics info counts not matching\n");
+		return;
+	}
+
+	odp_pktio_extra_stat_info_t stats_info[num_stats];
+	uint64_t extra_stats[num_stats];
+
+	num_info = odp_pktio_extra_stat_info(pktio, stats_info, num_stats);
+	if (num_info <= 0)
+		return;
+
+	num_stats = odp_pktio_extra_stats(pktio, extra_stats, num_stats);
+	if (num_stats <= 0)
+		return;
+
+	if (num_info != num_stats) {
+		ODP_ERR("extra statistics info counts not matching\n");
+		return;
+	}
+
+	printf("Pktio extra statistics\n----------------------\n");
+	for (i = 0; i < num_stats; i++)
+		ODP_PRINT("  %s=%" PRIu64 "\n", stats_info[i].name, extra_stats[i]);
+	ODP_PRINT("\n");
+}
+
 int odp_pktin_queue_config(odp_pktio_t pktio,
 			   const odp_pktin_queue_param_t *param)
 {
@@ -2037,14 +2309,13 @@ int odp_pktin_queue_config(odp_pktio_t pktio,
 				return -1;
 			}
 
-			if (mode == ODP_PKTIN_MODE_QUEUE) {
-				_odp_queue_fn->set_pktin(queue, pktio, i);
+			_odp_queue_fn->set_pktin(queue, pktio, i);
+			if (mode == ODP_PKTIN_MODE_QUEUE)
 				_odp_queue_fn->set_enq_deq_fn(queue,
 							      NULL,
 							      NULL,
 							      pktin_dequeue,
 							      pktin_deq_multi);
-			}
 
 			entry->s.in_queue[i].queue = queue;
 

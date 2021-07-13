@@ -138,7 +138,8 @@ typedef struct ODP_ALIGNED_CACHE {
 	struct rte_mempool *pkt_pool;	/**< DPDK packet pool */
 	uint32_t data_room;		/**< maximum packet length */
 	unsigned int min_rx_burst;	/**< minimum RX burst size */
-	odp_pktin_hash_proto_t hash;	/**< Packet input hash protocol */
+	/** RSS configuration */
+	struct rte_eth_rss_conf rss_conf;
 	/* Supported RTE_PTYPE_XXX flags in a mask */
 	uint32_t supported_ptypes;
 	uint16_t mtu;			/**< maximum transmission unit */
@@ -1131,7 +1132,7 @@ static int dpdk_vdev_promisc_mode_set(uint16_t port_id, int enable)
 	return mode;
 }
 
-static void rss_conf_to_hash_proto(struct rte_eth_rss_conf *rss_conf,
+static void hash_proto_to_rss_conf(struct rte_eth_rss_conf *rss_conf,
 				   const odp_pktin_hash_proto_t *hash_proto)
 {
 	if (hash_proto->proto.ipv4_udp)
@@ -1154,34 +1155,19 @@ static void rss_conf_to_hash_proto(struct rte_eth_rss_conf *rss_conf,
 	rss_conf->rss_key = NULL;
 }
 
-static int dpdk_setup_eth_dev(pktio_entry_t *pktio_entry,
-			      const struct rte_eth_dev_info *dev_info)
+static int dpdk_setup_eth_dev(pktio_entry_t *pktio_entry)
 {
 	int ret;
 	pkt_dpdk_t *pkt_dpdk = pkt_priv(pktio_entry);
-	struct rte_eth_rss_conf rss_conf;
 	struct rte_eth_conf eth_conf;
-	uint64_t rss_hf_capa = dev_info->flow_type_rss_offloads;
 	uint64_t rx_offloads = 0;
 	uint64_t tx_offloads = 0;
-
-	memset(&rss_conf, 0, sizeof(struct rte_eth_rss_conf));
-
-	/* Always set some hash functions to enable DPDK RSS hash calculation.
-	 * Hash capability has been checked in pktin config. */
-	if (pkt_dpdk->hash.all_bits == 0)
-		rss_conf.rss_hf = ETH_RSS_IP | ETH_RSS_TCP | ETH_RSS_UDP;
-	else
-		rss_conf_to_hash_proto(&rss_conf, &pkt_dpdk->hash);
-
-	/* Filter out unsupported flags */
-	rss_conf.rss_hf &= rss_hf_capa;
 
 	memset(&eth_conf, 0, sizeof(eth_conf));
 
 	eth_conf.rxmode.mq_mode = ETH_MQ_RX_RSS;
 	eth_conf.txmode.mq_mode = ETH_MQ_TX_NONE;
-	eth_conf.rx_adv_conf.rss_conf = rss_conf;
+	eth_conf.rx_adv_conf.rss_conf = pkt_dpdk->rss_conf;
 
 	/* Setup RX checksum offloads */
 	if (pktio_entry->s.config.pktin.bit.ipv4_chksum)
@@ -1423,59 +1409,57 @@ static int dpdk_pktio_term(void)
 	return 0;
 }
 
-static int check_hash_proto(pktio_entry_t *pktio_entry,
-			    const odp_pktin_queue_param_t *p)
+static void prepare_rss_conf(pktio_entry_t *pktio_entry,
+			     const odp_pktin_queue_param_t *p)
 {
 	struct rte_eth_dev_info dev_info;
 	uint64_t rss_hf_capa;
 	pkt_dpdk_t *pkt_dpdk = pkt_priv(pktio_entry);
 	uint16_t port_id = pkt_dpdk->port_id;
 
+	memset(&pkt_dpdk->rss_conf, 0, sizeof(struct rte_eth_rss_conf));
+
+	if (!p->hash_enable)
+		return;
+
 	rte_eth_dev_info_get(port_id, &dev_info);
 	rss_hf_capa = dev_info.flow_type_rss_offloads;
 
+	/* Print debug info about unsupported hash protocols */
 	if (p->hash_proto.proto.ipv4 &&
-	    ((rss_hf_capa & ETH_RSS_IPV4) == 0)) {
-		ODP_ERR("hash_proto.ipv4 not supported\n");
-		return -1;
-	}
+	    ((rss_hf_capa & ETH_RSS_IPV4) == 0))
+		ODP_PRINT("DPDK: hash_proto.ipv4 not supported (rss_hf_capa 0x%" PRIx64 ")\n",
+			  rss_hf_capa);
 
 	if (p->hash_proto.proto.ipv4_udp &&
-	    ((rss_hf_capa & ETH_RSS_NONFRAG_IPV4_UDP) == 0)) {
-		ODP_ERR("hash_proto.ipv4_udp not supported. "
-			"rss_hf_capa 0x%" PRIx64 "\n", rss_hf_capa);
-		return -1;
-	}
+	    ((rss_hf_capa & ETH_RSS_NONFRAG_IPV4_UDP) == 0))
+		ODP_PRINT("DPDK: hash_proto.ipv4_udp not supported (rss_hf_capa 0x%" PRIx64 ")\n",
+			  rss_hf_capa);
 
 	if (p->hash_proto.proto.ipv4_tcp &&
-	    ((rss_hf_capa & ETH_RSS_NONFRAG_IPV4_TCP) == 0)) {
-		ODP_ERR("hash_proto.ipv4_tcp not supported. "
-			"rss_hf_capa 0x%" PRIx64 "\n", rss_hf_capa);
-		return -1;
-	}
+	    ((rss_hf_capa & ETH_RSS_NONFRAG_IPV4_TCP) == 0))
+		ODP_PRINT("DPDK: hash_proto.ipv4_tcp not supported (rss_hf_capa 0x%" PRIx64 ")\n",
+			  rss_hf_capa);
 
 	if (p->hash_proto.proto.ipv6 &&
-	    ((rss_hf_capa & ETH_RSS_IPV6) == 0)) {
-		ODP_ERR("hash_proto.ipv6 not supported. "
-			"rss_hf_capa 0x%" PRIx64 "\n", rss_hf_capa);
-		return -1;
-	}
+	    ((rss_hf_capa & ETH_RSS_IPV6) == 0))
+		ODP_PRINT("DPDK: hash_proto.ipv6 not supported (rss_hf_capa 0x%" PRIx64 ")\n",
+			  rss_hf_capa);
 
 	if (p->hash_proto.proto.ipv6_udp &&
-	    ((rss_hf_capa & ETH_RSS_NONFRAG_IPV6_UDP) == 0)) {
-		ODP_ERR("hash_proto.ipv6_udp not supported. "
-			"rss_hf_capa 0x%" PRIx64 "\n", rss_hf_capa);
-		return -1;
-	}
+	    ((rss_hf_capa & ETH_RSS_NONFRAG_IPV6_UDP) == 0))
+		ODP_PRINT("DPDK: hash_proto.ipv6_udp not supported (rss_hf_capa 0x%" PRIx64 ")\n",
+			  rss_hf_capa);
 
 	if (p->hash_proto.proto.ipv6_tcp &&
-	    ((rss_hf_capa & ETH_RSS_NONFRAG_IPV6_TCP) == 0)) {
-		ODP_ERR("hash_proto.ipv6_tcp not supported. "
-			"rss_hf_capa 0x%" PRIx64 "\n", rss_hf_capa);
-		return -1;
-	}
+	    ((rss_hf_capa & ETH_RSS_NONFRAG_IPV6_TCP) == 0))
+		ODP_PRINT("DPDK: hash_proto.ipv6_tcp not supported (rss_hf_capa 0x%" PRIx64 ")\n",
+			  rss_hf_capa);
 
-	return 0;
+	hash_proto_to_rss_conf(&pkt_dpdk->rss_conf, &p->hash_proto);
+
+	/* Filter out unsupported hash functions */
+	pkt_dpdk->rss_conf.rss_hf &= rss_hf_capa;
 }
 
 static int dpdk_input_queues_config(pktio_entry_t *pktio_entry,
@@ -1484,8 +1468,7 @@ static int dpdk_input_queues_config(pktio_entry_t *pktio_entry,
 	odp_pktin_mode_t mode = pktio_entry->s.param.in_mode;
 	uint8_t lockless;
 
-	if (p->hash_enable && check_hash_proto(pktio_entry, p))
-		return -1;
+	prepare_rss_conf(pktio_entry, p);
 
 	/**
 	 * Scheduler synchronizes input queue polls. Only single thread
@@ -1495,9 +1478,6 @@ static int dpdk_input_queues_config(pktio_entry_t *pktio_entry,
 		lockless = 1;
 	else
 		lockless = 0;
-
-	if (p->hash_enable && p->num_queues > 1)
-		pkt_priv(pktio_entry)->hash = p->hash_proto;
 
 	pkt_priv(pktio_entry)->lockless_rx = lockless;
 
@@ -1632,6 +1612,21 @@ static int dpdk_init_capability(pktio_entry_t *pktio_entry,
 	capa->config.pktout.bit.tcp_chksum_ena =
 		capa->config.pktout.bit.tcp_chksum;
 	capa->config.pktout.bit.ts_ena = 1;
+
+	capa->stats.pktio.counter.in_octets = 1;
+	capa->stats.pktio.counter.in_packets = 1;
+	capa->stats.pktio.counter.in_discards = 1;
+	capa->stats.pktio.counter.in_errors = 1;
+	capa->stats.pktio.counter.out_octets = 1;
+	capa->stats.pktio.counter.out_packets = 1;
+	capa->stats.pktio.counter.out_errors = 1;
+
+	capa->stats.pktin_queue.counter.octets = 1;
+	capa->stats.pktin_queue.counter.packets = 1;
+	capa->stats.pktin_queue.counter.errors = 1;
+
+	capa->stats.pktout_queue.counter.octets = 1;
+	capa->stats.pktout_queue.counter.packets = 1;
 
 	return 0;
 }
@@ -1811,6 +1806,17 @@ static int dpdk_setup_eth_tx(pktio_entry_t *pktio_entry,
 		}
 	}
 
+	/* Set per queue statistics mappings. Not supported by all PMDs, so
+	 * ignore the return value. */
+	for (i = 0; i < pktio_entry->s.num_out_queue && i < RTE_ETHDEV_QUEUE_STAT_CNTRS; i++) {
+		ret = rte_eth_dev_set_tx_queue_stats_mapping(port_id, i, i);
+		if (ret) {
+			ODP_DBG("Mapping per TX queue statistics not supported: %d\n", ret);
+			break;
+		}
+	}
+	ODP_DBG("Mapped %" PRIu32 "/%d TX counters\n", i, RTE_ETHDEV_QUEUE_STAT_CNTRS);
+
 	return 0;
 }
 
@@ -1838,6 +1844,17 @@ static int dpdk_setup_eth_rx(const pktio_entry_t *pktio_entry,
 			return -1;
 		}
 	}
+
+	/* Set per queue statistics mappings. Not supported by all PMDs, so
+	 * ignore the return value. */
+	for (i = 0; i < pktio_entry->s.num_in_queue && i < RTE_ETHDEV_QUEUE_STAT_CNTRS; i++) {
+		ret = rte_eth_dev_set_rx_queue_stats_mapping(port_id, i, i);
+		if (ret) {
+			ODP_DBG("Mapping per RX queue statistics not supported: %d\n", ret);
+			break;
+		}
+	}
+	ODP_DBG("Mapped %" PRIu32 "/%d RX counters\n", i, RTE_ETHDEV_QUEUE_STAT_CNTRS);
 
 	return 0;
 }
@@ -1901,7 +1918,7 @@ static int dpdk_start(pktio_entry_t *pktio_entry)
 	rte_eth_dev_info_get(port_id, &dev_info);
 
 	/* Setup device */
-	if (dpdk_setup_eth_dev(pktio_entry, &dev_info)) {
+	if (dpdk_setup_eth_dev(pktio_entry)) {
 		ODP_ERR("Failed to configure device\n");
 		return -1;
 	}
@@ -2225,7 +2242,138 @@ static int dpdk_stats(pktio_entry_t *pktio_entry, odp_pktio_stats_t *stats)
 
 static int dpdk_stats_reset(pktio_entry_t *pktio_entry)
 {
-	rte_eth_stats_reset(pkt_priv(pktio_entry)->port_id);
+	uint16_t port_id = pkt_priv(pktio_entry)->port_id;
+
+	(void)rte_eth_stats_reset(port_id);
+	(void)rte_eth_xstats_reset(port_id);
+	return 0;
+}
+
+static int dpdk_extra_stat_info(pktio_entry_t *pktio_entry,
+				odp_pktio_extra_stat_info_t info[], int num)
+{
+	uint16_t port_id = pkt_priv(pktio_entry)->port_id;
+	int num_stats, ret, i;
+
+	num_stats = rte_eth_xstats_get_names(port_id, NULL, 0);
+	if (num_stats < 0) {
+		ODP_ERR("rte_eth_xstats_get_names() failed: %d\n", num_stats);
+		return num_stats;
+	} else if (info == NULL || num == 0 || num_stats == 0) {
+		return num_stats;
+	}
+
+	struct rte_eth_xstat_name xstats_names[num_stats];
+
+	ret = rte_eth_xstats_get_names(port_id, xstats_names, num_stats);
+	if (ret < 0 || ret > num_stats) {
+		ODP_ERR("rte_eth_xstats_get_names() failed: %d\n", ret);
+		return -1;
+	}
+	num_stats = ret;
+
+	for (i = 0; i < num && i < num_stats; i++)
+		strncpy(info[i].name, xstats_names[i].name,
+			ODP_PKTIO_STATS_EXTRA_NAME_LEN - 1);
+
+	return num_stats;
+}
+
+static int dpdk_extra_stats(pktio_entry_t *pktio_entry,
+			    uint64_t stats[], int num)
+{
+	uint16_t port_id = pkt_priv(pktio_entry)->port_id;
+	int num_stats, ret, i;
+
+	num_stats = rte_eth_xstats_get(port_id, NULL, 0);
+	if (num_stats < 0) {
+		ODP_ERR("rte_eth_xstats_get() failed: %d\n", num_stats);
+		return num_stats;
+	} else if (stats == NULL || num == 0 || num_stats == 0) {
+		return num_stats;
+	}
+
+	struct rte_eth_xstat xstats[num_stats];
+
+	ret = rte_eth_xstats_get(port_id, xstats, num_stats);
+	if (ret < 0 || ret > num_stats) {
+		ODP_ERR("rte_eth_xstats_get() failed: %d\n", ret);
+		return -1;
+	}
+	num_stats = ret;
+
+	for (i = 0; i < num && i < num_stats; i++)
+		stats[i] = xstats[i].value;
+
+	return num_stats;
+}
+
+static int dpdk_extra_stat_counter(pktio_entry_t *pktio_entry, uint32_t id,
+				   uint64_t *stat)
+{
+	uint16_t port_id = pkt_priv(pktio_entry)->port_id;
+	uint64_t xstat_id = id;
+	int ret;
+
+	ret = rte_eth_xstats_get_by_id(port_id, &xstat_id, stat, 1);
+	if (ret != 1) {
+		ODP_ERR("rte_eth_xstats_get_by_id() failed: %d\n", ret);
+		return -1;
+	}
+
+	return 0;
+}
+
+static int dpdk_pktin_stats(pktio_entry_t *pktio_entry, uint32_t index,
+			    odp_pktin_queue_stats_t *pktin_stats)
+{
+	struct rte_eth_stats rte_stats;
+	int ret;
+
+	if (odp_unlikely(index > RTE_ETHDEV_QUEUE_STAT_CNTRS - 1)) {
+		ODP_ERR("DPDK supports max %d per queue counters\n",
+			RTE_ETHDEV_QUEUE_STAT_CNTRS);
+		return -1;
+	}
+
+	ret = rte_eth_stats_get(pkt_priv(pktio_entry)->port_id, &rte_stats);
+	if (odp_unlikely(ret)) {
+		ODP_ERR("Failed to read DPDK pktio stats: %d\n", ret);
+		return -1;
+	}
+
+	memset(pktin_stats, 0, sizeof(odp_pktin_queue_stats_t));
+
+	pktin_stats->packets = rte_stats.q_ipackets[index];
+	pktin_stats->octets = rte_stats.q_ibytes[index];
+	pktin_stats->errors = rte_stats.q_errors[index];
+
+	return 0;
+}
+
+static int dpdk_pktout_stats(pktio_entry_t *pktio_entry, uint32_t index,
+			     odp_pktout_queue_stats_t *pktout_stats)
+{
+	struct rte_eth_stats rte_stats;
+	int ret;
+
+	if (odp_unlikely(index > RTE_ETHDEV_QUEUE_STAT_CNTRS - 1)) {
+		ODP_ERR("DPDK supports max %d per queue counters\n",
+			RTE_ETHDEV_QUEUE_STAT_CNTRS);
+		return -1;
+	}
+
+	ret = rte_eth_stats_get(pkt_priv(pktio_entry)->port_id, &rte_stats);
+	if (odp_unlikely(ret)) {
+		ODP_ERR("Failed to read DPDK pktio stats: %d\n", ret);
+		return -1;
+	}
+
+	memset(pktout_stats, 0, sizeof(odp_pktout_queue_stats_t));
+
+	pktout_stats->packets = rte_stats.q_opackets[index];
+	pktout_stats->octets = rte_stats.q_obytes[index];
+
 	return 0;
 }
 
@@ -2240,6 +2388,11 @@ const pktio_if_ops_t _odp_dpdk_pktio_ops = {
 	.stop = dpdk_stop,
 	.stats = dpdk_stats,
 	.stats_reset = dpdk_stats_reset,
+	.pktin_queue_stats = dpdk_pktin_stats,
+	.pktout_queue_stats = dpdk_pktout_stats,
+	.extra_stat_info = dpdk_extra_stat_info,
+	.extra_stats = dpdk_extra_stats,
+	.extra_stat_counter = dpdk_extra_stat_counter,
 	.recv = dpdk_recv,
 	.send = dpdk_send,
 	.link_status = dpdk_link_status,
