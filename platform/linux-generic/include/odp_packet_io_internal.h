@@ -1,5 +1,5 @@
 /* Copyright (c) 2013-2018, Linaro Limited
- * Copyright (c) 2019-2020, Nokia
+ * Copyright (c) 2019-2021, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -196,6 +196,14 @@ typedef struct pktio_if_ops {
 	int (*stop)(pktio_entry_t *pktio_entry);
 	int (*stats)(pktio_entry_t *pktio_entry, odp_pktio_stats_t *stats);
 	int (*stats_reset)(pktio_entry_t *pktio_entry);
+	int (*pktin_queue_stats)(pktio_entry_t *pktio_entry, uint32_t index,
+				 odp_pktin_queue_stats_t *pktin_stats);
+	int (*pktout_queue_stats)(pktio_entry_t *pktio_entry, uint32_t index,
+				  odp_pktout_queue_stats_t *pktout_stats);
+	int (*extra_stat_info)(pktio_entry_t *pktio_entry, odp_pktio_extra_stat_info_t info[],
+			       int num);
+	int (*extra_stats)(pktio_entry_t *pktio_entry, uint64_t stats[], int num);
+	int (*extra_stat_counter)(pktio_entry_t *pktio_entry, uint32_t id, uint64_t *stat);
 	uint64_t (*pktio_ts_res)(pktio_entry_t *pktio_entry);
 	odp_time_t (*pktio_ts_from_ns)(pktio_entry_t *pktio_entry, uint64_t ns);
 	odp_time_t (*pktio_time)(pktio_entry_t *pktio_entry, odp_time_t *global_ts);

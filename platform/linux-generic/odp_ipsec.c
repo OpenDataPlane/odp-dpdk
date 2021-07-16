@@ -158,7 +158,7 @@ int odp_ipsec_capability(odp_ipsec_capability_t *capa)
 
 	capa->max_num_sa = _odp_ipsec_max_num_sa();
 
-	capa->max_antireplay_ws = IPSEC_ANTIREPLAY_WS;
+	capa->max_antireplay_ws = IPSEC_AR_WIN_SIZE_MAX;
 
 	rc = set_ipsec_crypto_capa(capa);
 	if (rc < 0)
@@ -261,6 +261,7 @@ void odp_ipsec_config_init(odp_ipsec_config_t *config)
 	config->inbound.default_queue = ODP_QUEUE_INVALID;
 	config->inbound.lookup.min_spi = 0;
 	config->inbound.lookup.max_spi = UINT32_MAX;
+	config->inbound.reassembly.max_num_frags = 2;
 	config->stats_en = false;
 }
 

@@ -526,7 +526,7 @@ static int sock_link_info(pktio_entry_t *pktio_entry, odp_pktio_link_info_t *inf
 	return _odp_link_info_fd(pkt_priv(pktio_entry)->sockfd, pktio_entry->s.name, info);
 }
 
-static int sock_capability(pktio_entry_t *pktio_entry ODP_UNUSED,
+static int sock_capability(pktio_entry_t *pktio_entry,
 			   odp_pktio_capability_t *capa)
 {
 	pkt_sock_t *pkt_sock = pkt_priv(pktio_entry);
@@ -549,6 +549,9 @@ static int sock_capability(pktio_entry_t *pktio_entry ODP_UNUSED,
 	capa->config.pktin.bit.ts_ptp = 1;
 
 	capa->config.pktout.bit.ts_ena = 1;
+
+	/* Fill statistics capabilities */
+	_odp_sock_stats_capa(pktio_entry, capa);
 
 	return 0;
 }
@@ -573,6 +576,28 @@ static int sock_stats_reset(pktio_entry_t *pktio_entry)
 	}
 
 	return _odp_sock_stats_reset_fd(pktio_entry, pkt_priv(pktio_entry)->sockfd);
+}
+
+static int sock_extra_stat_info(pktio_entry_t *pktio_entry,
+				odp_pktio_extra_stat_info_t info[],
+				int num)
+{
+	return _odp_sock_extra_stat_info(pktio_entry, info, num,
+					 pkt_priv(pktio_entry)->sockfd);
+}
+
+static int sock_extra_stats(pktio_entry_t *pktio_entry, uint64_t stats[],
+			    int num)
+{
+	return _odp_sock_extra_stats(pktio_entry, stats, num,
+				     pkt_priv(pktio_entry)->sockfd);
+}
+
+static int sock_extra_stat_counter(pktio_entry_t *pktio_entry, uint32_t id,
+				   uint64_t *stat)
+{
+	return _odp_sock_extra_stat_counter(pktio_entry, id, stat,
+					    pkt_priv(pktio_entry)->sockfd);
 }
 
 static int sock_init_global(void)
@@ -600,6 +625,9 @@ const pktio_if_ops_t _odp_sock_mmsg_pktio_ops = {
 	.stop = NULL,
 	.stats = sock_stats,
 	.stats_reset = sock_stats_reset,
+	.extra_stat_info = sock_extra_stat_info,
+	.extra_stats = sock_extra_stats,
+	.extra_stat_counter = sock_extra_stat_counter,
 	.recv = sock_mmsg_recv,
 	.recv_tmo = sock_recv_tmo,
 	.recv_mq_tmo = sock_recv_mq_tmo,

@@ -8,6 +8,8 @@
 
 #ifdef _ODP_PKTIO_DPDK
 
+#include <odp_posix_extensions.h>
+
 #include <odp_packet_io_internal.h>
 #include <odp_packet_dpdk.h>
 #include <odp/api/byteorder.h>
@@ -98,7 +100,7 @@ static inline uint16_t dpdk_parse_eth(packet_parser_t *prs,
 			goto error;
 		}
 		ethtype = odp_be_to_cpu_16(*((const uint16_t *)(uintptr_t)
-					      (parseptr + 6)));
+					      (*parseptr + 6)));
 		*offset   += 8;
 		*parseptr += 8;
 	}

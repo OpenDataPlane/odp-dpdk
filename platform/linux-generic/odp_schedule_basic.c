@@ -190,10 +190,10 @@ typedef struct {
 
 	uint16_t         max_spread;
 	uint32_t         ring_mask;
-	prio_q_mask_t    prio_q_mask[NUM_PRIO];
 	odp_spinlock_t   mask_lock;
 	odp_atomic_u32_t grp_epoch;
 	odp_shm_t        shm;
+	prio_q_mask_t    prio_q_mask[NUM_SCHED_GRPS][NUM_PRIO];
 
 	struct {
 		uint8_t grp;
@@ -210,7 +210,7 @@ typedef struct {
 	/* Scheduler priority queues */
 	prio_queue_t prio_q[NUM_SCHED_GRPS][NUM_PRIO][MAX_SPREAD];
 
-	uint32_t prio_q_count[NUM_PRIO][MAX_SPREAD];
+	uint32_t prio_q_count[NUM_SCHED_GRPS][NUM_PRIO][MAX_SPREAD];
 
 	odp_thrmask_t  mask_all;
 	odp_spinlock_t grp_lock;
@@ -218,7 +218,8 @@ typedef struct {
 	struct {
 		char           name[ODP_SCHED_GROUP_NAME_LEN];
 		odp_thrmask_t  mask;
-		int	       allocated;
+		uint16_t       spread_thrs[MAX_SPREAD];
+		uint8_t        allocated;
 	} sched_grp[NUM_SCHED_GRPS];
 
 	struct {
@@ -467,6 +468,13 @@ static int schedule_init_global(void)
 	sched->sched_grp[ODP_SCHED_GROUP_ALL].allocated = 1;
 	sched->sched_grp[ODP_SCHED_GROUP_WORKER].allocated = 1;
 	sched->sched_grp[ODP_SCHED_GROUP_CONTROL].allocated = 1;
+	strncpy(sched->sched_grp[ODP_SCHED_GROUP_ALL].name, "__SCHED_GROUP_ALL",
+		ODP_SCHED_GROUP_NAME_LEN - 1);
+	strncpy(sched->sched_grp[ODP_SCHED_GROUP_WORKER].name, "__SCHED_GROUP_WORKER",
+		ODP_SCHED_GROUP_NAME_LEN - 1);
+	strncpy(sched->sched_grp[ODP_SCHED_GROUP_CONTROL].name, "__SCHED_GROUP_CONTROL",
+		ODP_SCHED_GROUP_NAME_LEN - 1);
+
 
 	odp_thrmask_setall(&sched->mask_all);
 
@@ -589,6 +597,7 @@ static int schedule_create_queue(uint32_t queue_index,
 				 const odp_schedule_param_t *sched_param)
 {
 	int i;
+	int grp  = sched_param->group;
 	int prio = prio_level_from_api(sched_param->prio);
 	uint8_t spread = spread_index(queue_index);
 
@@ -597,22 +606,19 @@ static int schedule_create_queue(uint32_t queue_index,
 		return -1;
 	}
 
-	if (sched_param->group < 0 || sched_param->group >= NUM_SCHED_GRPS) {
-		ODP_ERR("Bad schedule group\n");
+	if (grp < 0 || grp >= NUM_SCHED_GRPS) {
+		ODP_ERR("Bad schedule group %i\n", grp);
 		return -1;
 	}
-	if (sched_param->group == ODP_SCHED_GROUP_ALL &&
-	    !sched->config_if.group_enable.all) {
+	if (grp == ODP_SCHED_GROUP_ALL && !sched->config_if.group_enable.all) {
 		ODP_ERR("Trying to use disabled ODP_SCHED_GROUP_ALL\n");
 		return -1;
 	}
-	if (sched_param->group == ODP_SCHED_GROUP_CONTROL &&
-	    !sched->config_if.group_enable.control) {
+	if (grp == ODP_SCHED_GROUP_CONTROL && !sched->config_if.group_enable.control) {
 		ODP_ERR("Trying to use disabled ODP_SCHED_GROUP_CONTROL\n");
 		return -1;
 	}
-	if (sched_param->group == ODP_SCHED_GROUP_WORKER &&
-	    !sched->config_if.group_enable.worker) {
+	if (grp == ODP_SCHED_GROUP_WORKER && !sched->config_if.group_enable.worker) {
 		ODP_ERR("Trying to use disabled ODP_SCHED_GROUP_WORKER\n");
 		return -1;
 	}
@@ -620,12 +626,12 @@ static int schedule_create_queue(uint32_t queue_index,
 	odp_spinlock_lock(&sched->mask_lock);
 
 	/* update scheduler prio queue usage status */
-	sched->prio_q_mask[prio] |= 1 << spread;
-	sched->prio_q_count[prio][spread]++;
+	sched->prio_q_mask[grp][prio] |= 1 << spread;
+	sched->prio_q_count[grp][prio][spread]++;
 
 	odp_spinlock_unlock(&sched->mask_lock);
 
-	sched->queue[queue_index].grp  = sched_param->group;
+	sched->queue[queue_index].grp  = grp;
 	sched->queue[queue_index].prio = prio;
 	sched->queue[queue_index].spread = spread;
 	sched->queue[queue_index].sync = sched_param->sync;
@@ -650,16 +656,17 @@ static inline uint8_t sched_sync_type(uint32_t queue_index)
 
 static void schedule_destroy_queue(uint32_t queue_index)
 {
+	int grp  = sched->queue[queue_index].grp;
 	int prio = sched->queue[queue_index].prio;
 	uint8_t spread = spread_index(queue_index);
 
 	odp_spinlock_lock(&sched->mask_lock);
 
 	/* Clear mask bit when last queue is removed*/
-	sched->prio_q_count[prio][spread]--;
+	sched->prio_q_count[grp][prio][spread]--;
 
-	if (sched->prio_q_count[prio][spread] == 0)
-		sched->prio_q_mask[prio] &= (uint8_t)(~(1 << spread));
+	if (sched->prio_q_count[grp][prio][spread] == 0)
+		sched->prio_q_mask[grp][prio] &= (uint8_t)(~(1 << spread));
 
 	odp_spinlock_unlock(&sched->mask_lock);
 
@@ -1014,11 +1021,9 @@ static inline int poll_pktin(uint32_t qi, int direct_recv,
 }
 
 static inline int do_schedule_grp(odp_queue_t *out_queue, odp_event_t out_ev[],
-				  unsigned int max_num, int grp, int first)
+				  unsigned int max_num, int grp, int first_spr)
 {
-	int prio, i;
-	int ret;
-	int id;
+	int prio, spr, i, ret;
 	uint32_t qi;
 	uint16_t burst_def;
 	int num_spread = sched->config.num_spread;
@@ -1026,13 +1031,13 @@ static inline int do_schedule_grp(odp_queue_t *out_queue, odp_event_t out_ev[],
 
 	/* Schedule events */
 	for (prio = 0; prio < NUM_PRIO; prio++) {
-		if (sched->prio_q_mask[prio] == 0)
+		if (sched->prio_q_mask[grp][prio] == 0)
 			continue;
 
 		burst_def = sched->config.burst_default[prio];
 
-		/* Select the first ring based on weights */
-		id = first;
+		/* Select the first spread based on weights */
+		spr = first_spr;
 
 		for (i = 0; i < num_spread;) {
 			int num;
@@ -1044,24 +1049,24 @@ static inline int do_schedule_grp(odp_queue_t *out_queue, odp_event_t out_ev[],
 			int stashed = 1;
 			odp_event_t *ev_tbl = sched_local.stash.ev;
 
-			if (id >= num_spread)
-				id = 0;
+			if (spr >= num_spread)
+				spr = 0;
 
 			/* No queues created for this priority queue */
-			if (odp_unlikely((sched->prio_q_mask[prio] & (1 << id))
+			if (odp_unlikely((sched->prio_q_mask[grp][prio] & (1 << spr))
 			    == 0)) {
 				i++;
-				id++;
+				spr++;
 				continue;
 			}
 
 			/* Get queue index from the priority queue */
-			ring = &sched->prio_q[grp][prio][id].ring;
+			ring = &sched->prio_q[grp][prio][spr].ring;
 
 			if (ring_u32_deq(ring, ring_mask, &qi) == 0) {
 				/* Priority queue empty */
 				i++;
-				id++;
+				spr++;
 				continue;
 			}
 
@@ -1180,9 +1185,7 @@ static inline int do_schedule_grp(odp_queue_t *out_queue, odp_event_t out_ev[],
 static inline int do_schedule(odp_queue_t *out_queue, odp_event_t out_ev[],
 			      unsigned int max_num)
 {
-	int i, num_grp;
-	int ret;
-	int first, grp_id;
+	int i, num_grp, ret, spr, grp_id;
 	uint16_t spread_round, grp_round;
 	uint32_t epoch;
 
@@ -1214,7 +1217,7 @@ static inline int do_schedule(odp_queue_t *out_queue, odp_event_t out_ev[],
 	else
 		sched_local.spread_round = spread_round + 1;
 
-	first = sched_local.spread_tbl[spread_round];
+	spr = sched_local.spread_tbl[spread_round];
 
 	epoch = odp_atomic_load_acq_u32(&sched->grp_epoch);
 	num_grp = sched_local.num_grp;
@@ -1231,7 +1234,7 @@ static inline int do_schedule(odp_queue_t *out_queue, odp_event_t out_ev[],
 		int grp;
 
 		grp = sched_local.grp[grp_id];
-		ret = do_schedule_grp(out_queue, out_ev, max_num, grp, first);
+		ret = do_schedule_grp(out_queue, out_ev, max_num, grp, spr);
 
 		if (odp_likely(ret))
 			return ret;
@@ -1488,52 +1491,106 @@ static odp_schedule_group_t schedule_group_lookup(const char *name)
 	return group;
 }
 
-static int schedule_group_join(odp_schedule_group_t group,
-			       const odp_thrmask_t *mask)
+static int schedule_group_join(odp_schedule_group_t group, const odp_thrmask_t *mask)
 {
-	int ret;
+	int i, count, thr;
+	uint8_t spread;
+	odp_thrmask_t new_mask;
+
+	if (group >= NUM_SCHED_GRPS || group < SCHED_GROUP_NAMED) {
+		ODP_ERR("Bad group %i\n", group);
+		return -1;
+	}
+
+	count = odp_thrmask_count(mask);
+	if (count <= 0) {
+		ODP_ERR("No threads in the mask\n");
+		return -1;
+	}
+
+	int thr_tbl[count];
+
+	thr = odp_thrmask_first(mask);
+	for (i = 0; i < count; i++) {
+		if (thr < 0) {
+			ODP_ERR("No more threads in the mask\n");
+			return -1;
+		}
+
+		thr_tbl[i] = thr;
+		thr = odp_thrmask_next(mask, thr);
+	}
 
 	odp_spinlock_lock(&sched->grp_lock);
 
-	if (group < NUM_SCHED_GRPS && group >= SCHED_GROUP_NAMED &&
-	    sched->sched_grp[group].allocated) {
-		odp_thrmask_t new_mask;
-
-		odp_thrmask_or(&new_mask, &sched->sched_grp[group].mask, mask);
-		grp_update_mask(group, &new_mask);
-
-		ret = 0;
-	} else {
-		ret = -1;
+	if (sched->sched_grp[group].allocated == 0) {
+		odp_spinlock_unlock(&sched->grp_lock);
+		ODP_ERR("Bad group status\n");
+		return -1;
 	}
 
+	for (i = 0; i < count; i++) {
+		spread = spread_index(thr_tbl[i]);
+		sched->sched_grp[group].spread_thrs[spread]++;
+	}
+
+	odp_thrmask_or(&new_mask, &sched->sched_grp[group].mask, mask);
+	grp_update_mask(group, &new_mask);
+
 	odp_spinlock_unlock(&sched->grp_lock);
-	return ret;
+	return 0;
 }
 
-static int schedule_group_leave(odp_schedule_group_t group,
-				const odp_thrmask_t *mask)
+static int schedule_group_leave(odp_schedule_group_t group, const odp_thrmask_t *mask)
 {
+	int i, count, thr;
+	uint8_t spread;
 	odp_thrmask_t new_mask;
-	int ret;
+
+	if (group >= NUM_SCHED_GRPS || group < SCHED_GROUP_NAMED) {
+		ODP_ERR("Bad group %i\n", group);
+		return -1;
+	}
+
+	count = odp_thrmask_count(mask);
+	if (count <= 0) {
+		ODP_ERR("No threads in the mask\n");
+		return -1;
+	}
+
+	int thr_tbl[count];
+
+	thr = odp_thrmask_first(mask);
+	for (i = 0; i < count; i++) {
+		if (thr < 0) {
+			ODP_ERR("No more threads in the mask\n");
+			return -1;
+		}
+
+		thr_tbl[i] = thr;
+		thr = odp_thrmask_next(mask, thr);
+	}
 
 	odp_thrmask_xor(&new_mask, mask, &sched->mask_all);
 
 	odp_spinlock_lock(&sched->grp_lock);
 
-	if (group < NUM_SCHED_GRPS && group >= SCHED_GROUP_NAMED &&
-	    sched->sched_grp[group].allocated) {
-		odp_thrmask_and(&new_mask, &sched->sched_grp[group].mask,
-				&new_mask);
-		grp_update_mask(group, &new_mask);
-
-		ret = 0;
-	} else {
-		ret = -1;
+	if (sched->sched_grp[group].allocated == 0) {
+		odp_spinlock_unlock(&sched->grp_lock);
+		ODP_ERR("Bad group status\n");
+		return -1;
 	}
 
+	for (i = 0; i < count; i++) {
+		spread = spread_index(thr_tbl[i]);
+		sched->sched_grp[group].spread_thrs[spread]--;
+	}
+
+	odp_thrmask_and(&new_mask, &sched->sched_grp[group].mask, &new_mask);
+	grp_update_mask(group, &new_mask);
+
 	odp_spinlock_unlock(&sched->grp_lock);
-	return ret;
+	return 0;
 }
 
 static int schedule_group_thrmask(odp_schedule_group_t group,
@@ -1543,8 +1600,7 @@ static int schedule_group_thrmask(odp_schedule_group_t group,
 
 	odp_spinlock_lock(&sched->grp_lock);
 
-	if (group < NUM_SCHED_GRPS && group >= SCHED_GROUP_NAMED &&
-	    sched->sched_grp[group].allocated) {
+	if (group < NUM_SCHED_GRPS && sched->sched_grp[group].allocated) {
 		*thrmask = sched->sched_grp[group].mask;
 		ret = 0;
 	} else {
@@ -1562,8 +1618,7 @@ static int schedule_group_info(odp_schedule_group_t group,
 
 	odp_spinlock_lock(&sched->grp_lock);
 
-	if (group < NUM_SCHED_GRPS && group >= SCHED_GROUP_NAMED &&
-	    sched->sched_grp[group].allocated) {
+	if (group < NUM_SCHED_GRPS && sched->sched_grp[group].allocated) {
 		info->name    = sched->sched_grp[group].name;
 		info->thrmask = sched->sched_grp[group].mask;
 		ret = 0;
@@ -1579,6 +1634,7 @@ static int schedule_thr_add(odp_schedule_group_t group, int thr)
 {
 	odp_thrmask_t mask;
 	odp_thrmask_t new_mask;
+	uint8_t spread = spread_index(thr);
 
 	if (group < 0 || group >= SCHED_GROUP_NAMED)
 		return -1;
@@ -1594,6 +1650,7 @@ static int schedule_thr_add(odp_schedule_group_t group, int thr)
 	}
 
 	odp_thrmask_or(&new_mask, &sched->sched_grp[group].mask, &mask);
+	sched->sched_grp[group].spread_thrs[spread]++;
 	grp_update_mask(group, &new_mask);
 
 	odp_spinlock_unlock(&sched->grp_lock);
@@ -1605,6 +1662,7 @@ static int schedule_thr_rem(odp_schedule_group_t group, int thr)
 {
 	odp_thrmask_t mask;
 	odp_thrmask_t new_mask;
+	uint8_t spread = spread_index(thr);
 
 	if (group < 0 || group >= SCHED_GROUP_NAMED)
 		return -1;
@@ -1621,6 +1679,7 @@ static int schedule_thr_rem(odp_schedule_group_t group, int thr)
 	}
 
 	odp_thrmask_and(&new_mask, &sched->sched_grp[group].mask, &new_mask);
+	sched->sched_grp[group].spread_thrs[spread]--;
 	grp_update_mask(group, &new_mask);
 
 	odp_spinlock_unlock(&sched->grp_lock);
@@ -1655,6 +1714,82 @@ static int schedule_capability(odp_schedule_capability_t *capa)
 	capa->max_flow_id = BUF_HDR_MAX_FLOW_ID;
 
 	return 0;
+}
+
+static void schedule_print(void)
+{
+	int spr, prio, grp;
+	uint32_t num_queues, num_active;
+	ring_u32_t *ring;
+	odp_schedule_capability_t capa;
+	int num_spread = sched->config.num_spread;
+
+	(void)schedule_capability(&capa);
+
+	ODP_PRINT("\nScheduler debug info\n");
+	ODP_PRINT("--------------------\n");
+	ODP_PRINT("  scheduler:         basic\n");
+	ODP_PRINT("  max groups:        %u\n", capa.max_groups);
+	ODP_PRINT("  max priorities:    %u\n", capa.max_prios);
+	ODP_PRINT("  num spread:        %i\n", num_spread);
+	ODP_PRINT("  prefer ratio:      %u\n", sched->config.prefer_ratio);
+	ODP_PRINT("\n");
+
+	ODP_PRINT("  Number of active event queues:\n");
+	ODP_PRINT("              spread\n");
+	ODP_PRINT("            ");
+
+	for (spr = 0; spr < num_spread; spr++)
+		ODP_PRINT(" %7i", spr);
+
+	ODP_PRINT("\n");
+
+	for (prio = 0; prio < NUM_PRIO; prio++) {
+		ODP_PRINT("  prio %i", prio);
+
+		for (grp = 0; grp < NUM_SCHED_GRPS; grp++)
+			if (sched->prio_q_mask[grp][prio])
+				break;
+
+		if (grp == NUM_SCHED_GRPS) {
+			ODP_PRINT(":-\n");
+			continue;
+		}
+
+		ODP_PRINT("\n");
+
+		for (grp = 0; grp < NUM_SCHED_GRPS; grp++) {
+			if (sched->sched_grp[grp].allocated == 0)
+				continue;
+
+			ODP_PRINT("    group %i:", grp);
+
+			for (spr = 0; spr < num_spread; spr++) {
+				num_queues = sched->prio_q_count[grp][prio][spr];
+				ring = &sched->prio_q[grp][prio][spr].ring;
+				num_active = ring_u32_len(ring);
+				ODP_PRINT(" %3u/%3u", num_active, num_queues);
+			}
+			ODP_PRINT("\n");
+		}
+	}
+
+	ODP_PRINT("\n  Number of threads:\n");
+	ODP_PRINT("             spread\n");
+
+	for (grp = 0; grp < NUM_SCHED_GRPS; grp++) {
+		if (sched->sched_grp[grp].allocated == 0)
+			continue;
+
+		ODP_PRINT("    group %i:", grp);
+
+		for (spr = 0; spr < num_spread; spr++)
+			ODP_PRINT(" %u", sched->sched_grp[grp].spread_thrs[spr]);
+
+		ODP_PRINT("\n");
+	}
+
+	ODP_PRINT("\n");
 }
 
 /* Fill in scheduler interface */
@@ -1705,7 +1840,8 @@ const schedule_api_t _odp_schedule_basic_api = {
 	.schedule_group_info      = schedule_group_info,
 	.schedule_order_lock      = schedule_order_lock,
 	.schedule_order_unlock    = schedule_order_unlock,
-	.schedule_order_unlock_lock    = schedule_order_unlock_lock,
-	.schedule_order_lock_start	= schedule_order_lock_start,
-	.schedule_order_lock_wait      = schedule_order_lock_wait
+	.schedule_order_unlock_lock = schedule_order_unlock_lock,
+	.schedule_order_lock_start  = schedule_order_lock_start,
+	.schedule_order_lock_wait   = schedule_order_lock_wait,
+	.schedule_print           = schedule_print
 };

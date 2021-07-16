@@ -1,4 +1,5 @@
 /* Copyright (c) 2015-2018, Linaro Limited
+ * Copyright (c) 2021, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -83,15 +84,21 @@ static struct ethtool_gstrings *get_stringset(int fd, struct ifreq *ifr)
 	return strings;
 }
 
-static int ethtool_stats(int fd, struct ifreq *ifr, odp_pktio_stats_t *stats)
+static int ethtool_stats_get(int fd, const char *name,
+			     struct ethtool_gstrings **strings_out,
+			     struct ethtool_stats **estats_out,
+			     unsigned int *nstats_out)
 {
 	struct ethtool_gstrings *strings;
 	struct ethtool_stats *estats;
-	unsigned int n_stats, i;
+	struct ifreq ifr;
+	unsigned int n_stats;
 	int err;
-	int cnts;
 
-	strings = get_stringset(fd, ifr);
+	memset(&ifr, 0, sizeof(ifr));
+	snprintf(ifr.ifr_name, IF_NAMESIZE, "%s", name);
+
+	strings = get_stringset(fd, &ifr);
 	if (!strings)
 		return -1;
 
@@ -111,8 +118,8 @@ static int ethtool_stats(int fd, struct ifreq *ifr, odp_pktio_stats_t *stats)
 
 	estats->cmd = ETHTOOL_GSTATS;
 	estats->n_stats = n_stats;
-	ifr->ifr_data = (void *)estats;
-	err = ioctl(fd, SIOCETHTOOL, ifr);
+	ifr.ifr_data = (void *)estats;
+	err = ioctl(fd, SIOCETHTOOL, &ifr);
 	if (err < 0) {
 		_odp_errno = errno;
 		free(strings);
@@ -120,36 +127,83 @@ static int ethtool_stats(int fd, struct ifreq *ifr, odp_pktio_stats_t *stats)
 		return -1;
 	}
 
-	cnts = 0;
+	if (strings_out)
+		*strings_out = strings;
+	else
+		free(strings);
+
+	if (estats_out)
+		*estats_out = estats;
+	else
+		free(estats);
+
+	if (nstats_out)
+		*nstats_out = n_stats;
+
+	return 0;
+}
+
+int _odp_ethtool_stats_get_fd(int fd, const char *name, odp_pktio_stats_t *stats)
+{
+	struct ethtool_gstrings *strings;
+	struct ethtool_stats *estats;
+	unsigned int i, n_stats;
+	int cnts = 0;
+
+	if (ethtool_stats_get(fd, name, &strings, &estats, &n_stats))
+		return -1;
+
 	for (i = 0; i < n_stats; i++) {
 		char *cnt = (char *)&strings->data[i * ETH_GSTRING_LEN];
 		uint64_t val = estats->data[i];
 
-		if (!strcmp(cnt, "rx_octets")) {
+		if (!strcmp(cnt, "rx_octets") ||
+		    !strcmp(cnt, "rx_bytes")) {
 			stats->in_octets = val;
 			cnts++;
 		} else if (!strcmp(cnt, "rx_packets")) {
 			stats->in_packets = val;
 			cnts++;
-		} else if (!strcmp(cnt, "rx_ucast_packets")) {
+		} else if (!strcmp(cnt, "rx_ucast_packets") ||
+			   !strcmp(cnt, "rx_unicast")) {
 			stats->in_ucast_pkts = val;
 			cnts++;
-		} else if (!strcmp(cnt, "rx_discards")) {
+		} else if (!strcmp(cnt, "rx_broadcast") ||
+			   !strcmp(cnt, "rx_bcast_packets")) {
+			stats->in_bcast_pkts = val;
+			cnts++;
+		} else if (!strcmp(cnt, "rx_multicast") ||
+			   !strcmp(cnt, "rx_mcast_packets")) {
+			stats->in_mcast_pkts = val;
+			cnts++;
+		} else if (!strcmp(cnt, "rx_discards") ||
+			   !strcmp(cnt, "rx_dropped")) {
 			stats->in_discards = val;
 			cnts++;
 		} else if (!strcmp(cnt, "rx_errors")) {
 			stats->in_errors = val;
 			cnts++;
-		} else if (!strcmp(cnt, "tx_octets")) {
+		} else if (!strcmp(cnt, "tx_octets") ||
+			   !strcmp(cnt, "tx_bytes")) {
 			stats->out_octets = val;
 			cnts++;
 		} else if (!strcmp(cnt, "tx_packets")) {
 			stats->out_packets = val;
 			cnts++;
-		} else if (!strcmp(cnt, "tx_ucast_packets")) {
+		} else if (!strcmp(cnt, "tx_ucast_packets") ||
+			   !strcmp(cnt, "tx_unicast")) {
 			stats->out_ucast_pkts = val;
 			cnts++;
-		} else if (!strcmp(cnt, "tx_discards")) {
+		} else if (!strcmp(cnt, "tx_broadcast") ||
+			   !strcmp(cnt, "tx_bcast_packets")) {
+			stats->out_bcast_pkts = val;
+			cnts++;
+		} else if (!strcmp(cnt, "tx_multicast") ||
+			   !strcmp(cnt, "tx_mcast_packets")) {
+			stats->out_mcast_pkts = val;
+			cnts++;
+		} else if (!strcmp(cnt, "tx_discards") ||
+			   !strcmp(cnt, "tx_dropped")) {
 			stats->out_discards = val;
 			cnts++;
 		} else if (!strcmp(cnt, "tx_errors")) {
@@ -164,18 +218,66 @@ static int ethtool_stats(int fd, struct ifreq *ifr, odp_pktio_stats_t *stats)
 	/* Ethtool strings came from kernel driver. Name of that
 	 * strings is not universal. Current function needs to be updated
 	 * if your driver has different names for counters */
-	if (cnts < 8)
+	if (cnts < 14)
 		return -1;
 
 	return 0;
 }
 
-int _odp_ethtool_stats_get_fd(int fd, const char *name, odp_pktio_stats_t *stats)
+int _odp_ethtool_extra_stat_info(int fd, const char *name,
+				 odp_pktio_extra_stat_info_t info[], int num)
 {
-	struct ifreq ifr;
+	struct ethtool_gstrings *strings;
+	unsigned int i, n_stats;
 
-	memset(&ifr, 0, sizeof(ifr));
-	snprintf(ifr.ifr_name, IF_NAMESIZE, "%s", name);
+	if (ethtool_stats_get(fd, name, &strings, NULL, &n_stats))
+		return -1;
 
-	return ethtool_stats(fd, &ifr, stats);
+	for (i = 0; i < n_stats && i < (unsigned int)num; i++) {
+		char *cnt = (char *)&strings->data[i * ETH_GSTRING_LEN];
+
+		strncpy(info[i].name, cnt, ODP_PKTIO_STATS_EXTRA_NAME_LEN - 1);
+	}
+
+	free(strings);
+
+	return n_stats;
+}
+
+int _odp_ethtool_extra_stats(int fd, const char *name, uint64_t stats[], int num)
+{
+	struct ethtool_stats *estats;
+	unsigned int i, n_stats;
+
+	if (ethtool_stats_get(fd, name, NULL, &estats, &n_stats))
+		return -1;
+
+	for (i = 0; i < n_stats && i < (unsigned int)num; i++)
+		stats[i] = estats->data[i];
+
+	free(estats);
+
+	return n_stats;
+}
+
+int _odp_ethtool_extra_stat_counter(int fd, const char *name, uint32_t id,
+				    uint64_t *stat)
+{
+	struct ethtool_stats *estats;
+	unsigned int n_stats;
+	int ret = 0;
+
+	if (ethtool_stats_get(fd, name, NULL, &estats, &n_stats))
+		return -1;
+
+	if (id >= n_stats) {
+		ODP_ERR("Invalid counter id\n");
+		ret = -1;
+	} else {
+		*stat = estats->data[id];
+	}
+
+	free(estats);
+
+	return ret;
 }
