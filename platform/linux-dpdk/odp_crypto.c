@@ -35,8 +35,7 @@
 #include <string.h>
 #include <math.h>
 
-/* default number supported by DPDK crypto */
-#define MAX_SESSIONS 2048
+#define MAX_SESSIONS 4000
 /*
  * Max size of per-thread session object cache. May be useful if sessions
  * are created and destroyed very frequently.
