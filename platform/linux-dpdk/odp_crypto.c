@@ -503,6 +503,12 @@ int _odp_crypto_term_local(void)
 	return 0;
 }
 
+static int is_dev_aesni_mb(const struct rte_cryptodev_info *dev_info)
+{
+	return dev_info->driver_name &&
+		!strcmp(dev_info->driver_name, "crypto_aesni_mb");
+}
+
 static void capability_process(struct rte_cryptodev_info *dev_info,
 			       odp_crypto_cipher_algos_t *ciphers,
 			       odp_crypto_auth_algos_t *auths)
@@ -571,8 +577,16 @@ static void capability_process(struct rte_cryptodev_info *dev_info,
 				auths->bit.aes_gmac = 1;
 			if (cap_auth_algo == RTE_CRYPTO_AUTH_AES_CMAC)
 				auths->bit.aes_cmac = 1;
-			if (cap_auth_algo == RTE_CRYPTO_AUTH_AES_XCBC_MAC)
+
+			/* Combination of (3)DES-CBC and AES-XCBC-MAC does not
+			 * work with the aesni_mb crypto driver but causes
+			 * crash inside the intel-mb library. As a workaround,
+			 * we do not use aes-xcbc-mac with the aesni_mb driver.
+			 */
+			if (cap_auth_algo == RTE_CRYPTO_AUTH_AES_XCBC_MAC &&
+			    !is_dev_aesni_mb(dev_info))
 				auths->bit.aes_xcbc_mac = 1;
+
 		}
 
 		if (cap->sym.xform_type == RTE_CRYPTO_SYM_XFORM_AEAD) {
@@ -1193,6 +1207,13 @@ check_auth:
 			;
 
 		if (cap->op == RTE_CRYPTO_OP_TYPE_UNDEFINED)
+			continue;
+
+		/* As a bug workaround, we do not use AES_XCBC_MAC with
+		 * the aesni-mb crypto driver.
+		 */
+		if (auth_xform->auth.algo == RTE_CRYPTO_AUTH_AES_XCBC_MAC &&
+		    is_dev_aesni_mb(&dev_info))
 			continue;
 
 		/* Check if key size is supported by the algorithm. */
