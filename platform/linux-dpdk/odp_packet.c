@@ -16,6 +16,7 @@
 #include <odp/api/packet_io.h>
 #include <odp/api/plat/pktio_inlines.h>
 #include <odp_errno_define.h>
+#include <odp/api/proto_stats.h>
 
 /* Inlined API functions */
 #include <odp/api/plat/event_inlines.h>
@@ -2389,4 +2390,17 @@ int odp_packet_reass_partial_state(odp_packet_t pkt, odp_packet_t frags[],
 	(void)frags;
 	(void)res;
 	return -ENOTSUP;
+}
+
+void odp_packet_proto_stats_request(odp_packet_t pkt, odp_packet_proto_stats_opt_t *opt)
+{
+	(void)pkt;
+	(void)opt;
+}
+
+odp_proto_stats_t odp_packet_proto_stats(odp_packet_t pkt)
+{
+	(void)pkt;
+
+	return ODP_PROTO_STATS_INVALID;
 }
