@@ -1,4 +1,5 @@
 /* Copyright (c) 2013-2018, Linaro Limited
+ * Copyright (c) 2021, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -61,11 +62,16 @@ typedef struct ODP_ALIGNED_CACHE {
 #else
 	odp_spinlock_t lock ODP_ALIGNED_CACHE;
 #endif
+	odp_pool_t		pool_hdl;
+	uint32_t		pool_idx;
+
+	/* Everything under this mark is memset() to zero on pool create */
+	uint8_t			memset_mark;
+	uint8_t			type;
+	uint8_t			pool_ext;
 	char			name[ODP_POOL_NAME_LEN];
 	odp_pool_param_t	params;
-	odp_pool_t		pool_hdl;
 	struct rte_mempool	*rte_mempool;
-	uint32_t		pool_idx;
 	uint32_t		seg_len;
 
 } pool_t;
