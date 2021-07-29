@@ -992,3 +992,37 @@ int odp_pool_stats_reset(odp_pool_t pool_hdl ODP_UNUSED)
 {
 	return 0;
 }
+
+int odp_pool_ext_capability(odp_pool_type_t type, odp_pool_ext_capability_t *capa)
+{
+	if (type != ODP_POOL_PACKET)
+		return -1;
+
+	memset(capa, 0, sizeof(odp_pool_ext_capability_t));
+
+	capa->type = type;
+	capa->max_pools = 0;
+
+	return 0;
+}
+
+void odp_pool_ext_param_init(odp_pool_type_t type ODP_UNUSED,
+			     odp_pool_ext_param_t *param)
+{
+	memset(param, 0, sizeof(odp_pool_ext_param_t));
+}
+
+odp_pool_t odp_pool_ext_create(const char *name ODP_UNUSED,
+			       const odp_pool_ext_param_t *param ODP_UNUSED)
+{
+	return ODP_POOL_INVALID;
+}
+
+int odp_pool_ext_populate(odp_pool_t pool_hdl ODP_UNUSED,
+			  void *buf[] ODP_UNUSED,
+			  uint32_t buf_size ODP_UNUSED,
+			  uint32_t num ODP_UNUSED,
+			  uint32_t flags ODP_UNUSED)
+{
+	return -1;
+}
