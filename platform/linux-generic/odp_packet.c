@@ -18,6 +18,7 @@
 #include <odp/api/plat/byteorder_inlines.h>
 #include <odp/api/packet_io.h>
 #include <odp/api/plat/pktio_inlines.h>
+#include <odp/api/proto_stats.h>
 
 /* Inlined API functions */
 #include <odp/api/plat/event_inlines.h>
@@ -134,10 +135,11 @@ static inline void *packet_tail(odp_packet_hdr_t *pkt_hdr)
 static inline uint32_t seg_headroom(odp_packet_hdr_t *pkt_seg)
 {
 	odp_buffer_hdr_t *hdr = &pkt_seg->buf_hdr;
+	pool_t *pool = hdr->pool_ptr;
 	uint8_t *base = hdr->base_data;
 	uint8_t *head = pkt_seg->seg_data;
 
-	return CONFIG_PACKET_HEADROOM + (head - base);
+	return pool->headroom + (head - base);
 }
 
 static inline uint32_t seg_tailroom(odp_packet_hdr_t *pkt_seg)
@@ -690,7 +692,7 @@ odp_packet_t odp_packet_alloc(odp_pool_t pool_hdl, uint32_t len)
 	odp_packet_t pkt;
 	int num, num_seg;
 
-	if (odp_unlikely(pool->params.type != ODP_POOL_PACKET)) {
+	if (odp_unlikely(pool->type != ODP_POOL_PACKET)) {
 		_odp_errno = EINVAL;
 		return ODP_PACKET_INVALID;
 	}
@@ -713,7 +715,7 @@ int odp_packet_alloc_multi(odp_pool_t pool_hdl, uint32_t len,
 	pool_t *pool = pool_entry_from_hdl(pool_hdl);
 	int num, num_seg;
 
-	if (odp_unlikely(pool->params.type != ODP_POOL_PACKET)) {
+	if (odp_unlikely(pool->type != ODP_POOL_PACKET)) {
 		_odp_errno = EINVAL;
 		return -1;
 	}
@@ -1747,8 +1749,8 @@ int _odp_packet_copy_md_to_packet(odp_packet_t srcpkt, odp_packet_t dstpkt)
 	odp_packet_hdr_t *dsthdr = packet_hdr(dstpkt);
 	pool_t *src_pool = srchdr->buf_hdr.pool_ptr;
 	pool_t *dst_pool = dsthdr->buf_hdr.pool_ptr;
-	uint32_t src_uarea_size = src_pool->params.pkt.uarea_size;
-	uint32_t dst_uarea_size = dst_pool->params.pkt.uarea_size;
+	uint32_t src_uarea_size = src_pool->param_uarea_size;
+	uint32_t dst_uarea_size = dst_pool->param_uarea_size;
 
 	dsthdr->input = srchdr->input;
 	dsthdr->dst_queue = srchdr->dst_queue;
@@ -2948,4 +2950,173 @@ odp_packet_reass_partial_state(odp_packet_t pkt, odp_packet_t frags[],
 	(void)frags;
 	(void)res;
 	return -ENOTSUP;
+}
+
+static inline odp_packet_hdr_t *packet_buf_to_hdr(odp_packet_buf_t pkt_buf)
+{
+	return (odp_packet_hdr_t *)(uintptr_t)pkt_buf;
+}
+
+void *odp_packet_buf_head(odp_packet_buf_t pkt_buf)
+{
+	odp_packet_hdr_t *pkt_hdr = packet_buf_to_hdr(pkt_buf);
+	pool_t *pool = pkt_hdr->buf_hdr.pool_ptr;
+	uint32_t head_offset = sizeof(odp_packet_hdr_t) + pool->ext_param.pkt.app_header_size;
+
+	if (odp_unlikely(pool->pool_ext == 0)) {
+		ODP_ERR("Not an external memory pool\n");
+		return NULL;
+	}
+
+	return (uint8_t *)pkt_hdr + head_offset;
+}
+
+uint32_t odp_packet_buf_size(odp_packet_buf_t pkt_buf)
+{
+	odp_packet_hdr_t *pkt_hdr = packet_buf_to_hdr(pkt_buf);
+	pool_t *pool = pkt_hdr->buf_hdr.pool_ptr;
+	uint32_t head_offset = sizeof(odp_packet_hdr_t) + pool->ext_param.pkt.app_header_size;
+
+	return pool->ext_param.pkt.buf_size - head_offset;
+}
+
+uint32_t odp_packet_buf_data_offset(odp_packet_buf_t pkt_buf)
+{
+	odp_packet_hdr_t *pkt_hdr = packet_buf_to_hdr(pkt_buf);
+
+	return (uintptr_t)pkt_hdr->seg_data - (uintptr_t)odp_packet_buf_head(pkt_buf);
+}
+
+uint32_t odp_packet_buf_data_len(odp_packet_buf_t pkt_buf)
+{
+	odp_packet_hdr_t *pkt_hdr = packet_buf_to_hdr(pkt_buf);
+
+	return pkt_hdr->seg_len;
+}
+
+void odp_packet_buf_data_set(odp_packet_buf_t pkt_buf, uint32_t data_offset, uint32_t data_len)
+{
+	odp_packet_hdr_t *pkt_hdr = packet_buf_to_hdr(pkt_buf);
+	uint8_t *head = odp_packet_buf_head(pkt_buf);
+
+	pkt_hdr->seg_len  = data_len;
+	pkt_hdr->seg_data = head + data_offset;
+}
+
+odp_packet_buf_t odp_packet_buf_from_head(odp_pool_t pool_hdl, void *head)
+{
+	pool_t *pool = pool_entry_from_hdl(pool_hdl);
+	uint32_t head_offset = sizeof(odp_packet_hdr_t) + pool->ext_param.pkt.app_header_size;
+
+	if (odp_unlikely(pool->type != ODP_POOL_PACKET)) {
+		ODP_ERR("Not a packet pool\n");
+		return ODP_PACKET_BUF_INVALID;
+	}
+
+	if (odp_unlikely(pool->pool_ext == 0)) {
+		ODP_ERR("Not an external memory pool\n");
+		return ODP_PACKET_BUF_INVALID;
+	}
+
+	return (odp_packet_buf_t)((uintptr_t)head - head_offset);
+}
+
+uint32_t odp_packet_disassemble(odp_packet_t pkt, odp_packet_buf_t pkt_buf[], uint32_t num)
+{
+	uint32_t i;
+	odp_packet_seg_t seg;
+	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
+	pool_t *pool = pkt_hdr->buf_hdr.pool_ptr;
+	uint32_t num_segs = odp_packet_num_segs(pkt);
+
+	if (odp_unlikely(pool->type != ODP_POOL_PACKET)) {
+		ODP_ERR("Not a packet pool\n");
+		return 0;
+	}
+
+	if (odp_unlikely(pool->pool_ext == 0)) {
+		ODP_ERR("Not an external memory pool\n");
+		return 0;
+	}
+
+	if (odp_unlikely(num < num_segs)) {
+		ODP_ERR("Not enough buffer handles %u. Packet has %u segments.\n", num, num_segs);
+		return 0;
+	}
+
+	seg = odp_packet_first_seg(pkt);
+
+	for (i = 0; i < num_segs; i++) {
+		pkt_buf[i] = (odp_packet_buf_t)(uintptr_t)packet_seg_to_hdr(seg);
+		seg = odp_packet_next_seg(pkt, seg);
+	}
+
+	return num_segs;
+}
+
+odp_packet_t odp_packet_reassemble(odp_pool_t pool_hdl, odp_packet_buf_t pkt_buf[], uint32_t num)
+{
+	uint32_t i, data_len, tailroom;
+	odp_packet_hdr_t *cur_seg, *next_seg;
+	odp_packet_hdr_t *pkt_hdr = (odp_packet_hdr_t *)(uintptr_t)pkt_buf[0];
+	uint32_t headroom = odp_packet_buf_data_offset(pkt_buf[0]);
+
+	pool_t *pool = pool_entry_from_hdl(pool_hdl);
+
+	if (odp_unlikely(pool->type != ODP_POOL_PACKET)) {
+		ODP_ERR("Not a packet pool\n");
+		return ODP_PACKET_INVALID;
+	}
+
+	if (odp_unlikely(pool->pool_ext == 0)) {
+		ODP_ERR("Not an external memory pool\n");
+		return ODP_PACKET_INVALID;
+	}
+
+	if (odp_unlikely(num == 0)) {
+		ODP_ERR("Bad number of buffers: %u\n", num);
+		return ODP_PACKET_INVALID;
+	}
+
+	cur_seg  = pkt_hdr;
+	data_len = 0;
+
+	for (i = 0; i < num; i++) {
+		next_seg = NULL;
+		if (i < num - 1)
+			next_seg = (odp_packet_hdr_t *)(uintptr_t)pkt_buf[i + 1];
+
+		data_len += cur_seg->seg_len;
+		cur_seg->seg_next = next_seg;
+		cur_seg = next_seg;
+	}
+
+	tailroom  = pool->ext_param.pkt.buf_size - sizeof(odp_packet_hdr_t);
+	tailroom -= pool->ext_param.pkt.app_header_size;
+	tailroom -= odp_packet_buf_data_len(pkt_buf[num - 1]);
+
+	pkt_hdr->seg_count = num;
+	pkt_hdr->frame_len = data_len;
+	pkt_hdr->headroom  = headroom;
+	pkt_hdr->tailroom  = tailroom;
+
+	/* Reset metadata */
+	pkt_hdr->subtype = ODP_EVENT_PACKET_BASIC;
+	pkt_hdr->input   = ODP_PKTIO_INVALID;
+	packet_parse_reset(pkt_hdr, 1);
+
+	return packet_handle(pkt_hdr);
+}
+
+void odp_packet_proto_stats_request(odp_packet_t pkt, odp_packet_proto_stats_opt_t *opt)
+{
+	(void)pkt;
+	(void)opt;
+}
+
+odp_proto_stats_t odp_packet_proto_stats(odp_packet_t pkt)
+{
+	(void)pkt;
+
+	return ODP_PROTO_STATS_INVALID;
 }

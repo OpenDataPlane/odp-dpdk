@@ -30,6 +30,7 @@
 #include <odp/api/plat/queue_inlines.h>
 #include <odp_libconfig_internal.h>
 #include <odp_event_vector_internal.h>
+#include <odp/api/proto_stats.h>
 
 #include <string.h>
 #include <inttypes.h>
@@ -727,7 +728,7 @@ odp_pktio_t odp_pktio_lookup(const char *name)
 }
 
 static void packet_vector_enq_cos(odp_queue_t queue, odp_event_t events[],
-				  uint32_t num, const cos_t *cos_hdr)
+				  uint32_t num, cos_t *cos_hdr)
 {
 	odp_packet_vector_t pktv;
 	odp_pool_t pool = cos_hdr->s.vector.pool;
@@ -748,6 +749,7 @@ static void packet_vector_enq_cos(odp_queue_t queue, odp_event_t events[],
 	}
 	if (odp_unlikely(i == 0)) {
 		odp_event_free_multi(events, num);
+		_odp_cos_queue_stats_add(cos_hdr, queue, 0, num);
 		return;
 	}
 	num_pktv = i;
@@ -768,9 +770,15 @@ static void packet_vector_enq_cos(odp_queue_t queue, odp_event_t events[],
 	}
 
 	ret = odp_queue_enq_multi(queue, event_tbl, num_pktv);
-	if (odp_unlikely(ret != num_pktv)) {
+	if (odp_likely(ret == num_pktv)) {
+		_odp_cos_queue_stats_add(cos_hdr, queue, num_enq, num - num_enq);
+	} else {
+		uint32_t enqueued;
+
 		if (ret < 0)
 			ret = 0;
+		enqueued = max_size * ret;
+		_odp_cos_queue_stats_add(cos_hdr, queue, enqueued, num - enqueued);
 		odp_event_free_multi(&event_tbl[ret], num_pktv - ret);
 	}
 }
@@ -900,6 +908,7 @@ static inline int pktin_recv_buf(pktio_entry_t *entry, int pktin_index,
 	}
 
 	for (i = 0; i < num_dst; i++) {
+		cos_t *cos_hdr = NULL;
 		int num_enq, ret;
 		int idx = dst_idx[i];
 
@@ -910,7 +919,7 @@ static inline int pktin_recv_buf(pktio_entry_t *entry, int pktin_index,
 
 		if (cos[i] != CLS_COS_IDX_NONE) {
 			/* Packets from classifier */
-			cos_t *cos_hdr = _odp_cos_entry_from_idx(cos[i]);
+			cos_hdr = _odp_cos_entry_from_idx(cos[i]);
 
 			if (cos_hdr->s.vector.enable) {
 				packet_vector_enq_cos(dst[i], &ev[idx], num_enq, cos_hdr);
@@ -929,8 +938,11 @@ static inline int pktin_recv_buf(pktio_entry_t *entry, int pktin_index,
 
 		if (ret < num_enq)
 			odp_event_free_multi(&ev[idx + ret], num_enq - ret);
-	}
 
+		/* Update CoS statistics */
+		if (cos[i] != CLS_COS_IDX_NONE)
+			_odp_cos_queue_stats_add(cos_hdr, dst[i], ret, num_enq - ret);
+	}
 	return num_rx;
 }
 
@@ -1136,6 +1148,7 @@ int _odp_sched_cb_pktin_poll_one(int pktio_index,
 	odp_queue_t queue;
 	odp_bool_t vector_enabled = entry->s.in_queue[rx_queue].vector.enable;
 	uint32_t num = QUEUE_MULTI_MAX;
+	cos_t *cos_hdr = NULL;
 
 	if (odp_unlikely(entry->s.state != PKTIO_STATE_STARTED)) {
 		if (entry->s.state < PKTIO_STATE_ACTIVE ||
@@ -1162,12 +1175,13 @@ int _odp_sched_cb_pktin_poll_one(int pktio_index,
 		pkt_hdr = packet_hdr(pkt);
 		if (odp_unlikely(pkt_hdr->p.input_flags.dst_queue)) {
 			odp_event_t event = odp_packet_to_event(pkt);
+			uint16_t cos_idx = pkt_hdr->cos;
 
 			queue = pkt_hdr->dst_queue;
 
-			if (pkt_hdr->cos != CLS_COS_IDX_NONE) {
+			if (cos_idx != CLS_COS_IDX_NONE) {
 				/* Packets from classifier */
-				cos_t *cos_hdr = _odp_cos_entry_from_idx(pkt_hdr->cos);
+				cos_hdr = _odp_cos_entry_from_idx(cos_idx);
 
 				if (cos_hdr->s.vector.enable) {
 					packet_vector_enq_cos(queue, &event, 1, cos_hdr);
@@ -1182,7 +1196,13 @@ int _odp_sched_cb_pktin_poll_one(int pktio_index,
 			if (odp_unlikely(odp_queue_enq(queue, event))) {
 				/* Queue full? */
 				odp_packet_free(pkt);
-				odp_atomic_inc_u64(&entry->s.stats_extra.in_discards);
+				if (cos_idx != CLS_COS_IDX_NONE)
+					_odp_cos_queue_stats_add(cos_hdr, queue, 0, 1);
+				else
+					odp_atomic_inc_u64(&entry->s.stats_extra.in_discards);
+			} else {
+				if (cos_idx != CLS_COS_IDX_NONE)
+					_odp_cos_queue_stats_add(cos_hdr, queue, 1, 0);
 			}
 		} else {
 			evt_tbl[num_rx++] = odp_packet_to_event(pkt);
@@ -3327,4 +3347,64 @@ int odp_pktout_send_lso(odp_pktout_queue_t queue, const odp_packet_t packet[], i
 	}
 
 	return i;
+}
+
+void
+odp_proto_stats_param_init(odp_proto_stats_param_t *param)
+{
+	if (param)
+		memset(param, 0, sizeof(*param));
+}
+
+int
+odp_proto_stats_capability(odp_pktio_t pktio, odp_proto_stats_capability_t *capa)
+{
+	(void)pktio;
+
+	if (capa == NULL)
+		return -EINVAL;
+
+	memset(capa, 0, sizeof(*capa));
+
+	return 0;
+}
+
+odp_proto_stats_t
+odp_proto_stats_lookup(const char *name)
+{
+	(void)name;
+
+	return ODP_PROTO_STATS_INVALID;
+}
+
+odp_proto_stats_t
+odp_proto_stats_create(const char *name, const odp_proto_stats_param_t *param)
+{
+	(void)name;
+	(void)param;
+
+	return ODP_PROTO_STATS_INVALID;
+}
+
+int
+odp_proto_stats_destroy(odp_proto_stats_t stat)
+{
+	(void)stat;
+
+	return 0;
+}
+
+int
+odp_proto_stats(odp_proto_stats_t stat, odp_proto_stats_data_t *data)
+{
+	(void)stat;
+	(void)data;
+
+	return 0;
+}
+
+void
+odp_proto_stats_print(odp_proto_stats_t stat)
+{
+	(void)stat;
 }

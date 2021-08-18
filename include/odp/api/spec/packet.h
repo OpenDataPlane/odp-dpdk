@@ -19,265 +19,14 @@
 extern "C" {
 #endif
 
+#include <odp/api/proto_stats_types.h>
 #include <odp/api/time.h>
+#include <odp/api/packet_types.h>
 
 /** @defgroup odp_packet ODP PACKET
  *  Packet event metadata and operations.
  *  @{
  */
-
-/**
- * @typedef odp_packet_t
- * ODP packet
- */
-
-/**
- * @def ODP_PACKET_INVALID
- * Invalid packet
- */
-
-/**
- * @def ODP_PACKET_OFFSET_INVALID
- * Invalid packet offset
- */
-
-/**
- * @typedef odp_packet_seg_t
- * ODP packet segment
- */
-
-/**
- * @def ODP_PACKET_SEG_INVALID
- * Invalid packet segment
- */
-
-/**
- * @enum odp_packet_color_t
- * Color of packet for shaper/drop processing
- *
- * @var ODP_PACKET_GREEN
- * Packet is green
- *
- * @var ODP_PACKET_YELLOW
- * Packet is yellow
- *
- * @var ODP_PACKET_RED
- * Packet is red
- */
-
-/**
- * Maximum number of packet colors which accommodates ODP_PACKET_GREEN, ODP_PACKET_YELLOW and
- * ODP_PACKET_RED.
- */
-#define ODP_NUM_PACKET_COLORS 3
-
-/**
- * @typedef odp_proto_l2_type_t
- * Layer 2 protocol type
- */
-
-/**
- * @def ODP_PROTO_L2_TYPE_NONE
- * Layer 2 protocol type not defined
- *
- * @def ODP_PROTO_L2_TYPE_ETH
- * Layer 2 protocol is Ethernet
- */
-
-/**
- * @typedef odp_proto_l3_type_t
- * Layer 3 protocol type
- */
-
-/**
- * @def ODP_PROTO_L3_TYPE_NONE
- * Layer 3 protocol type not defined
- *
- * @def ODP_PROTO_L3_TYPE_ARP
- * Layer 3 protocol is ARP
- *
- * @def ODP_PROTO_L3_TYPE_RARP
- * Layer 3 protocol is RARP
- *
- * @def ODP_PROTO_L3_TYPE_MPLS
- * Layer 3 protocol is MPLS
- *
- * @def ODP_PROTO_L3_TYPE_IPV4
- * Layer 3 protocol type is IPv4
- *
- * @def ODP_PROTO_L3_TYPE_IPV6
- * Layer 3 protocol type is IPv6
- */
-
-/**
- * @typedef odp_proto_l4_type_t
- * Layer 4 protocol type
- */
-
-/**
- * @def ODP_PROTO_L4_TYPE_NONE
- * Layer 4 protocol type not defined
- *
- * @def ODP_PROTO_L4_TYPE_ICMPV4
- * Layer 4 protocol type is ICMPv4
- *
- * @def ODP_PROTO_L4_TYPE_IGMP
- * Layer 4 protocol type is IGMP
- *
- * @def ODP_PROTO_L4_TYPE_IPV4
- * Layer 4 protocol type is IPv4
- *
- * @def ODP_PROTO_L4_TYPE_TCP
- * Layer 4 protocol type is TCP
- *
- * @def ODP_PROTO_L4_TYPE_UDP
- * Layer 4 protocol type is UDP
- *
- * @def ODP_PROTO_L4_TYPE_IPV6
- * Layer 4 protocol type is IPv6
- *
- * @def ODP_PROTO_L4_TYPE_GRE
- * Layer 4 protocol type is GRE
- *
- * @def ODP_PROTO_L4_TYPE_ESP
- * Layer 4 protocol type is IPSEC ESP
- *
- * @def ODP_PROTO_L4_TYPE_AH
- * Layer 4 protocol type is IPSEC AH
- *
- * @def ODP_PROTO_L4_TYPE_ICMPV6
- * Layer 4 protocol type is ICMPv6
- *
- * @def ODP_PROTO_L4_TYPE_NO_NEXT
- * Layer 4 protocol type is "No Next Header".
- * Protocol / next header number is 59.
- *
- * @def ODP_PROTO_L4_TYPE_IPCOMP
- * Layer 4 protocol type is IP Payload Compression Protocol
- *
- * @def ODP_PROTO_L4_TYPE_SCTP
- * Layer 4 protocol type is SCTP
- *
- * @def ODP_PROTO_L4_TYPE_ROHC
- * Layer 4 protocol type is ROHC
- */
-
-/**
- * @enum odp_packet_chksum_status_t
- * Checksum check status in packet
- *
- * @var ODP_PACKET_CHKSUM_UNKNOWN
- * Checksum was not checked. Checksum check was not
- * attempted or the attempt failed.
- *
- * @var ODP_PACKET_CHKSUM_BAD
- * Checksum was checked and it was not correct.
- *
- * @var ODP_PACKET_CHKSUM_OK
- * Checksum was checked and it was correct.
- */
-
-/**
- * @typedef odp_packet_vector_t
- * ODP packet vector
- */
-
-/**
- * @def ODP_PACKET_VECTOR_INVALID
- * Invalid packet vector
- */
-
-/**
- * @typedef odp_packet_tx_compl_t
- * ODP Packet Tx completion
- */
-
-/**
- * @def ODP_PACKET_TX_COMPL_INVALID
- * Invalid packet Tx completion
- */
-
-/**
- * Protocol
- */
-typedef enum odp_proto_t {
-	/** No protocol defined */
-	ODP_PROTO_NONE = 0,
-
-	/** Ethernet (including VLAN) */
-	ODP_PROTO_ETH,
-
-	/** IP version 4 */
-	ODP_PROTO_IPV4,
-
-	/** IP version 6 */
-	ODP_PROTO_IPV6
-
-} odp_proto_t;
-
-/**
- * Protocol layer
- */
-typedef enum odp_proto_layer_t {
-	/** No layers */
-	ODP_PROTO_LAYER_NONE = 0,
-
-	/** Layer L2 protocols (Ethernet, VLAN, etc) */
-	ODP_PROTO_LAYER_L2,
-
-	/** Layer L3 protocols (IPv4, IPv6, ICMP, IPSEC, etc) */
-	ODP_PROTO_LAYER_L3,
-
-	/** Layer L4 protocols (UDP, TCP, SCTP) */
-	ODP_PROTO_LAYER_L4,
-
-	/** All layers */
-	ODP_PROTO_LAYER_ALL
-
-} odp_proto_layer_t;
-
-/**
- * Packet API data range specifier
- */
-typedef struct odp_packet_data_range {
-	/** Offset from beginning of packet */
-	uint32_t offset;
-
-	/** Length of data to operate on */
-	uint32_t length;
-
-} odp_packet_data_range_t;
-
-/**
- * Reassembly status of a packet
- */
-typedef enum odp_packet_reass_status_t {
-	/** Reassembly was not attempted */
-	ODP_PACKET_REASS_NONE = 0,
-
-	/** Reassembly was attempted but is incomplete. Partial reassembly
-	  * result can be accessed using ``odp_packet_reass_partial_state()``.
-	  *
-	  * The packet does not contain valid packet data and cannot be used
-	  * in normal packet operations.
-	  */
-	ODP_PACKET_REASS_INCOMPLETE,
-
-	/** Reassembly was successfully done. The packet has been
-	 *  reassembled from multiple received fragments. */
-	ODP_PACKET_REASS_COMPLETE,
-} odp_packet_reass_status_t;
-
-/**
- * Result from odp_packet_reass_partial_state()
- */
-typedef struct odp_packet_reass_partial_state_t {
-	/** Number of fragments returned */
-	uint16_t num_frags;
-
-	/** Time, in ns, since the reception of the first received fragment */
-	uint64_t elapsed_time;
-} odp_packet_reass_partial_state_t;
 
 /**
  * Event subtype of a packet
@@ -1155,6 +904,135 @@ int odp_packet_concat(odp_packet_t *dst, odp_packet_t src);
  */
 int odp_packet_split(odp_packet_t *pkt, uint32_t len, odp_packet_t *tail);
 
+/**
+ * Packet buffer head pointer
+ *
+ * Packet buffer start address. Buffer level headroom starts from here. For the first
+ * packet buffer of a packet this is equivalent to odp_packet_head().
+ *
+ * @param      pkt_buf   Packet buffer
+ *
+ * @return Packet buffer head pointer
+ */
+void *odp_packet_buf_head(odp_packet_buf_t pkt_buf);
+
+/**
+ * Packet buffer size in bytes
+ *
+ * Packet buffer size is calculated from the buffer head pointer (@see odp_packet_buf_head()).
+ * It contains all buffer level headroom, data, and tailroom. For a single segmented packet this is
+ * equivalent to odp_packet_buf_len().
+ *
+ * @param      pkt_buf   Packet buffer
+ *
+ * @return Packet buffer size
+ */
+uint32_t odp_packet_buf_size(odp_packet_buf_t pkt_buf);
+
+/**
+ * Packet buffer data offset
+ *
+ * Offset from the buffer head pointer to the first byte of packet data in the packet buffer.
+ * Valid values range from 0 to buf_size - 1. For the first packet buffer of a packet
+ * this is equivalent to odp_packet_headroom().
+ *
+ * @param      pkt_buf   Packet buffer
+ *
+ * @return Packet buffer data offset
+ */
+uint32_t odp_packet_buf_data_offset(odp_packet_buf_t pkt_buf);
+
+/**
+ * Packet buffer data length in bytes
+ *
+ * Packet buffer contains this many bytes of packet data. Valid values range from 1 to
+ * buf_size - data_offset. For the first packet buffer of a packet this is equivalent to
+ * odp_packet_seg_len().
+ *
+ * @param      pkt_buf   Packet buffer
+ *
+ * @return Packet buffer data length
+ */
+uint32_t odp_packet_buf_data_len(odp_packet_buf_t pkt_buf);
+
+/**
+ * Packet buffer data set
+ *
+ * Update packet data start offset and length in the packet buffer. Valid offset values range
+ * from 0 to buf_size - 1. Valid length values range from 1 to buf_size - data_offset.
+ *
+ * @param      pkt_buf      Packet buffer
+ * @param      data_offset  Packet buffer data offset in bytes (from the buffer head pointer)
+ * @param      data_len     Packet buffer data length in bytes
+ */
+void odp_packet_buf_data_set(odp_packet_buf_t pkt_buf, uint32_t data_offset, uint32_t data_len);
+
+/**
+ * Convert packet buffer head pointer to handle
+ *
+ * Converts a packet buffer head pointer (from a previous odp_packet_buf_head() call) to a packet
+ * buffer handle. This allows an application to save memory as it can store only buffer pointers
+ * (instead of pointers and handles) and convert those to handles when needed. This conversion
+ * may be done only for packet buffers that are not part of any packet (i.e. buffers between
+ * odp_packet_disassemble() and odp_packet_reassemble() calls).
+ *
+ * This call can be used only for packets of an external memory pool (@see odp_pool_ext_create()).
+ *
+ * @param      pool     Pool from which the packet buffer (disassembled packet) originate from
+ * @param      head     Head pointer
+ *
+ * @return Packet buffer handle on success
+ * @retval ODP_PACKET_BUF_INVALID on failure
+ */
+odp_packet_buf_t odp_packet_buf_from_head(odp_pool_t pool, void *head);
+
+/**
+ * Disassemble packet into packet buffers
+ *
+ * Breaks up a packet into a list of packet buffers. Outputs a packet buffer handle for each
+ * segment of the packet (@see odp_packet_num_segs()). After a successful operation the packet
+ * handle must not be referenced anymore. Packet buffers are reassembled into a new packet (or
+ * several new packets) with a later odp_packet_reassemble() call(s). All packet buffers must be
+ * reassembled into a packet and freed into the originating pool before the pool is destroyed.
+ *
+ * This call can be used only for packets of an external memory pool (@see odp_pool_ext_create()).
+ *
+ * @param      pkt      Packet to be disassembled
+ * @param[out] pkt_buf  Packet buffer handle array for output
+ * @param      num      Number of elements in packet buffer handle array. Must be equal to or
+ *                      larger than number of segments in the packet.
+ *
+ * @return Number of handles written (equals the number of segments in the packet)
+ * @retval 0 on failure
+ */
+uint32_t odp_packet_disassemble(odp_packet_t pkt, odp_packet_buf_t pkt_buf[], uint32_t num);
+
+/**
+ * Reassemble packet from packet buffers
+ *
+ * Forms a new packet from packet buffers of a previous odp_packet_disassemble() call(s). Packet
+ * buffers from different disassembled packets may be used, but all buffers must be from packets of
+ * the same pool. Packet pool capability 'max_segs_per_pkt' defines the maximum number of
+ * packet buffers that can be reassembled to form a new packet.
+ *
+ * Application may use odp_packet_buf_data_set() to adjust data_offset and data_len values
+ * in each packet buffer to match the current packet data placement. The operation
+ * maintains packet data content and position. Each buffer becomes a segment in the new packet.
+ * Packet metadata related to data length and position are set according data layout
+ * in the buffers. All other packet metadata are set to their default values. After a successful
+ * operation packet buffer handles must not be referenced anymore.
+ *
+ * This call can be used only for packets of an external memory pool (@see odp_pool_ext_create()).
+ *
+ * @param      pool     Pool from which all packet buffers (disassembled packets) originate from
+ * @param      pkt_buf  Packet buffers to form a new packet
+ * @param      num      Number of packet buffers. Must not exceed max_segs_per_pkt pool capability.
+ *
+ * @return Handle of the newly formed packet
+ * @retval ODP_PACKET_INVALID on failure
+ */
+odp_packet_t odp_packet_reassemble(odp_pool_t pool, odp_packet_buf_t pkt_buf[], uint32_t num);
+
 /*
  *
  * References
@@ -1421,52 +1299,6 @@ int odp_packet_move_data(odp_packet_t pkt, uint32_t dst_offset,
  */
 
 /**
- * Flags to control packet data checksum checking
- */
-typedef union odp_proto_chksums_t {
-	/** Individual checksum bits. */
-	struct {
-		/** IPv4 header checksum */
-		uint32_t ipv4   : 1;
-
-		/** UDP checksum */
-		uint32_t udp    : 1;
-
-		/** TCP checksum */
-		uint32_t tcp    : 1;
-
-		/** SCTP checksum */
-		uint32_t sctp   : 1;
-
-	} chksum;
-
-	/** All checksum bits. This can be used to set/clear all flags. */
-	uint32_t all_chksum;
-
-} odp_proto_chksums_t;
-
-/**
- * Packet parse parameters
- */
-typedef struct odp_packet_parse_param_t {
-	/** Protocol header at parse starting point. Valid values for this
-	 *  field are: ODP_PROTO_ETH, ODP_PROTO_IPV4, ODP_PROTO_IPV6. */
-	odp_proto_t proto;
-
-	/** Continue parsing until this layer. Must be the same or higher
-	 *  layer than the layer of 'proto'. */
-	odp_proto_layer_t last_layer;
-
-	/** Flags to control payload data checksums checks up to the selected
-	 *  parse layer. Checksum checking status can be queried for each packet
-	 *  with odp_packet_l3_chksum_status() and
-	 *  odp_packet_l4_chksum_status().
-	 */
-	odp_proto_chksums_t chksums;
-
-} odp_packet_parse_param_t;
-
-/**
  * Parse packet
  *
  * Parse protocol headers in packet data and update layer/protocol specific
@@ -1509,35 +1341,6 @@ int odp_packet_parse(odp_packet_t pkt, uint32_t offset,
  */
 int odp_packet_parse_multi(const odp_packet_t pkt[], const uint32_t offset[],
 			   int num, const odp_packet_parse_param_t *param);
-
-/** Packet parse results */
-typedef struct odp_packet_parse_result_t {
-	/** Parse result flags */
-	odp_packet_parse_result_flag_t flag;
-
-	/** @see odp_packet_len() */
-	uint32_t packet_len;
-
-	/** @see odp_packet_l2_offset() */
-	uint32_t l2_offset;
-	/** @see odp_packet_l3_offset() */
-	uint32_t l3_offset;
-	/** @see odp_packet_l4_offset() */
-	uint32_t l4_offset;
-
-	/** @see odp_packet_l3_chksum_status() */
-	odp_packet_chksum_status_t l3_chksum_status;
-	/** @see odp_packet_l4_chksum_status() */
-	odp_packet_chksum_status_t l4_chksum_status;
-
-	/** @see odp_packet_l2_type() */
-	odp_proto_l2_type_t l2_type;
-	/** @see odp_packet_l3_type() */
-	odp_proto_l3_type_t l3_type;
-	/** @see odp_packet_l4_type() */
-	odp_proto_l4_type_t l4_type;
-
-} odp_packet_parse_result_t;
 
 /**
  * Read parse results
@@ -2101,42 +1904,6 @@ void odp_packet_shaper_len_adjust_set(odp_packet_t pkt, int8_t adj);
 uint64_t odp_packet_cls_mark(odp_packet_t pkt);
 
 /**
- * LSO options
- */
-typedef struct odp_packet_lso_opt_t {
-	/** LSO profile handle
-	 *
-	 * The selected LSO profile specifies details of the segmentation operation to be done.
-	 * Depending on LSO profile options, additional metadata (e.g. L3/L4 protocol header
-	 * offsets) may need to be set on the packet. See LSO documentation
-	 * (e.g. odp_pktout_send_lso() and odp_lso_protocol_t) for additional metadata
-	 * requirements.
-	 */
-	odp_lso_profile_t lso_profile;
-
-	/** LSO payload offset
-	 *
-	 *  LSO operation considers packet data before 'payload_offset' as
-	 *  protocol headers and copies those in front of every created segment. It will modify
-	 *  protocol headers according to the LSO profile before segment transmission.
-	 *
-	 *  When stored into a packet, this offset can be read with odp_packet_payload_offset() and
-	 *  modified with odp_packet_payload_offset_set().
-	 */
-	uint32_t payload_offset;
-
-	/** Maximum payload length in an LSO segment
-	 *
-	 *  Max_payload_len parameter defines the maximum number of payload bytes in each
-	 *  created segment. Depending on the implementation, segments with less payload may be
-	 *  created. However, this value is used typically to divide packet payload evenly over
-	 *  all segments except the last one, which contains the remaining payload bytes.
-	 */
-	uint32_t max_payload_len;
-
-} odp_packet_lso_opt_t;
-
-/**
  * Request Large Send Offload (LSO) for a packet
  *
  * Setup packet metadata which requests LSO segmentation to be performed during packet output.
@@ -2234,32 +2001,6 @@ void odp_packet_aging_tmo_set(odp_packet_t pkt, uint64_t tmo_ns);
  */
 uint64_t odp_packet_aging_tmo(odp_packet_t pkt);
 
-/** Packet Tx completion mode */
-typedef enum odp_packet_tx_compl_mode_t {
-	/** Packet Tx completion event is disabled
-	 *
-	 * When mode is disabled, all other fields of odp_packet_tx_compl_opt_t are ignored.
-	 */
-	ODP_PACKET_TX_COMPL_DISABLED,
-	/** Packet Tx completion event is sent for all packets (both transmitted and dropped) */
-	ODP_PACKET_TX_COMPL_ALL,
-} odp_packet_tx_compl_mode_t;
-
-/**
- * Tx completion request options
- */
-typedef struct odp_packet_tx_compl_opt_t {
-	/** Queue handle
-	 *
-	 * Tx completion event will be posted to ODP queue identified by this handle.
-	 */
-	odp_queue_t queue;
-
-	/** Packet Tx completion event mode */
-	odp_packet_tx_compl_mode_t mode;
-
-} odp_packet_tx_compl_opt_t;
-
 /**
  * Request Tx completion event.
  *
@@ -2289,6 +2030,44 @@ int odp_packet_tx_compl_request(odp_packet_t pkt, const odp_packet_tx_compl_opt_
  * @retval 0         TX completion event is not requested
  */
 int odp_packet_has_tx_compl_request(odp_packet_t pkt);
+
+/**
+ * Request packet proto stats.
+ *
+ * The statistics enabled in the proto stats object are updated for the packet in
+ * packet output when the packet is transmitted or dropped. The statistics update
+ * is done as the last step of output processing after possible packet
+ * transformations (e.g. fragmentation, IPsec) that may occur. If a packet is
+ * fragmented or segmented to multiple packets as part of output processing, all
+ * the resulting packets inherit the proto stats object association from the
+ * original packet.
+ *
+ * The relevant octet counts will be updated with the actual packet length at
+ * the time of transmission or drop plus the respective adjustment value passed
+ * in the 'opt' parameter. The octet counts thus include possible additional
+ * headers added by ODP during packet output (e.g. ESP header added by inline
+ * outbound IPsec processing). Ethernet padding and FCS are not included in the
+ * octet counts. The adjustment value is added only if the respective capability
+ * field is true and otherwise ignored.
+ *
+ * @param pkt   Packet handle
+ * @param opt   Proto stats options. If NULL, then proto stats update is
+ *              disabled for this packet.
+ *
+ * @see odp_proto_stats_capability_t::tx
+ */
+void odp_packet_proto_stats_request(odp_packet_t pkt, odp_packet_proto_stats_opt_t *opt);
+
+/**
+ * Get proto stats object.
+ *
+ * Get the proto stats object associated with the given packet.
+ *
+ * @param pkt Packet handle
+ *
+ * @return Proto stats object handle or ODP_PROTO_STATS_INVALID if not set.
+ */
+odp_proto_stats_t odp_packet_proto_stats(odp_packet_t pkt);
 
 /*
  *

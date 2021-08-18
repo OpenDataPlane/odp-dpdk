@@ -49,6 +49,7 @@ extern "C" {
 #include <odp/api/packet.h>
 #include <odp/api/packet_flags.h>
 #include <odp/api/packet_io.h>
+#include <odp/api/proto_stats.h>
 #include <odp/api/crypto.h>
 #include <odp/api/classification.h>
 #include <odp/api/rwlock.h>
@@ -59,7 +60,7 @@ extern "C" {
 #include <odp/api/traffic_mngr.h>
 #include <odp/api/spinlock_recursive.h>
 #include <odp/api/rwlock_recursive.h>
-#include <odp/api/std_clib.h>
+#include <odp/api/std.h>
 #include <odp/api/support.h>
 #include <odp/api/ipsec.h>
 #include <odp/api/stash.h>

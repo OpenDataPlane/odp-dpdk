@@ -2024,14 +2024,18 @@ static int tm_enqueue(tm_system_t *tm_system,
 		drop = random_early_discard(tm_system, tm_queue_obj,
 					    initial_tm_wred_node, pkt_color);
 		if (drop)
-			return -1;
+			return -2;
 	}
 
 	work_item.queue_num = tm_queue_obj->queue_num;
 	work_item.pkt = pkt;
-	_odp_sched_fn->order_lock();
+	if (tm_queue_obj->ordered_enqueue)
+		_odp_sched_fn->order_lock();
+
 	rc = input_work_queue_append(tm_system, &work_item);
-	_odp_sched_fn->order_unlock();
+
+	if (tm_queue_obj->ordered_enqueue)
+		_odp_sched_fn->order_unlock();
 
 	if (rc < 0) {
 		ODP_DBG("%s work queue full\n", __func__);
@@ -2230,6 +2234,7 @@ static void tm_send_pkt(tm_system_t *tm_system, uint32_t max_sends)
 	odp_packet_t odp_pkt;
 	pkt_desc_t *pkt_desc;
 	uint32_t cnt;
+	int ret;
 
 	for (cnt = 1; cnt <= max_sends; cnt++) {
 		pkt_desc = &tm_system->egress_pkt_desc;
@@ -2248,8 +2253,16 @@ static void tm_send_pkt(tm_system_t *tm_system, uint32_t max_sends)
 
 		tm_system->egress_pkt_desc = EMPTY_PKT_DESC;
 		if (tm_system->egress.egress_kind == ODP_TM_EGRESS_PKT_IO) {
-			if (odp_pktout_send(tm_system->pktout, &odp_pkt, 1) != 1)
+			ret = odp_pktout_send(tm_system->pktout, &odp_pkt, 1);
+			if (odp_unlikely(ret != 1)) {
 				odp_packet_free(odp_pkt);
+				if (odp_unlikely(ret < 0))
+					odp_atomic_inc_u64(&tm_queue_obj->stats.errors);
+				else
+					odp_atomic_inc_u64(&tm_queue_obj->stats.discards);
+			} else {
+				odp_atomic_inc_u64(&tm_queue_obj->stats.packets);
+			}
 		} else if (tm_system->egress.egress_kind == ODP_TM_EGRESS_FN) {
 			tm_system->egress.egress_fcn(odp_pkt);
 		} else {
@@ -2535,6 +2548,8 @@ odp_bool_t odp_tm_is_idle(odp_tm_t odp_tm)
 void odp_tm_requirements_init(odp_tm_requirements_t *requirements)
 {
 	memset(requirements, 0, sizeof(odp_tm_requirements_t));
+
+	requirements->pkt_prio_mode = ODP_TM_PKT_PRIO_MODE_PRESERVE;
 }
 
 void odp_tm_egress_init(odp_tm_egress_t *egress)
@@ -2542,8 +2557,8 @@ void odp_tm_egress_init(odp_tm_egress_t *egress)
 	memset(egress, 0, sizeof(odp_tm_egress_t));
 }
 
-int odp_tm_capabilities(odp_tm_capabilities_t capabilities[] ODP_UNUSED,
-			uint32_t              capabilities_size)
+static int tm_capabilities(odp_tm_capabilities_t capabilities[],
+			   uint32_t              capabilities_size)
 {
 	odp_tm_level_capabilities_t *per_level_cap;
 	odp_tm_capabilities_t       *cap_ptr;
@@ -2565,12 +2580,20 @@ int odp_tm_capabilities(odp_tm_capabilities_t capabilities[] ODP_UNUSED,
 	cap_ptr->vlan_marking_supported        = true;
 	cap_ptr->ecn_marking_supported         = true;
 	cap_ptr->drop_prec_marking_supported   = true;
+	cap_ptr->tm_queue_threshold            = true;
+	cap_ptr->tm_queue_query_flags          = (ODP_TM_QUERY_PKT_CNT |
+						  ODP_TM_QUERY_BYTE_CNT |
+						  ODP_TM_QUERY_THRESHOLDS);
+	cap_ptr->max_schedulers_per_node       = ODP_TM_MAX_PRIORITIES;
 
 	cap_ptr->dynamic_topology_update  = true;
 	cap_ptr->dynamic_shaper_update    = true;
 	cap_ptr->dynamic_sched_update     = true;
 	cap_ptr->dynamic_wred_update      = true;
 	cap_ptr->dynamic_threshold_update = true;
+
+	/* We only support pkt priority mode preserve */
+	cap_ptr->pkt_prio_modes[ODP_TM_PKT_PRIO_MODE_PRESERVE] = true;
 
 	for (color = 0; color < ODP_NUM_PACKET_COLORS; color++)
 		cap_ptr->marking_colors_supported[color] = true;
@@ -2589,9 +2612,46 @@ int odp_tm_capabilities(odp_tm_capabilities_t capabilities[] ODP_UNUSED,
 		per_level_cap->tm_node_dual_slope_supported = true;
 		per_level_cap->fair_queuing_supported       = true;
 		per_level_cap->weights_supported            = true;
+		per_level_cap->tm_node_threshold            = true;
 	}
 
+	cap_ptr->queue_stats.counter.discards = 1;
+	cap_ptr->queue_stats.counter.errors = 1;
+	cap_ptr->queue_stats.counter.packets = 1;
+
 	return 1;
+}
+
+int ODP_DEPRECATE(odp_tm_capabilities)(odp_tm_capabilities_t capabilities[],
+				       uint32_t              capabilities_size)
+{
+	return tm_capabilities(capabilities, capabilities_size);
+}
+
+int odp_tm_egress_capabilities(odp_tm_capabilities_t *capabilities,
+			       const odp_tm_egress_t *egress)
+{
+	pktio_entry_t *entry;
+	int ret;
+
+	memset(capabilities, 0, sizeof(odp_tm_capabilities_t));
+	if (egress->egress_kind == ODP_TM_EGRESS_PKT_IO) {
+		entry = get_pktio_entry(egress->pktio);
+		if (entry == NULL) {
+			ODP_DBG("pktio entry %" PRIuPTR " does not exist\n",
+				(uintptr_t)egress->pktio);
+			return -1;
+		}
+
+		/* Report not capable if pktout mode is not TM */
+		if (entry->s.param.out_mode != ODP_PKTOUT_MODE_TM)
+			return 0;
+	}
+
+	ret = tm_capabilities(capabilities, 1);
+	if (ret <= 0)
+		return -1;
+	return 0;
 }
 
 static void tm_system_capabilities_set(odp_tm_capabilities_t *cap_ptr,
@@ -2601,10 +2661,11 @@ static void tm_system_capabilities_set(odp_tm_capabilities_t *cap_ptr,
 	odp_tm_level_capabilities_t *per_level_cap;
 	odp_packet_color_t           color;
 	odp_bool_t                   shaper_supported, wred_supported;
-	odp_bool_t                   dual_slope;
+	odp_bool_t                   dual_slope, threshold;
 	uint32_t                     num_levels, level_idx, max_nodes;
 	uint32_t                     max_queues, max_fanin;
-	uint8_t                      max_priority, min_weight, max_weight;
+	uint32_t                     min_weight, max_weight;
+	uint8_t                      max_priority;
 
 	num_levels = MAX(MIN(req_ptr->num_levels, ODP_TM_MAX_LEVELS), 1);
 	memset(cap_ptr, 0, sizeof(odp_tm_capabilities_t));
@@ -2614,6 +2675,7 @@ static void tm_system_capabilities_set(odp_tm_capabilities_t *cap_ptr,
 	shaper_supported = req_ptr->tm_queue_shaper_needed;
 	wred_supported   = req_ptr->tm_queue_wred_needed;
 	dual_slope       = req_ptr->tm_queue_dual_slope_needed;
+	threshold        = req_ptr->tm_queue_threshold_needed;
 
 	cap_ptr->max_tm_queues                 = max_queues;
 	cap_ptr->max_levels                    = num_levels;
@@ -2624,12 +2686,19 @@ static void tm_system_capabilities_set(odp_tm_capabilities_t *cap_ptr,
 	cap_ptr->ecn_marking_supported         = req_ptr->ecn_marking_needed;
 	cap_ptr->drop_prec_marking_supported   =
 					req_ptr->drop_prec_marking_needed;
+	cap_ptr->tm_queue_threshold            = threshold;
+	cap_ptr->tm_queue_query_flags          = (ODP_TM_QUERY_PKT_CNT |
+						  ODP_TM_QUERY_BYTE_CNT |
+						  ODP_TM_QUERY_THRESHOLDS);
+	cap_ptr->max_schedulers_per_node       = ODP_TM_MAX_PRIORITIES;
 
 	cap_ptr->dynamic_topology_update  = true;
 	cap_ptr->dynamic_shaper_update    = true;
 	cap_ptr->dynamic_sched_update     = true;
 	cap_ptr->dynamic_wred_update      = true;
 	cap_ptr->dynamic_threshold_update = true;
+
+	cap_ptr->pkt_prio_modes[ODP_TM_PKT_PRIO_MODE_PRESERVE] = true;
 
 	for (color = 0; color < ODP_NUM_PACKET_COLORS; color++)
 		cap_ptr->marking_colors_supported[color] =
@@ -2652,6 +2721,7 @@ static void tm_system_capabilities_set(odp_tm_capabilities_t *cap_ptr,
 		shaper_supported = per_level_req->tm_node_shaper_needed;
 		wred_supported   = per_level_req->tm_node_wred_needed;
 		dual_slope       = per_level_req->tm_node_dual_slope_needed;
+		threshold        = per_level_req->tm_node_threshold_needed;
 
 		per_level_cap->max_num_tm_nodes   = max_nodes;
 		per_level_cap->max_fanin_per_node = max_fanin;
@@ -2664,7 +2734,12 @@ static void tm_system_capabilities_set(odp_tm_capabilities_t *cap_ptr,
 		per_level_cap->tm_node_dual_slope_supported = dual_slope;
 		per_level_cap->fair_queuing_supported       = true;
 		per_level_cap->weights_supported            = true;
+		per_level_cap->tm_node_threshold            = threshold;
 	}
+
+	cap_ptr->queue_stats.counter.discards = 1;
+	cap_ptr->queue_stats.counter.errors = 1;
+	cap_ptr->queue_stats.counter.packets = 1;
 }
 
 static int affinitize_main_thread(void)
@@ -2932,6 +3007,11 @@ odp_tm_t odp_tm_create(const char            *name,
 		return ODP_TM_INVALID;
 	}
 
+	/* We only support global pkt priority mode */
+	if (requirements->pkt_prio_mode != ODP_TM_PKT_PRIO_MODE_PRESERVE) {
+		ODP_ERR("Unsupported Packet priority mode\n");
+		return ODP_TM_INVALID;
+	}
 	odp_ticketlock_lock(&tm_glb->create_lock);
 
 	/* If we are using pktio output (usual case) get the first associated
@@ -3960,6 +4040,8 @@ int odp_tm_node_context_set(odp_tm_node_t tm_node, void *user_context)
 void odp_tm_queue_params_init(odp_tm_queue_params_t *params)
 {
 	memset(params, 0, sizeof(odp_tm_queue_params_t));
+
+	params->ordered_enqueue = true;
 }
 
 odp_tm_queue_t odp_tm_queue_create(odp_tm_t odp_tm,
@@ -3996,11 +4078,15 @@ odp_tm_queue_t odp_tm_queue_create(odp_tm_t odp_tm,
 		memset(queue_obj, 0, sizeof(tm_queue_obj_t));
 		queue_obj->user_context = params->user_context;
 		queue_obj->priority = params->priority;
+		queue_obj->ordered_enqueue = params->ordered_enqueue;
 		queue_obj->tm_idx = tm_system->tm_idx;
 		queue_obj->queue_num = (uint32_t)_odp_int_pkt_queue;
 		queue_obj->_odp_int_pkt_queue = _odp_int_pkt_queue;
 		queue_obj->pkt = ODP_PACKET_INVALID;
 		odp_ticketlock_init(&queue_obj->tm_wred_node.tm_wred_node_lock);
+		odp_atomic_init_u64(&queue_obj->stats.discards, 0);
+		odp_atomic_init_u64(&queue_obj->stats.errors, 0);
+		odp_atomic_init_u64(&queue_obj->stats.packets, 0);
 
 		queue = odp_queue_create(NULL, NULL);
 		if (queue == ODP_QUEUE_INVALID) {
@@ -4438,6 +4524,40 @@ int odp_tm_enq_with_cnt(odp_tm_queue_t tm_queue, odp_packet_t pkt)
 	return pkt_cnt;
 }
 
+int odp_tm_enq_multi(odp_tm_queue_t tm_queue, const odp_packet_t packets[],
+		     int num)
+{
+	tm_queue_obj_t *tm_queue_obj;
+	tm_system_t *tm_system;
+	int i, rc;
+
+	tm_queue_obj = GET_TM_QUEUE_OBJ(tm_queue);
+	if (!tm_queue_obj)
+		return -1;
+
+	tm_system = &tm_glb->system[tm_queue_obj->tm_idx];
+	if (!tm_system)
+		return -1;
+
+	if (odp_atomic_load_u64(&tm_system->destroying))
+		return -1;
+
+	for (i = 0; i < num; i++) {
+		rc = tm_enqueue(tm_system, tm_queue_obj, packets[i]);
+		if (rc < 0 && rc != -2)
+			break;
+		/* For RED failure, just drop current pkt but
+		 * continue with next pkts.
+		 */
+		if (rc == -2) {
+			odp_packet_free(packets[i]);
+			odp_atomic_inc_u64(&tm_queue_obj->stats.discards);
+		}
+	}
+
+	return i;
+}
+
 int odp_tm_node_info(odp_tm_node_t tm_node, odp_tm_node_info_t *info)
 {
 	tm_queue_thresholds_t *threshold_params;
@@ -4752,6 +4872,23 @@ void odp_tm_stats_print(odp_tm_t odp_tm)
 				  tm_queue_obj->pkts_dequeued_cnt,
 				  tm_queue_obj->pkts_consumed_cnt);
 	}
+}
+
+int odp_tm_queue_stats(odp_tm_queue_t tm_queue, odp_tm_queue_stats_t *stats)
+{
+	tm_queue_obj_t *tm_queue_obj = GET_TM_QUEUE_OBJ(tm_queue);
+
+	if (!tm_queue_obj) {
+		ODP_ERR("Invalid TM queue handle\n");
+		return -1;
+	}
+
+	memset(stats, 0, sizeof(odp_tm_queue_stats_t));
+	stats->discards = odp_atomic_load_u64(&tm_queue_obj->stats.discards);
+	stats->errors = odp_atomic_load_u64(&tm_queue_obj->stats.errors);
+	stats->packets = odp_atomic_load_u64(&tm_queue_obj->stats.packets);
+
+	return 0;
 }
 
 uint64_t odp_tm_to_u64(odp_tm_t hdl)

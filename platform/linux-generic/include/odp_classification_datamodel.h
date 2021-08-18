@@ -145,6 +145,10 @@ struct cos_s {
 	odp_queue_param_t queue_param;
 	char name[ODP_COS_NAME_LEN];	/* name */
 	uint8_t index;
+	struct {
+		odp_atomic_u64_t discards;
+		odp_atomic_u64_t packets;
+	} stats[CLS_COS_QUEUE_MAX];
 };
 
 typedef union cos_u {
@@ -229,6 +233,17 @@ PMR table
 typedef struct pmr_tbl {
 	pmr_t pmr[CLS_PMR_MAX_ENTRY];
 } pmr_tbl_t;
+
+/**
+Classifier global data
+**/
+typedef struct cls_global_t {
+	cos_tbl_t cos_tbl;
+	pmr_tbl_t pmr_tbl;
+	_cls_queue_grp_tbl_t queue_grp_tbl;
+	odp_shm_t shm;
+
+} cls_global_t;
 
 #ifdef __cplusplus
 }

@@ -68,6 +68,7 @@ static struct auth_param auths[] = {
 	ALG(ODP_AUTH_ALG_SHA256_HMAC, &key_5a_256, NULL),
 	ALG(ODP_AUTH_ALG_SHA384_HMAC, &key_5a_384, NULL),
 	ALG(ODP_AUTH_ALG_SHA512_HMAC, &key_5a_512, NULL),
+	ALG(ODP_AUTH_ALG_AES_CMAC, &key_5a_128, NULL),
 	ALG(ODP_AUTH_ALG_AES_XCBC_MAC, &key_5a_128, NULL)
 };
 
@@ -1583,6 +1584,7 @@ static void ipsec_test_default_values(void)
 	CU_ASSERT(sa_param.proto == ODP_IPSEC_ESP);
 	CU_ASSERT(sa_param.crypto.cipher_alg == ODP_CIPHER_ALG_NULL);
 	CU_ASSERT(sa_param.crypto.auth_alg == ODP_AUTH_ALG_NULL);
+	CU_ASSERT(sa_param.crypto.icv_len == 0);
 	CU_ASSERT(sa_param.opt.esn == 0);
 	CU_ASSERT(sa_param.opt.udp_encap == 0);
 	CU_ASSERT(sa_param.opt.copy_dscp == 0);

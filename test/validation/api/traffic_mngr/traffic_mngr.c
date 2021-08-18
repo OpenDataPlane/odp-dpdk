@@ -20,7 +20,6 @@
 
 #define TM_DEBUG                 0
 
-#define MAX_CAPABILITIES         16
 #define MAX_NUM_IFACES           2
 #define MAX_TM_SYSTEMS           3
 #define NUM_LEVELS               3
@@ -386,35 +385,30 @@ static odp_bool_t approx_eq64(uint64_t val, uint64_t correct)
 static int test_overall_capabilities(void)
 {
 	odp_tm_level_capabilities_t *per_level;
-	odp_tm_capabilities_t        capabilities_array[MAX_CAPABILITIES];
+	odp_tm_capabilities_t        capabilities_array[2];
 	odp_tm_capabilities_t       *cap_ptr;
+	odp_tm_egress_t              egress;
+	odp_bool_t                  *prio_modes;
 	uint32_t                     num_records, idx, num_levels, level;
 	int                          rc;
 
-	rc = odp_tm_capabilities(capabilities_array, MAX_CAPABILITIES);
-	if (rc < 0) {
-		CU_ASSERT(rc < 0);
-		return -1;
-	}
+	odp_tm_egress_init(&egress);
+	egress.egress_kind = ODP_TM_EGRESS_PKT_IO;
+	egress.pktio = xmt_pktio;
 
-	/* Now test the return code (which did not indicate a failure code)
-	 * to make sure that there is at least ONE capabilities record
-	 * returned */
-	if (rc == 0) {
-		CU_ASSERT(rc != 0);
-		return -1;
-	}
+	rc = odp_tm_egress_capabilities(&capabilities_array[0], &egress);
+	CU_ASSERT_FATAL(rc == 0);
+	num_records = 1;
 
-	/* Now test the return code to see if there were more capabilities
-	 * records than the call above allowed for.  This is not an error,
-	 * just an interesting fact.
-	 */
-	num_records = MAX_CAPABILITIES;
-	if (MAX_CAPABILITIES < rc)
-		ODPH_DBG("There were more than %u capabilities (%u)\n",
-			 MAX_CAPABILITIES, rc);
-	else
-		num_records = rc;
+	/* Get capabilities for egress kind function. */
+	odp_tm_egress_init(&egress);
+	egress.egress_kind = ODP_TM_EGRESS_FN;
+	rc = odp_tm_egress_capabilities(&capabilities_array[1], &egress);
+	CU_ASSERT_FATAL(rc == 0);
+
+	/* Validate this record only if egress function is supported */
+	if (capabilities_array[1].max_tm_queues)
+		num_records++;
 
 	/* Loop through the returned capabilities (there MUST be at least one)
 	 * and do some basic checks to prove that it isn't just an empty
@@ -450,6 +444,11 @@ static int test_overall_capabilities(void)
 				return -1;
 			}
 		}
+
+		/* At least one pkt priority mode needs to be supported */
+		prio_modes = cap_ptr->pkt_prio_modes;
+		CU_ASSERT((prio_modes[ODP_TM_PKT_PRIO_MODE_PRESERVE] != 0) ||
+			  (prio_modes[ODP_TM_PKT_PRIO_MODE_OVERWRITE] != 0))
 	}
 
 	return 0;
@@ -1098,6 +1097,44 @@ static int make_pkts(uint32_t    num_pkts,
 	return 0;
 }
 
+static uint32_t send_pkts_multi(odp_tm_queue_t tm_queue, uint32_t num_pkts)
+{
+	xmt_pkt_desc_t *xmt_pkt_desc;
+	odp_packet_t    odp_pkt;
+	uint32_t        xmt_pkt_idx, pkts_sent;
+	int64_t         rc, i = 0;
+
+	/* Now send the pkts as fast as we can. RED drops are internally
+	 * consumed by odp_tm_enq_multi().
+	 */
+	xmt_pkt_idx = num_pkts_sent;
+	rc = odp_tm_enq_multi(tm_queue, &xmt_pkts[xmt_pkt_idx], num_pkts);
+	CU_ASSERT(rc <= num_pkts);
+
+	/* Record consumed packets */
+	pkts_sent = 0;
+	for (i = 0; i < rc; i++) {
+		xmt_pkt_desc = &xmt_pkt_descs[xmt_pkt_idx + i];
+		xmt_pkt_desc->xmt_idx = xmt_pkt_idx + i;
+		xmt_pkt_desc->xmt_time = odp_time_local();
+		xmt_pkt_desc->tm_queue = tm_queue;
+		pkts_sent++;
+	}
+
+	/* Free rejected pkts */
+	for (; i < num_pkts; i++) {
+		xmt_pkt_desc = &xmt_pkt_descs[xmt_pkt_idx + i];
+		xmt_pkt_desc->xmt_idx = xmt_pkt_idx + i;
+
+		odp_pkt = xmt_pkts[xmt_pkt_idx + i];
+		odp_packet_free(odp_pkt);
+		xmt_pkts[xmt_pkt_idx + i] = ODP_PACKET_INVALID;
+	}
+	num_pkts_sent += num_pkts;
+
+	return pkts_sent;
+}
+
 static uint32_t send_pkts(odp_tm_queue_t tm_queue, uint32_t num_pkts)
 {
 	xmt_pkt_desc_t *xmt_pkt_desc;
@@ -1341,6 +1378,7 @@ static int create_tm_queue(odp_tm_t         odp_tm,
 		queue_params.wred_profile[PKT_GREEN]  = green_profile;
 		queue_params.wred_profile[PKT_YELLOW] = yellow_profile;
 		queue_params.wred_profile[PKT_RED]    = red_profile;
+		queue_params.ordered_enqueue          = true;
 	}
 
 	tm_queue = odp_tm_queue_create(odp_tm, &queue_params);
@@ -1404,6 +1442,9 @@ static tm_node_desc_t *create_tm_node(odp_tm_t        odp_tm,
 
 	node_params.max_fanin = FANIN_RATIO;
 	node_params.level = level;
+	/* This is ignored when pkt priority mode is not overwrite */
+	node_params.priority = 0;
+
 	if (parent_node_desc == NULL)
 		snprintf(node_name, sizeof(node_name), "node_%" PRIu32,
 			 node_idx + 1);
@@ -1610,12 +1651,60 @@ static uint32_t find_child_queues(uint8_t         tm_system_idx,
 	return num_queues;
 }
 
+static void
+set_reqs_based_on_capas(odp_tm_requirements_t *req)
+{
+	odp_packet_color_t color;
+	int j;
+
+	/* Use tm capabilities identified based on egress capabilities
+	 * to see what can be enabled.
+	 */
+	if (tm_capabilities.ecn_marking_supported)
+		req->ecn_marking_needed = true;
+	if (tm_capabilities.drop_prec_marking_supported)
+		req->drop_prec_marking_needed = true;
+	if (tm_capabilities.tm_queue_wred_supported)
+		req->tm_queue_wred_needed = true;
+	if (tm_capabilities.tm_queue_dual_slope_supported)
+		req->tm_queue_dual_slope_needed = true;
+	if (tm_capabilities.vlan_marking_supported)
+		req->vlan_marking_needed = true;
+	if (tm_capabilities.tm_queue_threshold)
+		req->tm_queue_threshold_needed = true;
+
+	for (j = 0; j < tm_capabilities.max_levels; j++) {
+		if (tm_capabilities.per_level[j].tm_node_threshold)
+			req->per_level[j].tm_node_threshold_needed = true;
+	}
+
+	/* Mark colors as needed if at least one of the marking
+	 * feature is needed.
+	 * */
+	if (req->ecn_marking_needed || req->drop_prec_marking_needed) {
+		for (color = 0; color < ODP_NUM_PACKET_COLORS; color++)
+			req->marking_colors_needed[color] = true;
+	}
+
+	if (tm_capabilities.tm_queue_shaper_supported)
+		req->tm_queue_shaper_needed = true;
+
+	/* We can use any packet priority mode since it does not affect
+	 * our tests. Our scheduler test tests scheduling only in a node
+	 * directly connected to TM queues and such nodes see the original
+	 * packet priority before it could have been overwritten by any node.
+	 */
+	req->pkt_prio_mode = ODP_TM_PKT_PRIO_MODE_PRESERVE;
+	if (!tm_capabilities.pkt_prio_modes[ODP_TM_PKT_PRIO_MODE_PRESERVE])
+		req->pkt_prio_mode = ODP_TM_PKT_PRIO_MODE_OVERWRITE;
+
+}
+
 static int create_tm_system(void)
 {
 	odp_tm_level_requirements_t *per_level;
 	odp_tm_requirements_t        requirements;
 	odp_tm_egress_t              egress;
-	odp_packet_color_t           color;
 	tm_node_desc_t              *root_node_desc;
 	uint32_t                     level, max_nodes[ODP_TM_MAX_LEVELS];
 	odp_tm_t                     odp_tm, found_odp_tm;
@@ -1625,16 +1714,10 @@ static int create_tm_system(void)
 	odp_tm_requirements_init(&requirements);
 	odp_tm_egress_init(&egress);
 
-	requirements.max_tm_queues              = NUM_TM_QUEUES + 1;
+	requirements.max_tm_queues              = NUM_TM_QUEUES;
 	requirements.num_levels                 = NUM_LEVELS;
-	requirements.tm_queue_shaper_needed     = true;
-	requirements.tm_queue_wred_needed       = true;
-	requirements.tm_queue_dual_slope_needed = true;
-	requirements.vlan_marking_needed        = false;
-	requirements.ecn_marking_needed         = true;
-	requirements.drop_prec_marking_needed   = true;
-	for (color = 0; color < ODP_NUM_PACKET_COLORS; color++)
-		requirements.marking_colors_needed[color] = true;
+
+	set_reqs_based_on_capas(&requirements);
 
 	/* Set the max_num_tm_nodes to be double the expected number of nodes
 	 * at that level */
@@ -1662,10 +1745,8 @@ static int create_tm_system(void)
 	snprintf(tm_name, sizeof(tm_name), "TM_system_%" PRIu32,
 		 num_odp_tm_systems);
 	odp_tm = odp_tm_create(tm_name, &requirements, &egress);
-	if (odp_tm == ODP_TM_INVALID) {
-		ODPH_ERR("odp_tm_create() failed\n");
-		return -1;
-	}
+	CU_ASSERT_FATAL(odp_tm != ODP_TM_INVALID);
+
 
 	odp_tm_systems[num_odp_tm_systems] = odp_tm;
 
@@ -2105,9 +2186,10 @@ static int destroy_tm_systems(void)
 
 static int traffic_mngr_suite_init(void)
 {
-	odp_tm_capabilities_t capabilities_array[MAX_CAPABILITIES];
+	odp_tm_capabilities_t egress_capa;
 	uint32_t payload_len, copy_len;
-	int ret, i;
+	odp_tm_egress_t egress;
+	int j, ret;
 
 	/* Initialize some global variables. */
 	num_pkts_made   = 0;
@@ -2156,26 +2238,57 @@ static int traffic_mngr_suite_init(void)
 	if (ret > 0)
 		goto skip_tests;
 
-	/* Fetch initial dynamic update capabilities, it will be updated
-	 * later after TM system is created.
-	 */
-	ret = odp_tm_capabilities(capabilities_array, MAX_CAPABILITIES);
-	if (ret <= 0)
-		return -1;
+	odp_tm_egress_init(&egress);
+	egress.egress_kind = ODP_TM_EGRESS_PKT_IO;
+	egress.pktio = xmt_pktio;
 
-	for (i = 0; i < ret; i++) {
-		if (!capabilities_array[i].dynamic_shaper_update)
-			dynamic_shaper_update = false;
-
-		if (!capabilities_array[i].dynamic_sched_update)
-			dynamic_sched_update = false;
-
-		if (!capabilities_array[i].dynamic_threshold_update)
-			dynamic_threshold_update = false;
-
-		if (!capabilities_array[i].dynamic_wred_update)
-			dynamic_wred_update = false;
+	/* Get TM capabilities */
+	ret = odp_tm_egress_capabilities(&egress_capa, &egress);
+	if (ret) {
+		ODPH_ERR("Failed to retrieve tm capabilities");
+		return ret;
 	}
+
+	/* Check for sufficient TM queues */
+	if (egress_capa.max_tm_queues < NUM_TM_QUEUES)
+		goto skip_tests;
+
+	/* Check for sufficient TM levels */
+	if (egress_capa.max_levels < NUM_LEVELS)
+		goto skip_tests;
+
+	for (j = 0; j < NUM_LEVELS; j++) {
+		/* Per node fanin */
+		if (egress_capa.per_level[j].max_fanin_per_node <
+		    FANIN_RATIO)
+			break;
+	}
+
+	if (j != NUM_LEVELS)
+		goto skip_tests;
+
+	if (egress_capa.pkt_prio_modes[ODP_TM_PKT_PRIO_MODE_PRESERVE] &&
+	    egress_capa.max_schedulers_per_node < NUM_QUEUES_PER_NODE)
+		goto skip_tests;
+
+	if (!egress_capa.pkt_prio_modes[ODP_TM_PKT_PRIO_MODE_PRESERVE] &&
+	    egress_capa.max_schedulers_per_node < 1)
+		goto skip_tests;
+
+	/* Init tm capabilities with matching egress capa until tm is created */
+	tm_capabilities = egress_capa;
+
+	if (!tm_capabilities.dynamic_shaper_update)
+		dynamic_shaper_update = false;
+
+	if (!tm_capabilities.dynamic_sched_update)
+		dynamic_sched_update = false;
+
+	if (!tm_capabilities.dynamic_threshold_update)
+		dynamic_threshold_update = false;
+
+	if (!tm_capabilities.dynamic_wred_update)
+		dynamic_wred_update = false;
 
 	return 0;
 skip_tests:
@@ -2820,13 +2933,13 @@ static int test_sched_queue_priority(const char *shaper_name,
 
 	/* Send the low priority dummy pkts first.  The arrival order of
 	 * these pkts will be ignored. */
-	pkts_sent = send_pkts(tm_queues[NUM_PRIORITIES - 1], 4);
+	pkts_sent = send_pkts_multi(tm_queues[NUM_PRIORITIES - 1], 4);
 
 	/* Now send "num_pkts" first at the lowest priority, then "num_pkts"
 	 * at the second lowest priority, etc until "num_pkts" are sent last
 	 * at the highest priority. */
 	for (priority = NUM_PRIORITIES - 1; 0 <= priority; priority--)
-		pkts_sent += send_pkts(tm_queues[priority], num_pkts);
+		pkts_sent += send_pkts_multi(tm_queues[priority], num_pkts);
 
 	busy_wait(100 * ODP_TIME_MSEC_IN_NS);
 
@@ -4108,6 +4221,17 @@ static void traffic_mngr_test_scheduler(void)
 				 INCREASING_WEIGHTS) == 0);
 }
 
+static int traffic_mngr_check_thresholds(void)
+{
+	/* Check only for tm queue threshold support as
+	 * we only test queue threshold.
+	 */
+	if (!tm_capabilities.tm_queue_threshold)
+		return ODP_TEST_INACTIVE;
+
+	return ODP_TEST_ACTIVE;
+}
+
 static void traffic_mngr_test_thresholds(void)
 {
 	CU_ASSERT(test_threshold("thresh_A", "shaper_A", "node_1_2_1", 0,
@@ -4116,14 +4240,86 @@ static void traffic_mngr_test_thresholds(void)
 				 0,  6400) == 0);
 }
 
+static int traffic_mngr_check_queue_stats(void)
+{
+	if (tm_capabilities.queue_stats.all_counters == 0)
+		return ODP_TEST_INACTIVE;
+
+	return ODP_TEST_ACTIVE;
+}
+
+static void traffic_mngr_test_queue_stats(void)
+{
+	odp_tm_queue_stats_t stats_start, stats_stop;
+	odp_tm_queue_t tm_queue;
+	odp_tm_capabilities_t capa;
+	pkt_info_t pkt_info;
+	uint32_t pkts_sent;
+	uint32_t num_pkts = MIN(50, MAX_PKTS);
+	uint32_t pkt_len = 256;
+
+	CU_ASSERT_FATAL(odp_tm_capability(odp_tm_systems[0], &capa) == 0);
+
+	/* Reuse threshold test node */
+	tm_queue = find_tm_queue(0, "node_1_2_1", 0);
+	CU_ASSERT_FATAL(tm_queue != ODP_TM_INVALID);
+
+	init_xmt_pkts(&pkt_info);
+	pkt_info.drop_eligible = false;
+	pkt_info.pkt_class     = 1;
+	CU_ASSERT_FATAL(make_pkts(num_pkts, pkt_len, &pkt_info) == 0);
+
+	CU_ASSERT(odp_tm_queue_stats(tm_queue, &stats_start) == 0);
+
+	pkts_sent = send_pkts(tm_queue, num_pkts);
+
+	num_rcv_pkts = receive_pkts(odp_tm_systems[0], rcv_pktin, pkts_sent,
+				    1 * GBPS);
+
+	CU_ASSERT(odp_tm_queue_stats(tm_queue, &stats_stop) == 0);
+
+	if (capa.queue_stats.counter.packets)
+		CU_ASSERT(stats_stop.packets >= stats_start.packets + num_rcv_pkts);
+	if (capa.queue_stats.counter.octets)
+		CU_ASSERT(stats_stop.octets >= stats_start.octets + (num_rcv_pkts * pkt_len));
+	CU_ASSERT((stats_stop.discards - stats_start.discards) == 0);
+	CU_ASSERT((stats_stop.discard_octets - stats_start.discard_octets) == 0);
+	CU_ASSERT((stats_stop.errors - stats_start.errors) == 0);
+
+	printf("\nTM queue statistics\n-------------------\n");
+	printf("  discards:        %" PRIu64 "\n", stats_stop.discards);
+	printf("  discard octets:  %" PRIu64 "\n", stats_stop.discard_octets);
+	printf("  errors:          %" PRIu64 "\n", stats_stop.errors);
+	printf("  octets:          %" PRIu64 "\n", stats_stop.octets);
+	printf("  packets:         %" PRIu64 "\n", stats_stop.packets);
+
+	/* Check that all unsupported counters are still zero */
+	if (!capa.queue_stats.counter.discards)
+		CU_ASSERT(stats_stop.discards == 0);
+	if (!capa.queue_stats.counter.discard_octets)
+		CU_ASSERT(stats_stop.discard_octets == 0);
+	if (!capa.queue_stats.counter.errors)
+		CU_ASSERT(stats_stop.errors == 0);
+	if (!capa.queue_stats.counter.octets)
+		CU_ASSERT(stats_stop.octets == 0);
+	if (!capa.queue_stats.counter.packets)
+		CU_ASSERT(stats_stop.packets == 0);
+
+	flush_leftover_pkts(odp_tm_systems[0], rcv_pktin);
+	CU_ASSERT(odp_tm_is_idle(odp_tm_systems[0]));
+}
+
+static int traffic_mngr_check_wred(void)
+{
+	/* Check if wred is part of created odp_tm_t capabilities */
+	if (!tm_capabilities.tm_queue_wred_supported)
+		return ODP_TEST_INACTIVE;
+
+	return ODP_TEST_ACTIVE;
+}
+
 static void traffic_mngr_test_byte_wred(void)
 {
-	if (!tm_capabilities.tm_queue_wred_supported) {
-		ODPH_DBG("\nwas not run because tm_capabilities indicates"
-			 " no WRED support\n");
-		return;
-	}
-
 	CU_ASSERT(test_byte_wred("byte_wred_30G", "byte_bw_30G",
 				 "byte_thresh_30G", "node_1_3_1", 1,
 				 ODP_PACKET_GREEN, TM_PERCENT(30), true) == 0);
@@ -4142,12 +4338,6 @@ static void traffic_mngr_test_byte_wred(void)
 static void traffic_mngr_test_pkt_wred(void)
 {
 	int rc;
-
-	if (!tm_capabilities.tm_queue_wred_supported) {
-		ODPH_DBG("\ntest_pkt_wred was not run because tm_capabilities "
-			 "indicates no WRED support\n");
-		return;
-	}
 
 	rc = test_pkt_wred("pkt_wred_40G", "pkt_bw_40G",
 			   "pkt_thresh_40G", "node_1_3_2", 1,
@@ -4180,59 +4370,75 @@ static void traffic_mngr_test_pkt_wred(void)
 		CU_FAIL("70Y test failed\n");
 }
 
+static int traffic_mngr_check_query(void)
+{
+	uint32_t query_flags = (ODP_TM_QUERY_PKT_CNT | ODP_TM_QUERY_BYTE_CNT);
+
+	/* We need both pkt count and byte count query support */
+	if ((tm_capabilities.tm_queue_query_flags & query_flags) != query_flags)
+		return ODP_TEST_INACTIVE;
+
+	return ODP_TEST_ACTIVE;
+}
+
 static void traffic_mngr_test_query(void)
 {
 	CU_ASSERT(test_query_functions("query_shaper", "node_1_3_3", 3, 10)
 		  == 0);
 }
 
-static void traffic_mngr_test_marking(void)
+static int traffic_mngr_check_vlan_marking(void)
+{
+	if (!tm_capabilities.vlan_marking_supported)
+		return ODP_TEST_INACTIVE;
+	return ODP_TEST_ACTIVE;
+}
+
+static int traffic_mngr_check_ecn_marking(void)
+{
+	if (!tm_capabilities.ecn_marking_supported)
+		return ODP_TEST_INACTIVE;
+	return ODP_TEST_ACTIVE;
+}
+
+static int traffic_mngr_check_drop_prec_marking(void)
+{
+	if (!tm_capabilities.drop_prec_marking_supported)
+		return ODP_TEST_INACTIVE;
+	return ODP_TEST_ACTIVE;
+}
+
+static int traffic_mngr_check_ecn_drop_prec_marking(void)
+{
+	if (!tm_capabilities.ecn_marking_supported ||
+	    !tm_capabilities.drop_prec_marking_supported)
+		return ODP_TEST_INACTIVE;
+	return ODP_TEST_ACTIVE;
+}
+
+static void traffic_mngr_test_vlan_marking(void)
 {
 	odp_packet_color_t color;
-	odp_bool_t         test_ecn, test_drop_prec;
-	int                rc;
 
-	if (tm_capabilities.vlan_marking_supported) {
-		for (color = 0; color < ODP_NUM_PKT_COLORS; color++) {
-			rc = test_vlan_marking("node_1_3_1", color);
-			CU_ASSERT(rc == 0);
-		}
-	} else {
-		ODPH_DBG("\ntest_vlan_marking was not run because "
-			 "tm_capabilities indicates no vlan marking support\n");
+	for (color = 0; color < ODP_NUM_PKT_COLORS; color++) {
+		/* Tree is 3 level */
+		CU_ASSERT(test_vlan_marking("node_1_3_1", color) == 0);
 	}
+}
 
-	if (tm_capabilities.ecn_marking_supported) {
-		test_ecn       = true;
-		test_drop_prec = false;
+static void traffic_mngr_test_ecn_marking(void)
+{
+	CU_ASSERT(ip_marking_tests("node_1_3_2", true, false) == 0);
+}
 
-		rc = ip_marking_tests("node_1_3_2", test_ecn, test_drop_prec);
-		CU_ASSERT(rc == 0);
-	} else {
-		ODPH_DBG("\necn_marking tests were not run because "
-			 "tm_capabilities indicates no ecn marking support\n");
-	}
+static void traffic_mngr_test_drop_prec_marking(void)
+{
+	CU_ASSERT(ip_marking_tests("node_1_4_2", false, true) == 0);
+}
 
-	if (tm_capabilities.drop_prec_marking_supported) {
-		test_ecn       = false;
-		test_drop_prec = true;
-
-		rc = ip_marking_tests("node_1_4_2", test_ecn, test_drop_prec);
-		CU_ASSERT(rc == 0);
-	} else {
-		ODPH_DBG("\ndrop_prec marking tests were not run because "
-			 "tm_capabilities indicates no drop precedence "
-			 "marking support\n");
-	}
-
-	if (tm_capabilities.ecn_marking_supported &&
-	    tm_capabilities.drop_prec_marking_supported) {
-		test_ecn       = true;
-		test_drop_prec = true;
-
-		rc = ip_marking_tests("node_1_4_2", test_ecn, test_drop_prec);
-		CU_ASSERT(rc == 0);
-	}
+static void traffic_mngr_test_ecn_drop_prec_marking(void)
+{
+	CU_ASSERT(ip_marking_tests("node_1_4_2", true, true) == 0);
 }
 
 static void traffic_mngr_test_fanin_info(void)
@@ -4252,17 +4458,32 @@ odp_testinfo_t traffic_mngr_suite[] = {
 	ODP_TEST_INFO(traffic_mngr_test_tm_create),
 	ODP_TEST_INFO(traffic_mngr_test_shaper_profile),
 	ODP_TEST_INFO(traffic_mngr_test_sched_profile),
-	ODP_TEST_INFO(traffic_mngr_test_threshold_profile),
-	ODP_TEST_INFO(traffic_mngr_test_wred_profile),
+	ODP_TEST_INFO_CONDITIONAL(traffic_mngr_test_threshold_profile,
+				  traffic_mngr_check_thresholds),
+	ODP_TEST_INFO_CONDITIONAL(traffic_mngr_test_wred_profile,
+				  traffic_mngr_check_wred),
 	ODP_TEST_INFO_CONDITIONAL(traffic_mngr_test_shaper,
 				  traffic_mngr_check_shaper),
 	ODP_TEST_INFO_CONDITIONAL(traffic_mngr_test_scheduler,
 				  traffic_mngr_check_scheduler),
-	ODP_TEST_INFO(traffic_mngr_test_thresholds),
-	ODP_TEST_INFO(traffic_mngr_test_byte_wred),
-	ODP_TEST_INFO(traffic_mngr_test_pkt_wred),
-	ODP_TEST_INFO(traffic_mngr_test_query),
-	ODP_TEST_INFO(traffic_mngr_test_marking),
+	ODP_TEST_INFO_CONDITIONAL(traffic_mngr_test_thresholds,
+				  traffic_mngr_check_thresholds),
+	ODP_TEST_INFO_CONDITIONAL(traffic_mngr_test_byte_wred,
+				  traffic_mngr_check_wred),
+	ODP_TEST_INFO_CONDITIONAL(traffic_mngr_test_pkt_wred,
+				  traffic_mngr_check_wred),
+	ODP_TEST_INFO_CONDITIONAL(traffic_mngr_test_query,
+				  traffic_mngr_check_query),
+	ODP_TEST_INFO_CONDITIONAL(traffic_mngr_test_queue_stats,
+				  traffic_mngr_check_queue_stats),
+	ODP_TEST_INFO_CONDITIONAL(traffic_mngr_test_vlan_marking,
+				  traffic_mngr_check_vlan_marking),
+	ODP_TEST_INFO_CONDITIONAL(traffic_mngr_test_ecn_marking,
+				  traffic_mngr_check_ecn_marking),
+	ODP_TEST_INFO_CONDITIONAL(traffic_mngr_test_drop_prec_marking,
+				  traffic_mngr_check_drop_prec_marking),
+	ODP_TEST_INFO_CONDITIONAL(traffic_mngr_test_ecn_drop_prec_marking,
+				  traffic_mngr_check_ecn_drop_prec_marking),
 	ODP_TEST_INFO(traffic_mngr_test_fanin_info),
 	ODP_TEST_INFO(traffic_mngr_test_destroy),
 	ODP_TEST_INFO_NULL,
