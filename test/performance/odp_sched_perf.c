@@ -30,6 +30,8 @@
 typedef struct test_options_t {
 	uint32_t num_cpu;
 	uint32_t num_queue;
+	uint32_t num_low;
+	uint32_t num_high;
 	uint32_t num_dummy;
 	uint32_t num_event;
 	uint32_t num_sched;
@@ -48,6 +50,7 @@ typedef struct test_options_t {
 	uint32_t ctx_rd_words;
 	uint32_t ctx_rw_words;
 	uint64_t wait_ns;
+	int      verbose;
 
 } test_options_t;
 
@@ -94,6 +97,10 @@ static void print_usage(void)
 	       "\n"
 	       "  -c, --num_cpu          Number of CPUs (worker threads). 0: all available CPUs. Default: 1.\n"
 	       "  -q, --num_queue        Number of queues. Default: 1.\n"
+	       "  -L, --num_low          Number of lowest priority queues out of '--num_queue' queues. Rest of\n"
+	       "                         the queues are default (or highest) priority. Default: 0.\n"
+	       "  -H, --num_high         Number of highest priority queues out of '--num_queue' queues. Rest of\n"
+	       "                         the queues are default (or lowest) priority. Default: 0.\n"
 	       "  -d, --num_dummy        Number of empty queues. Default: 0.\n"
 	       "  -e, --num_event        Number of events per queue. Default: 100.\n"
 	       "  -s, --num_sched        Number of events to schedule per thread. Default: 100 000.\n"
@@ -111,6 +118,7 @@ static void print_usage(void)
 	       "  -l, --ctx_rw_words     Number of queue context words (uint64_t) to modify on every event. Default: 0.\n"
 	       "  -n, --rd_words         Number of event data words (uint64_t) to read before enqueueing it. Default: 0.\n"
 	       "  -m, --rw_words         Number of event data words (uint64_t) to modify before enqueueing it. Default: 0.\n"
+	       "  -v, --verbose          Verbose output.\n"
 	       "  -h, --help             This help\n"
 	       "\n");
 }
@@ -124,6 +132,8 @@ static int parse_options(int argc, char *argv[], test_options_t *test_options)
 	static const struct option longopts[] = {
 		{"num_cpu",      required_argument, NULL, 'c'},
 		{"num_queue",    required_argument, NULL, 'q'},
+		{"num_low",      required_argument, NULL, 'L'},
+		{"num_high",     required_argument, NULL, 'H'},
 		{"num_dummy",    required_argument, NULL, 'd'},
 		{"num_event",    required_argument, NULL, 'e'},
 		{"num_sched",    required_argument, NULL, 's'},
@@ -137,14 +147,17 @@ static int parse_options(int argc, char *argv[], test_options_t *test_options)
 		{"ctx_rw_words", required_argument, NULL, 'l'},
 		{"rd_words",     required_argument, NULL, 'n'},
 		{"rw_words",     required_argument, NULL, 'm'},
+		{"verbose",      no_argument,       NULL, 'v'},
 		{"help",         no_argument,       NULL, 'h'},
 		{NULL, 0, NULL, 0}
 	};
 
-	static const char *shortopts = "+c:q:d:e:s:g:j:b:t:f:w:k:l:n:m:h";
+	static const char *shortopts = "+c:q:L:H:d:e:s:g:j:b:t:f:w:k:l:n:m:vh";
 
 	test_options->num_cpu    = 1;
 	test_options->num_queue  = 1;
+	test_options->num_low    = 0;
+	test_options->num_high   = 0;
 	test_options->num_dummy  = 0;
 	test_options->num_event  = 100;
 	test_options->num_sched  = 100000;
@@ -158,6 +171,7 @@ static int parse_options(int argc, char *argv[], test_options_t *test_options)
 	test_options->rd_words   = 0;
 	test_options->rw_words   = 0;
 	test_options->wait_ns    = 0;
+	test_options->verbose    = 0;
 
 	while (1) {
 		opt = getopt_long(argc, argv, shortopts, longopts, &long_index);
@@ -171,6 +185,12 @@ static int parse_options(int argc, char *argv[], test_options_t *test_options)
 			break;
 		case 'q':
 			test_options->num_queue = atoi(optarg);
+			break;
+		case 'L':
+			test_options->num_low = atoi(optarg);
+			break;
+		case 'H':
+			test_options->num_high = atoi(optarg);
 			break;
 		case 'd':
 			test_options->num_dummy = atoi(optarg);
@@ -211,6 +231,9 @@ static int parse_options(int argc, char *argv[], test_options_t *test_options)
 		case 'w':
 			test_options->wait_ns = atoll(optarg);
 			break;
+		case 'v':
+			test_options->verbose = 1;
+			break;
 		case 'h':
 			/* fall through */
 		default:
@@ -224,8 +247,13 @@ static int parse_options(int argc, char *argv[], test_options_t *test_options)
 				   test_options->rw_words;
 
 	if ((test_options->num_queue + test_options->num_dummy) > MAX_QUEUES) {
-		printf("Error: Too many queues. Max supported %i.\n",
-		       MAX_QUEUES);
+		ODPH_ERR("Too many queues. Max supported %i.\n", MAX_QUEUES);
+		ret = -1;
+	}
+
+	if ((test_options->num_low + test_options->num_high) > test_options->num_queue) {
+		ODPH_ERR("Number of low/high prio %u/%u exceed number of queues %u.\n",
+			 test_options->num_low, test_options->num_high, test_options->num_queue);
 		ret = -1;
 	}
 
@@ -344,12 +372,14 @@ static int create_pool(test_global_t *global)
 	}
 
 	printf("\nScheduler performance test\n");
-	printf("  num sched        %u\n", num_sched);
-	printf("  num cpu          %u\n", num_cpu);
-	printf("  num queues       %u\n", num_queue);
-	printf("  num empty queues %u\n", num_dummy);
-	printf("  total queues     %u\n", tot_queue);
-	printf("  num groups       %i", num_group);
+	printf("  num sched                 %u\n", num_sched);
+	printf("  num cpu                   %u\n", num_cpu);
+	printf("  num queues                %u\n", num_queue);
+	printf("  num lowest prio queues    %u\n", test_options->num_low);
+	printf("  num highest prio queues   %u\n", test_options->num_high);
+	printf("  num empty queues          %u\n", num_dummy);
+	printf("  total queues              %u\n", tot_queue);
+	printf("  num groups                %i", num_group);
 	if (num_group == -1)
 		printf(" (ODP_SCHED_GROUP_WORKER)\n");
 	else if (num_group == 0)
@@ -357,14 +387,14 @@ static int create_pool(test_global_t *global)
 	else
 		printf("\n");
 
-	printf("  num join         %u\n", num_join);
-	printf("  forward events   %i\n", forward ? 1 : 0);
-	printf("  wait nsec        %" PRIu64 "\n", wait_ns);
-	printf("  events per queue %u\n", num_event);
-	printf("  queue size       %u\n", queue_size);
-	printf("  max burst size   %u\n", max_burst);
-	printf("  total events     %u\n", tot_event);
-	printf("  event size       %u bytes", event_size);
+	printf("  num join                  %u\n", num_join);
+	printf("  forward events            %i\n", forward ? 1 : 0);
+	printf("  wait nsec                 %" PRIu64 "\n", wait_ns);
+	printf("  events per queue          %u\n", num_event);
+	printf("  queue size                %u\n", queue_size);
+	printf("  max burst size            %u\n", max_burst);
+	printf("  total events              %u\n", tot_event);
+	printf("  event size                %u bytes", event_size);
 	if (touch_data) {
 		printf(" (rd: %u, rw: %u)\n",
 		       8 * test_options->rd_words,
@@ -373,7 +403,7 @@ static int create_pool(test_global_t *global)
 		printf("\n");
 	}
 
-	printf("  context size     %u bytes", ctx_size);
+	printf("  context size              %u bytes", ctx_size);
 	if (test_options->ctx_rd_words || test_options->ctx_rw_words) {
 		printf(" (rd: %u, rw: %u)\n",
 		       8 * test_options->ctx_rd_words,
@@ -464,12 +494,16 @@ static int create_queues(test_global_t *global)
 	odp_queue_t queue;
 	odp_buffer_t buf;
 	odp_schedule_sync_t sync;
+	odp_schedule_prio_t prio;
 	const char *type_str;
 	uint32_t i, j, first;
 	test_options_t *test_options = &global->test_options;
 	uint32_t num_event = test_options->num_event;
 	uint32_t queue_size = test_options->queue_size;
 	uint32_t tot_queue = test_options->tot_queue;
+	uint32_t num_low = test_options->num_low;
+	uint32_t num_high = test_options->num_high;
+	uint32_t num_default = test_options->num_queue - num_low - num_high;
 	int num_group = test_options->num_group;
 	int type = test_options->queue_type;
 	odp_pool_t pool = global->pool;
@@ -487,7 +521,7 @@ static int create_queues(test_global_t *global)
 		sync = ODP_SCHED_SYNC_ORDERED;
 	}
 
-	printf("  queue type       %s\n\n", type_str);
+	printf("  queue type                %s\n\n", type_str);
 
 	if (tot_queue > global->schedule_config.num_queues) {
 		printf("Max queues supported %u\n",
@@ -512,13 +546,14 @@ static int create_queues(test_global_t *global)
 
 	odp_queue_param_init(&queue_param);
 	queue_param.type = ODP_QUEUE_TYPE_SCHED;
-	queue_param.sched.prio  = ODP_SCHED_PRIO_DEFAULT;
 	queue_param.sched.sync  = sync;
 	queue_param.size = queue_size;
 	if (num_group == -1)
 		queue_param.sched.group = ODP_SCHED_GROUP_WORKER;
 	else
 		queue_param.sched.group = ODP_SCHED_GROUP_ALL;
+
+	first = test_options->num_dummy;
 
 	for (i = 0; i < tot_queue; i++) {
 		if (num_group > 0) {
@@ -529,6 +564,49 @@ static int create_queues(test_global_t *global)
 			queue_param.sched.group = group;
 		}
 
+		/* Create low, high and default queues in a mixed order. Dummy queues are created
+		 * first and with default priority. */
+		prio = ODP_SCHED_PRIO_DEFAULT;
+		if (i >= first) {
+			switch (i % 3) {
+			case 0:
+				if (num_low) {
+					num_low--;
+					prio = ODP_SCHED_PRIO_LOWEST;
+				} else if (num_high) {
+					num_high--;
+					prio = ODP_SCHED_PRIO_HIGHEST;
+				} else {
+					num_default--;
+				}
+				break;
+			case 1:
+				if (num_high) {
+					num_high--;
+					prio = ODP_SCHED_PRIO_HIGHEST;
+				} else if (num_low) {
+					num_low--;
+					prio = ODP_SCHED_PRIO_LOWEST;
+				} else {
+					num_default--;
+				}
+				break;
+			default:
+				if (num_default) {
+					num_default--;
+				} else if (num_high) {
+					num_high--;
+					prio = ODP_SCHED_PRIO_HIGHEST;
+				} else {
+					num_low--;
+					prio = ODP_SCHED_PRIO_LOWEST;
+				}
+				break;
+			}
+		}
+
+		queue_param.sched.prio = prio;
+
 		queue = odp_queue_create(NULL, &queue_param);
 
 		global->queue[i] = queue;
@@ -538,8 +616,6 @@ static int create_queues(test_global_t *global)
 			return -1;
 		}
 	}
-
-	first = test_options->num_dummy;
 
 	/* Store events into queues. Dummy queues are allocated from
 	 * the beginning of the array, so that usage of those affect allocation
@@ -902,6 +978,11 @@ static int test_sched(void *arg)
 		 * thread cannot do the clean up (ODP_SCHED_GROUP_WORKER). */
 		odp_event_t event;
 		uint64_t sched_wait = odp_schedule_wait_time(200 * ODP_TIME_MSEC_IN_NS);
+
+		/* Print schedule status at the end of the test, before any queues
+		 * are emptied or destroyed. */
+		if (test_options->verbose)
+			odp_schedule_print();
 
 		while ((event = odp_schedule(NULL, sched_wait)) != ODP_EVENT_INVALID)
 			odp_event_free(event);

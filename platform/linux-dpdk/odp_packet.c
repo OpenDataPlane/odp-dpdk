@@ -16,6 +16,7 @@
 #include <odp/api/packet_io.h>
 #include <odp/api/plat/pktio_inlines.h>
 #include <odp_errno_define.h>
+#include <odp/api/proto_stats.h>
 
 /* Inlined API functions */
 #include <odp/api/plat/event_inlines.h>
@@ -170,7 +171,7 @@ odp_packet_t odp_packet_alloc(odp_pool_t pool_hdl, uint32_t len)
 {
 	pool_t *pool = pool_entry_from_hdl(pool_hdl);
 
-	if (odp_unlikely(pool->params.type != ODP_POOL_PACKET)) {
+	if (odp_unlikely(pool->type != ODP_POOL_PACKET)) {
 		_odp_errno = EINVAL;
 		return ODP_PACKET_INVALID;
 	}
@@ -187,7 +188,7 @@ int odp_packet_alloc_multi(odp_pool_t pool_hdl, uint32_t len,
 	int i;
 	pool_t *pool = pool_entry_from_hdl(pool_hdl);
 
-	if (odp_unlikely(pool->params.type != ODP_POOL_PACKET)) {
+	if (odp_unlikely(pool->type != ODP_POOL_PACKET)) {
 		_odp_errno = EINVAL;
 		return -1;
 	}
@@ -2389,4 +2390,63 @@ int odp_packet_reass_partial_state(odp_packet_t pkt, odp_packet_t frags[],
 	(void)frags;
 	(void)res;
 	return -ENOTSUP;
+}
+
+void *odp_packet_buf_head(odp_packet_buf_t pkt_buf ODP_UNUSED)
+{
+	return NULL;
+}
+
+uint32_t odp_packet_buf_size(odp_packet_buf_t pkt_buf ODP_UNUSED)
+{
+	return 0;
+}
+
+uint32_t odp_packet_buf_data_offset(odp_packet_buf_t pkt_buf ODP_UNUSED)
+{
+	return 0;
+}
+
+uint32_t odp_packet_buf_data_len(odp_packet_buf_t pkt_buf ODP_UNUSED)
+{
+	return 0;
+}
+
+void odp_packet_buf_data_set(odp_packet_buf_t pkt_buf ODP_UNUSED,
+			     uint32_t data_offset ODP_UNUSED,
+			     uint32_t data_len ODP_UNUSED)
+{
+}
+
+odp_packet_buf_t odp_packet_buf_from_head(odp_pool_t pool_hdl ODP_UNUSED,
+					  void *head ODP_UNUSED)
+{
+	return ODP_PACKET_BUF_INVALID;
+}
+
+uint32_t odp_packet_disassemble(odp_packet_t pkt ODP_UNUSED,
+				odp_packet_buf_t pkt_buf[] ODP_UNUSED,
+				uint32_t num ODP_UNUSED)
+{
+	return 0;
+}
+
+odp_packet_t odp_packet_reassemble(odp_pool_t pool_hdl ODP_UNUSED,
+				   odp_packet_buf_t pkt_buf[] ODP_UNUSED,
+				   uint32_t num ODP_UNUSED)
+{
+	return ODP_PACKET_INVALID;
+}
+
+void odp_packet_proto_stats_request(odp_packet_t pkt, odp_packet_proto_stats_opt_t *opt)
+{
+	(void)pkt;
+	(void)opt;
+}
+
+odp_proto_stats_t odp_packet_proto_stats(odp_packet_t pkt)
+{
+	(void)pkt;
+
+	return ODP_PROTO_STATS_INVALID;
 }

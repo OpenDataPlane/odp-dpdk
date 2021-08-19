@@ -17,7 +17,7 @@
 extern "C" {
 #endif
 
-#include <odp/api/abi/packet.h>
+#include <odp/api/abi/packet_types.h>
 #include <odp/api/plat/packet_inline_types.h>
 
 /** @cond _ODP_HIDE_FROM_DOXYGEN_ */

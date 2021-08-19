@@ -1,5 +1,5 @@
 /* Copyright (c) 2013-2018, Linaro Limited
- * Copyright (c) 2019-2020, Nokia
+ * Copyright (c) 2019-2021, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -27,6 +27,7 @@
 
 #include <string.h>
 #include <stdio.h>
+#include <stddef.h>
 #include <inttypes.h>
 
 #include <odp/api/plat/pool_inline_types.h>
@@ -66,7 +67,7 @@ static __thread pool_local_t local;
 /* Fill in pool header field offsets for inline functions */
 const _odp_pool_inline_offset_t _odp_pool_inline ODP_ALIGNED_CACHE = {
 	.pool_hdl          = offsetof(pool_t, pool_hdl),
-	.uarea_size        = offsetof(pool_t, params.pkt.uarea_size)
+	.uarea_size        = offsetof(pool_t, param_uarea_size)
 };
 
 #include <odp/visibility_end.h>
@@ -369,9 +370,11 @@ int _odp_pool_term_local(void)
 	return 0;
 }
 
-static pool_t *reserve_pool(uint32_t shmflags)
+static pool_t *reserve_pool(uint32_t shmflags, uint8_t pool_ext, uint32_t num)
 {
 	int i;
+	odp_shm_t shm;
+	uint32_t mem_size;
 	pool_t *pool;
 	char ring_name[ODP_POOL_NAME_LEN];
 
@@ -382,19 +385,30 @@ static pool_t *reserve_pool(uint32_t shmflags)
 		if (pool->reserved == 0) {
 			pool->reserved = 1;
 			UNLOCK(&pool->lock);
+
+			memset(&pool->memset_mark, 0,
+			       sizeof(pool_t) - offsetof(pool_t, memset_mark));
 			sprintf(ring_name, "_odp_pool_ring_%d", i);
-			pool->ring_shm =
-				odp_shm_reserve(ring_name,
-						sizeof(pool_ring_t),
-						ODP_CACHE_LINE_SIZE, shmflags);
-			if (odp_unlikely(pool->ring_shm == ODP_SHM_INVALID)) {
+
+			/* Reserve memory for the ring, and for lookup table in case of pool ext */
+			mem_size = sizeof(pool_ring_t);
+			if (pool_ext)
+				mem_size += num * sizeof(odp_buffer_hdr_t *);
+
+			shm = odp_shm_reserve(ring_name, mem_size, ODP_CACHE_LINE_SIZE, shmflags);
+
+			if (odp_unlikely(shm == ODP_SHM_INVALID)) {
 				ODP_ERR("Unable to alloc pool ring %d\n", i);
 				LOCK(&pool->lock);
 				pool->reserved = 0;
 				UNLOCK(&pool->lock);
 				break;
 			}
-			pool->ring = odp_shm_addr(pool->ring_shm);
+
+			pool->ring_shm = shm;
+			pool->ring = odp_shm_addr(shm);
+			pool->pool_ext = pool_ext;
+
 			return pool;
 		}
 		UNLOCK(&pool->lock);
@@ -403,20 +417,59 @@ static pool_t *reserve_pool(uint32_t shmflags)
 	return NULL;
 }
 
+static void init_buffer_hdr(pool_t *pool, odp_buffer_hdr_t *buf_hdr, uint32_t buf_index,
+			    uint32_t hdr_len, uint8_t *data_ptr, void *uarea)
+{
+	odp_pool_type_t type = pool->type;
+
+	memset(buf_hdr, 0, hdr_len);
+
+	/* Initialize buffer metadata */
+	buf_hdr->index.u32    = 0;
+	buf_hdr->index.pool   = pool->pool_idx;
+	buf_hdr->index.buffer = buf_index;
+	buf_hdr->type         = type;
+	buf_hdr->event_type   = type;
+	buf_hdr->pool_ptr     = pool;
+	buf_hdr->uarea_addr   = uarea;
+	odp_atomic_init_u32(&buf_hdr->ref_cnt, 0);
+
+	/* Store base values for fast init */
+	buf_hdr->base_data = data_ptr;
+	buf_hdr->buf_end   = data_ptr + pool->seg_len + pool->tailroom;
+
+	/* Initialize segmentation metadata */
+	if (type == ODP_POOL_PACKET) {
+		odp_packet_hdr_t *pkt_hdr = (void *)buf_hdr;
+
+		pkt_hdr->seg_data  = data_ptr;
+		pkt_hdr->seg_len   = pool->seg_len;
+		pkt_hdr->seg_count = 1;
+		pkt_hdr->seg_next  = NULL;
+	}
+
+	/* Initialize event vector metadata */
+	if (type == ODP_POOL_VECTOR) {
+		odp_event_vector_hdr_t *vect_hdr = (void *)buf_hdr;
+
+		vect_hdr->size      = 0;
+		buf_hdr->event_type = ODP_EVENT_PACKET_VECTOR;
+	}
+}
+
 static void init_buffers(pool_t *pool)
 {
 	uint64_t i;
 	odp_buffer_hdr_t *buf_hdr;
 	odp_packet_hdr_t *pkt_hdr;
-	odp_event_vector_hdr_t *vect_hdr;
 	odp_shm_info_t shm_info;
 	void *addr;
 	void *uarea = NULL;
 	uint8_t *data;
-	uint32_t offset;
+	uint32_t offset, hdr_len;
 	ring_ptr_t *ring;
 	uint32_t mask;
-	int type;
+	odp_pool_type_t type;
 	uint64_t page_size;
 	int skipped_blocks = 0;
 
@@ -426,7 +479,7 @@ static void init_buffers(pool_t *pool)
 	page_size = shm_info.page_size;
 	ring = &pool->ring->hdr;
 	mask = pool->ring_mask;
-	type = pool->params.type;
+	type = pool->type;
 
 	for (i = 0; i < pool->num + skipped_blocks ; i++) {
 		int skip = 0;
@@ -435,11 +488,10 @@ static void init_buffers(pool_t *pool)
 					   pool->block_offset];
 		buf_hdr = addr;
 		pkt_hdr = addr;
-		vect_hdr = addr;
+
 		/* Skip packet buffers which cross huge page boundaries. Some
 		 * NICs cannot handle buffers which cross page boundaries. */
-		if (pool->params.type == ODP_POOL_PACKET &&
-		    page_size >= FIRST_HP_SIZE) {
+		if (type == ODP_POOL_PACKET && page_size >= FIRST_HP_SIZE) {
 			uint64_t first_page;
 			uint64_t last_page;
 
@@ -467,37 +519,8 @@ static void init_buffers(pool_t *pool)
 		while (((uintptr_t)&data[offset]) % pool->align != 0)
 			offset++;
 
-		memset(buf_hdr, 0, (uintptr_t)data - (uintptr_t)buf_hdr);
-
-		/* Initialize buffer metadata */
-		buf_hdr->index.u32    = 0;
-		buf_hdr->index.pool   = pool->pool_idx;
-		buf_hdr->index.buffer = i;
-		buf_hdr->type = type;
-		buf_hdr->event_type = type;
-		if (type == ODP_POOL_VECTOR)
-			buf_hdr->event_type = ODP_EVENT_PACKET_VECTOR;
-		buf_hdr->pool_ptr = pool;
-		buf_hdr->uarea_addr = uarea;
-
-		/* Initialize segmentation metadata */
-		if (type == ODP_POOL_PACKET) {
-			pkt_hdr->seg_data = &data[offset];
-			pkt_hdr->seg_len  = pool->seg_len;
-			pkt_hdr->seg_count = 1;
-			pkt_hdr->seg_next = NULL;
-		}
-
-		odp_atomic_init_u32(&buf_hdr->ref_cnt, 0);
-
-		/* Initialize event vector metadata */
-		if (type == ODP_POOL_VECTOR)
-			vect_hdr->size = 0;
-
-		/* Store base values for fast init */
-		buf_hdr->base_data = &data[offset];
-		buf_hdr->buf_end   = &data[offset + pool->seg_len +
-				     pool->tailroom];
+		hdr_len = (uintptr_t)data - (uintptr_t)buf_hdr;
+		init_buffer_hdr(pool, buf_hdr, i, hdr_len, &data[offset], uarea);
 
 		/* Store buffer into the global pool */
 		if (!skip)
@@ -522,6 +545,67 @@ static bool shm_is_from_huge_pages(odp_shm_t shm)
 	return (info.page_size >= huge_page_size);
 }
 
+static void set_pool_name(pool_t *pool, const char *name)
+{
+	if (name == NULL) {
+		pool->name[0] = 0;
+	} else {
+		strncpy(pool->name, name, ODP_POOL_NAME_LEN - 1);
+		pool->name[ODP_POOL_NAME_LEN - 1] = 0;
+	}
+}
+
+static void set_pool_cache_size(pool_t *pool, uint32_t cache_size)
+{
+	uint32_t burst_size;
+
+	pool->cache_size = 0;
+	pool->burst_size = 1;
+
+	if (cache_size > 1) {
+		cache_size = (cache_size / 2) * 2;
+		burst_size = _odp_pool_glb->config.burst_size;
+
+		if ((cache_size / burst_size) < 2)
+			burst_size = cache_size / 2;
+
+		pool->cache_size = cache_size;
+		pool->burst_size = burst_size;
+	}
+}
+
+static int reserve_uarea(pool_t *pool, uint32_t uarea_size, uint32_t num_pkt, uint32_t shmflags)
+{
+	odp_shm_t shm;
+	const char *max_prefix = "pool_000_uarea_";
+	int max_prefix_len = strlen(max_prefix);
+	char uarea_name[ODP_POOL_NAME_LEN + max_prefix_len];
+
+	pool->uarea_shm = ODP_SHM_INVALID;
+
+	if (uarea_size == 0) {
+		pool->param_uarea_size = 0;
+		pool->uarea_size       = 0;
+		pool->uarea_shm_size   = 0;
+		return 0;
+	}
+
+	sprintf(uarea_name, "pool_%03i_uarea_%s", pool->pool_idx, pool->name);
+
+	pool->param_uarea_size = uarea_size;
+	pool->uarea_size       = ROUNDUP_CACHE_LINE(uarea_size);
+	pool->uarea_shm_size   = num_pkt * (uint64_t)pool->uarea_size;
+
+	shm = odp_shm_reserve(uarea_name, pool->uarea_shm_size, ODP_PAGE_SIZE, shmflags);
+
+	if (shm == ODP_SHM_INVALID)
+		return -1;
+
+	pool->uarea_shm       = shm;
+	pool->uarea_base_addr = odp_shm_addr(shm);
+	return 0;
+}
+
 static odp_pool_t pool_create(const char *name, const odp_pool_param_t *params,
 			      uint32_t shmflags)
 {
@@ -529,17 +613,17 @@ static odp_pool_t pool_create(const char *name, const odp_pool_param_t *params,
 	uint32_t uarea_size, headroom, tailroom;
 	odp_shm_t shm;
 	uint32_t seg_len, align, num, hdr_size, block_size;
-	uint32_t max_len, cache_size, burst_size;
+	uint32_t max_len, cache_size;
 	uint32_t ring_size;
+	odp_pool_type_t type = params->type;
 	uint32_t num_extra = 0;
-	const char *max_prefix = "pool_000_uarea_";
+	const char *max_prefix = "pool_000_";
 	int max_prefix_len = strlen(max_prefix);
 	char shm_name[ODP_POOL_NAME_LEN + max_prefix_len];
-	char uarea_name[ODP_POOL_NAME_LEN + max_prefix_len];
 
 	align = 0;
 
-	if (params->type == ODP_POOL_PACKET) {
+	if (type == ODP_POOL_PACKET) {
 		uint32_t align_req = params->pkt.align;
 
 		if (align_req &&
@@ -551,7 +635,7 @@ static odp_pool_t pool_create(const char *name, const odp_pool_param_t *params,
 
 		align = _odp_pool_glb->config.pkt_base_align;
 	} else {
-		if (params->type == ODP_POOL_BUFFER)
+		if (type == ODP_POOL_BUFFER)
 			align = params->buf.align;
 
 		if (align < _odp_pool_glb->config.buf_min_align)
@@ -572,7 +656,7 @@ static odp_pool_t pool_create(const char *name, const odp_pool_param_t *params,
 	uarea_size  = 0;
 	cache_size  = 0;
 
-	switch (params->type) {
+	switch (type) {
 	case ODP_POOL_BUFFER:
 		num  = params->buf.num;
 		seg_len = params->buf.size;
@@ -630,32 +714,23 @@ static odp_pool_t pool_create(const char *name, const odp_pool_param_t *params,
 		return ODP_POOL_INVALID;
 	}
 
-	if (uarea_size)
-		uarea_size = ROUNDUP_CACHE_LINE(uarea_size);
-
-	pool = reserve_pool(shmflags);
+	pool = reserve_pool(shmflags, 0, num);
 
 	if (pool == NULL) {
 		ODP_ERR("No more free pools\n");
 		return ODP_POOL_INVALID;
 	}
 
-	if (name == NULL) {
-		pool->name[0] = 0;
-	} else {
-		strncpy(pool->name, name,
-			ODP_POOL_NAME_LEN - 1);
-		pool->name[ODP_POOL_NAME_LEN - 1] = 0;
-	}
+	set_pool_name(pool, name);
 
 	/* Format SHM names from prefix, pool index and pool name. */
 	sprintf(shm_name,   "pool_%03i_%s", pool->pool_idx, pool->name);
-	sprintf(uarea_name, "pool_%03i_uarea_%s", pool->pool_idx, pool->name);
 
+	pool->type   = type;
 	pool->params = *params;
 	pool->block_offset = 0;
 
-	if (params->type == ODP_POOL_PACKET) {
+	if (type == ODP_POOL_PACKET) {
 		uint32_t dpdk_obj_size;
 
 		hdr_size = ROUNDUP_CACHE_LINE(sizeof(odp_packet_hdr_t));
@@ -681,9 +756,9 @@ static odp_pool_t pool_create(const char *name, const odp_pool_param_t *params,
 		uint32_t align_pad = (align > ODP_CACHE_LINE_SIZE) ?
 				align - ODP_CACHE_LINE_SIZE : 0;
 
-		if (params->type == ODP_POOL_BUFFER)
+		if (type == ODP_POOL_BUFFER)
 			hdr_size = ROUNDUP_CACHE_LINE(sizeof(odp_buffer_hdr_t));
-		else if (params->type == ODP_POOL_TIMEOUT)
+		else if (type == ODP_POOL_TIMEOUT)
 			hdr_size = ROUNDUP_CACHE_LINE(sizeof(odp_timeout_hdr_t));
 		else
 			hdr_size = ROUNDUP_CACHE_LINE(sizeof(odp_event_vector_hdr_t));
@@ -693,7 +768,7 @@ static odp_pool_t pool_create(const char *name, const odp_pool_param_t *params,
 
 	/* Allocate extra memory for skipping packet buffers which cross huge
 	 * page boundaries. */
-	if (params->type == ODP_POOL_PACKET) {
+	if (type == ODP_POOL_PACKET) {
 		num_extra = ((((uint64_t)num * block_size) +
 				FIRST_HP_SIZE - 1) / FIRST_HP_SIZE);
 		num_extra += ((((uint64_t)num_extra * block_size) +
@@ -715,25 +790,11 @@ static odp_pool_t pool_create(const char *name, const odp_pool_param_t *params,
 	pool->max_len        = max_len;
 	pool->tailroom       = tailroom;
 	pool->block_size     = block_size;
-	pool->uarea_size     = uarea_size;
 	pool->shm_size       = (num + num_extra) * (uint64_t)block_size;
-	pool->uarea_shm_size = num * (uint64_t)uarea_size;
 	pool->ext_desc       = NULL;
 	pool->ext_destroy    = NULL;
 
-	pool->cache_size = 0;
-	pool->burst_size = 1;
-
-	if (cache_size > 1) {
-		cache_size = (cache_size / 2) * 2;
-		burst_size = _odp_pool_glb->config.burst_size;
-
-		if ((cache_size / burst_size) < 2)
-			burst_size = cache_size / 2;
-
-		pool->cache_size = cache_size;
-		pool->burst_size = burst_size;
-	}
+	set_pool_cache_size(pool, cache_size);
 
 	shm = odp_shm_reserve(shm_name, pool->shm_size, ODP_PAGE_SIZE,
 			      shmflags);
@@ -750,26 +811,16 @@ static odp_pool_t pool_create(const char *name, const odp_pool_param_t *params,
 	pool->base_addr = odp_shm_addr(pool->shm);
 	pool->max_addr  = pool->base_addr + pool->shm_size - 1;
 
-	pool->uarea_shm = ODP_SHM_INVALID;
-	if (uarea_size) {
-		shm = odp_shm_reserve(uarea_name, pool->uarea_shm_size,
-				      ODP_PAGE_SIZE, shmflags);
-
-		pool->uarea_shm = shm;
-
-		if (shm == ODP_SHM_INVALID) {
-			ODP_ERR("SHM reserve failed (uarea)\n");
-			goto error;
-		}
-
-		pool->uarea_base_addr = odp_shm_addr(pool->uarea_shm);
+	if (reserve_uarea(pool, uarea_size, num, shmflags)) {
+		ODP_ERR("User area SHM reserve failed\n");
+		goto error;
 	}
 
 	ring_ptr_init(&pool->ring->hdr);
 	init_buffers(pool);
 
 	/* Create zero-copy DPDK memory pool. NOP if zero-copy is disabled. */
-	if (params->type == ODP_POOL_PACKET && _odp_dpdk_pool_create(pool)) {
+	if (type == ODP_POOL_PACKET && _odp_dpdk_pool_create(pool)) {
 		ODP_ERR("Creating DPDK packet pool failed\n");
 		goto error;
 	}
@@ -994,7 +1045,8 @@ int odp_pool_destroy(odp_pool_t pool_hdl)
 	for (i = 0; i < ODP_THREAD_COUNT_MAX; i++)
 		cache_flush(&pool->local_cache[i], pool);
 
-	odp_shm_free(pool->shm);
+	if (pool->pool_ext == 0)
+		odp_shm_free(pool->shm);
 
 	if (pool->uarea_shm != ODP_SHM_INVALID)
 		odp_shm_free(pool->uarea_shm);
@@ -1044,10 +1096,18 @@ int odp_pool_info(odp_pool_t pool_hdl, odp_pool_info_t *info)
 	if (pool == NULL || info == NULL)
 		return -1;
 
-	info->name = pool->name;
-	info->params = pool->params;
+	memset(info, 0, sizeof(odp_pool_info_t));
 
-	if (pool->params.type == ODP_POOL_PACKET)
+	info->name = pool->name;
+
+	if (pool->pool_ext) {
+		info->pool_ext = 1;
+		info->pool_ext_param = pool->ext_param;
+	} else {
+		info->params = pool->params;
+	}
+
+	if (pool->type == ODP_POOL_PACKET)
 		info->pkt.max_num = pool->num;
 
 	info->min_data_addr = (uintptr_t)pool->base_addr;
@@ -1314,10 +1374,10 @@ void odp_pool_print(odp_pool_t pool_hdl)
 		  odp_pool_to_u64(pool->pool_hdl));
 	ODP_PRINT("  name            %s\n", pool->name);
 	ODP_PRINT("  pool type       %s\n",
-		  pool->params.type == ODP_POOL_BUFFER ? "buffer" :
-		  (pool->params.type == ODP_POOL_PACKET ? "packet" :
-		   (pool->params.type == ODP_POOL_TIMEOUT ? "timeout" :
-		    (pool->params.type == ODP_POOL_VECTOR ? "vector" :
+		  pool->type == ODP_POOL_BUFFER ? "buffer" :
+		  (pool->type == ODP_POOL_PACKET ? "packet" :
+		   (pool->type == ODP_POOL_TIMEOUT ? "timeout" :
+		    (pool->type == ODP_POOL_VECTOR ? "vector" :
 		     "unknown"))));
 	ODP_PRINT("  pool shm        %" PRIu64 "\n",
 		  odp_shm_to_u64(pool->shm));
@@ -1491,4 +1551,251 @@ int odp_buffer_is_valid(odp_buffer_t buf)
 		return 0;
 
 	return 1;
+}
+
+/* No actual head pointer alignment requirement. Anyway, require even byte address. */
+#define MIN_HEAD_ALIGN 2
+
+int odp_pool_ext_capability(odp_pool_type_t type, odp_pool_ext_capability_t *capa)
+{
+	odp_pool_stats_opt_t supported_stats;
+
+	if (type != ODP_POOL_PACKET)
+		return -1;
+
+	supported_stats.all = 0;
+
+	memset(capa, 0, sizeof(odp_pool_ext_capability_t));
+
+	capa->type           = type;
+	capa->max_pools      = ODP_CONFIG_POOLS - 1;
+	capa->min_cache_size = 0;
+	capa->max_cache_size = CONFIG_POOL_CACHE_MAX_SIZE;
+	capa->stats.all      = supported_stats.all;
+
+	capa->pkt.max_num_buf         = _odp_pool_glb->config.pkt_max_num;
+	capa->pkt.max_buf_size        = MAX_SIZE;
+	capa->pkt.odp_header_size     = sizeof(odp_packet_hdr_t);
+	capa->pkt.odp_trailer_size    = 0;
+	capa->pkt.min_mem_align       = ODP_CACHE_LINE_SIZE;
+	capa->pkt.min_buf_align       = ODP_CACHE_LINE_SIZE;
+	capa->pkt.min_head_align      = MIN_HEAD_ALIGN;
+	capa->pkt.buf_size_aligned    = 0;
+	capa->pkt.max_headroom        = CONFIG_PACKET_HEADROOM;
+	capa->pkt.max_headroom_size   = CONFIG_PACKET_HEADROOM;
+	capa->pkt.max_segs_per_pkt    = PKT_MAX_SEGS;
+	capa->pkt.max_uarea_size      = MAX_SIZE;
+
+	return 0;
+}
+
+void odp_pool_ext_param_init(odp_pool_type_t type, odp_pool_ext_param_t *param)
+{
+	uint32_t default_cache_size = _odp_pool_glb->config.local_cache_size;
+
+	memset(param, 0, sizeof(odp_pool_ext_param_t));
+
+	if (type != ODP_POOL_PACKET)
+		return;
+
+	param->type         = ODP_POOL_PACKET;
+	param->cache_size   = default_cache_size;
+	param->pkt.headroom = CONFIG_PACKET_HEADROOM;
+}
+
+static int check_pool_ext_param(const odp_pool_ext_param_t *param)
+{
+	odp_pool_ext_capability_t capa;
+	uint32_t head_offset = sizeof(odp_packet_hdr_t) + param->pkt.app_header_size;
+
+	if (param->type != ODP_POOL_PACKET) {
+		ODP_ERR("Pool type not supported\n");
+		return -1;
+	}
+
+	if (odp_pool_ext_capability(param->type, &capa)) {
+		ODP_ERR("Capa failed\n");
+		return -1;
+	}
+
+	if (param->cache_size > capa.max_cache_size) {
+		ODP_ERR("Too large cache size %u\n", param->cache_size);
+		return -1;
+	}
+
+	if (param->stats.all != capa.stats.all) {
+		ODP_ERR("Pool statistics not supported\n");
+		return -1;
+	}
+
+	if (param->pkt.num_buf > capa.pkt.max_num_buf) {
+		ODP_ERR("Too many packet buffers\n");
+		return -1;
+	}
+
+	if (param->pkt.buf_size > capa.pkt.max_buf_size) {
+		ODP_ERR("Too large packet buffer size %u\n", param->pkt.buf_size);
+		return -1;
+	}
+
+	if (param->pkt.uarea_size > capa.pkt.max_uarea_size) {
+		ODP_ERR("Too large user area size %u\n", param->pkt.uarea_size);
+		return -1;
+	}
+
+	if (param->pkt.headroom > capa.pkt.max_headroom) {
+		ODP_ERR("Too large headroom size\n");
+		return -1;
+	}
+
+	if (head_offset % capa.pkt.min_head_align) {
+		ODP_ERR("Head pointer not %u byte aligned\n", capa.pkt.min_head_align);
+		return -1;
+	}
+
+	return 0;
+}
+
+odp_pool_t odp_pool_ext_create(const char *name, const odp_pool_ext_param_t *param)
+{
+	pool_t *pool;
+	uint32_t ring_size;
+	uint32_t num_buf = param->pkt.num_buf;
+	uint32_t buf_size = param->pkt.buf_size;
+	uint32_t head_offset = sizeof(odp_packet_hdr_t) + param->pkt.app_header_size;
+	uint32_t headroom = param->pkt.headroom;
+	uint32_t shm_flags = 0;
+
+	if (check_pool_ext_param(param)) {
+		ODP_ERR("Bad pool ext param\n");
+		return ODP_POOL_INVALID;
+	}
+
+	if (odp_global_ro.shm_single_va)
+		shm_flags |= ODP_SHM_SINGLE_VA;
+
+	pool = reserve_pool(shm_flags, 1, num_buf);
+
+	if (pool == NULL) {
+		ODP_ERR("No more free pools\n");
+		return ODP_POOL_INVALID;
+	}
+
+	pool->ext_param = *param;
+	set_pool_name(pool, name);
+	set_pool_cache_size(pool, param->cache_size);
+
+	if (reserve_uarea(pool, param->pkt.uarea_size, num_buf, shm_flags)) {
+		ODP_ERR("User area SHM reserve failed\n");
+		goto error;
+	}
+
+	/* Ring size must be larger than the number of items stored */
+	if (num_buf + 1 <= RING_SIZE_MIN)
+		ring_size = RING_SIZE_MIN;
+	else
+		ring_size = ROUNDUP_POWER2_U32(num_buf + 1);
+
+	pool->ring_mask      = ring_size - 1;
+	pool->type           = param->type;
+	pool->num            = num_buf;
+	pool->headroom       = headroom;
+	pool->tailroom       = 0;
+	pool->seg_len        = buf_size - head_offset - headroom - pool->tailroom;
+	pool->max_seg_len    = headroom + pool->seg_len + pool->tailroom;
+	pool->max_len        = PKT_MAX_SEGS * pool->seg_len;
+
+	ring_ptr_init(&pool->ring->hdr);
+
+	return pool->pool_hdl;
+
+error:
+	if (pool->ring_shm != ODP_SHM_INVALID)
+		odp_shm_free(pool->ring_shm);
+
+	LOCK(&pool->lock);
+	pool->reserved = 0;
+	UNLOCK(&pool->lock);
+
+	return ODP_POOL_INVALID;
+}
+
+int odp_pool_ext_populate(odp_pool_t pool_hdl, void *buf[], uint32_t buf_size, uint32_t num,
+			  uint32_t flags)
+{
+	pool_t *pool;
+	odp_buffer_hdr_t *buf_hdr;
+	ring_ptr_t *ring;
+	uint32_t i, ring_mask, buf_index, head_offset;
+	uint32_t num_populated;
+	uint8_t *data_ptr;
+	uint32_t hdr_size = sizeof(odp_packet_hdr_t);
+	void *uarea = NULL;
+
+	if (pool_hdl == ODP_POOL_INVALID) {
+		ODP_ERR("Bad pool handle\n");
+		return -1;
+	}
+
+	pool = pool_entry_from_hdl(pool_hdl);
+
+	if (pool->type != ODP_POOL_PACKET || pool->pool_ext == 0) {
+		ODP_ERR("Bad pool type\n");
+		return -1;
+	}
+
+	if (buf_size != pool->ext_param.pkt.buf_size) {
+		ODP_ERR("Bad buffer size\n");
+		return -1;
+	}
+
+	num_populated = pool->num_populated;
+
+	if (num_populated + num > pool->num) {
+		ODP_ERR("Trying to over populate the pool\n");
+		return -1;
+	}
+
+	if ((num_populated + num == pool->num) && !(flags & ODP_POOL_POPULATE_DONE)) {
+		ODP_ERR("Missing ODP_POOL_POPULATE_DONE flag\n");
+		return -1;
+	}
+
+	if ((num_populated + num < pool->num) && flags) {
+		ODP_ERR("Unexpected flags: 0x%x\n", flags);
+		return -1;
+	}
+
+	ring = &pool->ring->hdr;
+	ring_mask = pool->ring_mask;
+	buf_index = pool->num_populated;
+	head_offset = sizeof(odp_packet_hdr_t) + pool->ext_param.pkt.app_header_size;
+
+	for (i = 0; i < num; i++) {
+		buf_hdr = buf[i];
+
+		if ((uintptr_t)buf_hdr & (ODP_CACHE_LINE_SIZE - 1)) {
+			ODP_ERR("Bad packet buffer align: buf[%u]\n", i);
+			return -1;
+		}
+
+		if (((uintptr_t)buf_hdr + head_offset) & (MIN_HEAD_ALIGN - 1)) {
+			ODP_ERR("Bad head pointer align: buf[%u]\n", i);
+			return -1;
+		}
+
+		if (pool->uarea_size)
+			uarea = &pool->uarea_base_addr[buf_index * pool->uarea_size];
+
+		data_ptr = (uint8_t *)buf_hdr + head_offset + pool->headroom;
+		init_buffer_hdr(pool, buf_hdr, buf_index, hdr_size, data_ptr, uarea);
+		pool->ring->buf_hdr_by_index[buf_index] = buf_hdr;
+		buf_index++;
+
+		ring_ptr_enq(ring, ring_mask, buf_hdr);
+	}
+
+	pool->num_populated += num;
+
+	return 0;
 }

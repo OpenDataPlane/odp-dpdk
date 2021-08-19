@@ -1,5 +1,5 @@
 /* Copyright (c) 2014-2018, Linaro Limited
- * Copyright (c) 2019-2020, Nokia
+ * Copyright (c) 2019-2021, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -42,15 +42,7 @@ static cos_tbl_t *cos_tbl;
 static pmr_tbl_t	*pmr_tbl;
 static _cls_queue_grp_tbl_t *queue_grp_tbl;
 
-typedef struct cls_global_t {
-	cos_tbl_t cos_tbl;
-	pmr_tbl_t pmr_tbl;
-	_cls_queue_grp_tbl_t queue_grp_tbl;
-	odp_shm_t shm;
-
-} cls_global_t;
-
-static cls_global_t *cls_global;
+cls_global_t *_odp_cls_global;
 
 static const rss_key default_rss = {
 	.u8 = {
@@ -61,11 +53,6 @@ static const rss_key default_rss = {
 	0x6a, 0x42, 0xb7, 0x3b, 0xbe, 0xac, 0x01, 0xfa,
 	}
 };
-
-cos_t *_odp_cos_entry_from_idx(uint32_t ndx)
-{
-	return &cos_tbl->cos_entry[ndx];
-}
 
 static inline uint32_t _odp_cos_to_ndx(odp_cos_t cos)
 {
@@ -109,13 +96,13 @@ int _odp_classification_init_global(void)
 	if (shm == ODP_SHM_INVALID)
 		return -1;
 
-	cls_global = odp_shm_addr(shm);
-	memset(cls_global, 0, sizeof(cls_global_t));
+	_odp_cls_global = odp_shm_addr(shm);
+	memset(_odp_cls_global, 0, sizeof(cls_global_t));
 
-	cls_global->shm = shm;
-	cos_tbl       = &cls_global->cos_tbl;
-	pmr_tbl       = &cls_global->pmr_tbl;
-	queue_grp_tbl = &cls_global->queue_grp_tbl;
+	_odp_cls_global->shm = shm;
+	cos_tbl       = &_odp_cls_global->cos_tbl;
+	pmr_tbl       = &_odp_cls_global->pmr_tbl;
+	queue_grp_tbl = &_odp_cls_global->queue_grp_tbl;
 
 	for (i = 0; i < CLS_COS_MAX_ENTRY; i++) {
 		/* init locks */
@@ -136,7 +123,7 @@ int _odp_classification_init_global(void)
 
 int _odp_classification_term_global(void)
 {
-	if (cls_global && odp_shm_free(cls_global->shm)) {
+	if (_odp_cls_global && odp_shm_free(_odp_cls_global->shm)) {
 		ODP_ERR("shm free failed\n");
 		return -1;
 	}
@@ -163,7 +150,9 @@ void odp_cls_pmr_param_init(odp_pmr_param_t *param)
 
 int odp_cls_capability(odp_cls_capability_t *capability)
 {
-	unsigned count = 0;
+	unsigned int count = 0;
+
+	memset(capability, 0, sizeof(odp_cls_capability_t));
 
 	for (int i = 0; i < CLS_PMR_MAX_ENTRY; i++)
 		if (!pmr_tbl->pmr[i].s.valid)
@@ -197,6 +186,9 @@ int odp_cls_capability(odp_cls_capability_t *capability)
 	capability->threshold_bp.all_bits = 0;
 	capability->max_hash_queues = CLS_COS_QUEUE_MAX;
 	capability->max_mark = MAX_MARK;
+	capability->stats.queue.counter.discards = 1;
+	capability->stats.queue.counter.packets = 1;
+
 	return 0;
 }
 
@@ -305,6 +297,11 @@ odp_cos_t odp_cls_cos_create(const char *name, const odp_cls_cos_param_t *param)
 
 			} else {
 				cos->s.queue = param->queue;
+			}
+			/* Initialize statistics counters */
+			for (j = 0; j < cos->s.num_queue; j++) {
+				odp_atomic_init_u64(&cos->s.stats[j].discards, 0);
+				odp_atomic_init_u64(&cos->s.stats[j].packets, 0);
 			}
 
 			cos->s.pool = param->pool;
@@ -1781,6 +1778,35 @@ uint64_t odp_cos_to_u64(odp_cos_t hdl)
 uint64_t odp_pmr_to_u64(odp_pmr_t hdl)
 {
 	return _odp_pri(hdl);
+}
+
+int odp_cls_queue_stats(odp_cos_t hdl, odp_queue_t queue,
+			odp_cls_queue_stats_t *stats)
+{
+	cos_t *cos = get_cos_entry(hdl);
+	int queue_idx;
+
+	if (odp_unlikely(cos == NULL)) {
+		ODP_ERR("Invalid odp_cos_t handle\n");
+		return -1;
+	}
+
+	if (odp_unlikely(stats == NULL)) {
+		ODP_ERR("Output structure NULL\n");
+		return -1;
+	}
+
+	queue_idx = _odp_cos_queue_idx(cos, queue);
+	if (odp_unlikely(queue_idx < 0)) {
+		ODP_ERR("Invalid odp_queue_t handle\n");
+		return -1;
+	}
+
+	memset(stats, 0, sizeof(odp_cls_queue_stats_t));
+	stats->discards = odp_atomic_load_u64(&cos->s.stats[queue_idx].discards);
+	stats->packets = odp_atomic_load_u64(&cos->s.stats[queue_idx].packets);
+
+	return 0;
 }
 
 static

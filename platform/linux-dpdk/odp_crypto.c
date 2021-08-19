@@ -575,7 +575,14 @@ static void capability_process(struct rte_cryptodev_info *dev_info,
 				auths->bit.sha512_hmac = 1;
 			if (cap_auth_algo == RTE_CRYPTO_AUTH_AES_GMAC)
 				auths->bit.aes_gmac = 1;
-			if (cap_auth_algo == RTE_CRYPTO_AUTH_AES_CMAC)
+
+			/* Using AES-CMAC with the aesni_mb driver for IPsec
+			 * causes a crash inside the intel-mb library.
+			 * As a workaround, we do not use AES-CMAC with
+			 * the aesni_mb driver.
+			 */
+			if (cap_auth_algo == RTE_CRYPTO_AUTH_AES_CMAC &&
+			    !is_dev_aesni_mb(dev_info))
 				auths->bit.aes_cmac = 1;
 
 			/* Combination of (3)DES-CBC and AES-XCBC-MAC does not

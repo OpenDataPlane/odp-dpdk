@@ -1,4 +1,5 @@
-/** Copyright (c) 2015-2018, Linaro Limited
+/* Copyright (c) 2015-2018, Linaro Limited
+ * Copyright (c) 2021, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier: BSD-3-Clause
@@ -37,7 +38,7 @@ extern "C" {
  * based systems or one or more hybrid systems - where because of
  * hardware constraints some of the packet scheduling is done in hardware
  * and some is done in software.  In addition, there may also be additional
- * API's beyond those described here for (a) controlling advanced capabilities
+ * APIs beyond those described here for (a) controlling advanced capabilities
  * supported by specific hardware, software or hybrid subsystems or (b)
  * dealing with constraints and limitations of specific implementations.
  */
@@ -189,6 +190,63 @@ extern "C" {
  * tree/hierarchy of nodes.
  */
 
+/**
+ * TM queue specific statistics counters
+ */
+typedef struct odp_tm_queue_stats_t {
+	/** Number of octets in successfully transmitted packets. In case of
+	 *  Ethernet, packet size includes MAC header. */
+	uint64_t octets;
+
+	/** Number of successfully transmitted packets. */
+	uint64_t packets;
+
+	/** Number of packets discarded due to other reasons (e.g. aging) than
+	 *  errors. */
+	uint64_t discards;
+
+	/** Number of octets in packets discarded due to other reasons (e.g.
+	 *  aging) than errors. */
+	uint64_t discard_octets;
+
+	/** Number of packets with transmission errors. */
+	uint64_t errors;
+
+} odp_tm_queue_stats_t;
+
+/**
+ *  TM queue level statistics capabilities
+ */
+typedef struct odp_tm_queue_stats_capability_t {
+	/** Supported counters */
+	union {
+		/** Statistics counters in a bit field structure */
+		struct {
+			/** @see odp_tm_queue_stats_t::octets */
+			uint64_t octets          : 1;
+
+			/** @see odp_tm_queue_stats_t::packets */
+			uint64_t packets         : 1;
+
+			/** @see odp_tm_queue_stats_t::discards */
+			uint64_t discards        : 1;
+
+			/** @see odp_tm_queue_stats_t::discard_octets */
+			uint64_t discard_octets  : 1;
+
+			/** @see odp_tm_queue_stats_t::errors */
+			uint64_t errors          : 1;
+
+		} counter;
+
+		/** All bits of the bit field structure
+		 *
+		 *  This field can be used to set/clear all flags, or
+		 *  for bitwise operations over the entire structure. */
+		uint64_t all_counters;
+	};
+} odp_tm_queue_stats_capability_t;
+
 /** Per Level Capabilities
  *
  * The odp_tm_level_capabilities_t record is used to describe the capabilities
@@ -213,12 +271,12 @@ typedef struct {
 	/** min_weight only has significance when the weights_supported field
 	 * below is true, in which case it specifies the smallest value
 	 * of the weights allowed at this level. */
-	uint8_t min_weight;
+	uint32_t min_weight;
 
 	/** max_weight only has significance when the weights_supported field
 	 * below is true, in which case it specifies the largest value
 	 * of the weights allowed at this level. */
-	uint8_t max_weight;
+	uint32_t max_weight;
 
 	/** tm_node_shaper_supported indicates that the tm_nodes at this level
 	 * all support TM shaping, */
@@ -248,7 +306,38 @@ typedef struct {
 	 * When true the min_weight and max_weight fields above specify
 	 * the legal range of such weights. */
 	odp_bool_t weights_supported;
+
+	/** tm_node_threshold indicates that the tm_nodes at this
+	 * level support threshold profiles. */
+	odp_bool_t tm_node_threshold;
 } odp_tm_level_capabilities_t;
+
+/** The tm_pkt_prio_mode_t enumeration type is used to indicate different
+ * modes a tm system supports with respect to assigning priority to a packet
+ * and propagating it across TM system. All the nodes in a TM system can
+ * function only on single mode specified at time of odp_tm_create().
+ */
+typedef enum odp_tm_pkt_prio_mode {
+	/** Indicates Packet priority preserve mode. In this mode, a packet gets
+	 * its priority based on a TM queue it gets enqueued to and then it
+	 * carries the same priority along with it as long as it is in the TM
+	 * system. At every TM node in the topology, that specific pkt is
+	 * scheduled as per that priority.
+	 */
+	ODP_TM_PKT_PRIO_MODE_PRESERVE,
+
+	/** Indicates Packet priority overwrite mode. In this mode, a packet
+	 * gets a new priority every time it passes through a TM queue or a
+	 * TM node. All the packets fed by a fan-in node will get the same
+	 * priority and that will be valid until overwritten again by another TM
+	 * node. This priority is part of the TM fan-in node parameters and is
+	 * fixed at node creation time.
+	 */
+	ODP_TM_PKT_PRIO_MODE_OVERWRITE,
+
+	/** Max enum of Packet priority mode */
+	ODP_TM_PKT_PRIO_MODE_MAX,
+} odp_tm_pkt_prio_mode_t;
 
 /** TM Capabilities Record.
  *
@@ -283,7 +372,7 @@ typedef struct {
 	 * proper TM shaping.  Note that TM Shaping is NOT the same thing as
 	 * Ingress Metering/Policing as specified by RFC 2697 (A Single Rate
 	 * Three Color Marker) or RFC 2698 (A Two Rate Three Color Marker).
-	 * These RFC's can be used for a Diffserv traffic conditioner, or
+	 * These RFCs can be used for a Diffserv traffic conditioner, or
 	 * other ingress policing.  They make no mention of and have no
 	 * algorithms for delaying packets - which is what TM shapers are
 	 * expected to do. */
@@ -385,6 +474,44 @@ typedef struct {
 	 * the parameters of the threshold profile of any TM node or TM queue.
 	 */
 	odp_bool_t dynamic_threshold_update;
+
+	/** TM queue statistics counter capabilities */
+	odp_tm_queue_stats_capability_t queue_stats;
+
+	/** tm_queue_threshold indicates support for threshold profile on a
+	 * TM queue. When TRUE, users can set/clear/update threshold profile
+	 * on a TM queue. When false none of it is supported.
+	 */
+	odp_bool_t tm_queue_threshold;
+
+	/** tm_queue_query_flags indicates supported types of TM queue query.
+	 * Types of TM queue query are same as query_flags that are passed to
+	 * odp_tm_queue_query(), odp_tm_priority_query() and
+	 * odp_tm_total_query(). When zero, none of the queue query API's are
+	 * supported. When non-zero, only the only supported types of passed
+	 * query_flags are taken into account and corresponding fields updated.
+	 *
+	 * @see ODP_TM_QUERY_PKT_CNT, ODP_TM_QUERY_BYTE_CNT,
+	 * ODP_TM_QUERY_THRESHOLDS.
+	 */
+	uint32_t tm_queue_query_flags;
+
+	/** Indicates the packet priority modes supported by TM systems on a
+	 * platform. A platform can support multiple packet priority modes. The
+	 * actual mode a TM system runs with is defined by
+	 * odp_tm_requirements_t.
+	 */
+	odp_bool_t pkt_prio_modes[ODP_TM_PKT_PRIO_MODE_MAX];
+
+	/** Maximum number of schedulers supported by a TM node at any level.
+	 * A TM node contains a WFQ/WRR scheduler for each packet priority level
+	 * for which the node has more than one possible input. TM topology and
+	 * priority configuration must be made so that the resulting number of
+	 * WFQ/WRR schedulers does not exceed this capability in any TM node.
+	 *
+	 * The value can vary between 0 and ODP_TM_MAX_PRIORITIES.
+	 */
+	uint8_t max_schedulers_per_node;
 } odp_tm_capabilities_t;
 
 /** Per Level Requirements
@@ -411,12 +538,12 @@ typedef struct {
 	/** min_weight only has significance when the weights_supported field
 	 * below is true, in which case it specifies the smallest value
 	 * of the weights that will be used at this level. */
-	uint8_t min_weight;
+	uint32_t min_weight;
 
 	/** max_weight only has significance when the weights_supported field
 	 * below is true, in which case it specifies the largest value
 	 * of the weights that will be used at this level. */
-	uint8_t max_weight;
+	uint32_t max_weight;
 
 	/** tm_node_shaper_needed indicates that the tm_nodes at this level
 	 * are expected to do TM shaping, */
@@ -437,11 +564,15 @@ typedef struct {
 	 * disciplines. */
 	odp_bool_t fair_queuing_needed;
 
-	/** weights_needd indicates that the tm_node schedulers at this
+	/** weights_needed indicates that the tm_node schedulers at this
 	 * level are expected have different weights for their different
 	 * fanins.  When true the min_weight and max_weight fields above
 	 * specify the used range of such weights. */
 	odp_bool_t weights_needed;
+
+	/** tm_node_threshold_needed indicates that the tm_nodes at this
+	 * level may use threshold profile support */
+	odp_bool_t tm_node_threshold_needed;
 } odp_tm_level_requirements_t;
 
 /** TM Requirements Record.
@@ -471,6 +602,10 @@ typedef struct {
 	 * ignored if tm_queue_wred_needed above is false. */
 	odp_bool_t tm_queue_dual_slope_needed;
 
+	/** tm_queue_threshold_needed indicates that the tm_queues are
+	 * expected to use threshold profile support */
+	odp_bool_t tm_queue_threshold_needed;
+
 	/** vlan_marking_needed indicates that the ODP application expects
 	 * to use some form of VLAN egress marking using the
 	 * odp_tm_vlan_marking() function.  See also comments for
@@ -494,8 +629,14 @@ typedef struct {
 	 * the application will not enable this color for vlan marking,
 	 * ecn marking nor drop precedence marking.  A value of TRUE means that
 	 * the application expects to use this color in conjunction with one or
-	 * more of the marking API's. */
+	 * more of the marking APIs. */
 	odp_bool_t marking_colors_needed[ODP_NUM_PACKET_COLORS];
+
+	/** Packet priority mode.
+	 * TM capabilities indicate which modes are supported.
+	 * The default value is ODP_TM_PKT_PRIO_MODE_PRESERVE.
+	 */
+	odp_tm_pkt_prio_mode_t pkt_prio_mode;
 
 	/** The per_level array specifies the TM system requirements that
 	 * can vary based upon the tm_node level. */
@@ -556,19 +697,23 @@ void odp_tm_egress_init(odp_tm_egress_t *egress);
 
 /** Query All TM Capabilities
  *
- * The odp_tm_capabilities() function can be used to obtain the complete set of
- * TM limits supported by this implementation.  The reason that this returns
- * a SET of capabilities and not just one, is because it is expected that
- * many HW based implementations may have one set of limits for the HW and
- * also support a SW TM implementation with a (presumably larger) different
- * set of limits.  There are also cases where there could be more than
- * SW implementation (one supporting say tens of thousands of tm_queues and
- * a variant supporting tens of millions of tm_queues).
+ * @deprecated Use odp_tm_egress_capabilities() instead that also additionally
+ * takes egress as input to provide capabilities specific to a given egress.
+ *
+ * This function returns the set of TM capabilities that are common for all
+ * egresses. The reason that this returns a SET of capabilities and not just
+ * one, is because it is expected that many HW based implementations may have
+ * one set of limits for the HW and also support a SW TM implementation with a
+ * (presumably larger) different set of limits. There are also cases where
+ * there could be more than one SW implementation (one supporting say tens of
+ * thousands of tm_queues and a variant supporting tens of millions of
+ * tm_queues). It returns capabilities that are valid for all egresses.
  * The caller passes in an array of odp_tm_capabilities_t records and the
- * number of such records.  Then the first N of these records will be filled
- * in by the implementation and the number N will be returned.  In the event
- * that N is larger than the capabilities_size, N will still be returned,
- * but only capabilities_size records will be filled in.
+ * maximum number of such records to output. If number of such records
+ * implementation supports is larger than caller requested number, then
+ * only caller requested number of records are written and return value is
+ * max number of records implementation supports.
+ * Caller then may again call with larger number of records to be returned.
  *
  * @param[out] capabilities      An array of odp_tm_capabilities_t records to
  *                               be filled in.
@@ -580,8 +725,32 @@ void odp_tm_egress_init(odp_tm_egress_t *egress);
  *                               implementations supports. *NOTE* that this
  *                               number can be > capabilities_size!
  */
-int odp_tm_capabilities(odp_tm_capabilities_t capabilities[],
-			uint32_t              capabilities_size);
+int ODP_DEPRECATE(odp_tm_capabilities)(odp_tm_capabilities_t capabilities[],
+				       uint32_t              capabilities_size);
+
+/** Query TM Capabilities specific to an egress
+ *
+ * The function returns the set of TM limits supported by this implementation
+ * for a given egress. Unlike odp_tm_capability() which return's capabilities
+ * of already created TM system which are limited by its requirements, this
+ * function returns maximum TM system limits.
+ *
+ * Lack of TM support in the given egress does not cause this
+ * function to return a failure. Lack of TM support is indicated
+ * by zero max_tm_queues capability.
+ *
+ * If the pktio of an egress of the pktio kind has not been opened
+ * in the ODP_PKTOUT_MODE_TM pktout mode, the capabilities will
+ * indicate that TM is not supported.
+ *
+ * @param[out] capabilities      odp_tm_capabilities_t record to be filled in.
+ * @param      egress            Only capabilities compatible with this egress
+ *                               are returned.
+ * @retval 0  on success
+ * @retval <0 on failure
+ */
+int odp_tm_egress_capabilities(odp_tm_capabilities_t *capabilities,
+			       const odp_tm_egress_t *egress);
 
 /** Create/instantiate a TM Packet Scheduling system.
  *
@@ -645,8 +814,7 @@ odp_tm_t odp_tm_find(const char            *name,
  * In addition, ODP TM implementations should fail API requests that "exceed"
  * the limits or features contracted for in the requirements.
  *
- * @param      odp_tm        The odp_tm_t value of the TM system to be
- *                           queried.
+ * @param tm                 TM handle
  * @param[out] capabilities  A pointer to an odp_tm_capabilities_t record
  *                           where the actual limits used by the TM system are
  *                           copied into.  Note that these limits do NOT
@@ -654,10 +822,11 @@ odp_tm_t odp_tm_find(const char            *name,
  *                           a TM system was created by odp_tm_create,
  *                           but of course these limits in some cases could
  *                           be larger.
+ *
  * @return                   Returns 0 upon success, < 0 upon failure (which
  *                           indicates that the odp_tm value did not exist).
  */
-int odp_tm_capability(odp_tm_t odp_tm, odp_tm_capabilities_t *capabilities);
+int odp_tm_capability(odp_tm_t tm, odp_tm_capabilities_t *capabilities);
 
 /**
  * Start a TM system
@@ -665,7 +834,7 @@ int odp_tm_capability(odp_tm_t odp_tm, odp_tm_capabilities_t *capabilities);
  * odp_tm_start() needs to be used to start an already created or found TM
  * system. By default, all the TM systems are in stopped state.
  *
- * @param tm  TM system to be started
+ * @param tm  TM handle
  *
  * @retval 0  on success
  * @retval <0 on failure
@@ -688,7 +857,7 @@ int odp_tm_start(odp_tm_t tm);
  * A following call to odp_tm_start() restarts TM system and its scheduling/shaping
  * on existing and new packets.
  *
- * @param tm  TM system to be stopped
+ * @param tm  TM handle
  *
  * @retval 0  on success
  * @retval <0 on failure
@@ -715,11 +884,11 @@ int odp_tm_stop(odp_tm_t tm);
  * TM system, other than EVENTUALLY these packets will be either sent (in ANY
  * order) or freed.
  *
- * @param odp_tm  The odp_tm_t value of the TM system to be destroyed (and
- *                hence destroyed (and hence freed).
+ * @param tm      The handle of the TM system to be destroyed (and hence freed).
+ *
  * @return        0 upon success, < 0 upon failure.
  */
-int odp_tm_destroy(odp_tm_t odp_tm);
+int odp_tm_destroy(odp_tm_t tm);
 
 /** Marking APIs */
 
@@ -736,15 +905,16 @@ int odp_tm_destroy(odp_tm_t odp_tm);
  * calls to this function with drop_eligible_enabled == FALSE - i.e. must
  * always return 0 when disabling this feature.
  *
- * @param odp_tm                 Odp_tm is used to identify the TM system
- *                               whose egress behavior is being changed.
+ * @param tm                     Handle of the TM system whose egress behavior
+ *                               is being changed.
  * @param color                  The packet color whose egress marking is
  *                               being changed.
  * @param drop_eligible_enabled  If true then will set the DEI bit for
  *                               egressed VLAN tagged pkts with this color.
+ *
  * @return                       0 upon success, < 0 upon failure.
  */
-int odp_tm_vlan_marking(odp_tm_t           odp_tm,
+int odp_tm_vlan_marking(odp_tm_t           tm,
 			odp_packet_color_t color,
 			odp_bool_t         drop_eligible_enabled);
 
@@ -765,8 +935,8 @@ int odp_tm_vlan_marking(odp_tm_t           odp_tm,
  * calls to this function with ecn_ce_enabled == FALSE - i.e. must always
  * return 0 when disabling this feature.
  *
- * @param odp_tm          Odp_tm is used to identify the TM system whose
- *                        egress behavior is being changed.
+ * @param tm              Handle of the TM system whose egress behavior is being
+ *                        changed.
  * @param color           The packet color whose egress marking is
  *                        being changed.
  * @param ecn_ce_enabled  If true then egressed IPv4/IPv6 pkts whose
@@ -774,9 +944,10 @@ int odp_tm_vlan_marking(odp_tm_t           odp_tm,
  *                        either one of the two values 1 or 2, will set this
  *                        subfield to the value ECN_CE - i.e. Congestion
  *                        Experienced (whose value is 3).
+ *
  * @return                0 upon success, < 0 upon failure.
  */
-int odp_tm_ecn_marking(odp_tm_t           odp_tm,
+int odp_tm_ecn_marking(odp_tm_t           tm,
 		       odp_packet_color_t color,
 		       odp_bool_t         ecn_ce_enabled);
 
@@ -805,17 +976,18 @@ int odp_tm_ecn_marking(odp_tm_t           odp_tm,
  * calls to this function with drop_prec_enabled == FALSE - i.e. must always
  * return 0 when disabling this feature.
  *
- * @param odp_tm            Odp_tm is used to identify the TM system whose
- *                          egress behavior is being changed.
+ * @param tm                Handle of the TM system whose egress behavior is
+ *                          being changed.
  * @param color             The packet color whose egress marking is
  *                          being changed.
  * @param drop_prec_enabled If true then egressed IPv4/IPv6 pkts with this
  *                          color will have the pkt's Drop Precedence
  *                          sub-subfield of the DSCP subfield set to
  *                          LOW, MEDIUM or HIGH drop precedence.
+ *
  * @return                  0 upon success, < 0 upon failure.
  */
-int odp_tm_drop_prec_marking(odp_tm_t           odp_tm,
+int odp_tm_drop_prec_marking(odp_tm_t           tm,
 			     odp_packet_color_t color,
 			     odp_bool_t         drop_prec_enabled);
 
@@ -1004,11 +1176,11 @@ typedef struct {
 	/** In the case that sched_modes for a given strict priority level
 	 * indicates the use of weighted scheduling, this field supplies the
 	 * weighting factors.  The weights - when defined - are used such that
-	 * the (adjusted) frame lengths are divided by these 8-bit weights
+	 * the (adjusted) frame lengths are divided by these weights
 	 * (i.e. they are divisors and not multipliers).  Consequently a
 	 * weight of 0 (when sched_mode is ODP_TM_BYTE_BASED_WEIGHTS) is
 	 * illegal. */
-	uint8_t sched_weights[ODP_TM_MAX_PRIORITIES];
+	uint32_t sched_weights[ODP_TM_MAX_PRIORITIES];
 } odp_tm_sched_params_t;
 
 /** odp_tm_sched_params_init() must be called to initialize any
@@ -1351,6 +1523,22 @@ typedef struct {
 	 * greater levels may be connected to the fan-in of tm_node's with
 	 * numerically smaller levels. */
 	uint8_t level;
+
+	/** New strict priority level assigned to packets going through this
+	 * node when packet priority mode is ODP_TM_PKT_PRIO_MODE_OVERWRITE.
+	 * In other packet priority modes this field is ignored. The new
+	 * priority does not affect packet processing in this node but in
+	 * its destination node.
+	 *
+	 * The value must be in the range 0..ODP_TM_MAX_PRIORITIES-1.
+	 * Additionally, the total number of possible priorities seen by
+	 * the destination node must not exceed the max priority configured
+	 * for the destination node.
+	 *
+	 * @see odp_tm_pkt_prio_mode_t
+	 * @see odp_tm_level_requirements_t::max_priority
+	 */
+	uint8_t priority;
 } odp_tm_node_params_t;
 
 /** odp_tm_node_params_init() must be called to initialize any
@@ -1368,17 +1556,18 @@ void odp_tm_node_params_init(odp_tm_node_params_t *params);
  * strict priority levels for an tm_node cannot be changed after tm_node
  * creation.  The level parameter MUST be in the range 0..max_level - 1.
  *
- * @param odp_tm  Odp_tm is used to identify the TM system into which this
- *                odp_tm_node object is created.
+ * @param tm      Handle of the TM system into which this odp_tm_node object is
+ *                created.
  * @param name    Optional name that can be used later later to find this
  *                same odp_tm_node_t.  Can be NULL, otherwise must be
  *                unique across all odp_tm_node objects.
  * @param params  A pointer to a record holding (an extensible) set of
  *                properties/attributes of this tm_node.
+ *
  * @return        Returns ODP_TM_INVALID upon failure, otherwise returns
  *                a valid odp_tm_node_t handle if successful.
  */
-odp_tm_node_t odp_tm_node_create(odp_tm_t odp_tm, const char *name,
+odp_tm_node_t odp_tm_node_create(odp_tm_t tm, const char *name,
 				 const odp_tm_node_params_t *params);
 
 /** Destroy  a tm_node object.
@@ -1455,14 +1644,13 @@ int odp_tm_node_wred_config(odp_tm_node_t tm_node,
 /** odp_tm_node_lookup() can be used to find the tm_node object created with
  * the specified name.
  *
- * @param odp_tm  Odp_tm is used to identify the TM system into which this
- *                odp_tm_node object is created.
+ * @param tm      TM handle
  * @param name    Name of a previously created tm_node.  Cannot be NULL.
  *
  * @return        Returns ODP_TM_INVALID upon failure, or the tm_node
  *                handle created with this name.
  */
-odp_tm_node_t odp_tm_node_lookup(odp_tm_t odp_tm, const char *name);
+odp_tm_node_t odp_tm_node_lookup(odp_tm_t tm, const char *name);
 
 /** odp_tm_node_context() can be used to get the user_context value that is
  * associated with the given tm_node.
@@ -1518,6 +1706,12 @@ typedef struct {
 	 * have the same single strict priority level and this level must be
 	 * in the range 0..max_priority. */
 	uint8_t priority;
+
+	/** Maintain original packet order of the source queue when enqueuing
+	 * packets to this queue while holding ordered or atomic queue
+	 * synchronization context. Default value of this flag is true.
+	 */
+	odp_bool_t ordered_enqueue;
 } odp_tm_queue_params_t;
 
 /** odp_tm_queue_params_init() must be called to initialize any
@@ -1536,14 +1730,15 @@ void odp_tm_queue_params_init(odp_tm_queue_params_t *params);
  * number of buffers and instead limit the queue memory usage by buffer counts
  * versus strictly using byte counts.
  *
- * @param odp_tm  Odp_tm is used to identify the TM system into which this
- *                odp_tm_queue object is created.
+ * @param tm      Handle of the TM system into which this odp_tm_queue object is
+ *                created.
  * @param params  A pointer to a record holding (an extensible) set of
  *                properties/attributes of this tm_queue.
+ *
  * @return        Returns ODP_TM_INVALID upon failure, otherwise a valid
  *                odp_tm_queue_t handle.
  */
-odp_tm_queue_t odp_tm_queue_create(odp_tm_t odp_tm,
+odp_tm_queue_t odp_tm_queue_create(odp_tm_t tm,
 				   const odp_tm_queue_params_t *params);
 
 /** Destroy an tm_queue object. The odp_tm_queue_destroy frees the resources
@@ -1561,7 +1756,7 @@ int odp_tm_queue_destroy(odp_tm_queue_t tm_queue);
  * @param tm_queue  Specifies the tm_queue whose user_context is to be
  *                  returned.
  * @return          Returns the user_context pointer associated with this
- *                  tm_queue.  Returns NULL if the tm_quue is not valid OR
+ *                  tm_queue. Returns NULL if the tm_queue is not valid OR
  *                  if the user_context was NULL.
  */
 void *odp_tm_queue_context(odp_tm_queue_t tm_queue);
@@ -1719,6 +1914,22 @@ int odp_tm_queue_disconnect(odp_tm_queue_t tm_queue);
  */
 int odp_tm_enq(odp_tm_queue_t tm_queue, odp_packet_t pkt);
 
+/** The odp_tm_enq_multi() function is used to add packets to a given TM system.
+ * This function enqueues multiple packets but is otherwise similar to
+ * odp_tm_enq(). Packets dropped by WRED or other queue management action do not
+ * cause this function to return a failure. Such packets get consumed just like
+ * the packets that are not dropped.
+ *
+ * @param tm_queue  Specifies the tm_queue (and indirectly the TM system).
+ * @param packets   Array of packets to enqueue.
+ * @param num       Number of packets to send.
+ *
+ * @retval >0  on success indicating number of packets consumed
+ * @retval <=0 on failure.
+ */
+int odp_tm_enq_multi(odp_tm_queue_t tm_queue, const odp_packet_t packets[],
+		     int num);
+
 /** The odp_tm_enq_with_cnt() function behaves identically to odp_tm_enq(),
  * except that it also returns (an approximation to?) the current tm_queue
  * packet queue count.
@@ -1862,7 +2073,7 @@ typedef struct {
 	odp_tm_wred_t wred_profile[ODP_NUM_PACKET_COLORS];
 
 	/** The next_tm_node is the "next" node in the tree - i.e. the fanout
-	 * of this tm_queu.  Can be ODP_TM_ROOT if this tm_queue directly
+	 * of this tm_queue. Can be ODP_TM_ROOT if this tm_queue directly
 	 * connects to the egress spigot and can be ODP_TM_INVALID if this
 	 * tm_queue is disconnected from the TM system tree. */
 	odp_tm_node_t next_tm_node;
@@ -1956,12 +2167,10 @@ typedef struct {
 } odp_tm_query_info_t;
 
 /** The odp_tm_queue_query() function can be used to check a single tm_queue's
- * queue utilization.  The query_flags indicate whether or not packet counts,
- * byte counts or both are being requested.  It is an error to request
- * neither.  The implementation may still return both sets of counts
- * regardless of query_flags if the cost of returning all the counts is
- * comparable to the cost of checking the query_flags. The info structure is
- * written only on success.
+ * queue utilization.  The query flags indicate which information is being
+ * requested.
+ * The implementation may choose to return additional information that was not
+ * requested. The info structure is written only on success.
  *
  * @param      tm_queue     Specifies the tm_queue (and indirectly the
  *                          TM system).
@@ -1976,12 +2185,10 @@ int odp_tm_queue_query(odp_tm_queue_t       tm_queue,
 		       odp_tm_query_info_t *info);
 
 /** The odp_tm_priority_query() function can be used to check the queue
- * utilization of all tm_queue's with the given priority.  The query_flags
- * indicate whether or not packet counts, byte counts or both are being
- * requested.  It is an error to request neither.  The implementation may
- * still return both sets of counts regardless of query_flags if the cost of
- * returning all the counts is comparable to the cost of checking the
- * query_flags. The info structure is written only on success.
+ * utilization of all tm_queue's with the given priority.  The query flags
+ * indicate which information is being requested. The implementation may
+ * choose to return additional information that was not requested.
+ * The info structure is written only on success.
  *
  * @param      odp_tm       Specifies the TM system.
  * @param      priority     Supplies the strict priority level used to specify
@@ -1999,11 +2206,9 @@ int odp_tm_priority_query(odp_tm_t             odp_tm,
 
 /** The odp_tm_total_query() function can be used to check the queue
  * utilization of all tm_queue's in a single TM system.  The query_flags
- * indicate whether or not packet counts, byte counts or both are being
- * requested.  It is an error to request neither.  The implementation may
- * still return both sets of counts regardless of query_flags if the cost of
- * returning all the counts is comparable to the cost of checking the
- * query_flags. The info structure is written only on success.
+ * indicate which information is being requested. The implementation may
+ * choose to return additional information that was not requested.
+ * The info structure is written only on success.
  *
  * @param      odp_tm       Specifies the TM system.
  * @param      query_flags  A set of flag bits indicating which counters are
@@ -2041,13 +2246,14 @@ int odp_tm_priority_threshold_config(odp_tm_t           odp_tm,
  * other than returning these queue threshold values in the
  * odp_tm_query_info_t record.
  *
- * @param odp_tm              Specifies the TM system.
+ * @param tm                  TM handle
  * @param thresholds_profile  Specifies the queue threshold profile that
  *                            should now be used for the entire TM
  *                            system.
+ *
  * @return                    Returns 0 upon success and < 0 upon failure.
  */
-int odp_tm_total_threshold_config(odp_tm_t odp_tm,
+int odp_tm_total_threshold_config(odp_tm_t tm,
 				  odp_tm_threshold_t thresholds_profile);
 
 /** The odp_tm_is_idle function is used to determine if the specified ODP
@@ -2059,23 +2265,41 @@ int odp_tm_total_threshold_config(odp_tm_t odp_tm,
  * since for some implementations this call could take a fairly long time
  * to execute!
  *
- * @param odp_tm  Specifies the TM system.
+ * @param tm      TM handle
+ *
  * @return        Returns 1 if the TM system is idle and 0 otherwise.
  */
-odp_bool_t odp_tm_is_idle(odp_tm_t odp_tm);
+odp_bool_t odp_tm_is_idle(odp_tm_t tm);
 
 /** The odp_tm_stats_print function is used to write implementation-defined
  * information about the specified TM system to the ODP log. The intended use
  * is for debugging.
  *
- * @param odp_tm  Specifies the TM system.
+ * @param tm      TM handle
  */
-void odp_tm_stats_print(odp_tm_t odp_tm);
+void odp_tm_stats_print(odp_tm_t tm);
+
+/**
+ * Get statistics for a TM queue
+ *
+ * Counters not supported by the queue are set to zero.
+ *
+ * It's implementation defined if odp_pktio_stats_reset() call affects these
+ * counters.
+ *
+ * @param      tm_queue TM queue handle
+ * @param[out] stats    Statistics structure for output
+ *
+ * @retval  0 on success
+ * @retval <0 on failure
+ */
+int odp_tm_queue_stats(odp_tm_queue_t tm_queue, odp_tm_queue_stats_t *stats);
 
 /**
  * Get printable value for an odp_tm_t
  *
- * @param hdl  odp_tm_t handle to be printed
+ * @param tm   TM handle
+ *
  * @return     uint64_t value that can be used to print/display this
  *             handle
  *
@@ -2083,7 +2307,7 @@ void odp_tm_stats_print(odp_tm_t odp_tm);
  * to enable applications to generate a printable value that represents
  * an odp_tm_t handle.
  */
-uint64_t odp_tm_to_u64(odp_tm_t hdl);
+uint64_t odp_tm_to_u64(odp_tm_t tm);
 
 /**
  * Get printable value for an odp_tm_queue_t

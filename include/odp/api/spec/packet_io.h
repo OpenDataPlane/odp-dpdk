@@ -21,7 +21,7 @@ extern "C" {
 
 #include <odp/api/deprecated.h>
 #include <odp/api/packet_io_stats.h>
-#include <odp/api/queue.h>
+#include <odp/api/queue_types.h>
 #include <odp/api/reassembly.h>
 #include <odp/api/time.h>
 #include <odp/api/packet.h>
@@ -505,6 +505,9 @@ typedef union odp_pktout_config_opt_t {
 		 * 1: Application may request packet TX completion events
 		 */
 		uint64_t tx_compl_ena : 1;
+
+		/** Enable packet protocol stats update */
+		uint64_t proto_stats_ena : 1;
 
 	} bit;
 

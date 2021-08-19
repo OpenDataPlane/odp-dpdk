@@ -430,6 +430,8 @@ uint32_t _odp_ipsec_auth_digest_len(odp_auth_alg_t auth)
 		return 16;
 	case ODP_AUTH_ALG_AES_CCM:
 		return 16;
+	case ODP_AUTH_ALG_AES_CMAC:
+		return 12;
 	case ODP_AUTH_ALG_CHACHA20_POLY1305:
 		return 16;
 	default:
@@ -628,6 +630,10 @@ odp_ipsec_sa_t odp_ipsec_sa_create(const odp_ipsec_sa_param_t *param)
 
 	crypto_param.auth_digest_len =
 		_odp_ipsec_auth_digest_len(crypto_param.auth_alg);
+
+	if (param->crypto.icv_len != 0 &&
+	    param->crypto.icv_len != crypto_param.auth_digest_len)
+		goto error;
 
 	if ((uint32_t)-1 == crypto_param.cipher_iv.length ||
 	    (uint32_t)-1 == crypto_param.auth_digest_len)

@@ -31,12 +31,16 @@ odpapiinclude_HEADERS = \
 	odp/api/init.h \
 	odp/api/ipsec.h \
 	odp/api/packet.h \
+	odp/api/packet_types.h \
 	odp/api/packet_flags.h \
 	odp/api/packet_io.h \
 	odp/api/packet_io_stats.h \
 	odp/api/protocols.h \
 	odp/api/pool.h \
+	odp/api/proto_stats.h \
+	odp/api/proto_stats_types.h \
 	odp/api/queue.h \
+	odp/api/queue_types.h \
 	odp/api/random.h \
 	odp/api/reassembly.h \
 	odp/api/rwlock.h \
@@ -47,7 +51,7 @@ odpapiinclude_HEADERS = \
 	odp/api/spinlock.h \
 	odp/api/spinlock_recursive.h \
 	odp/api/stash.h \
-	odp/api/std_clib.h \
+	odp/api/std.h \
 	odp/api/std_types.h \
 	odp/api/support.h \
 	odp/api/sync.h \
@@ -83,11 +87,15 @@ odpapispecinclude_HEADERS = \
 		  odp/api/spec/init.h \
 		  odp/api/spec/ipsec.h \
 		  odp/api/spec/packet.h \
+		  odp/api/spec/packet_types.h \
 		  odp/api/spec/packet_flags.h \
 		  odp/api/spec/packet_io.h \
 		  odp/api/spec/packet_io_stats.h \
 		  odp/api/spec/protocols.h \
 		  odp/api/spec/pool.h \
+		  odp/api/spec/pool_types.h \
+		  odp/api/spec/proto_stats.h \
+		  odp/api/spec/proto_stats_types.h \
 		  odp/api/spec/queue.h \
 		  odp/api/spec/queue_types.h \
 		  odp/api/spec/random.h \
@@ -100,7 +108,7 @@ odpapispecinclude_HEADERS = \
 		  odp/api/spec/spinlock.h \
 		  odp/api/spec/spinlock_recursive.h \
 		  odp/api/spec/stash.h \
-		  odp/api/spec/std_clib.h \
+		  odp/api/spec/std.h \
 		  odp/api/spec/std_types.h \
 		  odp/api/spec/support.h \
 		  odp/api/spec/sync.h \
@@ -137,10 +145,14 @@ odpapiabidefaultinclude_HEADERS = \
 	odp/api/abi-default/init.h \
 	odp/api/abi-default/ipsec.h \
 	odp/api/abi-default/packet.h \
+	odp/api/abi-default/packet_types.h \
 	odp/api/abi-default/packet_flags.h \
 	odp/api/abi-default/packet_io.h \
+	odp/api/abi-default/proto_stats.h \
+	odp/api/abi-default/proto_stats_types.h \
 	odp/api/abi-default/pool.h \
 	odp/api/abi-default/queue.h \
+	odp/api/abi-default/queue_types.h \
 	odp/api/abi-default/rwlock.h \
 	odp/api/abi-default/rwlock_recursive.h \
 	odp/api/abi-default/schedule.h \
@@ -149,7 +161,7 @@ odpapiabidefaultinclude_HEADERS = \
 	odp/api/abi-default/spinlock.h \
 	odp/api/abi-default/spinlock_recursive.h \
 	odp/api/abi-default/stash.h \
-	odp/api/abi-default/std_clib.h \
+	odp/api/abi-default/std.h \
 	odp/api/abi-default/std_types.h \
 	odp/api/abi-default/sync.h \
 	odp/api/abi-default/thread.h \
@@ -183,10 +195,14 @@ odpapiabiarchinclude_HEADERS = \
 	odp/arch/arm32-linux/odp/api/abi/init.h \
 	odp/arch/arm32-linux/odp/api/abi/ipsec.h \
 	odp/arch/arm32-linux/odp/api/abi/packet.h \
+	odp/arch/arm32-linux/odp/api/abi/packet_types.h \
 	odp/arch/arm32-linux/odp/api/abi/packet_flags.h \
 	odp/arch/arm32-linux/odp/api/abi/packet_io.h \
 	odp/arch/arm32-linux/odp/api/abi/pool.h \
+	odp/arch/arm32-linux/odp/api/abi/proto_stats.h \
+	odp/arch/arm32-linux/odp/api/abi/proto_stats_types.h \
 	odp/arch/arm32-linux/odp/api/abi/queue.h \
+	odp/arch/arm32-linux/odp/api/abi/queue_types.h \
 	odp/arch/arm32-linux/odp/api/abi/rwlock.h \
 	odp/arch/arm32-linux/odp/api/abi/rwlock_recursive.h \
 	odp/arch/arm32-linux/odp/api/abi/schedule.h \
@@ -195,7 +211,7 @@ odpapiabiarchinclude_HEADERS = \
 	odp/arch/arm32-linux/odp/api/abi/spinlock.h \
 	odp/arch/arm32-linux/odp/api/abi/spinlock_recursive.h \
 	odp/arch/arm32-linux/odp/api/abi/stash.h \
-	odp/arch/arm32-linux/odp/api/abi/std_clib.h \
+	odp/arch/arm32-linux/odp/api/abi/std.h \
 	odp/arch/arm32-linux/odp/api/abi/std_types.h \
 	odp/arch/arm32-linux/odp/api/abi/sync.h \
 	odp/arch/arm32-linux/odp/api/abi/thread.h \
@@ -225,10 +241,14 @@ odpapiabiarchinclude_HEADERS = \
 	odp/arch/arm64-linux/odp/api/abi/init.h \
 	odp/arch/arm64-linux/odp/api/abi/ipsec.h \
 	odp/arch/arm64-linux/odp/api/abi/packet.h \
+	odp/arch/arm64-linux/odp/api/abi/packet_types.h \
 	odp/arch/arm64-linux/odp/api/abi/packet_flags.h \
 	odp/arch/arm64-linux/odp/api/abi/packet_io.h \
 	odp/arch/arm64-linux/odp/api/abi/pool.h \
+	odp/arch/arm64-linux/odp/api/abi/proto_stats.h \
+	odp/arch/arm64-linux/odp/api/abi/proto_stats_types.h \
 	odp/arch/arm64-linux/odp/api/abi/queue.h \
+	odp/arch/arm64-linux/odp/api/abi/queue_types.h \
 	odp/arch/arm64-linux/odp/api/abi/rwlock.h \
 	odp/arch/arm64-linux/odp/api/abi/rwlock_recursive.h \
 	odp/arch/arm64-linux/odp/api/abi/schedule.h \
@@ -237,7 +257,7 @@ odpapiabiarchinclude_HEADERS = \
 	odp/arch/arm64-linux/odp/api/abi/spinlock.h \
 	odp/arch/arm64-linux/odp/api/abi/spinlock_recursive.h \
 	odp/arch/arm64-linux/odp/api/abi/stash.h \
-	odp/arch/arm64-linux/odp/api/abi/std_clib.h \
+	odp/arch/arm64-linux/odp/api/abi/std.h \
 	odp/arch/arm64-linux/odp/api/abi/std_types.h \
 	odp/arch/arm64-linux/odp/api/abi/sync.h \
 	odp/arch/arm64-linux/odp/api/abi/thread.h \
@@ -267,10 +287,14 @@ odpapiabiarchinclude_HEADERS = \
 	odp/arch/default-linux/odp/api/abi/init.h \
 	odp/arch/default-linux/odp/api/abi/ipsec.h \
 	odp/arch/default-linux/odp/api/abi/packet.h \
+	odp/arch/default-linux/odp/api/abi/packet_types.h \
 	odp/arch/default-linux/odp/api/abi/packet_flags.h \
 	odp/arch/default-linux/odp/api/abi/packet_io.h \
 	odp/arch/default-linux/odp/api/abi/pool.h \
+	odp/arch/default-linux/odp/api/abi/proto_stats.h \
+	odp/arch/default-linux/odp/api/abi/proto_stats_types.h \
 	odp/arch/default-linux/odp/api/abi/queue.h \
+	odp/arch/default-linux/odp/api/abi/queue_types.h \
 	odp/arch/default-linux/odp/api/abi/rwlock.h \
 	odp/arch/default-linux/odp/api/abi/rwlock_recursive.h \
 	odp/arch/default-linux/odp/api/abi/schedule.h \
@@ -279,7 +303,7 @@ odpapiabiarchinclude_HEADERS = \
 	odp/arch/default-linux/odp/api/abi/spinlock.h \
 	odp/arch/default-linux/odp/api/abi/spinlock_recursive.h \
 	odp/arch/default-linux/odp/api/abi/stash.h \
-	odp/arch/default-linux/odp/api/abi/std_clib.h \
+	odp/arch/default-linux/odp/api/abi/std.h \
 	odp/arch/default-linux/odp/api/abi/std_types.h \
 	odp/arch/default-linux/odp/api/abi/sync.h \
 	odp/arch/default-linux/odp/api/abi/thread.h \
@@ -309,10 +333,14 @@ odpapiabiarchinclude_HEADERS = \
 	odp/arch/mips64-linux/odp/api/abi/init.h \
 	odp/arch/mips64-linux/odp/api/abi/ipsec.h \
 	odp/arch/mips64-linux/odp/api/abi/packet.h \
+	odp/arch/mips64-linux/odp/api/abi/packet_types.h \
 	odp/arch/mips64-linux/odp/api/abi/packet_flags.h \
 	odp/arch/mips64-linux/odp/api/abi/packet_io.h \
 	odp/arch/mips64-linux/odp/api/abi/pool.h \
+	odp/arch/mips64-linux/odp/api/abi/proto_stats.h \
+	odp/arch/mips64-linux/odp/api/abi/proto_stats_types.h \
 	odp/arch/mips64-linux/odp/api/abi/queue.h \
+	odp/arch/mips64-linux/odp/api/abi/queue_types.h \
 	odp/arch/mips64-linux/odp/api/abi/rwlock.h \
 	odp/arch/mips64-linux/odp/api/abi/rwlock_recursive.h \
 	odp/arch/mips64-linux/odp/api/abi/schedule.h \
@@ -321,7 +349,7 @@ odpapiabiarchinclude_HEADERS = \
 	odp/arch/mips64-linux/odp/api/abi/spinlock.h \
 	odp/arch/mips64-linux/odp/api/abi/spinlock_recursive.h \
 	odp/arch/mips64-linux/odp/api/abi/stash.h \
-	odp/arch/mips64-linux/odp/api/abi/std_clib.h \
+	odp/arch/mips64-linux/odp/api/abi/std.h \
 	odp/arch/mips64-linux/odp/api/abi/std_types.h \
 	odp/arch/mips64-linux/odp/api/abi/sync.h \
 	odp/arch/mips64-linux/odp/api/abi/thread.h \
@@ -351,10 +379,14 @@ odpapiabiarchinclude_HEADERS = \
 	odp/arch/power64-linux/odp/api/abi/init.h \
 	odp/arch/power64-linux/odp/api/abi/ipsec.h \
 	odp/arch/power64-linux/odp/api/abi/packet.h \
+	odp/arch/power64-linux/odp/api/abi/packet_types.h \
 	odp/arch/power64-linux/odp/api/abi/packet_flags.h \
 	odp/arch/power64-linux/odp/api/abi/packet_io.h \
 	odp/arch/power64-linux/odp/api/abi/pool.h \
+	odp/arch/power64-linux/odp/api/abi/proto_stats.h \
+	odp/arch/power64-linux/odp/api/abi/proto_stats_types.h \
 	odp/arch/power64-linux/odp/api/abi/queue.h \
+	odp/arch/power64-linux/odp/api/abi/queue_types.h \
 	odp/arch/power64-linux/odp/api/abi/rwlock.h \
 	odp/arch/power64-linux/odp/api/abi/rwlock_recursive.h \
 	odp/arch/power64-linux/odp/api/abi/schedule.h \
@@ -363,7 +395,7 @@ odpapiabiarchinclude_HEADERS = \
 	odp/arch/power64-linux/odp/api/abi/spinlock.h \
 	odp/arch/power64-linux/odp/api/abi/spinlock_recursive.h \
 	odp/arch/power64-linux/odp/api/abi/stash.h \
-	odp/arch/power64-linux/odp/api/abi/std_clib.h \
+	odp/arch/power64-linux/odp/api/abi/std.h \
 	odp/arch/power64-linux/odp/api/abi/std_types.h \
 	odp/arch/power64-linux/odp/api/abi/sync.h \
 	odp/arch/power64-linux/odp/api/abi/thread.h \
@@ -393,10 +425,14 @@ odpapiabiarchinclude_HEADERS = \
 	odp/arch/x86_32-linux/odp/api/abi/init.h \
 	odp/arch/x86_32-linux/odp/api/abi/ipsec.h \
 	odp/arch/x86_32-linux/odp/api/abi/packet.h \
+	odp/arch/x86_32-linux/odp/api/abi/packet_types.h \
 	odp/arch/x86_32-linux/odp/api/abi/packet_flags.h \
 	odp/arch/x86_32-linux/odp/api/abi/packet_io.h \
 	odp/arch/x86_32-linux/odp/api/abi/pool.h \
+	odp/arch/x86_32-linux/odp/api/abi/proto_stats.h \
+	odp/arch/x86_32-linux/odp/api/abi/proto_stats_types.h \
 	odp/arch/x86_32-linux/odp/api/abi/queue.h \
+	odp/arch/x86_32-linux/odp/api/abi/queue_types.h \
 	odp/arch/x86_32-linux/odp/api/abi/rwlock.h \
 	odp/arch/x86_32-linux/odp/api/abi/rwlock_recursive.h \
 	odp/arch/x86_32-linux/odp/api/abi/schedule.h \
@@ -405,7 +441,7 @@ odpapiabiarchinclude_HEADERS = \
 	odp/arch/x86_32-linux/odp/api/abi/spinlock.h \
 	odp/arch/x86_32-linux/odp/api/abi/spinlock_recursive.h \
 	odp/arch/x86_32-linux/odp/api/abi/stash.h \
-	odp/arch/x86_32-linux/odp/api/abi/std_clib.h \
+	odp/arch/x86_32-linux/odp/api/abi/std.h \
 	odp/arch/x86_32-linux/odp/api/abi/std_types.h \
 	odp/arch/x86_32-linux/odp/api/abi/sync.h \
 	odp/arch/x86_32-linux/odp/api/abi/thread.h \
@@ -435,10 +471,14 @@ odpapiabiarchinclude_HEADERS = \
 	odp/arch/x86_64-linux/odp/api/abi/init.h \
 	odp/arch/x86_64-linux/odp/api/abi/ipsec.h \
 	odp/arch/x86_64-linux/odp/api/abi/packet.h \
+	odp/arch/x86_64-linux/odp/api/abi/packet_types.h \
 	odp/arch/x86_64-linux/odp/api/abi/packet_flags.h \
 	odp/arch/x86_64-linux/odp/api/abi/packet_io.h \
 	odp/arch/x86_64-linux/odp/api/abi/pool.h \
+	odp/arch/x86_64-linux/odp/api/abi/proto_stats.h \
+	odp/arch/x86_64-linux/odp/api/abi/proto_stats_types.h \
 	odp/arch/x86_64-linux/odp/api/abi/queue.h \
+	odp/arch/x86_64-linux/odp/api/abi/queue_types.h \
 	odp/arch/x86_64-linux/odp/api/abi/rwlock.h \
 	odp/arch/x86_64-linux/odp/api/abi/rwlock_recursive.h \
 	odp/arch/x86_64-linux/odp/api/abi/schedule.h \
@@ -447,7 +487,7 @@ odpapiabiarchinclude_HEADERS = \
 	odp/arch/x86_64-linux/odp/api/abi/spinlock.h \
 	odp/arch/x86_64-linux/odp/api/abi/spinlock_recursive.h \
 	odp/arch/x86_64-linux/odp/api/abi/stash.h \
-	odp/arch/x86_64-linux/odp/api/abi/std_clib.h \
+	odp/arch/x86_64-linux/odp/api/abi/std.h \
 	odp/arch/x86_64-linux/odp/api/abi/std_types.h \
 	odp/arch/x86_64-linux/odp/api/abi/sync.h \
 	odp/arch/x86_64-linux/odp/api/abi/thread.h \

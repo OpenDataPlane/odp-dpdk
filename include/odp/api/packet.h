@@ -20,8 +20,8 @@ extern "C" {
 #include <odp/api/std_types.h>
 #include <odp/api/abi/event.h>
 #include <odp/api/abi/packet_io.h>
+#include <odp/api/abi/packet_types.h>
 #include <odp/api/abi/packet.h>
-#include <odp/api/abi/queue.h>
 #include <odp/api/abi/buffer.h>
 #include <odp/api/abi/pool.h>
 

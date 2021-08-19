@@ -1,5 +1,5 @@
 /* Copyright (c) 2013-2018, Linaro Limited
- * Copyright (c) 2019-2020, Nokia
+ * Copyright (c) 2019-2021, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -24,6 +24,7 @@
 #include <odp_event_vector_internal.h>
 
 #include <string.h>
+#include <stddef.h>
 #include <stdlib.h>
 #include <math.h>
 #include <inttypes.h>
@@ -293,7 +294,7 @@ struct mbuf_ctor_arg {
 	pool_t	*pool;
 	uint16_t seg_buf_offset; /* To skip the ODP buf/pkt/tmo header */
 	uint16_t seg_buf_size;   /* size of user data */
-	int type;                /* ODP pool type */
+	odp_pool_type_t type;    /* ODP pool type */
 	int event_type;          /* ODP event type */
 	int pkt_uarea_size;      /* size of user area in bytes */
 };
@@ -574,6 +575,7 @@ odp_pool_t odp_pool_create(const char *name, const odp_pool_param_t *params)
 	struct rte_pktmbuf_pool_private mbp_ctor_arg;
 	struct mbuf_ctor_arg mb_ctor_arg;
 	odp_pool_t pool_hdl = ODP_POOL_INVALID;
+	odp_pool_type_t type = params->type;
 	unsigned int mb_size, i, cache_size;
 	size_t hdr_size;
 	pool_t *pool;
@@ -606,7 +608,10 @@ odp_pool_t odp_pool_create(const char *name, const odp_pool_param_t *params)
 			continue;
 		}
 
-		switch (params->type) {
+		memset(&pool->memset_mark, 0,
+		       sizeof(pool_t) - offsetof(pool_t, memset_mark));
+
+		switch (type) {
 		case ODP_POOL_BUFFER:
 			buf_align = params->buf.align;
 			blk_size = params->buf.size;
@@ -702,8 +707,7 @@ odp_pool_t odp_pool_create(const char *name, const odp_pool_param_t *params)
 			ODP_DBG("type: vector, name: %s, num: %u\n", pool_name, num);
 			break;
 		default:
-			ODP_ERR("Bad type %i\n",
-				params->type);
+			ODP_ERR("Bad pool type %i\n", (int)type);
 			UNLOCK(&pool->lock);
 			return ODP_POOL_INVALID;
 		}
@@ -711,7 +715,7 @@ odp_pool_t odp_pool_create(const char *name, const odp_pool_param_t *params)
 		mb_ctor_arg.seg_buf_offset =
 			(uint16_t)ROUNDUP_CACHE_LINE(hdr_size);
 		mb_ctor_arg.seg_buf_size = mbp_ctor_arg.mbuf_data_room_size;
-		mb_ctor_arg.type = params->type;
+		mb_ctor_arg.type = type;
 		mb_ctor_arg.event_type = event_type;
 		mb_size = mb_ctor_arg.seg_buf_offset + mb_ctor_arg.seg_buf_size;
 		mb_ctor_arg.pool = pool;
@@ -725,7 +729,7 @@ odp_pool_t odp_pool_create(const char *name, const odp_pool_param_t *params)
 
 		format_pool_name(pool_name, rte_name);
 
-		if (params->type == ODP_POOL_PACKET) {
+		if (type == ODP_POOL_PACKET) {
 			uint16_t data_room_size, priv_size;
 
 			data_room_size  = mbp_ctor_arg.mbuf_data_room_size;
@@ -763,6 +767,7 @@ odp_pool_t odp_pool_create(const char *name, const odp_pool_param_t *params)
 		}
 
 		pool->rte_mempool = mp;
+		pool->type = type;
 		pool->params = *params;
 		ODP_DBG("Header/element/trailer size: %u/%u/%u, "
 			"total pool size: %lu\n",
@@ -803,9 +808,9 @@ static inline int buffer_alloc_multi(pool_t *pool, odp_buffer_hdr_t *buf_hdr[],
 	int i;
 	struct rte_mempool *mp = pool->rte_mempool;
 
-	ODP_ASSERT(pool->params.type == ODP_POOL_BUFFER ||
-		   pool->params.type == ODP_POOL_TIMEOUT ||
-		   pool->params.type == ODP_POOL_VECTOR);
+	ODP_ASSERT(pool->type == ODP_POOL_BUFFER ||
+		   pool->type == ODP_POOL_TIMEOUT ||
+		   pool->type == ODP_POOL_VECTOR);
 
 	for (i = 0; i < num; i++) {
 		struct rte_mbuf *mbuf;
@@ -890,7 +895,7 @@ int odp_pool_info(odp_pool_t pool_hdl, odp_pool_info_t *info)
 	info->name = pool->name;
 	info->params = pool->params;
 
-	if (pool->params.type == ODP_POOL_PACKET)
+	if (pool->type == ODP_POOL_PACKET)
 		info->pkt.max_num = pool->rte_mempool->size;
 
 	memset(&args, 0, sizeof(struct mem_cb_arg_t));
@@ -986,4 +991,38 @@ int odp_pool_stats(odp_pool_t pool_hdl, odp_pool_stats_t *stats)
 int odp_pool_stats_reset(odp_pool_t pool_hdl ODP_UNUSED)
 {
 	return 0;
+}
+
+int odp_pool_ext_capability(odp_pool_type_t type, odp_pool_ext_capability_t *capa)
+{
+	if (type != ODP_POOL_PACKET)
+		return -1;
+
+	memset(capa, 0, sizeof(odp_pool_ext_capability_t));
+
+	capa->type = type;
+	capa->max_pools = 0;
+
+	return 0;
+}
+
+void odp_pool_ext_param_init(odp_pool_type_t type ODP_UNUSED,
+			     odp_pool_ext_param_t *param)
+{
+	memset(param, 0, sizeof(odp_pool_ext_param_t));
+}
+
+odp_pool_t odp_pool_ext_create(const char *name ODP_UNUSED,
+			       const odp_pool_ext_param_t *param ODP_UNUSED)
+{
+	return ODP_POOL_INVALID;
+}
+
+int odp_pool_ext_populate(odp_pool_t pool_hdl ODP_UNUSED,
+			  void *buf[] ODP_UNUSED,
+			  uint32_t buf_size ODP_UNUSED,
+			  uint32_t num ODP_UNUSED,
+			  uint32_t flags ODP_UNUSED)
+{
+	return -1;
 }
