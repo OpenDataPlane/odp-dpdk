@@ -8,6 +8,7 @@
 #include <odp_posix_extensions.h>
 
 #include <odp/api/shared_memory.h>
+#include <odp/api/thread.h>
 #include <odp/api/ticketlock.h>
 #include <odp/api/timer.h>
 #include <odp/api/plat/queue_inlines.h>
@@ -17,6 +18,7 @@
 #include <odp_libconfig_internal.h>
 #include <odp_queue_if.h>
 #include <odp_ring_u32_internal.h>
+#include <odp_thread_internal.h>
 #include <odp_timer_internal.h>
 
 #include <rte_cycles.h>
@@ -99,6 +101,19 @@ typedef struct timer_pool_s {
 
 } timer_pool_t;
 
+/* Wrappers for alternative DPDK timer implementation */
+typedef int (*timer_stop_fn)(struct rte_timer *tim);
+typedef int (*timer_manage_fn)(void);
+typedef int (*timer_reset_fn)(struct rte_timer *tim, uint64_t ticks,
+			      enum rte_timer_type type, unsigned int tim_lcore,
+			      rte_timer_cb_t fct, void *arg);
+
+typedef struct timer_ops_t {
+	timer_stop_fn   stop;
+	timer_manage_fn manage;
+	timer_reset_fn  reset;
+} timer_ops_t;
+
 typedef struct {
 	timer_pool_t timer_pool[MAX_TIMER_POOLS];
 	odp_shm_t shm;
@@ -108,12 +123,18 @@ typedef struct {
 	odp_time_t poll_interval_time;
 	int num_timer_pools;
 	int poll_interval;
+	uint32_t data_id;
+	uint8_t use_alternate;
+	timer_ops_t ops;
 
 } timer_global_t;
 
 typedef struct timer_local_t {
-	odp_time_t last_run;
-	int        run_cnt;
+	odp_time_t   last_run;
+	uint64_t     thrmask_epoch;
+	int          run_cnt;
+	int          num_poll_cores;
+	unsigned int poll_cores[ODP_THREAD_COUNT_MAX];
 
 } timer_local_t;
 
@@ -122,6 +143,87 @@ static timer_global_t *timer_global;
 
 /* Timer thread local data */
 static __thread timer_local_t timer_local;
+
+static void timer_cb(struct rte_timer *rte_timer, void *arg ODP_UNUSED)
+{
+	timer_entry_t *timer = rte_timer->arg;
+	odp_event_t event;
+	odp_queue_t queue;
+
+	odp_ticketlock_lock(&timer->lock);
+
+	if (timer->state != TICKING) {
+		ODP_ERR("Timer has been cancelled or freed.\n");
+		odp_ticketlock_unlock(&timer->lock);
+		return;
+	}
+
+	queue = timer->queue;
+	event = timer->tmo_event;
+	timer->tmo_event = ODP_EVENT_INVALID;
+	timer->state = EXPIRED;
+
+	odp_ticketlock_unlock(&timer->lock);
+
+	if (odp_unlikely(odp_queue_enq(queue, event))) {
+		ODP_ERR("Timeout event enqueue failed.\n");
+		odp_event_free(event);
+	}
+}
+
+static void timer_alt_manage_cb(struct rte_timer *rte_timer)
+{
+	timer_cb(rte_timer, NULL);
+}
+
+static inline int timer_stop(struct rte_timer *tim)
+{
+	return rte_timer_stop(tim);
+}
+
+static inline int timer_alt_stop(struct rte_timer *tim)
+{
+	return rte_timer_alt_stop(timer_global->data_id, tim);
+}
+
+static inline int timer_manage(void)
+{
+	return rte_timer_manage();
+}
+
+static inline int timer_alt_manage(void)
+{
+	uint64_t thrmask_epoch = _odp_thread_thrmask_epoch();
+
+	if (odp_unlikely(timer_local.thrmask_epoch != thrmask_epoch)) {
+		int cpu_ids = _odp_thread_cpu_ids(timer_local.poll_cores,
+							ODP_THREAD_COUNT_MAX);
+
+		timer_local.num_poll_cores = cpu_ids;
+		timer_local.thrmask_epoch = thrmask_epoch;
+	}
+
+	return rte_timer_alt_manage(timer_global->data_id,
+				    timer_local.poll_cores,
+				    timer_local.num_poll_cores,
+				    timer_alt_manage_cb);
+}
+
+static inline int timer_reset(struct rte_timer *tim, uint64_t ticks,
+			      enum rte_timer_type type, unsigned int tim_lcore,
+			      rte_timer_cb_t fct, void *arg)
+{
+	return rte_timer_reset(tim, ticks, type, tim_lcore, fct, arg);
+}
+
+static inline  int timer_alt_reset(struct rte_timer *tim, uint64_t ticks,
+				   enum rte_timer_type type,
+				   unsigned int tim_lcore, rte_timer_cb_t fct,
+				   void *arg)
+{
+	return rte_timer_alt_reset(timer_global->data_id, tim, ticks, type,
+				   tim_lcore, fct, arg);
+}
 
 static inline timer_pool_t *timer_pool_from_hdl(odp_timer_pool_t hdl)
 {
@@ -168,6 +270,8 @@ int _odp_timer_init_global(const odp_init_t *params)
 	timer_global->shm = shm;
 	odp_ticketlock_init(&timer_global->lock);
 
+	ODP_PRINT("\nTimer config:\n");
+
 	conf_str =  "timer.inline_poll_interval";
 	if (!_odp_libconfig_lookup_int(conf_str, &val)) {
 		ODP_ERR("Config option '%s' not found.\n", conf_str);
@@ -175,6 +279,7 @@ int _odp_timer_init_global(const odp_init_t *params)
 		return -1;
 	}
 	timer_global->poll_interval = val;
+	ODP_PRINT("  %s: %d\n", conf_str, val);
 
 	conf_str =  "timer.inline_poll_interval_nsec";
 	if (!_odp_libconfig_lookup_int(conf_str, &val)) {
@@ -185,14 +290,53 @@ int _odp_timer_init_global(const odp_init_t *params)
 	timer_global->poll_interval_nsec = val;
 	timer_global->poll_interval_time =
 		odp_time_global_from_ns(timer_global->poll_interval_nsec);
+	ODP_PRINT("  %s: %d\n", conf_str, val);
 
-	rte_timer_subsystem_init();
+	conf_str =  "timer.alternate";
+	if (!_odp_libconfig_lookup_int(conf_str, &val)) {
+		ODP_ERR("Config option '%s' not found.\n", conf_str);
+		odp_shm_free(shm);
+		return -1;
+	}
+	timer_global->use_alternate = !!val;
+	ODP_PRINT("  %s: %" PRIu8 "\n", conf_str, timer_global->use_alternate);
+
+	ODP_PRINT("\n");
+
+	if (rte_timer_subsystem_init()) {
+		ODP_ERR("Initializing  DPDK timer library failed\n");
+		odp_shm_free(shm);
+		return -1;
+	}
+
+	if (timer_global->use_alternate) {
+		if (rte_timer_data_alloc(&timer_global->data_id)) {
+			ODP_ERR("Failed to allocate DPDK timer data instance\n");
+			odp_shm_free(shm);
+			return -1;
+		}
+		timer_global->ops.stop = timer_alt_stop;
+		timer_global->ops.manage = timer_alt_manage;
+		timer_global->ops.reset = timer_alt_reset;
+	} else {
+		timer_global->ops.stop = timer_stop;
+		timer_global->ops.manage = timer_manage;
+		timer_global->ops.reset = timer_reset;
+	}
 
 	return 0;
 }
 
 int _odp_timer_term_global(void)
 {
+	if (timer_global && timer_global->use_alternate) {
+		if (rte_timer_data_dealloc(timer_global->data_id)) {
+			ODP_ERR("Failed to deallocate DPDK timer data instance\n");
+			return -1;
+		}
+	}
+	rte_timer_subsystem_finalize();
+
 	if (timer_global && odp_shm_free(timer_global->shm)) {
 		ODP_ERR("Shm free failed for odp_timer\n");
 		return -1;
@@ -218,6 +362,7 @@ void _odp_timer_run_inline(int dec)
 {
 	int poll_interval = timer_global->poll_interval;
 	odp_time_t now;
+	int ret;
 
 	/* Rate limit how often this thread checks the timer pools. */
 
@@ -239,7 +384,9 @@ void _odp_timer_run_inline(int dec)
 	}
 
 	/* Check timer pools */
-	rte_timer_manage();
+	ret = timer_global->ops.manage();
+	if (odp_unlikely(ret))
+		ODP_ERR("RTE timer manage failed: %d\n", ret);
 }
 
 static inline uint64_t tmo_ticks_to_ns_round_up(uint64_t tmo_ticks)
@@ -352,7 +499,6 @@ odp_timer_pool_t odp_timer_pool_create(const char *name,
 	else
 		res_ns = GIGA_HZ / param->res_hz;
 
-
 	/* Scan timer pool twice during resolution interval */
 	if (res_ns > ODP_TIME_USEC_IN_NS)
 		nsec_per_scan = res_ns / 2;
@@ -416,6 +562,7 @@ odp_timer_pool_t odp_timer_pool_create(const char *name,
 
 		odp_ticketlock_init(&timer->lock);
 		rte_timer_init(&timer->rte_timer);
+		timer->rte_timer.arg = timer;
 		timer->timer_pool = timer_pool;
 		timer->timer_idx  = i;
 
@@ -583,7 +730,7 @@ retry:
 	if (timer->state == TICKING) {
 		ODP_DBG("Freeing active timer.\n");
 
-		if (rte_timer_stop(&timer->rte_timer)) {
+		if (timer_global->ops.stop(&timer->rte_timer)) {
 			/* Another core runs timer callback function. */
 			odp_ticketlock_unlock(&timer->lock);
 			goto retry;
@@ -616,34 +763,6 @@ retry:
 static inline odp_timeout_hdr_t *timeout_to_hdr(odp_timeout_t tmo)
 {
 	return (odp_timeout_hdr_t *)(uintptr_t)tmo;
-}
-
-static void timer_cb(struct rte_timer *rte_timer, void *arg)
-{
-	timer_entry_t *timer = arg;
-	odp_event_t event;
-	odp_queue_t queue;
-	(void)rte_timer;
-
-	odp_ticketlock_lock(&timer->lock);
-
-	if (timer->state != TICKING) {
-		ODP_ERR("Timer has been cancelled or freed.\n");
-		odp_ticketlock_unlock(&timer->lock);
-		return;
-	}
-
-	queue = timer->queue;
-	event = timer->tmo_event;
-	timer->tmo_event = ODP_EVENT_INVALID;
-	timer->state = EXPIRED;
-
-	odp_ticketlock_unlock(&timer->lock);
-
-	if (odp_unlikely(odp_queue_enq(queue, event))) {
-		ODP_ERR("Timeout event enqueue failed.\n");
-		odp_event_free(event);
-	}
 }
 
 static inline int timer_set(odp_timer_t timer_hdl, uint64_t tick,
@@ -687,8 +806,8 @@ retry:
 			return ODP_TIMER_FAIL;
 	}
 
-	if (odp_unlikely(rte_timer_reset(&timer->rte_timer, rel_tick, SINGLE,
-					 lcore, timer_cb, timer))) {
+	if (odp_unlikely(timer_global->ops.reset(&timer->rte_timer, rel_tick,
+						 SINGLE, lcore, timer_cb, timer))) {
 		int do_retry = 0;
 
 		/* Another core is currently running the callback function.
@@ -770,7 +889,7 @@ int odp_timer_cancel(odp_timer_t timer_hdl, odp_event_t *tmo_ev)
 		return -1;
 	}
 
-	if (odp_unlikely(rte_timer_stop(&timer->rte_timer))) {
+	if (odp_unlikely(timer_global->ops.stop(&timer->rte_timer))) {
 		/* Another core runs timer callback function. */
 		odp_ticketlock_unlock(&timer->lock);
 		return -1;
