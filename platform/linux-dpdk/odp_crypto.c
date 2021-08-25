@@ -1216,6 +1216,13 @@ check_auth:
 		if (cap->op == RTE_CRYPTO_OP_TYPE_UNDEFINED)
 			continue;
 
+		/* As a bug workaround, we do not use AES_CMAC with
+		 * the aesni-mb crypto driver.
+		 */
+		if (auth_xform->auth.algo == RTE_CRYPTO_AUTH_AES_CMAC &&
+		    is_dev_aesni_mb(&dev_info))
+			continue;
+
 		/* As a bug workaround, we do not use AES_XCBC_MAC with
 		 * the aesni-mb crypto driver.
 		 */
