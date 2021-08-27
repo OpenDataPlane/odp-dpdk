@@ -1849,14 +1849,15 @@ int odp_crypto_int(odp_packet_t pkt_in,
 	odp_crypto_alg_err_t rc_cipher = ODP_CRYPTO_ALG_ERR_NONE;
 	odp_crypto_alg_err_t rc_auth = ODP_CRYPTO_ALG_ERR_NONE;
 	struct rte_cryptodev_sym_session *rte_session = NULL;
-	struct rte_crypto_op *op;
+	struct rte_crypto_op *op = NULL;
 	odp_bool_t allocated = false;
 	odp_packet_t out_pkt = *pkt_out;
 	odp_crypto_packet_result_t *op_result;
 	odp_packet_hdr_t *pkt_hdr;
+	odp_bool_t result_ok = true;
 
 	session = (crypto_session_entry_t *)(intptr_t)param->session;
-	if (session == NULL)
+	if (odp_unlikely(session == NULL))
 		return -1;
 
 	/* Resolve output buffer */
@@ -1870,6 +1871,13 @@ int odp_crypto_int(odp_packet_t pkt_in,
 	if (odp_unlikely(ODP_PACKET_INVALID == out_pkt)) {
 		ODP_DBG("Alloc failed.\n");
 		return -1;
+	}
+
+	op = rte_crypto_op_alloc(global->crypto_op_pool,
+				 RTE_CRYPTO_OP_TYPE_SYMMETRIC);
+	if (odp_unlikely(op == NULL)) {
+		ODP_ERR("Failed to allocate crypto operation\n");
+		goto err;
 	}
 
 	if (pkt_in != out_pkt) {
@@ -1891,15 +1899,8 @@ int odp_crypto_int(odp_packet_t pkt_in,
 	rte_session = session->rte_session;
 	/* NULL rte_session means that it is a NULL-NULL operation.
 	 * Just return new packet. */
-	if (rte_session == NULL)
+	if (odp_unlikely(rte_session == NULL))
 		goto out;
-
-	op = rte_crypto_op_alloc(global->crypto_op_pool,
-				 RTE_CRYPTO_OP_TYPE_SYMMETRIC);
-	if (op == NULL) {
-		ODP_ERR("Failed to allocate crypto operation");
-		goto err;
-	}
 
 	if (cipher_is_aead(session->p.cipher_alg))
 		crypto_fill_aead_param(session, out_pkt, param, op,
@@ -1908,8 +1909,8 @@ int odp_crypto_int(odp_packet_t pkt_in,
 		crypto_fill_sym_param(session, out_pkt, param, op,
 				      &rc_cipher, &rc_auth);
 
-	if (rc_cipher == ODP_CRYPTO_ALG_ERR_NONE &&
-	    rc_auth == ODP_CRYPTO_ALG_ERR_NONE) {
+	if (odp_likely(rc_cipher == ODP_CRYPTO_ALG_ERR_NONE &&
+		       rc_auth == ODP_CRYPTO_ALG_ERR_NONE)) {
 		int retry_count = 0;
 		int queue_pair;
 		int rc;
@@ -1938,11 +1939,12 @@ int odp_crypto_int(odp_packet_t pkt_in,
 			odp_spinlock_lock(&global->lock);
 		rc = rte_cryptodev_enqueue_burst(session->cdev_id,
 						 queue_pair, &op, 1);
-		if (rc == 0) {
+		if (odp_unlikely(rc == 0)) {
 			if (odp_unlikely(queue_pairs_shared))
 				odp_spinlock_unlock(&global->lock);
 			ODP_ERR("Failed to enqueue packet\n");
-			goto err_op_free;
+			result_ok = false;
+			goto out;
 		}
 
 		/* There may be a delay until the crypto operation is
@@ -1950,7 +1952,8 @@ int odp_crypto_int(odp_packet_t pkt_in,
 		while (1) {
 			rc = rte_cryptodev_dequeue_burst(session->cdev_id,
 							 queue_pair, &op, 1);
-			if (rc == 0 && retry_count < MAX_DEQ_RETRIES) {
+			if (odp_unlikely(rc == 0) &&
+			    retry_count < MAX_DEQ_RETRIES) {
 				odp_time_wait_ns(ODP_TIME_USEC_IN_NS);
 				retry_count++;
 				continue;
@@ -1959,9 +1962,11 @@ int odp_crypto_int(odp_packet_t pkt_in,
 		}
 		if (odp_unlikely(queue_pairs_shared))
 			odp_spinlock_unlock(&global->lock);
-		if (rc == 0) {
-			ODP_ERR("Failed to dequeue packet");
-			goto err_op_free;
+		if (odp_unlikely(rc == 0)) {
+			ODP_ERR("Failed to dequeue packet\n");
+			result_ok = false;
+			op = NULL;
+			goto out;
 		}
 
 		out_pkt = (odp_packet_t)op->sym->m_src;
@@ -1971,14 +1976,18 @@ int odp_crypto_int(odp_packet_t pkt_in,
 			rc_auth = ODP_CRYPTO_ALG_ERR_NONE;
 			break;
 		case RTE_CRYPTO_OP_STATUS_AUTH_FAILED:
+			result_ok = false;
 			rc_cipher = ODP_CRYPTO_ALG_ERR_NONE;
 			rc_auth = ODP_CRYPTO_ALG_ERR_ICV_CHECK;
 			break;
 		default:
+			result_ok = false;
 			rc_cipher = ODP_CRYPTO_ALG_ERR_NONE;
 			rc_auth = ODP_CRYPTO_ALG_ERR_NONE;
 			break;
 		}
+	} else {
+		result_ok = false;
 	}
 
 	if (session->p.auth_digest_len != 0 &&
@@ -1989,9 +1998,10 @@ int odp_crypto_int(odp_packet_t pkt_in,
 					 session->p.auth_digest_len,
 					 pkt_hdr->crypto_digest_buf);
 	}
-	rte_crypto_op_free(op);
 
 out:
+	if (odp_likely(op))
+		rte_crypto_op_free(op);
 	/* Fill in result */
 	packet_subtype_set(out_pkt, ODP_EVENT_PACKET_CRYPTO);
 	op_result = get_op_result_from_packet(out_pkt);
@@ -1999,9 +2009,7 @@ out:
 	op_result->cipher_status.hw_err = ODP_CRYPTO_HW_ERR_NONE;
 	op_result->auth_status.alg_err = rc_auth;
 	op_result->auth_status.hw_err = ODP_CRYPTO_HW_ERR_NONE;
-	op_result->ok =
-		(rc_cipher == ODP_CRYPTO_ALG_ERR_NONE) &&
-		(rc_auth == ODP_CRYPTO_ALG_ERR_NONE);
+	op_result->ok = result_ok;
 
 	pkt_hdr = packet_hdr(out_pkt);
 	pkt_hdr->p.flags.crypto_err = !op_result->ok;
@@ -2011,10 +2019,9 @@ out:
 
 	return 0;
 
-err_op_free:
-	rte_crypto_op_free(op);
-
 err:
+	if (op)
+		rte_crypto_op_free(op);
 	if (allocated) {
 		odp_packet_free(out_pkt);
 		out_pkt = ODP_PACKET_INVALID;
