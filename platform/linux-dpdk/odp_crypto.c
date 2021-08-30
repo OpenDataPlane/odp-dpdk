@@ -2053,8 +2053,14 @@ int odp_crypto_operation(odp_crypto_op_param_t *param,
 		return rc;
 
 	rc = odp_crypto_result(&packet_result, out_pkt);
-	if (rc < 0)
-		return rc;
+	if (rc < 0) {
+		/*
+		 * We cannot fail since odp_crypto_op() has already processed
+		 * the packet. Let's indicate error in the result instead.
+		 */
+		packet_hdr(out_pkt)->p.flags.crypto_err = 1;
+		packet_result.ok = false;
+	}
 
 	/* Indicate to caller operation was sync */
 	*posted = 0;
