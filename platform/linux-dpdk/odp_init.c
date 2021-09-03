@@ -78,13 +78,70 @@ static void disable_features(odp_global_data_ro_t *global_ro,
 	global_ro->disable.compress = init_param->not_used.feat.compress;
 }
 
+static int read_pci_config(char **pci_cmd)
+{
+	const char *pci_str[2] = {"dpdk.pci_whitelist", "dpdk.pci_blacklist"};
+	char pci_type[2] = {'w', 'b'};
+	const int str_size =  100;
+	char *buf = NULL;
+	int pci_count;
+	int i, j;
+
+	for (i = 0; i < 2; i++) {
+		/* get the size of the array */
+		pci_count = _odp_libconfig_lookup_array_str(pci_str[i], NULL, 0, 0);
+
+		if (pci_count < 0)
+			return -1;
+
+		/* skip if list is empty */
+		if (pci_count == 0)
+			continue;
+
+		char pci_list[pci_count][str_size];
+		char *pci_list_addr[pci_count];
+
+		for (j = 0; j < pci_count; j++)
+			pci_list_addr[j] = pci_list[j];
+
+		if (pci_count != _odp_libconfig_lookup_array_str(pci_str[i],
+								 pci_list_addr,
+								 pci_count, str_size))
+			return -1;
+
+		/* Buffer to concatenate list of '-w/-b <pci addr>' strings */
+		buf = malloc(pci_count * (str_size + 3));
+		if (buf == NULL) {
+			ODP_ERR("PCI config buffer alloc fail\n");
+			return -1;
+		}
+
+		memset(buf, '\0', pci_count * str_size);
+		for (j = 0; j < pci_count; j++) {
+			char addr_str[str_size];
+
+			snprintf(addr_str, str_size, "-%c %s ", pci_type[i], pci_list[j]);
+			strcat(buf, addr_str);
+		}
+
+		ODP_PRINT("  %s: %s\n\n", pci_str[i], buf);
+
+		/* No need to read blacklist if whitelist is defined */
+		*pci_cmd = buf;
+		return strlen(buf);
+	}
+
+	return 0;
+}
+
 static int _odp_init_dpdk(const char *cmdline)
 {
 	int dpdk_argc;
-	int i, cmdlen;
-	const char *str;
+	int i, cmdlen, pcicmdlen;
+	const char *str, *pci_str = "";
 	uint32_t mem_prealloc;
 	int val = 0;
+	char *pci_cmd = NULL;
 
 	ODP_PRINT("DPDK config:\n");
 
@@ -95,7 +152,7 @@ static int _odp_init_dpdk(const char *cmdline)
 	}
 	mem_prealloc = val;
 
-	ODP_PRINT("  %s: %" PRIu32 "\n\n", str, mem_prealloc);
+	ODP_PRINT("  %s: %" PRIu32 "\n", str, mem_prealloc);
 
 	if (cmdline == NULL) {
 		cmdline = getenv("ODP_PLATFORM_PARAMS");
@@ -103,17 +160,29 @@ static int _odp_init_dpdk(const char *cmdline)
 			cmdline = "";
 	}
 
-	cmdlen = snprintf(NULL, 0, "odpdpdk -m %" PRIu32 " %s ", mem_prealloc, cmdline);
+	pcicmdlen = read_pci_config(&pci_cmd);
+	if (pcicmdlen < 0) {
+		ODP_ERR("Error reading PCI config\n");
+		return -1;
+	}
+
+	cmdlen = snprintf(NULL, 0, "odpdpdk -m %" PRIu32 " %s ", mem_prealloc, cmdline) + pcicmdlen;
+
+	if (pci_cmd != NULL)
+		pci_str = pci_cmd;
 
 	char full_cmdline[cmdlen];
 
 	/* First argument is facility log, simply bind it to odpdpdk for now. In
 	 * process mode DPDK memory has to be preallocated. */
 	if (odp_global_ro.init_param.mem_model == ODP_MEM_MODEL_PROCESS)
-		cmdlen = snprintf(full_cmdline, cmdlen, "odpdpdk -m %" PRIu32 " %s",
-				  mem_prealloc, cmdline);
+		cmdlen = snprintf(full_cmdline, cmdlen, "odpdpdk -m %" PRIu32 " %s %s",
+				  mem_prealloc, cmdline, pci_str);
 	else
-		cmdlen = snprintf(full_cmdline, cmdlen, "odpdpdk %s", cmdline);
+		cmdlen = snprintf(full_cmdline, cmdlen, "odpdpdk %s %s", cmdline, pci_str);
+
+	if (pci_cmd != NULL)
+		free(pci_cmd);
 
 	for (i = 0, dpdk_argc = 1; i < cmdlen; ++i) {
 		if (isspace(full_cmdline[i]))
