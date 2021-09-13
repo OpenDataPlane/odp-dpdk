@@ -36,6 +36,8 @@ extern "C" {
 
 #include <stdint.h>
 
+#define _ODP_SCHED_ID_EVENTDEV (_ODP_SCHED_ID_SCALABLE + 1)
+
 #define RX_ADAPTER_INIT           0
 #define RX_ADAPTER_STOPPED        1
 #define RX_ADAPTER_RUNNING        2

@@ -1,4 +1,5 @@
 /* Copyright (c) 2018, Linaro Limited
+ * Copyright (c) 2021, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -10,6 +11,9 @@
 #include <odp_init_internal.h>
 #include <odp_debug_internal.h>
 #include <odp_global_data.h>
+
+/* Required for _ODP_SCHED_ID_EVENTDEV */
+#include <odp_eventdev_internal.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -25,6 +29,7 @@ extern const schedule_api_t _odp_schedule_eventdev_api;
 
 const schedule_fn_t *_odp_sched_fn;
 const schedule_api_t *_odp_sched_api;
+int _odp_sched_id;
 
 uint64_t odp_schedule_wait_time(uint64_t ns)
 {
@@ -216,12 +221,15 @@ int _odp_schedule_init_global(void)
 	ODP_PRINT("Using scheduler '%s'\n", sched);
 
 	if (!strcmp(sched, "basic")) {
+		_odp_sched_id = _ODP_SCHED_ID_BASIC;
 		_odp_sched_fn = &_odp_schedule_basic_fn;
 		_odp_sched_api = &_odp_schedule_basic_api;
 	} else if (!strcmp(sched, "sp")) {
+		_odp_sched_id = _ODP_SCHED_ID_SP;
 		_odp_sched_fn = &_odp_schedule_sp_fn;
 		_odp_sched_api = &_odp_schedule_sp_api;
 	} else if (!strcmp(sched, "eventdev")) {
+		_odp_sched_id = _ODP_SCHED_ID_EVENTDEV;
 		_odp_sched_fn = &_odp_schedule_eventdev_fn;
 		_odp_sched_api = &_odp_schedule_eventdev_api;
 	} else {
