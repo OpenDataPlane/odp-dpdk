@@ -136,6 +136,14 @@ const pktio_if_ops_t * const _odp_pktio_if_ops[]  = {
 	NULL
 };
 
+/* Timestamp offset in rte mbuf.*/
+static int rte_mbuf_hw_ts_dynfield_offset = -1;
+
+static inline rte_mbuf_timestamp_t *rte_mbuf_hw_ts_field(struct rte_mbuf *mbuf)
+{
+	return RTE_MBUF_DYNFIELD(mbuf, rte_mbuf_hw_ts_dynfield_offset, rte_mbuf_timestamp_t *);
+}
+
 extern void *pktio_entry_ptr[ODP_CONFIG_PKTIO_ENTRIES];
 
 static uint32_t mtu_get_pkt_dpdk(pktio_entry_t *pktio_entry);
@@ -284,6 +292,17 @@ static int dpdk_setup_eth_dev(pktio_entry_t *pktio_entry)
 
 	if (pktio_entry->s.config.pktin.bit.tcp_chksum)
 		rx_offloads |= DEV_RX_OFFLOAD_TCP_CKSUM;
+
+	if (pktio_entry->s.config.pktin.bit.ts_hw) {
+		rx_offloads |= DEV_RX_OFFLOAD_TIMESTAMP;
+
+		rte_mbuf_dyn_rx_timestamp_register(&rte_mbuf_hw_ts_dynfield_offset, NULL);
+		if (rte_mbuf_hw_ts_dynfield_offset < 0) {
+			//Disable HW mbuf timestamping since we would not be able to read it.
+			pktio_entry->s.config.pktin.bit.ts_hw = 0;
+			ODP_ERR("rte_mbuf_dyn_rx_timestamp_register failed. ts_hw disabled!\n");
+		}
+	}
 
 	eth_conf.rxmode.offloads = rx_offloads;
 
@@ -548,6 +567,9 @@ static int dpdk_init_capability(pktio_entry_t *pktio_entry,
 		(dev_info->rx_offload_capa & DEV_RX_OFFLOAD_TCP_CKSUM) ? 1 : 0;
 	if (capa->config.pktin.bit.tcp_chksum)
 		capa->config.pktin.bit.drop_tcp_err = 1;
+
+	capa->config.pktin.bit.ts_hw =
+		(dev_info->rx_offload_capa & DEV_RX_OFFLOAD_TIMESTAMP) ? 1 : 0;
 
 	capa->config.pktout.bit.ipv4_chksum =
 		(dev_info->tx_offload_capa & DEV_TX_OFFLOAD_IPV4_CKSUM) ? 1 : 0;
@@ -906,12 +928,6 @@ int _odp_input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int nu
 	for (i = 0; i < num_prefetch; i++)
 		prefetch_pkt(pkt_table[i]);
 
-	if (pktio_entry->s.config.pktin.bit.ts_all ||
-	    pktio_entry->s.config.pktin.bit.ts_ptp) {
-		ts_val = odp_time_global();
-		ts = &ts_val;
-	}
-
 	for (i = 0; i < num; ++i) {
 		odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt_table[i]);
 		struct rte_mbuf *mbuf = pkt_to_mbuf(pkt_table[i]);
@@ -930,6 +946,19 @@ int _odp_input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int nu
 				continue;
 			}
 		}
+
+		/*Moved this into pkt processing cycle since we want to have unique TS for each ptk, rather than one for group*/
+		if (pktio_entry->s.config.pktin.bit.ts_all ||
+			pktio_entry->s.config.pktin.bit.ts_ptp) {
+			ts_val = odp_time_global();
+			ts = &ts_val;
+		}
+
+		if (pktio_entry->s.config.pktin.bit.ts_hw) {
+			ts = (odp_time_t*)rte_mbuf_hw_ts_field(mbuf);
+			ts_val = *ts;
+		}
+
 		packet_set_ts(pkt_hdr, ts);
 
 		odp_prefetch(rte_pktmbuf_mtod(mbuf, char *));
@@ -978,6 +1007,18 @@ int _odp_input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int nu
 				pkt = new_pkt;
 				pkt_hdr = packet_hdr(pkt);
 			}
+
+			if (pktio_entry->s.config.pktin.bit.ts_all ||
+				pktio_entry->s.config.pktin.bit.ts_ptp) {
+				ts_val = odp_time_global();
+				ts = &ts_val;
+			}
+			
+			if (pktio_entry->s.config.pktin.bit.ts_hw) {
+				ts = (odp_time_t*)rte_mbuf_hw_ts_field(mbuf);
+				ts_val = *ts;
+			}
+
 			packet_set_ts(pkt_hdr, ts);
 			pktio_entry->s.stats.in_octets += odp_packet_len(pkt);
 			copy_packet_cls_metadata(&parsed_hdr, pkt_hdr);

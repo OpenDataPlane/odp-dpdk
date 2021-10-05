@@ -393,6 +393,10 @@ typedef union odp_pktin_config_opt_t {
 		/** Drop packets with a SCTP error on packet input */
 		uint64_t drop_sctp_err : 1;
 
+		/**Apply hardware timestamp on pkt input. Should be supported 
+		 * by NIC driver. */ 
+		uint64_t ts_hw : 1;
+
 	} bit;
 
 	/** All bits of the bit field structure
