@@ -8,6 +8,7 @@
 #include <odp_posix_extensions.h>
 
 #include <sched.h>
+#include <odp/api/atomic.h>
 #include <odp/api/thread.h>
 #include <odp/api/thrmask.h>
 #include <odp/api/spinlock.h>
@@ -18,7 +19,9 @@
 #include <odp/api/align.h>
 #include <odp/api/cpu.h>
 #include <odp_schedule_if.h>
+#include <odp/api/plat/atomic_inlines.h>
 #include <odp/api/plat/thread_inlines.h>
+#include <odp_thread_internal.h>
 #include <odp_libconfig_internal.h>
 
 #include <rte_config.h>
@@ -36,7 +39,7 @@ typedef struct {
 		odp_thrmask_t  worker;
 		odp_thrmask_t  control;
 	};
-
+	odp_atomic_u64_t thrmask_all_epoch;
 	uint32_t       num;
 	uint32_t       num_worker;
 	uint32_t       num_control;
@@ -87,6 +90,7 @@ int _odp_thread_init_global(void)
 	thread_globals->shm = shm;
 
 	odp_spinlock_init(&thread_globals->lock);
+	odp_atomic_init_u64(&thread_globals->thrmask_all_epoch, 0);
 	thread_globals->num_max = num_max;
 	ODP_PRINT("System config:\n");
 	ODP_PRINT("  system.thread_count_max: %d\n\n", num_max);
@@ -112,6 +116,25 @@ int _odp_thread_term_global(void)
 	return ret;
 }
 
+uint64_t _odp_thread_thrmask_epoch(void)
+{
+	return odp_atomic_load_u64(&thread_globals->thrmask_all_epoch);
+}
+
+int _odp_thread_cpu_ids(unsigned int cpu_ids[], int max_num)
+{
+	odp_thrmask_t *all = &thread_globals->all;
+	int num_cpus = 0;
+	uint32_t thr;
+
+	for (thr = 0; num_cpus < max_num && thr < thread_globals->num_max; thr++) {
+		if (odp_thrmask_isset(all, thr))
+			cpu_ids[num_cpus++] = thread_globals->thr[thr].cpu;
+	}
+
+	return num_cpus;
+}
+
 static int alloc_id(odp_thread_type_t type)
 {
 	int thr;
@@ -123,6 +146,7 @@ static int alloc_id(odp_thread_type_t type)
 	for (thr = 0; thr < (int)thread_globals->num_max; thr++) {
 		if (odp_thrmask_isset(all, thr) == 0) {
 			odp_thrmask_set(all, thr);
+			odp_atomic_inc_u64(&thread_globals->thrmask_all_epoch);
 
 			if (type == ODP_THREAD_WORKER) {
 				odp_thrmask_set(&thread_globals->worker, thr);
@@ -151,6 +175,7 @@ static int free_id(int thr)
 		return -1;
 
 	odp_thrmask_clr(all, thr);
+	odp_atomic_inc_u64(&thread_globals->thrmask_all_epoch);
 
 	if (thread_globals->thr[thr].type == ODP_THREAD_WORKER) {
 		odp_thrmask_clr(&thread_globals->worker, thr);
