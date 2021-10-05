@@ -15,6 +15,10 @@
 #include <sys/wait.h>
 #include <sys/prctl.h>
 #include <sys/syscall.h>
+#include <errno.h>
+#include <limits.h>
+#include <sys/time.h>
+#include <sys/resource.h>
 
 #include <odp_api.h>
 #include <odp/helper/threads.h>
@@ -81,7 +85,7 @@ static void *run_thread(void *arg)
 /*
  * Create a single linux process
  */
-static int create_process(odph_thread_t *thread, int cpu)
+static int create_process(odph_thread_t *thread, int cpu, uint64_t stack_size)
 {
 	cpu_set_t cpu_set;
 	pid_t pid;
@@ -116,6 +120,22 @@ static int create_process(odph_thread_t *thread, int cpu)
 	if (sched_setaffinity(0, sizeof(cpu_set_t), &cpu_set)) {
 		ODPH_ERR("sched_setaffinity() failed\n");
 		return -2;
+	}
+
+	if (stack_size) {
+		struct rlimit rlimit;
+
+		if (getrlimit(RLIMIT_STACK, &rlimit)) {
+			ODPH_ERR("getrlimit() failed: %s\n", strerror(errno));
+			return -3;
+		}
+
+		rlimit.rlim_cur = stack_size;
+
+		if (setrlimit(RLIMIT_STACK, &rlimit)) {
+			ODPH_ERR("setrlimit() failed: %s\n", strerror(errno));
+			return -4;
+		}
 	}
 
 	run_thread(&thread->start_args);
@@ -160,7 +180,7 @@ static int wait_process(odph_thread_t *thread)
 /*
  * Create a single linux pthread
  */
-static int create_pthread(odph_thread_t *thread, int cpu)
+static int create_pthread(odph_thread_t *thread, int cpu, uint64_t stack_size)
 {
 	int ret;
 	cpu_set_t cpu_set;
@@ -174,6 +194,24 @@ static int create_pthread(odph_thread_t *thread, int cpu)
 
 	pthread_attr_setaffinity_np(&thread->thread.attr,
 				    sizeof(cpu_set_t), &cpu_set);
+
+	if (stack_size) {
+		/*
+		 * Round up to page size. "On some systems,
+		 * pthread_attr_setstacksize() can fail with the error EINVAL if
+		 * stacksize is not a multiple of the system page size." (man
+		 * page)
+		 */
+		stack_size = (stack_size + ODP_PAGE_SIZE - 1) & ~(ODP_PAGE_SIZE - 1);
+
+		if (stack_size < PTHREAD_STACK_MIN)
+			stack_size = PTHREAD_STACK_MIN;
+
+		if (pthread_attr_setstacksize(&thread->thread.attr, stack_size)) {
+			ODPH_ERR("pthread_attr_setstacksize() failed\n");
+			return -1;
+		}
+	}
 
 	thread->start_args.mem_model = ODP_MEM_MODEL_THREAD;
 
@@ -224,6 +262,17 @@ static int wait_pthread(odph_thread_t *thread)
 	return 0;
 }
 
+void odph_thread_param_init(odph_thread_param_t *param)
+{
+	memset(param, 0, sizeof(*param));
+}
+
+void odph_thread_common_param_init(odph_thread_common_param_t *param)
+{
+	memset(param, 0, sizeof(*param));
+	param->sync_timeout = ODP_TIME_SEC_IN_NS;
+}
+
 int odph_thread_create(odph_thread_t thread[],
 		       const odph_thread_common_param_t *param,
 		       const odph_thread_param_t thr_param[],
@@ -272,10 +321,10 @@ int odph_thread_create(odph_thread_t thread[],
 			odp_atomic_init_u32(&start_args->status, NOT_STARTED);
 
 		if (use_pthread) {
-			if (create_pthread(&thread[i], cpu))
+			if (create_pthread(&thread[i], cpu, start_args->thr_params.stack_size))
 				break;
 		} else {
-			if (create_process(&thread[i], cpu))
+			if (create_process(&thread[i], cpu, start_args->thr_params.stack_size))
 				break;
 		}
 
@@ -286,6 +335,10 @@ int odph_thread_create(odph_thread_t thread[],
 			uint32_t status;
 			int timeout = 0;
 			odp_atomic_u32_t *atomic = &start_args->status;
+			uint64_t timeout_ns = param->sync_timeout;
+
+			if (!timeout_ns)
+				timeout_ns = ODP_TIME_SEC_IN_NS;
 
 			t1 = odp_time_local();
 
@@ -293,7 +346,7 @@ int odph_thread_create(odph_thread_t thread[],
 				odp_cpu_pause();
 				t2 = odp_time_local();
 				diff_ns = odp_time_diff_ns(t2, t1);
-				timeout = diff_ns > ODP_TIME_SEC_IN_NS;
+				timeout = diff_ns > timeout_ns;
 				status = odp_atomic_load_acq_u32(atomic);
 
 			} while (status != INIT_DONE && timeout == 0);
@@ -375,10 +428,10 @@ int odph_odpthreads_create(odph_odpthread_t *thread_tbl,
 		start_args->instance   = thr_params->instance;
 
 		if (helper_options.mem_model == ODP_MEM_MODEL_THREAD) {
-			if (create_pthread(&thread_tbl[i], cpu))
+			if (create_pthread(&thread_tbl[i], cpu, 0))
 				break;
 		 } else {
-			if (create_process(&thread_tbl[i], cpu))
+			if (create_process(&thread_tbl[i], cpu, 0))
 				break;
 		}
 

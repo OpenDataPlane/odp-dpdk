@@ -1,5 +1,5 @@
 /* Copyright (c) 2013-2018, Linaro Limited
- * Copyright (c) 2019, Nokia
+ * Copyright (c) 2019-2021, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -69,6 +69,12 @@ typedef struct {
 	/** @deprecated ODP instance handle for odph_odpthreads_create(). */
 	odp_instance_t instance;
 
+	/**
+	 * Minimum stack size in bytes. 0 = use default. Ignored by
+	 * odph_odpthreads_create().
+	 */
+	uint64_t stack_size;
+
 } odph_thread_param_t;
 
 /** Helper internal thread start arguments. Used both in process and thread
@@ -121,10 +127,10 @@ typedef struct {
 	odp_mem_model_t mem_model; /**< Process or thread */
 } odph_helper_options_t;
 
-/** Legacy thread table entry */
+/** @deprecated Legacy thread table entry */
 typedef odph_thread_t odph_odpthread_t;
 
-/** Legacy thread parameters */
+/** @deprecated Legacy thread parameters */
 typedef odph_thread_param_t odph_odpthread_params_t;
 
 /** Common parameters for odph_thread_create() call */
@@ -165,6 +171,19 @@ typedef struct {
 	int sync;
 
 	/**
+	 * Synchronized thread creation timeout in nanoseconds
+	 *
+	 * When synchronized thread creation has been requested, waiting for the
+	 * synchronization signal times out once the time indicated by this
+	 * parameter has passed.
+	 *
+	 * If this parameter is 0, the default value is used.
+	 *
+	 * Default value is ODP_TIME_SEC_IN_NS.
+	 */
+	uint64_t sync_timeout;
+
+	/**
 	 * Thread parameter sharing
 	 *
 	 * 0: Thread parameters are not shared. The thread parameter table
@@ -177,6 +196,25 @@ typedef struct {
 	int share_param;
 
 } odph_thread_common_param_t;
+
+/**
+ * Initialize thread params
+ *
+ * Initialize an odph_thread_param_t to its default values for all fields.
+ *
+ * @param[out] param Pointer to parameter structure
+ */
+void odph_thread_param_init(odph_thread_param_t *param);
+
+/**
+ * Initialize thread common params
+ *
+ * Initialize an odph_thread_common_param_t to its default values for all
+ * fields.
+ *
+ * @param[out] param Pointer to parameter structure
+ */
+void odph_thread_common_param_init(odph_thread_common_param_t *param);
 
 /**
  * Create and pin threads (as Linux pthreads or processes)
@@ -196,6 +234,9 @@ typedef struct {
  * each thread to be created. However, all threads may be created
  * with a single thread parameter table element by setting 'share_param'
  * parameter.
+ *
+ * Use odph_thread_common_param_init() and odph_thread_param_init() to
+ * initialize parameters with default values.
  *
  * Thread table must be large enough to hold 'num' elements. Also the cpumask
  * must contain 'num' CPUs. Threads are pinned to CPUs in order - the first

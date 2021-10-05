@@ -25,7 +25,6 @@ odpapiinclude_HEADERS = \
 	odp/api/deprecated.h \
 	odp/api/errno.h \
 	odp/api/event.h \
-	odp/api/feature.h \
 	odp/api/hash.h \
 	odp/api/hints.h \
 	odp/api/init.h \
@@ -53,7 +52,6 @@ odpapiinclude_HEADERS = \
 	odp/api/stash.h \
 	odp/api/std.h \
 	odp/api/std_types.h \
-	odp/api/support.h \
 	odp/api/sync.h \
 	odp/api/system_info.h \
 	odp/api/thread.h \
@@ -81,7 +79,6 @@ odpapispecinclude_HEADERS = \
 		  odp/api/spec/debug.h \
 		  odp/api/spec/errno.h \
 		  odp/api/spec/event.h \
-		  odp/api/spec/feature.h \
 		  odp/api/spec/hash.h \
 		  odp/api/spec/hints.h \
 		  odp/api/spec/init.h \
@@ -110,7 +107,6 @@ odpapispecinclude_HEADERS = \
 		  odp/api/spec/stash.h \
 		  odp/api/spec/std.h \
 		  odp/api/spec/std_types.h \
-		  odp/api/spec/support.h \
 		  odp/api/spec/sync.h \
 		  odp/api/spec/system_info.h \
 		  odp/api/spec/thread.h \

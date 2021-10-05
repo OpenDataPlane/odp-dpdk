@@ -1,4 +1,5 @@
 /* Copyright (c) 2014-2018, Linaro Limited
+ * Copyright (c) 2021, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:	BSD-3-Clause
@@ -174,7 +175,7 @@ static int alg_op(odp_packet_t pkt,
 		  odp_packet_data_range_t *cipher_range,
 		  odp_packet_data_range_t *auth_range,
 		  uint8_t *aad,
-		  unsigned int plaintext_len)
+		  unsigned int hash_result_offset)
 {
 	int rc;
 	odp_crypto_op_result_t result;
@@ -198,7 +199,7 @@ static int alg_op(odp_packet_t pkt,
 
 	op_params.aad_ptr = aad;
 
-	op_params.hash_result_offset = plaintext_len;
+	op_params.hash_result_offset = hash_result_offset;
 
 	rc = odp_crypto_operation(&op_params, &posted, &result);
 	if (rc < 0) {
@@ -254,7 +255,7 @@ static int alg_packet_op(odp_packet_t pkt,
 			 odp_packet_data_range_t *cipher_range,
 			 odp_packet_data_range_t *auth_range,
 			 uint8_t *aad,
-			 unsigned int plaintext_len)
+			 unsigned int hash_result_offset)
 {
 	int rc;
 	odp_crypto_packet_result_t result;
@@ -275,7 +276,7 @@ static int alg_packet_op(odp_packet_t pkt,
 
 	op_params.aad_ptr = aad;
 
-	op_params.hash_result_offset = plaintext_len;
+	op_params.hash_result_offset = hash_result_offset;
 
 	rc = odp_crypto_op(&pkt, &out_pkt, &op_params, 1);
 	if (rc <= 0) {
@@ -315,7 +316,7 @@ static int alg_packet_op_enq(odp_packet_t pkt,
 			     odp_packet_data_range_t *cipher_range,
 			     odp_packet_data_range_t *auth_range,
 			     uint8_t *aad,
-			     unsigned int plaintext_len)
+			     unsigned int hash_result_offset)
 {
 	int rc;
 	odp_event_t event;
@@ -337,7 +338,7 @@ static int alg_packet_op_enq(odp_packet_t pkt,
 
 	op_params.aad_ptr = aad;
 
-	op_params.hash_result_offset = plaintext_len;
+	op_params.hash_result_offset = hash_result_offset;
 
 	rc = odp_crypto_op_enq(&pkt, &pkt, &op_params, 1);
 	if (rc <= 0) {
@@ -381,12 +382,204 @@ static int alg_packet_op_enq(odp_packet_t pkt,
 	return 0;
 }
 
+/*
+ * Try to adjust packet so that the first segment holds 'first_seg_len' bytes
+ * of packet data (+ tailroom if first_seg_len is longer than the packet).
+ *
+ * If 'first_seg_len' is zero, do not try to add segments but make headroom
+ * zero.
+ *
+ * Packet data bytes are not preserved.
+ */
+static void adjust_segments(odp_packet_t *pkt, uint32_t first_seg_len)
+{
+	uint32_t shift;
+
+	shift = odp_packet_headroom(*pkt) + first_seg_len;
+
+	if (odp_packet_extend_head(pkt, shift, NULL, NULL) < 0) {
+		CU_FAIL("odp_packet_extend_head() failed\n");
+		return;
+	}
+	if (odp_packet_trunc_tail(pkt, shift, NULL, NULL) < 0) {
+		CU_FAIL("odp_packet_trunc_tail() failed\n");
+		return;
+	}
+	/*
+	 * ODP API does not seem to guarantee that we ever have a multi-segment
+	 * packet at this point, but we can print a message about it.
+	 */
+	if (first_seg_len == 1 &&
+	    first_seg_len != odp_packet_seg_len(*pkt))
+		printf("Could not create a segmented packet for testing.\n");
+}
+
+/*
+ * Generate or verify header and trailer bytes
+ */
+static void do_header_and_trailer(odp_packet_t pkt,
+				  uint32_t header_len, uint32_t trailer_len,
+				  odp_bool_t check)
+{
+	uint32_t trailer_offset = odp_packet_len(pkt) - trailer_len;
+	uint32_t max_len = header_len > trailer_len ? header_len : trailer_len;
+	uint8_t buffer[max_len];
+	uint32_t n;
+	int rc;
+
+	for (n = 0; n < max_len; n++)
+		buffer[n] = n;
+
+	if (check) {
+		CU_ASSERT(!packet_cmp_mem_bytes(pkt, 0,
+						buffer, header_len));
+		CU_ASSERT(!packet_cmp_mem_bytes(pkt, trailer_offset,
+						buffer, trailer_len));
+	} else {
+		rc = odp_packet_copy_from_mem(pkt, 0,
+					      header_len, buffer);
+		CU_ASSERT(rc == 0);
+		rc = odp_packet_copy_from_mem(pkt, trailer_offset,
+					      trailer_len, buffer);
+		CU_ASSERT(rc == 0);
+	}
+}
+
 typedef enum crypto_test {
 	NORMAL_TEST = 0,   /**< Plain execution */
 	REPEAT_TEST,       /**< Rerun without reinitializing the session */
 	WRONG_DIGEST_TEST, /**< Check against wrong digest */
 	MAX_TEST,          /**< Final mark */
 } crypto_test;
+
+typedef struct alg_test_param_t {
+	odp_crypto_session_t session;
+	odp_crypto_op_t op;
+	odp_auth_alg_t auth_alg;
+	crypto_test_reference_t *ref;
+	odp_bool_t override_iv;
+	odp_bool_t bit_mode;
+	odp_bool_t adjust_segmentation;
+	uint32_t first_seg_len;
+	uint32_t header_len;
+	uint32_t trailer_len;
+} alg_test_param_t;
+
+static void alg_test_execute(const alg_test_param_t *param)
+{
+	int rc;
+	odp_bool_t ok = false;
+	int iteration;
+	uint32_t reflength;
+	odp_packet_data_range_t cipher_range;
+	odp_packet_data_range_t auth_range;
+	crypto_test_reference_t *ref = param->ref;
+	uint8_t *cipher_iv = param->override_iv ? ref->cipher_iv : NULL;
+	uint8_t *auth_iv   = param->override_iv ? ref->auth_iv : NULL;
+
+	cipher_range.offset = param->header_len;
+	cipher_range.length = ref->length;
+	auth_range.offset = param->header_len;
+	auth_range.length = ref->length;
+
+	if (param->bit_mode) {
+		reflength = (ref->length + 7) / 8;
+		cipher_range.offset *= 8;
+		auth_range.offset *= 8;
+	} else {
+		reflength = ref->length;
+	}
+
+	for (iteration = NORMAL_TEST; iteration < MAX_TEST; iteration++) {
+		odp_packet_t pkt;
+		uint32_t digest_offset = param->header_len + reflength;
+
+		/*
+		 * Test detection of wrong digest value in input packet
+		 * only when decoding and using non-null auth algorithm.
+		 */
+		if (iteration == WRONG_DIGEST_TEST &&
+		    (param->auth_alg == ODP_AUTH_ALG_NULL ||
+		     param->op == ODP_CRYPTO_OP_ENCODE))
+			continue;
+
+		pkt = odp_packet_alloc(suite_context.pool,
+				       param->header_len + reflength +
+				       ref->digest_length + param->trailer_len);
+		CU_ASSERT(pkt != ODP_PACKET_INVALID);
+		if (pkt == ODP_PACKET_INVALID)
+			continue;
+
+		if (param->adjust_segmentation)
+			adjust_segments(&pkt, param->first_seg_len);
+
+		do_header_and_trailer(pkt, param->header_len, param->trailer_len, false);
+
+		if (param->op == ODP_CRYPTO_OP_ENCODE) {
+			odp_packet_copy_from_mem(pkt, param->header_len,
+						 reflength, ref->plaintext);
+		} else {
+			odp_packet_copy_from_mem(pkt, param->header_len,
+						 reflength, ref->ciphertext);
+			odp_packet_copy_from_mem(pkt, digest_offset,
+						 ref->digest_length,
+						 ref->digest);
+			if (iteration == WRONG_DIGEST_TEST) {
+				uint8_t byte = ~ref->digest[0];
+
+				odp_packet_copy_from_mem(pkt, digest_offset,
+							 1, &byte);
+			}
+		}
+
+		if (!suite_context.packet)
+			rc = alg_op(pkt, &ok, param->session,
+				    cipher_iv, auth_iv,
+				    &cipher_range, &auth_range,
+				    ref->aad, digest_offset);
+		else if (ODP_CRYPTO_ASYNC == suite_context.op_mode)
+			rc = alg_packet_op_enq(pkt, &ok, param->session,
+					       cipher_iv, auth_iv,
+					       &cipher_range, &auth_range,
+					       ref->aad, digest_offset);
+		else
+			rc = alg_packet_op(pkt, &ok, param->session,
+					   cipher_iv, auth_iv,
+					   &cipher_range, &auth_range,
+					   ref->aad, digest_offset);
+		if (rc < 0) {
+			odp_packet_free(pkt);
+			break;
+		}
+
+		if (iteration == WRONG_DIGEST_TEST) {
+			CU_ASSERT(!ok);
+			odp_packet_free(pkt);
+			continue;
+		}
+
+		CU_ASSERT(ok);
+
+		do_header_and_trailer(pkt, param->header_len, param->trailer_len, true);
+
+		if (param->op == ODP_CRYPTO_OP_ENCODE) {
+			CU_ASSERT(!packet_cmp_mem(pkt, param->header_len,
+						  ref->ciphertext,
+						  ref->length,
+						  param->bit_mode));
+			CU_ASSERT(!packet_cmp_mem(pkt, digest_offset,
+						  ref->digest,
+						  ref->digest_length,
+						  param->bit_mode));
+		} else {
+			CU_ASSERT(!packet_cmp_mem(pkt, param->header_len,
+						  ref->plaintext,
+						  ref->length,
+						  param->bit_mode));
+		}
+		odp_packet_free(pkt);
+	}
+}
 
 /* Basic algorithm run function for async inplace mode.
  * Creates a session from input parameters and runs one operation
@@ -404,15 +597,14 @@ static void alg_test(odp_crypto_op_t op,
 		     odp_bool_t ovr_iv,
 		     odp_bool_t bit_mode)
 {
+	unsigned int initial_num_failures = CU_get_number_of_failures();
 	odp_crypto_session_t session;
 	int rc;
-	odp_crypto_ses_create_err_t status;
-	odp_bool_t ok = false;
-	int iteration;
 	uint32_t reflength;
+	uint32_t seg_len;
+	uint32_t max_shift;
+	odp_crypto_ses_create_err_t status;
 	odp_crypto_session_param_t ses_params;
-	odp_packet_data_range_t cipher_range;
-	odp_packet_data_range_t auth_range;
 	odp_crypto_key_t cipher_key = {
 		.data = ref->cipher_key,
 		.length = ref->cipher_key_length
@@ -429,6 +621,7 @@ static void alg_test(odp_crypto_op_t op,
 		.data = ovr_iv ? NULL : ref->auth_iv,
 		.length = ref->auth_iv_length
 	};
+	alg_test_param_t test_param;
 
 	/* Create a crypto session */
 	odp_crypto_session_param_init(&ses_params);
@@ -453,96 +646,47 @@ static void alg_test(odp_crypto_op_t op,
 	CU_ASSERT(odp_crypto_session_to_u64(session) !=
 		  odp_crypto_session_to_u64(ODP_CRYPTO_SESSION_INVALID));
 
-	cipher_range.offset = 0;
-	cipher_range.length = ref->length;
-	auth_range.offset = 0;
-	auth_range.length = ref->length;
+	memset(&test_param, 0, sizeof(test_param));
+	test_param.session = session;
+	test_param.op = op;
+	test_param.auth_alg = auth_alg;
+	test_param.ref = ref;
+	test_param.override_iv = ovr_iv;
+	test_param.bit_mode = bit_mode;
+
+	alg_test_execute(&test_param);
 
 	if (bit_mode)
 		reflength = (ref->length + 7) / 8;
 	else
 		reflength = ref->length;
+	max_shift = reflength + ref->digest_length;
 
-	/* Prepare input data */
-	odp_packet_t pkt = odp_packet_alloc(suite_context.pool,
-					    reflength + ref->digest_length);
-	CU_ASSERT(pkt != ODP_PACKET_INVALID);
-	if (pkt == ODP_PACKET_INVALID)
-		goto cleanup;
-
-	for (iteration = NORMAL_TEST; iteration < MAX_TEST; iteration++) {
-		/* checking against wrong digest is meaningless for NULL digest
-		 * or when generating digest */
-		if (iteration == WRONG_DIGEST_TEST &&
-		    (auth_alg == ODP_AUTH_ALG_NULL ||
-		     op == ODP_CRYPTO_OP_ENCODE))
-			continue;
-
-		if (op == ODP_CRYPTO_OP_ENCODE) {
-			odp_packet_copy_from_mem(pkt, 0, reflength,
-						 ref->plaintext);
-		} else {
-			odp_packet_copy_from_mem(pkt, 0, reflength,
-						 ref->ciphertext);
-			odp_packet_copy_from_mem(pkt, reflength,
-						 ref->digest_length,
-						 ref->digest);
-			if (iteration == WRONG_DIGEST_TEST) {
-				uint8_t byte = ~ref->digest[0];
-
-				odp_packet_copy_from_mem(pkt, reflength,
-							 1, &byte);
-			}
-		}
-
-		if (!suite_context.packet)
-			rc = alg_op(pkt, &ok, session,
-				    ovr_iv ? ref->cipher_iv : NULL,
-				    ovr_iv ? ref->auth_iv : NULL,
-				    &cipher_range, &auth_range,
-				    ref->aad, reflength);
-		else if (ODP_CRYPTO_ASYNC == suite_context.op_mode)
-			rc = alg_packet_op_enq(pkt, &ok, session,
-					       ovr_iv ? ref->cipher_iv : NULL,
-					       ovr_iv ? ref->auth_iv : NULL,
-					       &cipher_range, &auth_range,
-					       ref->aad, reflength);
-		else
-			rc = alg_packet_op(pkt, &ok, session,
-					   ovr_iv ? ref->cipher_iv : NULL,
-					   ovr_iv ? ref->auth_iv : NULL,
-					   &cipher_range, &auth_range,
-					   ref->aad, reflength);
-		if (rc < 0)
+	/*
+	 * Test with segmented packets with all possible segment boundaries
+	 * within the packet data (including boundary after the packet data
+	 * in the location where the digest will be written).
+	 */
+	for (seg_len = 0; seg_len <= max_shift; seg_len++) {
+		/*
+		 * CUnit chokes on too many assertion failures, so bail
+		 * out if this test has already failed.
+		 */
+		if (CU_get_number_of_failures() > initial_num_failures)
 			break;
 
-		if (iteration == WRONG_DIGEST_TEST) {
-			CU_ASSERT(!ok);
-			continue;
-		}
+		test_param.adjust_segmentation = true;
+		test_param.first_seg_len = seg_len;
+		test_param.header_len = 0;
+		test_param.trailer_len = 0;
+		alg_test_execute(&test_param);
 
-		CU_ASSERT(ok);
-
-		if (op == ODP_CRYPTO_OP_ENCODE) {
-			CU_ASSERT(!packet_cmp_mem(pkt, 0,
-						  ref->ciphertext,
-						  ref->length,
-						  bit_mode));
-			CU_ASSERT(!packet_cmp_mem(pkt, reflength,
-						  ref->digest,
-						  ref->digest_length,
-						  bit_mode));
-		} else {
-			CU_ASSERT(!packet_cmp_mem(pkt, 0,
-						  ref->plaintext,
-						  ref->length,
-						  bit_mode));
-		}
+		/* Test partial packet crypto with odd alignment. */
+		test_param.header_len = 3;
+		test_param.trailer_len = 32;
+		alg_test_execute(&test_param);
 	}
 
-	odp_packet_free(pkt);
-
-cleanup:
 	rc = odp_crypto_session_destroy(session);
 	CU_ASSERT(!rc);
 }
@@ -1035,10 +1179,6 @@ static int check_alg_3des_cbc(void)
 	return check_alg_support(ODP_CIPHER_ALG_3DES_CBC, ODP_AUTH_ALG_NULL);
 }
 
-/* This test verifies the correctness of encode (plaintext -> ciphertext)
- * operation for 3DES_CBC algorithm. IV for the operation is the session IV.
- * In addition the test verifies if the implementation can use the
- * packet buffer as completion event buffer.*/
 static void crypto_test_enc_alg_3des_cbc(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
@@ -1050,9 +1190,6 @@ static void crypto_test_enc_alg_3des_cbc(void)
 		  false);
 }
 
-/* This test verifies the correctness of encode (plaintext -> ciphertext)
- * operation for 3DES_CBC algorithm. IV for the operation is the operation IV.
- * */
 static void crypto_test_enc_alg_3des_cbc_ovr_iv(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
@@ -1064,11 +1201,6 @@ static void crypto_test_enc_alg_3des_cbc_ovr_iv(void)
 		  false);
 }
 
-/* This test verifies the correctness of decode (ciphertext -> plaintext)
- * operation for 3DES_CBC algorithm. IV for the operation is the session IV
- * In addition the test verifies if the implementation can use the
- * packet buffer as completion event buffer.
- * */
 static void crypto_test_dec_alg_3des_cbc(void)
 {
 	check_alg(ODP_CRYPTO_OP_DECODE,
@@ -1080,11 +1212,6 @@ static void crypto_test_dec_alg_3des_cbc(void)
 		  false);
 }
 
-/* This test verifies the correctness of decode (ciphertext -> plaintext)
- * operation for 3DES_CBC algorithm. IV for the operation is the session IV
- * In addition the test verifies if the implementation can use the
- * packet buffer as completion event buffer.
- * */
 static void crypto_test_dec_alg_3des_cbc_ovr_iv(void)
 {
 	check_alg(ODP_CRYPTO_OP_DECODE,
@@ -1101,8 +1228,6 @@ static int check_alg_3des_ecb(void)
 	return check_alg_support(ODP_CIPHER_ALG_3DES_ECB, ODP_AUTH_ALG_NULL);
 }
 
-/* This test verifies the correctness of encode (plaintext -> ciphertext)
- * operation for 3DES_ECB algorithm. */
 static void crypto_test_enc_alg_3des_ecb(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
@@ -1114,11 +1239,6 @@ static void crypto_test_enc_alg_3des_ecb(void)
 		  false);
 }
 
-/* This test verifies the correctness of decode (ciphertext -> plaintext)
- * operation for 3DES_ECB algorithm. IV for the operation is the session IV
- * In addition the test verifies if the implementation can use the
- * packet buffer as completion event buffer.
- * */
 static void crypto_test_dec_alg_3des_ecb(void)
 {
 	check_alg(ODP_CRYPTO_OP_DECODE,
@@ -1185,10 +1305,6 @@ static int check_alg_aes_gcm(void)
 	return check_alg_support(ODP_CIPHER_ALG_AES_GCM, ODP_AUTH_ALG_AES_GCM);
 }
 
-/* This test verifies the correctness of encode (plaintext -> ciphertext)
- * operation for AES128_GCM algorithm. IV for the operation is the session IV.
- * In addition the test verifies if the implementation can use the
- * packet buffer as completion event buffer.*/
 static void crypto_test_enc_alg_aes_gcm(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
@@ -1200,10 +1316,6 @@ static void crypto_test_enc_alg_aes_gcm(void)
 		  false);
 }
 
-/* This test verifies the correctness of encode (plaintext -> ciphertext)
- * operation for AES128_GCM algorithm. IV for the operation is the session IV.
- * In addition the test verifies if the implementation can use the
- * packet buffer as completion event buffer.*/
 static void crypto_test_enc_alg_aes_gcm_ovr_iv(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
@@ -1215,11 +1327,6 @@ static void crypto_test_enc_alg_aes_gcm_ovr_iv(void)
 		  false);
 }
 
-/* This test verifies the correctness of decode (ciphertext -> plaintext)
- * operation for 3DES_CBC algorithm. IV for the operation is the session IV
- * In addition the test verifies if the implementation can use the
- * packet buffer as completion event buffer.
- * */
 static void crypto_test_dec_alg_aes_gcm(void)
 {
 	check_alg(ODP_CRYPTO_OP_DECODE,
@@ -1231,11 +1338,6 @@ static void crypto_test_dec_alg_aes_gcm(void)
 		  false);
 }
 
-/* This test verifies the correctness of decode (ciphertext -> plaintext)
- * operation for 3DES_CBC algorithm. IV for the operation is the session IV
- * In addition the test verifies if the implementation can use the
- * packet buffer as completion event buffer.
- * */
 static void crypto_test_dec_alg_aes_gcm_ovr_iv(void)
 {
 	check_alg(ODP_CRYPTO_OP_DECODE,
@@ -1301,10 +1403,6 @@ static int check_alg_aes_cbc(void)
 	return check_alg_support(ODP_CIPHER_ALG_AES_CBC, ODP_AUTH_ALG_NULL);
 }
 
-/* This test verifies the correctness of encode (plaintext -> ciphertext)
- * operation for AES128_CBC algorithm. IV for the operation is the session IV.
- * In addition the test verifies if the implementation can use the
- * packet buffer as completion event buffer.*/
 static void crypto_test_enc_alg_aes_cbc(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
@@ -1316,9 +1414,6 @@ static void crypto_test_enc_alg_aes_cbc(void)
 		  false);
 }
 
-/* This test verifies the correctness of encode (plaintext -> ciphertext)
- * operation for AES128_CBC algorithm. IV for the operation is the operation IV.
- * */
 static void crypto_test_enc_alg_aes_cbc_ovr_iv(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
@@ -1330,11 +1425,6 @@ static void crypto_test_enc_alg_aes_cbc_ovr_iv(void)
 		  false);
 }
 
-/* This test verifies the correctness of decode (ciphertext -> plaintext)
- * operation for AES128_CBC algorithm. IV for the operation is the session IV
- * In addition the test verifies if the implementation can use the
- * packet buffer as completion event buffer.
- * */
 static void crypto_test_dec_alg_aes_cbc(void)
 {
 	check_alg(ODP_CRYPTO_OP_DECODE,
@@ -1346,11 +1436,6 @@ static void crypto_test_dec_alg_aes_cbc(void)
 		  false);
 }
 
-/* This test verifies the correctness of decode (ciphertext -> plaintext)
- * operation for AES128_CBC algorithm. IV for the operation is the session IV
- * In addition the test verifies if the implementation can use the
- * packet buffer as completion event buffer.
- * */
 static void crypto_test_dec_alg_aes_cbc_ovr_iv(void)
 {
 	check_alg(ODP_CRYPTO_OP_DECODE,
@@ -1367,10 +1452,6 @@ static int check_alg_aes_ctr(void)
 	return check_alg_support(ODP_CIPHER_ALG_AES_CTR, ODP_AUTH_ALG_NULL);
 }
 
-/* This test verifies the correctness of encode (plaintext -> ciphertext)
- * operation for AES128_CTR algorithm. IV for the operation is the session IV.
- * In addition the test verifies if the implementation can use the
- * packet buffer as completion event buffer.*/
 static void crypto_test_enc_alg_aes_ctr(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
@@ -1382,9 +1463,6 @@ static void crypto_test_enc_alg_aes_ctr(void)
 		  false);
 }
 
-/* This test verifies the correctness of encode (plaintext -> ciphertext)
- * operation for AES128_CTR algorithm. IV for the operation is the operation IV.
- * */
 static void crypto_test_enc_alg_aes_ctr_ovr_iv(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
@@ -1396,11 +1474,6 @@ static void crypto_test_enc_alg_aes_ctr_ovr_iv(void)
 		  false);
 }
 
-/* This test verifies the correctness of decode (ciphertext -> plaintext)
- * operation for AES128_CTR algorithm. IV for the operation is the session IV
- * In addition the test verifies if the implementation can use the
- * packet buffer as completion event buffer.
- * */
 static void crypto_test_dec_alg_aes_ctr(void)
 {
 	check_alg(ODP_CRYPTO_OP_DECODE,
@@ -1412,11 +1485,6 @@ static void crypto_test_dec_alg_aes_ctr(void)
 		  false);
 }
 
-/* This test verifies the correctness of decode (ciphertext -> plaintext)
- * operation for AES128_CTR algorithm. IV for the operation is the session IV
- * In addition the test verifies if the implementation can use the
- * packet buffer as completion event buffer.
- * */
 static void crypto_test_dec_alg_aes_ctr_ovr_iv(void)
 {
 	check_alg(ODP_CRYPTO_OP_DECODE,
@@ -1433,9 +1501,6 @@ static int check_alg_aes_ecb(void)
 	return check_alg_support(ODP_CIPHER_ALG_AES_ECB, ODP_AUTH_ALG_NULL);
 }
 
-/* This test verifies the correctness of encode (plaintext -> ciphertext)
- * operation for AES128_ECB algorithm.
- */
 static void crypto_test_enc_alg_aes_ecb(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
@@ -1447,9 +1512,6 @@ static void crypto_test_enc_alg_aes_ecb(void)
 		  false);
 }
 
-/* This test verifies the correctness of decode (ciphertext -> plaintext)
- * operation for AES128_ECB algorithm.
- * */
 static void crypto_test_dec_alg_aes_ecb(void)
 {
 	check_alg(ODP_CRYPTO_OP_DECODE,
@@ -1466,11 +1528,6 @@ static int check_alg_aes_cfb128(void)
 	return check_alg_support(ODP_CIPHER_ALG_AES_CFB128, ODP_AUTH_ALG_NULL);
 }
 
-/* This test verifies the correctness of encode (plaintext -> ciphertext)
- * operation for AES128_CFB128 algorithm. IV for the operation is the session
- * IV.
- * In addition the test verifies if the implementation can use the
- * packet buffer as completion event buffer.*/
 static void crypto_test_enc_alg_aes_cfb128(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
@@ -1482,10 +1539,6 @@ static void crypto_test_enc_alg_aes_cfb128(void)
 		  false);
 }
 
-/* This test verifies the correctness of encode (plaintext -> ciphertext)
- * operation for AES128_CFB128 algorithm. IV for the operation is the operation
- * IV.
- * */
 static void crypto_test_enc_alg_aes_cfb128_ovr_iv(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
@@ -1497,11 +1550,6 @@ static void crypto_test_enc_alg_aes_cfb128_ovr_iv(void)
 		  false);
 }
 
-/* This test verifies the correctness of decode (ciphertext -> plaintext)
- * operation for AES128_CFB128 algorithm. IV for the operation is the session IV
- * In addition the test verifies if the implementation can use the
- * packet buffer as completion event buffer.
- * */
 static void crypto_test_dec_alg_aes_cfb128(void)
 {
 	check_alg(ODP_CRYPTO_OP_DECODE,
@@ -1513,11 +1561,6 @@ static void crypto_test_dec_alg_aes_cfb128(void)
 		  false);
 }
 
-/* This test verifies the correctness of decode (ciphertext -> plaintext)
- * operation for AES128_CFB128 algorithm. IV for the operation is the session IV
- * In addition the test verifies if the implementation can use the
- * packet buffer as completion event buffer.
- * */
 static void crypto_test_dec_alg_aes_cfb128_ovr_iv(void)
 {
 	check_alg(ODP_CRYPTO_OP_DECODE,
@@ -1534,10 +1577,6 @@ static int check_alg_aes_xts(void)
 	return check_alg_support(ODP_CIPHER_ALG_AES_XTS, ODP_AUTH_ALG_NULL);
 }
 
-/* This test verifies the correctness of encode (plaintext -> ciphertext)
- * operation for AES128_XTS algorithm. IV for the operation is the session IV.
- * In addition the test verifies if the implementation can use the
- * packet buffer as completion event buffer.*/
 static void crypto_test_enc_alg_aes_xts(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
@@ -1549,9 +1588,6 @@ static void crypto_test_enc_alg_aes_xts(void)
 		  false);
 }
 
-/* This test verifies the correctness of encode (plaintext -> ciphertext)
- * operation for AES128_XTS algorithm. IV for the operation is the operation IV.
- * */
 static void crypto_test_enc_alg_aes_xts_ovr_iv(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
@@ -1563,11 +1599,6 @@ static void crypto_test_enc_alg_aes_xts_ovr_iv(void)
 		  false);
 }
 
-/* This test verifies the correctness of decode (ciphertext -> plaintext)
- * operation for AES128_XTS algorithm. IV for the operation is the session IV
- * In addition the test verifies if the implementation can use the
- * packet buffer as completion event buffer.
- * */
 static void crypto_test_dec_alg_aes_xts(void)
 {
 	check_alg(ODP_CRYPTO_OP_DECODE,
@@ -1579,11 +1610,6 @@ static void crypto_test_dec_alg_aes_xts(void)
 		  false);
 }
 
-/* This test verifies the correctness of decode (ciphertext -> plaintext)
- * operation for AES128_XTS algorithm. IV for the operation is the session IV
- * In addition the test verifies if the implementation can use the
- * packet buffer as completion event buffer.
- * */
 static void crypto_test_dec_alg_aes_xts_ovr_iv(void)
 {
 	check_alg(ODP_CRYPTO_OP_DECODE,
@@ -1797,13 +1823,6 @@ static int check_alg_hmac_md5(void)
 	return check_alg_support(ODP_CIPHER_ALG_NULL, ODP_AUTH_ALG_MD5_HMAC);
 }
 
-/* This test verifies the correctness of HMAC_MD5 digest operation.
- * The output check length is truncated to 12 bytes (96 bits) as
- * returned by the crypto operation API call.
- * Note that hash digest is a one-way operation.
- * In addition the test verifies if the implementation can use the
- * packet buffer as completion event buffer.
- * */
 static void crypto_test_gen_alg_hmac_md5(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
@@ -1831,13 +1850,6 @@ static int check_alg_hmac_sha1(void)
 	return check_alg_support(ODP_CIPHER_ALG_NULL, ODP_AUTH_ALG_SHA1_HMAC);
 }
 
-/* This test verifies the correctness of HMAC_SHA1 digest operation.
- * The output check length is truncated to 12 bytes (96 bits) as
- * returned by the crypto operation API call.
- * Note that hash digest is a one-way operation.
- * In addition the test verifies if the implementation can use the
- * packet buffer as completion event buffer.
- * */
 static void crypto_test_gen_alg_hmac_sha1(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
@@ -1892,13 +1904,6 @@ static int check_alg_hmac_sha256(void)
 	return check_alg_support(ODP_CIPHER_ALG_NULL, ODP_AUTH_ALG_SHA256_HMAC);
 }
 
-/* This test verifies the correctness of HMAC_SHA256 digest operation.
- * The output check length is truncated to 16 bytes (128 bits) as
- * returned by the crypto operation API call.
- * Note that hash digest is a one-way operation.
- * In addition the test verifies if the implementation can use the
- * packet buffer as completion event buffer.
- * */
 static void crypto_test_gen_alg_hmac_sha256(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
@@ -1926,13 +1931,6 @@ static int check_alg_hmac_sha384(void)
 	return check_alg_support(ODP_CIPHER_ALG_NULL, ODP_AUTH_ALG_SHA384_HMAC);
 }
 
-/* This test verifies the correctness of HMAC_SHA384 digest operation.
- * The output check length is truncated to 24 bytes (192 bits) as
- * returned by the crypto operation API call.
- * Note that hash digest is a one-way operation.
- * In addition the test verifies if the implementation can use the
- * packet buffer as completion event buffer.
- * */
 static void crypto_test_gen_alg_hmac_sha384(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
@@ -1960,13 +1958,6 @@ static int check_alg_hmac_sha512(void)
 	return check_alg_support(ODP_CIPHER_ALG_NULL, ODP_AUTH_ALG_SHA512_HMAC);
 }
 
-/* This test verifies the correctness of HMAC_SHA512 digest operation.
- * The output check length is truncated to 32 bytes (256 bits) as
- * returned by the crypto operation API call.
- * Note that hash digest is a one-way operation.
- * In addition the test verifies if the implementation can use the
- * packet buffer as completion event buffer.
- * */
 static void crypto_test_gen_alg_hmac_sha512(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
@@ -1995,13 +1986,6 @@ static int check_alg_aes_xcbc(void)
 						ODP_AUTH_ALG_AES_XCBC_MAC);
 }
 
-/* This test verifies the correctness of AES_XCBC_MAC digest operation.
- * The output check length is truncated to 16 bytes (128 bits) as
- * returned by the crypto operation API call.
- * Note that hash digest is a one-way operation.
- * In addition the test verifies if the implementation can use the
- * packet buffer as completion event buffer.
- * */
 static void crypto_test_gen_alg_aes_xcbc(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,

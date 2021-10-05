@@ -20,7 +20,7 @@ extern "C" {
 #endif
 
 #include <odp/api/crypto.h>
-#include <odp/api/support.h>
+#include <odp/api/std_types.h>
 #include <odp/api/packet_io.h>
 #include <odp/api/protocols.h>
 #include <odp/api/classification.h>
@@ -337,6 +337,28 @@ typedef struct odp_ipsec_capability_t {
 	 *  less than 'max_cos' capability in classifier API.
 	 */
 	uint32_t max_cls_cos;
+
+	/**
+	 * Scheduled queue support
+	 *
+	 * 0: Scheduled queues are not supported either as IPsec SA destination
+	 *    queues or as IPsec default queue
+	 * 1: Scheduled queues are supported as both IPsec SA destination queues
+	 *    and IPsec default queue
+	 * @see odp_ipsec_sa_param_t
+	 */
+	odp_bool_t queue_type_sched;
+
+	/**
+	 * Plain queue support
+	 *
+	 * 0: Plain queues are not supported either as IPsec SA destination
+	 *    queues or as IPsec default queue
+	 * 1: Plain queues are supported as both IPsec SA destination queues and
+	 *    IPsec default queue
+	 * @see odp_ipsec_sa_param_t
+	 */
+	odp_bool_t queue_type_plain;
 
 	/** Maximum number of different destination queues. The same queue may
 	 *  be used for many SAs. */
@@ -1532,6 +1554,17 @@ typedef struct odp_ipsec_packet_result_t {
 		uint32_t len;
 	} outer_hdr;
 
+	/** Total IP length of the original ESP or AH packet before IPsec
+	 *  decapsulation. This is valid only for inbound inline and async
+	 *  processed packets. Zero value means that the length information
+	 *  is not available.
+	 *
+	 *  If the result packet was reassembled from multiple IPsec
+	 *  protected packets, this is the sum of the lengths of all the
+	 *  involved IPsec packets.
+	 */
+	uint32_t orig_ip_len;
+
 } odp_ipsec_packet_result_t;
 
 /**
@@ -1591,9 +1624,10 @@ typedef struct odp_ipsec_status_t {
  * packets consumed and outputs a new packet handle for each outputted packet.
  * Outputted packets contain IPSEC result metadata (odp_ipsec_packet_result_t),
  * which should be checked for transformation errors, etc. Outputted packets
- * with error status have not been transformed but the original packet is
- * returned. The operation does not modify packets that it does not consume.
- * It cannot consume all input packets if 'num_out' is smaller than 'num_in'.
+ * with error status have undefined content, except that in case of sa_lookup
+ * error the original input packet data is returned. The operation does not
+ * modify packets that it does not consume. It cannot consume all input
+ * packets if 'num_out' is smaller than 'num_in'.
  *
  * Packet context pointer and user area content are copied from input to output
  * packets. Output packets are allocated from the same pool(s) as input packets.
@@ -1675,9 +1709,10 @@ int odp_ipsec_in(const odp_packet_t pkt_in[], int num_in,
  * packets consumed and outputs a new packet handle for each outputted packet.
  * Outputted packets contain IPSEC result metadata (odp_ipsec_packet_result_t),
  * which should be checked for transformation errors, etc. Outputted packets
- * with error status have not been transformed but the original packet is
- * returned. The operation does not modify packets that it does not consume.
- * It cannot consume all input packets if 'num_out' is smaller than 'num_in'.
+ * with error status have undefined content, except that in case of MTU error
+ * the original input packet data is returned. The operation does not modify
+ * packets that it does not consume. It cannot consume all input packets if
+ * 'num_out' is smaller than 'num_in'.
  *
  * Packet context pointer and user area content are copied from input to output
  * packets. Output packets are allocated from the same pool(s) as input packets.
