@@ -124,11 +124,18 @@ extern "C" {
 				   CONFIG_PACKET_HEADROOM - \
 				   CONFIG_PACKET_TAILROOM)
 
-/* Maximum number of shared memory blocks.
- *
- * This the number of separate SHM areas that can be reserved concurrently
+/*
+ * Number of shared memory blocks reserved for implementation internal use.
  */
-#define ODP_CONFIG_SHM_BLOCKS (ODP_CONFIG_POOLS + 48)
+#define CONFIG_INTERNAL_SHM_BLOCKS 20
+
+/*
+ * Maximum number of shared memory blocks.
+ *
+ * This is the number of separate SHM blocks that an application can reserve
+ * concurrently.
+ */
+#define CONFIG_SHM_BLOCKS 64
 
 /*
  * Maximum event burst size

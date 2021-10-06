@@ -1,4 +1,5 @@
 /* Copyright (c) 2017-2018, Linaro Limited
+ * Copyright (c) 2021, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -25,9 +26,7 @@
 
 #define SHM_MAX_ALIGN (0x80000000)
 #define SHM_BLOCK_NAME "%" PRIu64 "-%d-%s"
-
-ODP_STATIC_ASSERT(ODP_CONFIG_SHM_BLOCKS >= ODP_CONFIG_POOLS,
-		  "ODP_CONFIG_SHM_BLOCKS < ODP_CONFIG_POOLS");
+#define SHM_MAX_NB_BLOCKS (CONFIG_INTERNAL_SHM_BLOCKS + CONFIG_SHM_BLOCKS)
 
 ODP_STATIC_ASSERT(ODP_SHM_NAME_LEN >= RTE_MEMZONE_NAMESIZE,
 		  "ODP_SHM_NAME_LEN < RTE_MEMZONE_NAMESIZE");
@@ -68,7 +67,7 @@ typedef struct {
  */
 typedef struct {
 	odp_spinlock_t  lock;
-	shm_block_t block[ODP_CONFIG_SHM_BLOCKS];
+	shm_block_t block[SHM_MAX_NB_BLOCKS];
 } shm_table_t;
 
 static shm_table_t *shm_tbl;
@@ -80,7 +79,7 @@ static odp_bool_t mz_name_used(const char *name)
 {
 	int idx;
 
-	for (idx = 0; idx < ODP_CONFIG_SHM_BLOCKS; idx++) {
+	for (idx = 0; idx < SHM_MAX_NB_BLOCKS; idx++) {
 		if (shm_tbl->block[idx].mz &&
 		    strncmp(name, shm_tbl->block[idx].mz->name,
 			    RTE_MEMZONE_NAMESIZE) == 0)
@@ -124,7 +123,7 @@ static int find_free_block(void)
 {
 	int idx;
 
-	for (idx = 0; idx < ODP_CONFIG_SHM_BLOCKS; idx++) {
+	for (idx = 0; idx < SHM_MAX_NB_BLOCKS; idx++) {
 		if (shm_tbl->block[idx].mz == NULL)
 			return idx;
 	}
@@ -145,7 +144,7 @@ static inline odp_bool_t handle_is_valid(odp_shm_t shm)
 {
 	int idx = handle_to_idx(shm);
 
-	if (idx < 0 || idx >= ODP_CONFIG_SHM_BLOCKS ||
+	if (idx < 0 || idx >= SHM_MAX_NB_BLOCKS ||
 	    shm_tbl->block[idx].mz == NULL) {
 		ODP_ERR("Invalid odp_shm_t handle: %" PRIu64 "\n",
 			odp_shm_to_u64(shm));
@@ -199,7 +198,7 @@ int _odp_shm_term_global(void)
 	}
 
 	/* Cleanup possibly non freed memory (and complain a bit) */
-	for (idx = 0; idx < ODP_CONFIG_SHM_BLOCKS; idx++) {
+	for (idx = 0; idx < SHM_MAX_NB_BLOCKS; idx++) {
 		block = &shm_tbl->block[idx];
 		if (block->mz) {
 			ODP_ERR("block '%s' was never freed (cleaning up...)\n",
@@ -224,7 +223,7 @@ int odp_shm_capability(odp_shm_capability_t *capa)
 {
 	memset(capa, 0, sizeof(odp_shm_capability_t));
 
-	capa->max_blocks = ODP_CONFIG_SHM_BLOCKS;
+	capa->max_blocks = CONFIG_SHM_BLOCKS;
 	capa->max_size = 0;
 	capa->max_align = SHM_MAX_ALIGN;
 
@@ -357,7 +356,7 @@ odp_shm_t odp_shm_lookup(const char *name)
 
 	odp_spinlock_lock(&shm_tbl->lock);
 
-	for (idx = 0; idx < ODP_CONFIG_SHM_BLOCKS; idx++) {
+	for (idx = 0; idx < SHM_MAX_NB_BLOCKS; idx++) {
 		if (shm_tbl->block[idx].mz &&
 		    strncmp(name, shm_tbl->block[idx].name,
 			    ODP_SHM_NAME_LEN) == 0) {
@@ -425,7 +424,7 @@ void odp_shm_print_all(void)
 
 	ODP_PRINT("\nShared memory blocks\n--------------------\n");
 
-	for (idx = 0; idx < ODP_CONFIG_SHM_BLOCKS; idx++) {
+	for (idx = 0; idx < SHM_MAX_NB_BLOCKS; idx++) {
 		block = &shm_tbl->block[idx];
 		if (block->mz == NULL)
 			continue;
