@@ -130,7 +130,7 @@ static int queue_init_global(void)
 	_odp_queue_inline_offset.context = offsetof(queue_entry_t,
 						    s.param.context);
 
-	shm = odp_shm_reserve("_odp_queue_gbl",
+	shm = odp_shm_reserve("_odp_queue_basic_global",
 			      sizeof(queue_global_t),
 			      sizeof(queue_entry_t), 0);
 

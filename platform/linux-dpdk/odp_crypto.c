@@ -315,7 +315,7 @@ int _odp_crypto_init_global(void)
 	mem_size += (MAX_SESSIONS * sizeof(crypto_session_entry_t));
 
 	/* Allocate our globally shared memory */
-	shm = odp_shm_reserve("_odp_crypto_glb", mem_size,
+	shm = odp_shm_reserve("_odp_crypto_global", mem_size,
 			      ODP_CACHE_LINE_SIZE, 0);
 	if (shm != ODP_SHM_INVALID) {
 		global = odp_shm_addr(shm);
