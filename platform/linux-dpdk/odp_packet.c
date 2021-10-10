@@ -522,11 +522,18 @@ int odp_packet_trunc_tail(odp_packet_t *pkt, uint32_t len, void **tail_ptr,
 			  uint32_t *tailroom)
 {
 	struct rte_mbuf *mb = pkt_to_mbuf(*pkt);
+	struct rte_mbuf *last_mb = rte_pktmbuf_lastseg(mb);
 
 	if (odp_unlikely(len >= odp_packet_len(*pkt)))
 		return -1;
 
-	if (rte_pktmbuf_trim(mb, len)) {
+	/*
+	 * Trim only if the last segment does not become zero length.
+	 */
+	if (odp_likely(len < last_mb->data_len)) {
+		if (odp_unlikely(rte_pktmbuf_trim(mb, len)))
+			return -1;
+	} else {
 		struct rte_mbuf *reverse[mb->nb_segs];
 		struct rte_mbuf *t = mb;
 		int i;
