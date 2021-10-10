@@ -365,8 +365,8 @@ int odp_packet_extend_head(odp_packet_t *pkt, uint32_t len, void **data_ptr,
 		}
 		/* Expand the original head segment*/
 		newhead->pkt_len += rte_pktmbuf_headroom(mb);
+		mb->data_len += rte_pktmbuf_headroom(mb);
 		mb->data_off = 0;
-		mb->data_len = mb->buf_len;
 		_copy_head_metadata(newhead, mb);
 		mb = newhead;
 		*pkt = (odp_packet_t)newhead;
