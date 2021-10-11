@@ -29,7 +29,10 @@ int ipsec_config(odp_instance_t inst);
 int ipsec_in_inline_init(void);
 int ipsec_out_inline_init(void);
 
-int ipsec_suite_init(void);
+int ipsec_suite_sync_init(void);
+int ipsec_suite_plain_init(void);
+int ipsec_suite_sched_init(void);
+int ipsec_suite_term(void);
 int ipsec_in_term(void);
 int ipsec_out_term(void);
 
@@ -39,8 +42,10 @@ struct suite_context_s {
 	odp_ipsec_op_mode_t inbound_op_mode;
 	odp_ipsec_op_mode_t outbound_op_mode;
 	odp_pool_t pool;
+	odp_queue_t default_queue;
 	odp_queue_t queue;
 	odp_pktio_t pktio;
+	odp_queue_type_t q_type;
 };
 
 extern struct suite_context_s suite_context;
@@ -85,6 +90,8 @@ typedef struct {
 	int num_pkt;
 	struct {
 		odp_ipsec_op_status_t status;
+		odp_packet_reass_status_t reass_status;
+		uint16_t num_frags;
 		const ipsec_test_packet *pkt_res;
 		odp_proto_l3_type_t l3_type;
 		odp_proto_l4_type_t l4_type;

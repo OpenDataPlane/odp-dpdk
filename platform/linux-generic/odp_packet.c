@@ -11,6 +11,7 @@
 #include <odp/api/plat/packet_inlines.h>
 #include <odp_packet_internal.h>
 #include <odp_debug_internal.h>
+#include <odp_macros_internal.h>
 #include <odp_chksum_internal.h>
 #include <odp_errno_define.h>
 #include <odp/api/hints.h>
@@ -1847,7 +1848,15 @@ static uint32_t packet_sum_crc32c(odp_packet_hdr_t *pkt_hdr,
 	return sum;
 }
 
-/** Parser helper function for Ethernet packets */
+/*
+ * In the worst case we look at the Ethernet header, 8 bytes of LLC/SNAP
+ * header and two VLAN tags in the same packet.
+ */
+#define PARSE_ETH_BYTES (sizeof(_odp_ethhdr_t) + 8 + 2 * sizeof(_odp_vlanhdr_t))
+/** Parser helper function for Ethernet packets
+ *
+ *  Requires up to PARSE_ETH_BYTES bytes of contiguous packet data.
+ */
 static inline uint16_t parse_eth(packet_parser_t *prs, const uint8_t **parseptr,
 				 uint32_t *offset, uint32_t frame_len)
 {
@@ -1864,7 +1873,7 @@ static inline uint16_t parse_eth(packet_parser_t *prs, const uint8_t **parseptr,
 	eth = (const _odp_ethhdr_t *)*parseptr;
 
 	/* Detect jumbo frames */
-	if (odp_unlikely(frame_len > _ODP_ETH_LEN_MAX))
+	if (odp_unlikely(frame_len - *offset > _ODP_ETH_LEN_MAX))
 		input_flags.jumbo = 1;
 
 	/* Handle Ethernet broadcast/multicast addresses */
@@ -1922,14 +1931,27 @@ static inline uint16_t parse_eth(packet_parser_t *prs, const uint8_t **parseptr,
 		*parseptr += sizeof(_odp_vlanhdr_t);
 	}
 
+	/*
+	 * The packet was too short for what we parsed. We just give up
+	 * entirely without trying to parse what fits in the packet.
+	 */
+	if (odp_unlikely(*offset > frame_len)) {
+		input_flags.all = 0;
+		input_flags.l2  = 1;
+		ethtype = 0;
+	}
+
 error:
 	prs->input_flags.all |= input_flags.all;
 
 	return ethtype;
 }
 
+#define PARSE_IPV4_BYTES (0xfU * 4) /* max IPv4 header length with options */
 /**
  * Parser helper function for IPv4
+ *
+ * Requires up to PARSE_IPV4_BYTES bytes of contiguous packet data.
  */
 static inline uint8_t parse_ipv4(packet_parser_t *prs, const uint8_t **parseptr,
 				 uint32_t *offset, uint32_t frame_len,
@@ -1945,6 +1967,7 @@ static inline uint8_t parse_ipv4(packet_parser_t *prs, const uint8_t **parseptr,
 
 	if (odp_unlikely(ihl < _ODP_IPV4HDR_IHL_MIN ||
 			 ver != 4 ||
+			 sizeof(*ipv4) > frame_len - *offset ||
 			 (l3_len > frame_len - *offset))) {
 		prs->flags.ip_err = 1;
 		return 0;
@@ -1987,8 +2010,15 @@ static inline uint8_t parse_ipv4(packet_parser_t *prs, const uint8_t **parseptr,
 	return ipv4->proto;
 }
 
+/*
+ * Peeks 2 bytes beyond IPv6 base header without length check if there
+ * are extension headers.
+ */
+#define PARSE_IPV6_BYTES (sizeof(_odp_ipv6hdr_t) + 2)
 /**
  * Parser helper function for IPv6
+ *
+ * Requires at least PARSE_IPV6_BYTES bytes of contiguous packet data.
  */
 static inline uint8_t parse_ipv6(packet_parser_t *prs, const uint8_t **parseptr,
 				 uint32_t *offset, uint32_t frame_len,
@@ -2003,8 +2033,9 @@ static inline uint8_t parse_ipv6(packet_parser_t *prs, const uint8_t **parseptr,
 			  _ODP_IPV6HDR_LEN;
 
 	/* Basic sanity checks on IPv6 header */
-	if ((odp_be_to_cpu_32(ipv6->ver_tc_flow) >> 28) != 6 ||
-	    l3_len > frame_len - *offset) {
+	if (odp_unlikely((odp_be_to_cpu_32(ipv6->ver_tc_flow) >> 28) != 6 ||
+			 sizeof(*ipv6) > frame_len - *offset ||
+			 l3_len > frame_len - *offset)) {
 		prs->flags.ip_err = 1;
 		return 0;
 	}
@@ -2056,8 +2087,11 @@ static inline uint8_t parse_ipv6(packet_parser_t *prs, const uint8_t **parseptr,
 	return ipv6->next_hdr;
 }
 
+#define PARSE_TCP_BYTES (sizeof(_odp_tcphdr_t))
 /**
  * Parser helper function for TCP
+ *
+ * Requires PARSE_TCP_BYTES bytes of contiguous packet data.
  */
 static inline void parse_tcp(packet_parser_t *prs, const uint8_t **parseptr,
 			     uint16_t tcp_len,
@@ -2083,8 +2117,15 @@ static inline void parse_tcp(packet_parser_t *prs, const uint8_t **parseptr,
 	*parseptr += len;
 }
 
+/*
+ * In the worst case we look at the UDP header and 4 bytes of the UDP
+ * payload (the non-ESP marker to distinguish IKE packets from ESP packets).
+ */
+#define PARSE_UDP_BYTES (sizeof(_odp_udphdr_t) + 4)
 /**
  * Parser helper function for UDP
+ *
+ * Requires PARSE_UDP_BYTES bytes of contiguous packet data.
  */
 static inline void parse_udp(packet_parser_t *prs, const uint8_t **parseptr,
 			     odp_proto_chksums_t chksums,
@@ -2129,8 +2170,11 @@ static inline void parse_udp(packet_parser_t *prs, const uint8_t **parseptr,
 	*parseptr += sizeof(_odp_udphdr_t);
 }
 
+#define PARSE_SCTP_BYTES (sizeof(_odp_sctphdr_t))
 /**
  * Parser helper function for SCTP
+ *
+ * Requires PARSE_SCTP_BYTES bytes of contiguous packet data.
  */
 static inline void parse_sctp(packet_parser_t *prs, const uint8_t **parseptr,
 			      uint16_t sctp_len,
@@ -2157,6 +2201,10 @@ static inline void parse_sctp(packet_parser_t *prs, const uint8_t **parseptr,
 	*parseptr += sizeof(_odp_sctphdr_t);
 }
 
+#define MAX3(a, b, c) (MAX(MAX((a), (b)), (c)))
+#define PARSE_L3_L4_BYTES (MAX(PARSE_IPV4_BYTES, PARSE_IPV6_BYTES) + \
+			   MAX3(PARSE_TCP_BYTES, PARSE_UDP_BYTES, PARSE_SCTP_BYTES))
+/* Requires up to PARSE_L3_L4_BYTES bytes of contiguous packet data. */
 static inline
 int packet_parse_common_l3_l4(packet_parser_t *prs, const uint8_t *parseptr,
 			      uint32_t offset,
@@ -2516,6 +2564,8 @@ static int packet_l4_chksum(odp_packet_hdr_t *pkt_hdr,
 	if (chksums.chksum.sctp &&
 	    pkt_hdr->p.input_flags.sctp &&
 	    !pkt_hdr->p.input_flags.ipfrag) {
+		uint32_t seg_len = 0;
+		_odp_sctphdr_t hdr_copy;
 		uint32_t sum = ~packet_sum_crc32c(pkt_hdr,
 						 pkt_hdr->p.l4_offset +
 						 _ODP_SCTPHDR_LEN,
@@ -2525,8 +2575,14 @@ static int packet_l4_chksum(odp_packet_hdr_t *pkt_hdr,
 						 l4_part_sum);
 		_odp_sctphdr_t *sctp = packet_map(pkt_hdr,
 						  pkt_hdr->p.l4_offset,
-						  NULL, NULL);
+						  &seg_len, NULL);
+		if (odp_unlikely(seg_len < sizeof(*sctp))) {
+			odp_packet_t pkt = packet_handle(pkt_hdr);
 
+			sctp = &hdr_copy;
+			odp_packet_copy_to_mem(pkt, pkt_hdr->p.l4_offset,
+					       sizeof(*sctp), sctp);
+		}
 		pkt_hdr->p.input_flags.l4_chksum_done = 1;
 		if (sum != sctp->chksum) {
 			pkt_hdr->p.flags.l4_chksum_err = 1;
@@ -2587,6 +2643,8 @@ int odp_packet_parse(odp_packet_t pkt, uint32_t offset,
 	int ret;
 	uint16_t ethtype;
 	uint64_t l4_part_sum = 0;
+	const uint32_t min_seglen = PARSE_ETH_BYTES + PARSE_L3_L4_BYTES;
+	uint8_t buf[min_seglen];
 
 	if (proto == ODP_PROTO_NONE || layer == ODP_PROTO_LAYER_NONE)
 		return -1;
@@ -2595,6 +2653,20 @@ int odp_packet_parse(odp_packet_t pkt, uint32_t offset,
 
 	if (data == NULL)
 		return -1;
+
+	/*
+	 * We must not have a packet segment boundary within the parsed
+	 * packet data range. Copy enough data to a temporary buffer for
+	 * parsing if necessary.
+	 */
+	if (odp_unlikely(pkt_hdr->seg_count > 1) &&
+	    odp_unlikely(seg_len < min_seglen)) {
+		seg_len = min_seglen;
+		if (seg_len > packet_len - offset)
+			seg_len = packet_len - offset;
+		odp_packet_copy_to_mem(pkt, offset, seg_len, buf);
+		data = buf;
+	}
 
 	/* Reset parser flags, keep other flags */
 	packet_parse_reset(pkt_hdr, 0);
@@ -2940,6 +3012,13 @@ odp_packet_reass_status(odp_packet_t pkt)
 {
 	(void)pkt;
 	return ODP_PACKET_REASS_NONE;
+}
+
+int odp_packet_reass_info(odp_packet_t pkt, odp_packet_reass_info_t *info)
+{
+	(void)pkt;
+	(void)info;
+	return -1;
 }
 
 int

@@ -64,8 +64,11 @@ typedef struct crypto_session_entry_s {
 	struct rte_cryptodev_sym_session *rte_session;
 	struct rte_crypto_sym_xform cipher_xform;
 	struct rte_crypto_sym_xform auth_xform;
+	struct {
+		unsigned int cdev_qpairs_shared:1;
+		unsigned int chained_bufs_ok:1;
+	} flags;
 	uint16_t cdev_nb_qpairs;
-	odp_bool_t cdev_qpairs_shared;
 	uint8_t cdev_id;
 	uint8_t cipher_iv_data[MAX_IV_LENGTH];
 	uint8_t auth_iv_data[MAX_IV_LENGTH];
@@ -312,7 +315,7 @@ int _odp_crypto_init_global(void)
 	mem_size += (MAX_SESSIONS * sizeof(crypto_session_entry_t));
 
 	/* Allocate our globally shared memory */
-	shm = odp_shm_reserve("_odp_crypto_glb", mem_size,
+	shm = odp_shm_reserve("_odp_crypto_global", mem_size,
 			      ODP_CACHE_LINE_SIZE, 0);
 	if (shm != ODP_SHM_INVALID) {
 		global = odp_shm_addr(shm);
@@ -1260,6 +1263,34 @@ check_finish:
 	return -1;
 }
 
+static int chained_bufs_ok(const odp_crypto_session_param_t *param,
+			   uint8_t cdev_id)
+{
+	struct rte_cryptodev_info dev_info;
+	int chained_bufs_ok;
+
+	rte_cryptodev_info_get(cdev_id, &dev_info);
+	chained_bufs_ok = !!(dev_info.feature_flags & RTE_CRYPTODEV_FF_IN_PLACE_SGL);
+
+	/*
+	 * Some crypto devices do not support chained buffers with all
+	 * algorithms despite advertizing SG support in feature flags.
+	 */
+
+	if (dev_info.driver_name &&
+	    !strcmp(dev_info.driver_name, "crypto_aesni_gcm") &&
+	    param->auth_alg == ODP_AUTH_ALG_AES_GMAC)
+		chained_bufs_ok = 0;
+
+	if (dev_info.driver_name &&
+	    !strcmp(dev_info.driver_name, "crypto_openssl") &&
+	    (param->cipher_alg == ODP_CIPHER_ALG_AES_GCM ||
+	     param->auth_alg == ODP_AUTH_ALG_AES_GMAC))
+		chained_bufs_ok = 0;
+
+	return chained_bufs_ok;
+}
+
 #if RTE_VERSION < RTE_VERSION_NUM(19, 8, 0, 0)
 static int crypto_init_key(uint8_t **data, uint16_t *length,
 			   odp_crypto_key_t *key, const char *type)
@@ -1482,6 +1513,7 @@ int odp_crypto_session_create(const odp_crypto_session_param_t *param,
 		    param->auth_alg == ODP_AUTH_ALG_NULL) {
 			rte_session = NULL;
 			cdev_id = ~0;
+			session->flags.chained_bufs_ok = 1;
 			session->cdev_nb_qpairs = 0;
 			goto out_null;
 		} else if (param->cipher_alg == ODP_CIPHER_ALG_NULL) {
@@ -1524,8 +1556,12 @@ int odp_crypto_session_create(const odp_crypto_session_param_t *param,
 		goto err;
 	}
 
+	session->flags.chained_bufs_ok = chained_bufs_ok(param, cdev_id);
 	session->cdev_nb_qpairs = global->enabled_crypto_dev_qpairs[cdev_id];
-	session->cdev_qpairs_shared = global->enabled_crypto_dev_qpairs_shared[cdev_id];
+	if (global->enabled_crypto_dev_qpairs_shared[cdev_id])
+		session->flags.cdev_qpairs_shared = 1;
+	else
+		session->flags.cdev_qpairs_shared = 0;
 out_null:
 	session->rte_session  = rte_session;
 	session->cdev_id = cdev_id;
@@ -1840,6 +1876,50 @@ static void crypto_fill_sym_param(crypto_session_entry_t *session,
 	op->sym->auth.data.length = param->auth_range.length;
 }
 
+/*
+ * Attempt to change a multi segment packet to a single segment packet by
+ * reducing the headroom. Shift packet data toward the start of the first
+ * segment and trim the tail, hopefully getting rid of the tail segment.
+ *
+ * This fails if the packet data does not fit in the first segment with
+ * the new headroom. A temporary copy to a bigger buffer would be needed
+ * in that case.
+ *
+ * Do nothing for single segment packets.
+ *
+ * We assume that odp_crypto_operation() makes no promise to not shift
+ * packet data within the packet. If that is not the case, the shifting
+ * done here needs to be undone after the crypto operation.
+ *
+ */
+static int linearize_pkt(const crypto_session_entry_t *session, odp_packet_t pkt)
+{
+	const uint32_t new_headroom = CONFIG_PACKET_HEADROOM;
+	uint32_t headroom;
+	uint32_t len;
+	uint32_t shift;
+	int rc;
+
+	if (odp_likely(odp_packet_num_segs(pkt) == 1))
+		return 0;
+	if (session->flags.chained_bufs_ok)
+		return 0;
+
+	headroom = odp_packet_headroom(pkt);
+	if (odp_unlikely(new_headroom >= headroom))
+		return -1;
+
+	len = odp_packet_len(pkt);
+	shift = headroom - new_headroom;
+	odp_packet_push_head(pkt, shift);
+	odp_packet_move_data(pkt, 0, shift, len);
+	/* We rely on our trunc implementation to not change the handle */
+	rc = odp_packet_trunc_tail(&pkt, shift, NULL, NULL);
+	ODP_ASSERT(rc == 0);
+
+	return odp_packet_num_segs(pkt) != 1;
+}
+
 static
 int odp_crypto_int(odp_packet_t pkt_in,
 		   odp_packet_t *pkt_out,
@@ -1896,6 +1976,9 @@ int odp_crypto_int(odp_packet_t pkt_in,
 		pkt_in = ODP_PACKET_INVALID;
 	}
 
+	if (linearize_pkt(session, out_pkt))
+		goto err;
+
 	rte_session = session->rte_session;
 	/* NULL rte_session means that it is a NULL-NULL operation.
 	 * Just return new packet. */
@@ -1914,7 +1997,7 @@ int odp_crypto_int(odp_packet_t pkt_in,
 		int retry_count = 0;
 		int queue_pair;
 		int rc;
-		odp_bool_t queue_pairs_shared = session->cdev_qpairs_shared;
+		odp_bool_t queue_pairs_shared = session->flags.cdev_qpairs_shared;
 
 		if (odp_unlikely(queue_pairs_shared))
 			queue_pair = odp_thread_id() % session->cdev_nb_qpairs;

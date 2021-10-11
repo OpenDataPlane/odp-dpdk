@@ -20,6 +20,7 @@
 #include <odp/api/plat/queue_inlines.h>
 #include <odp_classification_internal.h>
 #include <odp_libconfig_internal.h>
+#include <odp_schedule_if.h>
 
 #include <protocols/eth.h>
 #include <protocols/ip.h>
@@ -163,6 +164,9 @@ int odp_ipsec_capability(odp_ipsec_capability_t *capa)
 	rc = set_ipsec_crypto_capa(capa);
 	if (rc < 0)
 		return rc;
+
+	capa->queue_type_plain = true;
+	capa->queue_type_sched = true;
 
 	rc = odp_queue_capability(&queue_capa);
 	if (rc < 0)
@@ -756,7 +760,8 @@ static ipsec_sa_t *ipsec_in_single(odp_packet_t pkt,
 				   odp_ipsec_sa_t sa,
 				   odp_packet_t *pkt_out,
 				   odp_bool_t enqueue_op,
-				   odp_ipsec_op_status_t *status)
+				   odp_ipsec_op_status_t *status,
+				   uint32_t *orig_ip_len)
 {
 	ipsec_state_t state;
 	ipsec_sa_t *ipsec_sa = NULL;
@@ -792,6 +797,7 @@ static ipsec_sa_t *ipsec_in_single(odp_packet_t pkt,
 		status->error.alg = 1;
 		goto exit;
 	}
+	*orig_ip_len = state.ip_tot_len;
 
 	/* Check IP header for IPSec protocols and look it up */
 	if (_ODP_IPPROTO_ESP == state.ip_next_hdr ||
@@ -1014,13 +1020,14 @@ static int ipsec_out_tunnel_parse_ipv6(ipsec_state_t *state,
 				       ipsec_sa_t *ipsec_sa)
 {
 	_odp_ipv6hdr_t *ipv6hdr = state->ip;
+	uint32_t ver_tc_flow = odp_be_to_cpu_32(ipv6hdr->ver_tc_flow);
 
 	ipv6hdr->hop_limit -= ipsec_sa->dec_ttl;
-	state->out_tunnel.ip_tos = (ipv6hdr->ver_tc_flow &
+	state->out_tunnel.ip_tos = (ver_tc_flow &
 				    _ODP_IPV6HDR_TC_MASK) >>
 		_ODP_IPV6HDR_TC_SHIFT;
 	state->out_tunnel.ip_df = 0;
-	state->out_tunnel.ip_flabel = (ipv6hdr->ver_tc_flow &
+	state->out_tunnel.ip_flabel = (ver_tc_flow &
 				       _ODP_IPV6HDR_FLOW_LABEL_MASK) >>
 		_ODP_IPV6HDR_FLOW_LABEL_SHIFT;
 	state->ip_next_hdr = ipv6hdr->next_hdr;
@@ -1740,6 +1747,7 @@ int odp_ipsec_in(const odp_packet_t pkt_in[], int num_in,
 		odp_ipsec_op_status_t status;
 		odp_ipsec_sa_t sa;
 		ipsec_sa_t *ipsec_sa;
+		uint32_t dummy; /* orig_ip_len not valid in sync operations */
 		odp_ipsec_packet_result_t *result;
 
 		memset(&status, 0, sizeof(status));
@@ -1751,7 +1759,7 @@ int odp_ipsec_in(const odp_packet_t pkt_in[], int num_in,
 			ODP_ASSERT(ODP_IPSEC_SA_INVALID != sa);
 		}
 
-		ipsec_sa = ipsec_in_single(pkt, sa, &pkt, false, &status);
+		ipsec_sa = ipsec_in_single(pkt, sa, &pkt, false, &status, &dummy);
 
 		packet_subtype_set(pkt, ODP_EVENT_PACKET_IPSEC);
 		result = ipsec_pkt_result(pkt);
@@ -1851,8 +1859,10 @@ int odp_ipsec_in_enq(const odp_packet_t pkt_in[], int num_in,
 		odp_ipsec_op_status_t status;
 		odp_ipsec_sa_t sa;
 		ipsec_sa_t *ipsec_sa;
+		uint32_t orig_ip_len = 0;
 		odp_ipsec_packet_result_t *result;
 		odp_queue_t queue;
+		int rc;
 
 		memset(&status, 0, sizeof(status));
 
@@ -1863,12 +1873,13 @@ int odp_ipsec_in_enq(const odp_packet_t pkt_in[], int num_in,
 			ODP_ASSERT(ODP_IPSEC_SA_INVALID != sa);
 		}
 
-		ipsec_sa = ipsec_in_single(pkt, sa, &pkt, true, &status);
+		ipsec_sa = ipsec_in_single(pkt, sa, &pkt, true, &status, &orig_ip_len);
 
 		packet_subtype_set(pkt, ODP_EVENT_PACKET_IPSEC);
 		result = ipsec_pkt_result(pkt);
 		memset(result, 0, sizeof(*result));
 		result->status = status;
+		result->orig_ip_len = orig_ip_len;
 		if (NULL != ipsec_sa) {
 			result->sa = ipsec_sa->ipsec_sa_hdl;
 			queue = ipsec_sa->queue;
@@ -1877,10 +1888,6 @@ int odp_ipsec_in_enq(const odp_packet_t pkt_in[], int num_in,
 			queue = ipsec_config->inbound.default_queue;
 		}
 
-		if (odp_queue_enq(queue, odp_ipsec_packet_to_event(pkt))) {
-			odp_packet_free(pkt);
-			break;
-		}
 		in_pkt++;
 		sa_idx += sa_inc;
 
@@ -1891,6 +1898,12 @@ int odp_ipsec_in_enq(const odp_packet_t pkt_in[], int num_in,
 		 */
 		if (sa == ODP_IPSEC_SA_INVALID && ipsec_sa)
 			_odp_ipsec_sa_unuse(ipsec_sa);
+
+		rc = odp_queue_enq(queue, odp_ipsec_packet_to_event(pkt));
+		if (odp_unlikely(rc)) {
+			odp_packet_free(pkt);
+			break;
+		}
 	}
 
 	return in_pkt;
@@ -1915,6 +1928,7 @@ int odp_ipsec_out_enq(const odp_packet_t pkt_in[], int num_in,
 		odp_ipsec_packet_result_t *result;
 		const odp_ipsec_out_opt_t *opt;
 		odp_queue_t queue;
+		int rc;
 
 		memset(&status, 0, sizeof(status));
 
@@ -1939,13 +1953,15 @@ int odp_ipsec_out_enq(const odp_packet_t pkt_in[], int num_in,
 		if (ipsec_config->stats_en)
 			ipsec_sa_err_stats_update(ipsec_sa, &status);
 
-		if (odp_queue_enq(queue, odp_ipsec_packet_to_event(pkt))) {
-			odp_packet_free(pkt);
-			break;
-		}
 		in_pkt++;
 		sa_idx += sa_inc;
 		opt_idx += opt_inc;
+
+		rc = odp_queue_enq(queue, odp_ipsec_packet_to_event(pkt));
+		if (odp_unlikely(rc)) {
+			odp_packet_free(pkt);
+			break;
+		}
 	}
 
 	return in_pkt;
@@ -1955,6 +1971,7 @@ int _odp_ipsec_try_inline(odp_packet_t *pkt)
 {
 	odp_ipsec_op_status_t status;
 	ipsec_sa_t *ipsec_sa;
+	uint32_t orig_ip_len = 0;
 	odp_ipsec_packet_result_t *result;
 	odp_packet_hdr_t *pkt_hdr;
 
@@ -1964,7 +1981,7 @@ int _odp_ipsec_try_inline(odp_packet_t *pkt)
 	memset(&status, 0, sizeof(status));
 
 	ipsec_sa = ipsec_in_single(*pkt, ODP_IPSEC_SA_INVALID, pkt, false,
-				   &status);
+				   &status, &orig_ip_len);
 	/*
 	 * Route packet back in case of lookup failure or early error before
 	 * lookup
@@ -1976,6 +1993,7 @@ int _odp_ipsec_try_inline(odp_packet_t *pkt)
 	result = ipsec_pkt_result(*pkt);
 	memset(result, 0, sizeof(*result));
 	result->status = status;
+	result->orig_ip_len = orig_ip_len;
 	result->sa = ipsec_sa->ipsec_sa_hdl;
 	result->flag.inline_mode = 1;
 
@@ -2096,6 +2114,7 @@ int odp_ipsec_out_inline(const odp_packet_t pkt_in[], int num_in,
 			}
 		} else {
 			odp_queue_t queue;
+			int rc;
 err:
 			if (ipsec_config->stats_en)
 				ipsec_sa_err_stats_update(ipsec_sa, &status);
@@ -2107,8 +2126,9 @@ err:
 			result->status = status;
 			queue = ipsec_sa->queue;
 
-			if (odp_queue_enq(queue,
-					  odp_ipsec_packet_to_event(pkt))) {
+			rc = odp_queue_enq(queue, odp_ipsec_packet_to_event(pkt));
+			if (odp_unlikely(rc)) {
+				in_pkt++;
 				odp_packet_free(pkt);
 				break;
 			}
@@ -2196,6 +2216,21 @@ int odp_ipsec_stats(odp_ipsec_sa_t sa, odp_ipsec_stats_t *stats)
 	return 0;
 }
 
+int odp_ipsec_stats_multi(odp_ipsec_sa_t sa[], odp_ipsec_stats_t stats[], int num)
+{
+	int ret, i;
+
+	ODP_ASSERT(NULL != stats);
+
+	for (i = 0; i < num; i++) {
+		ret = odp_ipsec_stats(sa[i], &stats[i]);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+
 static int read_config_file(ipsec_global_t *global)
 {
 	const char *str_i = "ipsec.ordering.async_inbound";
@@ -2224,7 +2259,7 @@ int _odp_ipsec_init_global(void)
 	if (odp_global_ro.disable.ipsec)
 		return 0;
 
-	shm = odp_shm_reserve("_odp_ipsec", sizeof(*ipsec_global),
+	shm = odp_shm_reserve("_odp_ipsec_global", sizeof(*ipsec_global),
 			      ODP_CACHE_LINE_SIZE, 0);
 	if (shm == ODP_SHM_INVALID) {
 		ODP_ERR("Shm reserve failed for odp_ipsec\n");
@@ -2260,7 +2295,7 @@ int _odp_ipsec_term_global(void)
 	if (odp_global_ro.disable.ipsec)
 		return 0;
 
-	shm = odp_shm_lookup("_odp_ipsec");
+	shm = odp_shm_lookup("_odp_ipsec_global");
 
 	if (shm == ODP_SHM_INVALID || odp_shm_free(shm)) {
 		ODP_ERR("Shm free failed for odp_ipsec");

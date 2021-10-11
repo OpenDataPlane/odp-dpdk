@@ -979,10 +979,12 @@ static int test_sched(void *arg)
 		odp_event_t event;
 		uint64_t sched_wait = odp_schedule_wait_time(200 * ODP_TIME_MSEC_IN_NS);
 
-		/* Print schedule status at the end of the test, before any queues
+		/* Print queue and scheduler status at the end of the test, before any queues
 		 * are emptied or destroyed. */
-		if (test_options->verbose)
+		if (test_options->verbose) {
+			odp_queue_print_all();
 			odp_schedule_print();
+		}
 
 		while ((event = odp_schedule(NULL, sched_wait)) != ODP_EVENT_INVALID)
 			odp_event_free(event);
@@ -1025,13 +1027,13 @@ static int start_workers(test_global_t *global, odp_instance_t instance)
 	odp_atomic_init_u32(&global->num_worker, num_cpu);
 
 	memset(global->thread_tbl, 0, sizeof(global->thread_tbl));
-	memset(thr_param, 0, sizeof(thr_param));
-	memset(&thr_common, 0, sizeof(thr_common));
+	odph_thread_common_param_init(&thr_common);
 
 	thr_common.instance = instance;
 	thr_common.cpumask  = &global->cpumask;
 
 	for (i = 0; i < num_cpu; i++) {
+		odph_thread_param_init(&thr_param[i]);
 		thr_param[i].start    = test_sched;
 		thr_param[i].arg      = &global->thread_arg[i];
 		thr_param[i].thr_type = ODP_THREAD_WORKER;

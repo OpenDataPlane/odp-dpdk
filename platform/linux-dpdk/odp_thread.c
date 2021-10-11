@@ -76,7 +76,7 @@ int _odp_thread_init_global(void)
 	if (num_max > ODP_THREAD_COUNT_MAX)
 		num_max = ODP_THREAD_COUNT_MAX;
 
-	shm = odp_shm_reserve("_odp_thread_globals",
+	shm = odp_shm_reserve("_odp_thread_global",
 			      sizeof(thread_globals_t),
 			      ODP_CACHE_LINE_SIZE, 0);
 

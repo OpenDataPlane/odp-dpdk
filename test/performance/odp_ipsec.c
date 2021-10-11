@@ -1027,9 +1027,12 @@ int main(int argc, char *argv[])
 	char cpumaskstr[ODP_CPUMASK_STR_SIZE];
 	int num_workers = 1;
 	odph_helper_options_t helper_options;
-	odph_odpthread_t thr[num_workers];
+	odph_thread_t thread_tbl[num_workers];
+	odph_thread_common_param_t thr_common;
+	odph_thread_param_t thr_param;
 	odp_instance_t instance;
 	odp_init_t init_param;
+	odp_ipsec_capability_t ipsec_capa;
 	odp_pool_capability_t capa;
 	odp_ipsec_config_t config;
 	uint32_t max_seg_len;
@@ -1092,6 +1095,21 @@ int main(int argc, char *argv[])
 	}
 	odp_pool_print(pool);
 
+	if (odp_ipsec_capability(&ipsec_capa) < 0) {
+		app_err("IPSEC capability call failed.\n");
+		exit(EXIT_FAILURE);
+	}
+
+	if (cargs.schedule && !ipsec_capa.queue_type_sched) {
+		app_err("Scheduled type destination queue not supported.\n");
+		exit(EXIT_FAILURE);
+	}
+
+	if (cargs.poll && !ipsec_capa.queue_type_plain) {
+		app_err("Plain type destination queue not supported.\n");
+		exit(EXIT_FAILURE);
+	}
+
 	odp_ipsec_config_init(&config);
 	config.max_num_sa = 2;
 	config.inbound.chksums.all_chksum = 0;
@@ -1148,20 +1166,22 @@ int main(int argc, char *argv[])
 		printf("Run in sync mode\n");
 	}
 
-	memset(thr, 0, sizeof(thr));
-
 	if (cargs.alg_config) {
-		odph_odpthread_params_t thr_param;
-
-		memset(&thr_param, 0, sizeof(thr_param));
-		thr_param.start    = run_thr_func;
-		thr_param.arg      = &thr_arg;
-		thr_param.thr_type = ODP_THREAD_WORKER;
-		thr_param.instance = instance;
+		odph_thread_common_param_init(&thr_common);
+		thr_common.instance = instance;
+		thr_common.cpumask = &cpumask;
+		thr_common.share_param = 1;
 
 		if (cargs.schedule) {
-			odph_odpthreads_create(&thr[0], &cpumask, &thr_param);
-			odph_odpthreads_join(&thr[0]);
+			odph_thread_param_init(&thr_param);
+			thr_param.start = run_thr_func;
+			thr_param.arg = &thr_arg;
+			thr_param.thr_type = ODP_THREAD_WORKER;
+
+			memset(thread_tbl, 0, sizeof(thread_tbl));
+			odph_thread_create(thread_tbl, &thr_common, &thr_param, num_workers);
+
+			odph_thread_join(thread_tbl, num_workers);
 		} else {
 			run_measure_one_config(&cargs, cargs.alg_config);
 		}

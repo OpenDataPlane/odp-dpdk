@@ -153,7 +153,7 @@ int _odp_pool_init_global(void)
 	uint32_t i;
 	odp_shm_t shm;
 
-	shm = odp_shm_reserve("_odp_pool_glb", sizeof(pool_global_t),
+	shm = odp_shm_reserve("_odp_pool_global", sizeof(pool_global_t),
 			      ODP_CACHE_LINE_SIZE, 0);
 
 	_odp_pool_glb = odp_shm_addr(shm);

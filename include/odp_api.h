@@ -33,7 +33,6 @@ extern "C" {
 #include <odp/api/barrier.h>
 #include <odp/api/spinlock.h>
 #include <odp/api/atomic.h>
-#include <odp/api/feature.h>
 #include <odp/api/init.h>
 #include <odp/api/system_info.h>
 #include <odp/api/thread.h>
@@ -61,7 +60,6 @@ extern "C" {
 #include <odp/api/spinlock_recursive.h>
 #include <odp/api/rwlock_recursive.h>
 #include <odp/api/std.h>
-#include <odp/api/support.h>
 #include <odp/api/ipsec.h>
 #include <odp/api/stash.h>
 #include <odp/api/reassembly.h>

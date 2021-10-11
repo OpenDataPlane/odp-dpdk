@@ -32,6 +32,7 @@
 #include <odp_init_internal.h>
 #include <odp_errno_define.h>
 #include <odp_global_data.h>
+#include <odp_schedule_if.h>
 
 /* Local vars */
 static const
@@ -4935,7 +4936,7 @@ int _odp_tm_init_global(void)
 		return 0;
 	}
 
-	shm = odp_shm_reserve("_odp_traffic_mng", sizeof(tm_global_t), 0, 0);
+	shm = odp_shm_reserve("_odp_traffic_mng_global", sizeof(tm_global_t), 0, 0);
 	if (shm == ODP_SHM_INVALID)
 		return -1;
 
