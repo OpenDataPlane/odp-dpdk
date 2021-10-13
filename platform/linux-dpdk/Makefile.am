@@ -240,6 +240,7 @@ endif
 if ARCH_IS_ARM
 __LIB__libodp_dpdk_la_SOURCES += arch/default/odp_atomic.c \
 				 arch/default/odp_cpu_cycles.c \
+				 arch/default/odp_global_time.c \
 				 arch/default/odp_hash_crc32.c \
 				 arch/arm/odp_sysinfo_parse.c
 odpapiabiarchinclude_HEADERS += arch/default/odp/api/abi/cpu_time.h \
