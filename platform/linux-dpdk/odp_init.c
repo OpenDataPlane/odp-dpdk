@@ -135,14 +135,41 @@ static int read_pci_config(char **pci_cmd)
 	return 0;
 }
 
+static int read_eal_cmdstr(char **eal_cmd)
+{
+	const char *dpdk_str = "dpdk.eal_params";
+	int length;
+	char *buf;
+
+	length = _odp_libconfig_lookup_str(dpdk_str, NULL, 0);
+	if (length <= 0)
+		return length;
+
+	buf = malloc(length);
+	if (buf == NULL) {
+		ODP_ERR("DPDK EAL command string buffer alloc fail\n");
+		return -1;
+	}
+
+	if (_odp_libconfig_lookup_str(dpdk_str, buf, length) < 0)	{
+		free(buf);
+		return -1;
+	}
+
+	ODP_PRINT("  %s: %s\n\n", dpdk_str, buf);
+
+	*eal_cmd = buf;
+	return length;
+}
+
 static int _odp_init_dpdk(const char *cmdline)
 {
 	int dpdk_argc;
-	int i, cmdlen, pcicmdlen;
-	const char *str, *pci_str = "";
+	int i, cmdlen, pcicmdlen, ealcmdlen;
+	const char *str, *pci_str = "", *eal_str = "";
 	uint32_t mem_prealloc;
 	int val = 0;
-	char *pci_cmd = NULL;
+	char *pci_cmd = NULL, *eal_cmd = NULL;
 
 	ODP_PRINT("DPDK config:\n");
 
@@ -167,23 +194,39 @@ static int _odp_init_dpdk(const char *cmdline)
 		return -1;
 	}
 
-	cmdlen = snprintf(NULL, 0, "odpdpdk -m %" PRIu32 " %s ", mem_prealloc, cmdline) + pcicmdlen;
+	/* Read any additional EAL command string from config */
+	ealcmdlen = read_eal_cmdstr(&eal_cmd);
+	if (ealcmdlen < 0) {
+		ODP_ERR("Error reading additional DPDK EAL command string\n");
+		if (pci_cmd != NULL)
+			free(pci_cmd);
+		return -1;
+	}
+	cmdlen = snprintf(NULL, 0, "odpdpdk -m %" PRIu32 " %s ", mem_prealloc,
+			  cmdline) + pcicmdlen + ealcmdlen;
 
 	if (pci_cmd != NULL)
 		pci_str = pci_cmd;
+
+	if (eal_cmd != NULL)
+		eal_str = eal_cmd;
 
 	char full_cmdline[cmdlen];
 
 	/* First argument is facility log, simply bind it to odpdpdk for now. In
 	 * process mode DPDK memory has to be preallocated. */
 	if (odp_global_ro.init_param.mem_model == ODP_MEM_MODEL_PROCESS)
-		cmdlen = snprintf(full_cmdline, cmdlen, "odpdpdk -m %" PRIu32 " %s %s",
-				  mem_prealloc, cmdline, pci_str);
+		cmdlen = snprintf(full_cmdline, cmdlen, "odpdpdk -m %" PRIu32 " %s %s %s",
+				  mem_prealloc, cmdline, pci_str, eal_str);
 	else
-		cmdlen = snprintf(full_cmdline, cmdlen, "odpdpdk %s %s", cmdline, pci_str);
+		cmdlen = snprintf(full_cmdline, cmdlen, "odpdpdk %s %s %s",
+				  cmdline, pci_str, eal_str);
 
 	if (pci_cmd != NULL)
 		free(pci_cmd);
+
+	if (eal_cmd != NULL)
+		free(eal_cmd);
 
 	for (i = 0, dpdk_argc = 1; i < cmdlen; ++i) {
 		if (isspace(full_cmdline[i]))
