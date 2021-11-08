@@ -71,6 +71,9 @@ struct odp_buffer_hdr_t {
 
 	/* Pool pointer */
 	void *pool_ptr;
+
+	/* User area pointer */
+	void *uarea_addr;
 };
 
 /*

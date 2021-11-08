@@ -297,7 +297,6 @@ struct mbuf_ctor_arg {
 	uint16_t seg_buf_size;   /* size of user data */
 	odp_pool_type_t type;    /* ODP pool type */
 	int event_type;          /* ODP event type */
-	int pkt_uarea_size;      /* size of user area in bytes */
 };
 
 /* ODP DPDK mbuf constructor.
@@ -322,8 +321,7 @@ odp_dpdk_mbuf_ctor(struct rte_mempool *mp,
 
 	if (mb_ctor_arg->pool->pool_ext) {
 		odp_pool_ext_param_t *p = &mb_ctor_arg->pool->ext_param;
-		uint32_t app_hdr_offset =
-			sizeof(odp_packet_hdr_t) + p->pkt.uarea_size;
+		uint32_t app_hdr_offset = sizeof(odp_packet_hdr_t);
 		uint32_t app_hdr_size = p->pkt.app_header_size;
 		uint32_t buf_size = p->pkt.buf_size;
 
@@ -363,6 +361,8 @@ odp_dpdk_mbuf_ctor(struct rte_mempool *mp,
 	buf_hdr->pool_ptr = mb_ctor_arg->pool;
 	buf_hdr->type = mb_ctor_arg->type;
 	buf_hdr->event_type = mb_ctor_arg->event_type;
+	buf_hdr->uarea_addr = mb_ctor_arg->pool->uarea_base_addr +
+			      i * mb_ctor_arg->pool->uarea_size;
 
 	/* Initialize event vector metadata */
 	if (mb_ctor_arg->type == ODP_POOL_VECTOR) {
@@ -583,6 +583,41 @@ static void format_pool_name(const char *name, char *rte_name)
 	} while (rte_mempool_lookup(rte_name) != NULL);
 }
 
+static int reserve_uarea(pool_t *pool, uint32_t uarea_size, uint32_t num_pkt)
+{
+	odp_shm_t shm;
+	char uarea_name[ODP_SHM_NAME_LEN];
+	uint32_t shm_flags = 0;
+
+	pool->uarea_shm = ODP_SHM_INVALID;
+
+	if (uarea_size == 0) {
+		pool->uarea_size = 0;
+		pool->uarea_shm_size = 0;
+		return 0;
+	}
+
+	snprintf(uarea_name, ODP_SHM_NAME_LEN, "_odp_pool_%03i_uarea_%s",
+		 pool->pool_idx, pool->name);
+	uarea_name[ODP_SHM_NAME_LEN - 1] = 0;
+
+	pool->uarea_size = ROUNDUP_CACHE_LINE(uarea_size);
+	pool->uarea_shm_size = num_pkt * (uint64_t)pool->uarea_size;
+
+	if (odp_global_ro.shm_single_va)
+		shm_flags |= ODP_SHM_SINGLE_VA;
+
+	shm = odp_shm_reserve(uarea_name, pool->uarea_shm_size, ODP_PAGE_SIZE,
+			      shm_flags);
+
+	if (shm == ODP_SHM_INVALID)
+		return -1;
+
+	pool->uarea_shm = shm;
+	pool->uarea_base_addr = odp_shm_addr(shm);
+	return 0;
+}
+
 odp_pool_t odp_pool_create(const char *name, const odp_pool_param_t *params)
 {
 	struct rte_pktmbuf_pool_private mbp_ctor_arg;
@@ -594,6 +629,7 @@ odp_pool_t odp_pool_create(const char *name, const odp_pool_param_t *params)
 	pool_t *pool;
 	uint32_t buf_align, blk_size, headroom, tailroom, min_seg_len;
 	uint32_t max_len, min_align;
+	uint32_t uarea_size = 0;
 	int8_t event_type;
 	char pool_name[ODP_POOL_NAME_LEN];
 	char rte_name[RTE_MEMPOOL_NAMESIZE];
@@ -688,17 +724,16 @@ odp_pool_t odp_pool_create(const char *name, const odp_pool_param_t *params)
 			blk_size = ROUNDUP_ALIGN(blk_size - headroom,
 						 min_seg_len) + headroom;
 
-			hdr_size = sizeof(odp_packet_hdr_t) +
-				   params->pkt.uarea_size;
-			mb_ctor_arg.pkt_uarea_size = params->pkt.uarea_size;
+			hdr_size = sizeof(odp_packet_hdr_t);
 			CHECK_U16_OVERFLOW(blk_size);
 			mbp_ctor_arg.mbuf_data_room_size = blk_size;
 			num = params->pkt.num;
 			event_type = ODP_EVENT_PACKET;
+			uarea_size = params->pkt.uarea_size;
 
 			ODP_DBG("type: packet, name: %s, num: %u, len: %u, blk_size: %u, "
 				"uarea_size: %d, hdr_size: %zu\n", pool_name, num, params->pkt.len,
-				blk_size, params->pkt.uarea_size, hdr_size);
+				blk_size, uarea_size, hdr_size);
 			break;
 		case ODP_POOL_TIMEOUT:
 			hdr_size = sizeof(odp_timeout_hdr_t);
@@ -768,9 +803,6 @@ odp_pool_t odp_pool_create(const char *name, const odp_pool_param_t *params)
 			return ODP_POOL_INVALID;
 		}
 
-		/* Initialize pool objects */
-		rte_mempool_obj_iter(mp, odp_dpdk_mbuf_ctor, &mb_ctor_arg);
-
 		if (name == NULL) {
 			pool->name[0] = 0;
 		} else {
@@ -779,9 +811,20 @@ odp_pool_t odp_pool_create(const char *name, const odp_pool_param_t *params)
 			pool->name[ODP_POOL_NAME_LEN - 1] = 0;
 		}
 
-		pool->rte_mempool = mp;
 		pool->type = type;
 		pool->params = *params;
+
+		if (reserve_uarea(pool, uarea_size, num)) {
+			ODP_ERR("User area SHM reserve failed\n");
+			rte_mempool_free(mp);
+			UNLOCK(&pool->lock);
+			return ODP_POOL_INVALID;
+		}
+
+		/* Initialize pool objects */
+		rte_mempool_obj_iter(mp, odp_dpdk_mbuf_ctor, &mb_ctor_arg);
+
+		pool->rte_mempool = mp;
 		ODP_DBG("Header/element/trailer size: %u/%u/%u, "
 			"total pool size: %lu\n",
 			mp->header_size, mp->elt_size, mp->trailer_size,
@@ -945,6 +988,9 @@ int odp_pool_destroy(odp_pool_t pool_hdl)
 	rte_mempool_free(pool->rte_mempool);
 	pool->rte_mempool = NULL;
 
+	if (pool->uarea_shm != ODP_SHM_INVALID)
+		odp_shm_free(pool->uarea_shm);
+
 	return 0;
 }
 
@@ -1020,8 +1066,6 @@ int odp_pool_stats_reset(odp_pool_t pool_hdl ODP_UNUSED)
  */
 #define EXT_MIN_HEAD_ALIGN 2
 
-#define EXT_UAREA_SIZE 32
-
 /*
  * Round up the space we reserve for objhdr up to cache line size. The rte_mbuf
  * that comes after this must be cache line aligned.
@@ -1048,8 +1092,7 @@ int odp_pool_ext_capability(odp_pool_type_t type,
 
 	capa->pkt.max_num_buf = _odp_pool_glb->config.pkt_max_num;
 	capa->pkt.max_buf_size = MAX_SIZE;
-	capa->pkt.odp_header_size =
-		SIZEOF_OBJHDR + sizeof(odp_packet_hdr_t) + EXT_UAREA_SIZE;
+	capa->pkt.odp_header_size = SIZEOF_OBJHDR + sizeof(odp_packet_hdr_t);
 	capa->pkt.odp_trailer_size = 0;
 	capa->pkt.min_mem_align = ODP_CACHE_LINE_SIZE;
 	capa->pkt.min_buf_align = ODP_CACHE_LINE_SIZE;
@@ -1058,7 +1101,7 @@ int odp_pool_ext_capability(odp_pool_type_t type,
 	capa->pkt.max_headroom = CONFIG_PACKET_HEADROOM;
 	capa->pkt.max_headroom_size = CONFIG_PACKET_HEADROOM;
 	capa->pkt.max_segs_per_pkt = PKT_MAX_SEGS;
-	capa->pkt.max_uarea_size = EXT_UAREA_SIZE;
+	capa->pkt.max_uarea_size = MAX_SIZE;
 
 	return 0;
 }
@@ -1081,7 +1124,6 @@ static int check_pool_ext_param(const odp_pool_ext_param_t *param)
 {
 	odp_pool_ext_capability_t capa;
 	uint32_t head_offset = SIZEOF_OBJHDR + sizeof(odp_packet_hdr_t) +
-			       param->pkt.uarea_size +
 			       param->pkt.app_header_size;
 
 	if (param->type != ODP_POOL_PACKET) {
@@ -1171,8 +1213,7 @@ odp_pool_t odp_pool_ext_create(const char *name,
 		memset(&pool->memset_mark, 0,
 		       sizeof(pool_t) - offsetof(pool_t, memset_mark));
 
-		hdr_size = sizeof(odp_packet_hdr_t) + params->pkt.uarea_size +
-			   params->pkt.app_header_size;
+		hdr_size = sizeof(odp_packet_hdr_t) + params->pkt.app_header_size;
 		priv_size = hdr_size - sizeof(struct rte_mbuf);
 		buf_size = params->pkt.buf_size;
 		blk_size = buf_size - SIZEOF_OBJHDR - hdr_size;
@@ -1228,11 +1269,16 @@ odp_pool_t odp_pool_ext_create(const char *name,
 		pool->params.pkt.uarea_size = params->pkt.uarea_size;
 		pool->params.type = params->type;
 		pool->pool_ext = 1;
-		pool->rte_mempool = mp;
 		pool->seg_len = blk_size;
 		pool->type = params->type;
 		strcpy(pool->name, pool_name);
 
+		if (reserve_uarea(pool, params->pkt.uarea_size, num)) {
+			ODP_ERR("User area SHM reserve failed\n");
+			goto error;
+		}
+
+		pool->rte_mempool = mp;
 		ODP_DBG("Header/element/trailer size: %u/%u/%u, "
 			"total pool size: %lu\n",
 			mp->header_size, mp->elt_size, mp->trailer_size,
@@ -1341,9 +1387,7 @@ int odp_pool_ext_populate(odp_pool_t pool_hdl, void *buf[], uint32_t buf_size,
 		STAILQ_INSERT_TAIL(&mp->elt_list, hdr, next);
 		mp->populated_size++;
 
-		mb_ctor_arg.pkt_uarea_size = params->pkt.uarea_size;
 		mb_ctor_arg.seg_buf_offset = sizeof(odp_packet_hdr_t) +
-					     params->pkt.uarea_size +
 					     params->pkt.app_header_size;
 		mb_ctor_arg.seg_buf_size = pool->seg_len;
 		mb_ctor_arg.type = params->type;
