@@ -208,7 +208,7 @@ _ODP_INLINE void *odp_packet_user_ptr(odp_packet_t pkt)
 
 _ODP_INLINE void *odp_packet_user_area(odp_packet_t pkt)
 {
-	return (void *)((char *)pkt + _odp_packet_inline.udata);
+	return _odp_pkt_get(pkt, void *, user_area);
 }
 
 _ODP_INLINE uint32_t odp_packet_user_area_size(odp_packet_t pkt)

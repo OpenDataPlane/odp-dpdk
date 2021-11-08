@@ -76,6 +76,10 @@ typedef struct ODP_ALIGNED_CACHE {
 	uint8_t			pool_ext;
 	odp_pool_param_t	params;
 	odp_pool_ext_param_t	ext_param;
+	odp_shm_t		uarea_shm;
+	uint64_t		uarea_shm_size;
+	uint32_t		uarea_size;
+	uint8_t			*uarea_base_addr;
 	char			name[ODP_POOL_NAME_LEN];
 
 } pool_t;

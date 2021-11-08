@@ -43,7 +43,7 @@ typedef struct _odp_packet_inline_offset_t {
 	uint16_t pkt_len;
 	uint16_t seg_len;
 	uint16_t nb_segs;
-	uint16_t udata;
+	uint16_t user_area;
 	uint16_t rss;
 	uint16_t ol_flags;
 	uint64_t rss_flag;

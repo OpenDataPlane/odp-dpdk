@@ -127,7 +127,7 @@ extern "C" {
 /*
  * Number of shared memory blocks reserved for implementation internal use.
  */
-#define CONFIG_INTERNAL_SHM_BLOCKS 20
+#define CONFIG_INTERNAL_SHM_BLOCKS (ODP_CONFIG_POOLS + 20)
 
 /*
  * Maximum number of shared memory blocks.
