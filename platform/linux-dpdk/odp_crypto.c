@@ -2175,10 +2175,10 @@ int odp_crypto_op(const odp_packet_t pkt_in[],
 	crypto_session_entry_t *session;
 	int i, rc;
 
-	session = (crypto_session_entry_t *)(intptr_t)param->session;
-	ODP_ASSERT(ODP_CRYPTO_SYNC == session->p.op_mode);
-
 	for (i = 0; i < num_pkt; i++) {
+		session = (crypto_session_entry_t *)(intptr_t)param[i].session;
+		ODP_ASSERT(ODP_CRYPTO_SYNC == session->p.op_mode);
+
 		rc = odp_crypto_int(pkt_in[i], &pkt_out[i], &param[i]);
 		if (rc < 0)
 			break;
@@ -2197,11 +2197,11 @@ int odp_crypto_op_enq(const odp_packet_t pkt_in[],
 	crypto_session_entry_t *session;
 	int i, rc;
 
-	session = (crypto_session_entry_t *)(intptr_t)param->session;
-	ODP_ASSERT(ODP_CRYPTO_ASYNC == session->p.op_mode);
-	ODP_ASSERT(ODP_QUEUE_INVALID != session->p.compl_queue);
-
 	for (i = 0; i < num_pkt; i++) {
+		session = (crypto_session_entry_t *)(intptr_t)param[i].session;
+		ODP_ASSERT(ODP_CRYPTO_ASYNC == session->p.op_mode);
+		ODP_ASSERT(ODP_QUEUE_INVALID != session->p.compl_queue);
+
 		pkt = pkt_out[i];
 		rc = odp_crypto_int(pkt_in[i], &pkt, &param[i]);
 		if (rc < 0)
