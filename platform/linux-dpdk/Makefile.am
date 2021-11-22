@@ -134,6 +134,7 @@ noinst_HEADERS = \
 		  include/odp_ptr_ring_spsc_internal.h \
 		  include/odp_ptr_ring_st_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_ring_u32_internal.h \
+		  ${top_srcdir}/platform/linux-generic/include/odp_ring_u64_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_schedule_if.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_sorted_list_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_sysinfo_internal.h \
