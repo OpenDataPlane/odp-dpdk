@@ -903,6 +903,56 @@ void odp_pool_print(odp_pool_t pool_hdl)
 	rte_mempool_dump(stdout, pool->rte_mempool);
 }
 
+void odp_pool_print_all(void)
+{
+	uint64_t available;
+	uint32_t i, index, tot, cache_size;
+	uint32_t elt_size, elt_len = 0;
+	uint8_t type, ext;
+	const int col_width = 24;
+	const char *name;
+	char type_c;
+
+	ODP_PRINT("\nList of all pools\n");
+	ODP_PRINT("-----------------\n");
+	ODP_PRINT(" idx %-*s type   free    tot  cache  elt_len  ext\n", col_width, "name");
+
+	for (i = 0; i < ODP_CONFIG_POOLS; i++) {
+		pool_t *pool = pool_entry(i);
+
+		LOCK(&pool->lock);
+
+		if (pool->rte_mempool == NULL) {
+			UNLOCK(&pool->lock);
+			continue;
+		}
+
+		available  = rte_mempool_avail_count(pool->rte_mempool);
+		cache_size = pool->rte_mempool->cache_size;
+		ext        = pool->pool_ext;
+		index      = pool->pool_idx;
+		name       = pool->name;
+		tot        = pool->rte_mempool->size;
+		type       = pool->type;
+		elt_size   = pool->rte_mempool->elt_size;
+
+		UNLOCK(&pool->lock);
+
+		if (type == ODP_POOL_BUFFER || type == ODP_POOL_PACKET)
+			elt_len = elt_size;
+
+		type_c = (type == ODP_POOL_BUFFER) ? 'B' :
+			 (type == ODP_POOL_PACKET) ? 'P' :
+			 (type == ODP_POOL_TIMEOUT) ? 'T' :
+			 (type == ODP_POOL_VECTOR) ? 'V' : '-';
+
+		ODP_PRINT("%4u %-*s    %c %6" PRIu64 " %6" PRIu32 " %6" PRIu32 " %8" PRIu32 "    "
+			  "%" PRIu8 "\n", index, col_width, name, type_c, available, tot,
+			  cache_size, elt_len, ext);
+	}
+	ODP_PRINT("\n");
+}
+
 static void mempool_addr_range(struct rte_mempool *mp ODP_UNUSED, void *opaque,
 			       struct rte_mempool_memhdr *memhdr,
 			       unsigned int mem_idx ODP_UNUSED)
