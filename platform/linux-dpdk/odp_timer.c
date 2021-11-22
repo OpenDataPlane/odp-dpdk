@@ -16,6 +16,7 @@
 #include <odp_debug_internal.h>
 #include <odp_init_internal.h>
 #include <odp_libconfig_internal.h>
+#include <odp_pool_internal.h>
 #include <odp_queue_if.h>
 #include <odp_ring_u32_internal.h>
 #include <odp_thread_internal.h>
@@ -956,20 +957,26 @@ void *odp_timeout_user_ptr(odp_timeout_t tmo)
 	return (void *)(uintptr_t)timeout_hdr->user_ptr;
 }
 
-odp_timeout_t odp_timeout_alloc(odp_pool_t pool)
+odp_timeout_t odp_timeout_alloc(odp_pool_t pool_hdl)
 {
-	odp_buffer_t buf = odp_buffer_alloc(pool);
+	odp_timeout_t tmo;
+	pool_t *pool;
+	int ret;
 
-	if (odp_unlikely(buf == ODP_BUFFER_INVALID))
-		return ODP_TIMEOUT_INVALID;
-	return odp_timeout_from_event(odp_buffer_to_event(buf));
+	ODP_ASSERT(pool_hdl != ODP_POOL_INVALID);
+
+	pool = pool_entry_from_hdl(pool_hdl);
+	ret = _odp_buffer_alloc_multi(pool, (odp_buffer_hdr_t **)&tmo, 1);
+
+	if (odp_likely(ret == 1))
+		return tmo;
+
+	return ODP_TIMEOUT_INVALID;
 }
 
 void odp_timeout_free(odp_timeout_t tmo)
 {
-	odp_event_t ev = odp_timeout_to_event(tmo);
-
-	odp_buffer_free(odp_buffer_from_event(ev));
+	_odp_buffer_free_multi((odp_buffer_hdr_t **)&tmo, 1);
 }
 
 void odp_timer_pool_print(odp_timer_pool_t timer_pool)
