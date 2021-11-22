@@ -77,13 +77,16 @@ ODP_STATIC_ASSERT(sizeof(_odp_dummy_mbuf.hash.rss) == sizeof(uint32_t),
 ODP_STATIC_ASSERT(sizeof(_odp_dummy_mbuf.ol_flags) == sizeof(uint64_t),
 		  "ol_flags should be uint64_t");
 
-/* Check that invalid values are the same. Some versions of Clang have trouble
- * with the strong type casting, and complain that these invalid values are not
- * integral constants. */
+/* Check that invalid values are the same. Some versions of Clang  and pedantic
+ * build have trouble with the strong type casting, and complain that these
+ * invalid values are not integral constants. */
 #ifndef __clang__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
 ODP_STATIC_ASSERT(ODP_PACKET_INVALID == 0, "Packet invalid not 0");
 ODP_STATIC_ASSERT(ODP_BUFFER_INVALID == 0, "Buffer invalid not 0");
 ODP_STATIC_ASSERT(ODP_EVENT_INVALID  == 0, "Event invalid not 0");
+#pragma GCC diagnostic pop
 #endif
 
 static inline odp_buffer_t packet_to_buffer(odp_packet_t pkt)
