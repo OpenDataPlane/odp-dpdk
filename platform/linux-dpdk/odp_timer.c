@@ -982,7 +982,7 @@ void odp_timer_pool_print(odp_timer_pool_t timer_pool)
 
 	ODP_PRINT("\nTimer pool info\n");
 	ODP_PRINT("---------------\n");
-	ODP_PRINT("  timer pool     %p\n", tp);
+	ODP_PRINT("  timer pool     %p\n", (void *)tp);
 	ODP_PRINT("  name           %s\n", tp->name);
 	ODP_PRINT("  num timers     %u\n", tp->cur_timers);
 	ODP_PRINT("  hwm timers     %u\n", tp->hwm_timers);
@@ -1001,7 +1001,7 @@ void odp_timer_print(odp_timer_t timer_hdl)
 
 	ODP_PRINT("\nTimer info\n");
 	ODP_PRINT("----------\n");
-	ODP_PRINT("  timer pool     %p\n", timer->timer_pool);
+	ODP_PRINT("  timer pool     %p\n", (void *)timer->timer_pool);
 	ODP_PRINT("  timer index    %" PRIu32 "\n", timer->timer_idx);
 	ODP_PRINT("  dest queue     0x%" PRIx64 "\n", odp_queue_to_u64(timer->queue));
 	ODP_PRINT("  user ptr       %p\n", timer->user_ptr);
@@ -1035,7 +1035,7 @@ void odp_timeout_print(odp_timeout_t tmo)
 	ODP_PRINT("\nTimeout info\n");
 	ODP_PRINT("------------\n");
 	ODP_PRINT("  tmo handle     0x%" PRIx64 "\n", odp_timeout_to_u64(tmo));
-	ODP_PRINT("  timer pool     %p\n", tp);
+	ODP_PRINT("  timer pool     %p\n", (void *)tp);
 	ODP_PRINT("  timer index    %u\n", idx);
 	ODP_PRINT("  expiration     %" PRIu64 "\n", timeout_hdr->expiration);
 	ODP_PRINT("  user ptr       %p\n", timeout_hdr->user_ptr);
