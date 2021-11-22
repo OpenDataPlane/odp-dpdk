@@ -81,6 +81,8 @@ typedef struct {
 
 } timer_entry_t;
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
 typedef struct timer_pool_s {
 	timer_entry_t timer[MAX_TIMER_RING_SIZE];
 
@@ -100,6 +102,7 @@ typedef struct timer_pool_s {
 	uint32_t hwm_timers;
 
 } timer_pool_t;
+#pragma GCC diagnostic pop
 
 /* Wrappers for alternative DPDK timer implementation */
 typedef int (*timer_stop_fn)(struct rte_timer *tim);
