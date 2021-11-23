@@ -22,7 +22,7 @@
  * @return 1 for success and 0 for fail
  */
 #define ATOMIC_CAS_OP_128(atom, oper, old_val, new_val, val) \
-({ \
+__extension__ ({ \
 	odp_u128_t _val; \
 	odp_atomic_u128_t *_atom = atom; \
 	odp_u128_t *_old_val = old_val; \
@@ -152,7 +152,96 @@ static inline int _odp_atomic_cas_acq_rel_u128(odp_atomic_u128_t *atom, odp_u128
 
 	return 0;
 }
-#else /* _ODP_LOCK_FREE_128BIT_ATOMICS */
+
+static inline void _odp_atomic_add_u32(odp_atomic_u32_t *atom, uint32_t val)
+{
+	__asm__ volatile("stadd   %w[val], %[atom]"
+			 : [atom] "+Q" (atom->v)
+			 : [val] "r" (val));
+}
+
+static inline void _odp_atomic_sub_u32(odp_atomic_u32_t *atom, uint32_t val)
+{
+	int32_t neg_val = -val;
+
+	__asm__ volatile("stadd   %w[neg_val], %[atom]"
+			 : [atom] "+Q" (atom->v)
+			 : [neg_val] "r" (neg_val));
+}
+
+static inline void _odp_atomic_inc_u32(odp_atomic_u32_t *atom)
+{
+	_odp_atomic_add_u32(atom, 1);
+}
+
+static inline void _odp_atomic_dec_u32(odp_atomic_u32_t *atom)
+{
+	_odp_atomic_sub_u32(atom, 1);
+}
+
+static inline void _odp_atomic_add_u64(odp_atomic_u64_t *atom, uint64_t val)
+{
+	__asm__ volatile("stadd   %[val], %[atom]"
+			 : [atom] "+Q" (atom->v)
+			 : [val] "r" (val));
+}
+
+static inline void _odp_atomic_sub_u64(odp_atomic_u64_t *atom, uint64_t val)
+{
+	int64_t neg_val = -val;
+
+	__asm__ volatile("stadd   %[neg_val], %[atom]"
+			 : [atom] "+Q" (atom->v)
+			 : [neg_val] "r" (neg_val));
+}
+
+static inline void _odp_atomic_inc_u64(odp_atomic_u64_t *atom)
+{
+	_odp_atomic_add_u64(atom, 1);
+}
+
+static inline void _odp_atomic_dec_u64(odp_atomic_u64_t *atom)
+{
+	_odp_atomic_sub_u64(atom, 1);
+}
+
+static inline void _odp_atomic_add_rel_u32(odp_atomic_u32_t *atom, uint32_t val)
+{
+	__asm__ volatile("staddl   %w[val], %[atom]"
+			 : [atom] "+Q" (atom->v)
+			 : [val] "r" (val)
+			 : "memory");
+}
+
+static inline void _odp_atomic_sub_rel_u32(odp_atomic_u32_t *atom, uint32_t val)
+{
+	int32_t neg_val = -val;
+
+	__asm__ volatile("staddl   %w[neg_val], %[atom]"
+			 : [atom] "+Q" (atom->v)
+			 : [neg_val] "r" (neg_val)
+			 : "memory");
+}
+
+static inline void _odp_atomic_add_rel_u64(odp_atomic_u64_t *atom, uint64_t val)
+{
+	__asm__ volatile("staddl   %[val], %[atom]"
+			 : [atom] "+Q" (atom->v)
+			 : [val] "r" (val)
+			 : "memory");
+}
+
+static inline void _odp_atomic_sub_rel_u64(odp_atomic_u64_t *atom, uint64_t val)
+{
+	int64_t neg_val = -val;
+
+	__asm__ volatile("staddl   %[neg_val], %[atom]"
+			 : [atom] "+Q" (atom->v)
+			 : [neg_val] "r" (neg_val)
+			 : "memory");
+}
+
+#else /* !_ODP_LOCK_FREE_128BIT_ATOMICS */
 
 /* Use generic implementation */
 #include <odp/api/abi/atomic_generic.h>

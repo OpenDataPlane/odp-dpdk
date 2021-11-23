@@ -329,6 +329,12 @@ int ipsec_check_esp_aes_gcm_128_reass_ipv6(void)
 	return ODP_TEST_INACTIVE;
 }
 
+int ipsec_check_esp_null_aes_xcbc(void)
+{
+	return  ipsec_check_esp(ODP_CIPHER_ALG_NULL, 0,
+				ODP_AUTH_ALG_AES_XCBC_MAC, 128);
+}
+
 void ipsec_sa_param_fill(odp_ipsec_sa_param_t *param,
 			 odp_bool_t in,
 			 odp_bool_t ah,
@@ -949,9 +955,15 @@ static void verify_in(const ipsec_test_part *part,
 				CU_ASSERT_EQUAL(IPSEC_SA_CTX,
 						odp_ipsec_sa_context(sa));
 			if (suite_context.inbound_op_mode != ODP_IPSEC_OP_MODE_SYNC) {
-				uint32_t len = part->pkt_in->len - part->pkt_in->l3_offset;
+				uint32_t len;
 
-				CU_ASSERT(result.orig_ip_len == len);
+				if (part->out[i].orig_ip_len)
+					len = part->out[i].orig_ip_len;
+				else
+					len = part->pkt_in->len - part->pkt_in->l3_offset;
+
+				CU_ASSERT(result.orig_ip_len == 0 ||
+					  result.orig_ip_len == len);
 			}
 		}
 		ipsec_check_packet(part->out[i].pkt_res,
@@ -991,11 +1003,7 @@ static void parse_ip(odp_packet_t pkt)
 		.proto = proto,
 		.last_layer = ODP_PROTO_LAYER_L4,
 	};
-	/*
-	 * odp_packet_parse() is buggy in linux generic ODP. Intentionally
-	 * ignore the return value until the bug has been fixed.
-	 */
-	(void)odp_packet_parse(pkt, l3, &param);
+	CU_ASSERT(odp_packet_parse(pkt, l3, &param) == 0);
 }
 
 int ipsec_check_out(const ipsec_test_part *part, odp_ipsec_sa_t sa,

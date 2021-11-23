@@ -1,5 +1,5 @@
 /* Copyright (c) 2013-2018, Linaro Limited
- * Copyright (c) 2019, Nokia
+ * Copyright (c) 2019-2021, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -36,11 +36,21 @@ extern "C" {
  * ODP log level.
  */
 typedef enum {
+	/** Debug */
 	ODP_LOG_DBG,
+
+	/** Error */
 	ODP_LOG_ERR,
+
+	/** Unimplemented */
 	ODP_LOG_UNIMPLEMENTED,
+
+	/** Abort */
 	ODP_LOG_ABORT,
+
+	/** Print */
 	ODP_LOG_PRINT
+
 } odp_log_level_t;
 
 /**
@@ -344,6 +354,20 @@ int odp_term_global(odp_instance_t instance);
  * @param func Log function
  */
 void odp_log_thread_fn_set(odp_log_func_t func);
+
+/**
+ * Get instance handle
+ *
+ * A successful call outputs the calling thread's ODP instance handle.
+ *
+ * @param[out] instance   Instance handle pointer for output
+ *
+ * @retval 0 on success
+ * @retval <0 on failure
+ *
+ * @see odp_init_global(), odp_init_local()
+ */
+int odp_instance(odp_instance_t *instance);
 
 /**
  * @}

@@ -669,6 +669,7 @@ static odp_pool_t pool_create(const char *name, const odp_pool_param_t *params,
 			return ODP_POOL_INVALID;
 		}
 
+		num = params->pkt.num;
 		seg_len = CONFIG_PACKET_MAX_SEG_LEN;
 		max_len = _odp_pool_glb->config.pkt_max_len;
 
@@ -691,9 +692,19 @@ static odp_pool_t pool_create(const char *name, const odp_pool_param_t *params,
 			return ODP_POOL_INVALID;
 		}
 
+		/* Multiple segments required per 'params->pkt.len' packet */
+		if (params->pkt.len > seg_len)
+			num *= (params->pkt.len + seg_len - 1) / seg_len;
+
+		/* Make sure 'params->pkt.max_num' limitation holds */
+		if (params->pkt.max_num && num > params->pkt.max_num) {
+			ODP_ERR("Pool 'max_num' parameter too small (%u/%u)\n",
+				params->pkt.max_num, num);
+			return ODP_POOL_INVALID;
+		}
+
 		headroom    = CONFIG_PACKET_HEADROOM;
 		tailroom    = CONFIG_PACKET_TAILROOM;
-		num         = params->pkt.num;
 		uarea_size  = params->pkt.uarea_size;
 		cache_size  = params->pkt.cache_size;
 		break;
@@ -853,12 +864,15 @@ static int check_params(const odp_pool_param_t *params)
 	uint32_t cache_size, num;
 	int num_threads = odp_global_ro.init_param.num_control +
 				odp_global_ro.init_param.num_worker;
+	int cur_threads = odp_thread_count();
 
 	if (!params || odp_pool_capability(&capa) < 0)
 		return -1;
 
 	num = 0;
 	cache_size = 0;
+	if (num_threads < cur_threads)
+		num_threads = cur_threads;
 
 	switch (params->type) {
 	case ODP_POOL_BUFFER:
@@ -1270,6 +1284,9 @@ odp_buffer_t odp_buffer_alloc(odp_pool_t pool_hdl)
 	ODP_ASSERT(ODP_POOL_INVALID != pool_hdl);
 
 	pool = pool_entry_from_hdl(pool_hdl);
+
+	ODP_ASSERT(pool->type == ODP_POOL_BUFFER);
+
 	ret  = _odp_buffer_alloc_multi(pool, (odp_buffer_hdr_t **)&buf, 1);
 
 	if (odp_likely(ret == 1))
@@ -1285,6 +1302,8 @@ int odp_buffer_alloc_multi(odp_pool_t pool_hdl, odp_buffer_t buf[], int num)
 	ODP_ASSERT(ODP_POOL_INVALID != pool_hdl);
 
 	pool = pool_entry_from_hdl(pool_hdl);
+
+	ODP_ASSERT(pool->type == ODP_POOL_BUFFER);
 
 	return _odp_buffer_alloc_multi(pool, (odp_buffer_hdr_t **)buf, num);
 }
@@ -1392,12 +1411,62 @@ void odp_pool_print(odp_pool_t pool_hdl)
 	ODP_PRINT("  block size      %u\n", pool->block_size);
 	ODP_PRINT("  uarea size      %u\n", pool->uarea_size);
 	ODP_PRINT("  shm size        %" PRIu64 "\n", pool->shm_size);
-	ODP_PRINT("  base addr       %p\n", pool->base_addr);
-	ODP_PRINT("  max addr        %p\n", pool->max_addr);
+	ODP_PRINT("  base addr       %p\n", (void *)pool->base_addr);
+	ODP_PRINT("  max addr        %p\n", (void *)pool->max_addr);
 	ODP_PRINT("  uarea shm size  %" PRIu64 "\n", pool->uarea_shm_size);
-	ODP_PRINT("  uarea base addr %p\n", pool->uarea_base_addr);
+	ODP_PRINT("  uarea base addr %p\n", (void *)pool->uarea_base_addr);
 	ODP_PRINT("  cache size      %u\n", pool->cache_size);
 	ODP_PRINT("  burst size      %u\n", pool->burst_size);
+	ODP_PRINT("\n");
+}
+
+void odp_pool_print_all(void)
+{
+	uint64_t available;
+	uint32_t i, index, tot, cache_size, seg_len;
+	uint32_t buf_len = 0;
+	uint8_t type, ext;
+	const int col_width = 24;
+	const char *name;
+	char type_c;
+
+	ODP_PRINT("\nList of all pools\n");
+	ODP_PRINT("-----------------\n");
+	ODP_PRINT(" idx %-*s type   free    tot  cache  buf_len  ext\n", col_width, "name");
+
+	for (i = 0; i < ODP_CONFIG_POOLS; i++) {
+		pool_t *pool = pool_entry(i);
+
+		LOCK(&pool->lock);
+
+		if (!pool->reserved) {
+			UNLOCK(&pool->lock);
+			continue;
+		}
+
+		available  = ring_ptr_len(&pool->ring->hdr);
+		cache_size = pool->cache_size;
+		ext        = pool->pool_ext;
+		index      = pool->pool_idx;
+		name       = pool->name;
+		tot        = pool->num;
+		type       = pool->type;
+		seg_len    = pool->seg_len;
+
+		UNLOCK(&pool->lock);
+
+		if (type == ODP_POOL_BUFFER || type == ODP_POOL_PACKET)
+			buf_len = seg_len;
+
+		type_c = (type == ODP_POOL_BUFFER) ? 'B' :
+			 (type == ODP_POOL_PACKET) ? 'P' :
+			 (type == ODP_POOL_TIMEOUT) ? 'T' :
+			 (type == ODP_POOL_VECTOR) ? 'V' : '-';
+
+		ODP_PRINT("%4u %-*s    %c %6" PRIu64 " %6" PRIu32 " %6" PRIu32 " %8" PRIu32 "    "
+			  "%" PRIu8 "\n", index, col_width, name, type_c, available, tot,
+			  cache_size, buf_len, ext);
+	}
 	ODP_PRINT("\n");
 }
 

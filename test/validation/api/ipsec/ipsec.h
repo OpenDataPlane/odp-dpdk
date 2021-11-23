@@ -96,6 +96,11 @@ typedef struct {
 		odp_proto_l3_type_t l3_type;
 		odp_proto_l4_type_t l4_type;
 		uint32_t seq_num;
+		/*
+		 * Expected original IP length. Non zero only when expected len
+		 * differs from that of input test packet (pkt_in).
+		 */
+		uint32_t orig_ip_len;
 	} out[MAX_FRAGS];
 } ipsec_test_part;
 
@@ -149,5 +154,6 @@ int ipsec_check_esp_chacha20_poly1305(void);
 int ipsec_check_test_sa_update_seq_num(void);
 int ipsec_check_esp_aes_gcm_128_reass_ipv4(void);
 int ipsec_check_esp_aes_gcm_128_reass_ipv6(void);
+int ipsec_check_esp_null_aes_xcbc(void);
 
 #endif

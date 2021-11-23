@@ -1777,6 +1777,7 @@ static void test_multi_out_in(odp_ipsec_sa_t out_sa,
 {
 	uint8_t ver_ihl = result_packet->data[result_packet->l3_offset];
 	odp_bool_t is_result_ipv6 = (ODPH_IPV4HDR_VER(ver_ihl) == ODPH_IPV6);
+	uint32_t orig_ip_len = 0;
 	int i;
 
 	for (i = 0; i < num_input_packets; i++) {
@@ -1784,6 +1785,7 @@ static void test_multi_out_in(odp_ipsec_sa_t out_sa,
 		ipsec_test_part test_in;
 		ipsec_test_packet test_pkt;
 		odp_packet_t pkt = ODP_PACKET_INVALID;
+		uint32_t l3_off, pkt_len;
 
 		/*
 		 * Convert plain text packet to IPsec packet through
@@ -1798,11 +1800,26 @@ static void test_multi_out_in(odp_ipsec_sa_t out_sa,
 		 * Expect result packet only for the last packet.
 		 */
 		memset(&test_in, 0, sizeof(test_in));
+
+		/*
+		 * In case of complete reassembly, the original IP length is the
+		 * sum of IP lengths of the ESP packets that contained the
+		 * individual fragments.
+		 */
+		if (reass_status == ODP_PACKET_REASS_COMPLETE) {
+			pkt_len = odp_packet_len(pkt);
+			l3_off = odp_packet_l3_offset(pkt);
+			CU_ASSERT(ODP_PACKET_OFFSET_INVALID != l3_off)
+
+			orig_ip_len += pkt_len - l3_off;
+		}
+
 		if (i == num_input_packets - 1) {
 			part_prep_plain(&test_in, 1, is_result_ipv6, true);
 			test_in.out[0].pkt_res = result_packet;
 			test_in.out[0].reass_status = reass_status;
 			test_in.out[0].num_frags = num_input_packets;
+			test_in.out[0].orig_ip_len = orig_ip_len;
 		}
 		ipsec_test_packet_from_pkt(&test_pkt, &pkt);
 		test_in.pkt_in = &test_pkt;
@@ -2192,6 +2209,42 @@ static void test_in_ipv6_esp_reass_incomp(void)
 	ipsec_sa_destroy(out_sa);
 }
 
+static void test_in_ipv4_null_aes_xcbc_esp(void)
+{
+	odp_ipsec_tunnel_param_t tunnel;
+	odp_ipsec_sa_param_t param;
+	odp_ipsec_sa_t sa;
+
+	memset(&tunnel, 0, sizeof(odp_ipsec_tunnel_param_t));
+
+	ipsec_sa_param_fill(&param,
+			    true, false, 0x100, &tunnel,
+			    ODP_CIPHER_ALG_NULL, NULL,
+			    ODP_AUTH_ALG_AES_XCBC_MAC, &key_auth_aes_xcbc_128,
+			    NULL, NULL);
+
+	sa = odp_ipsec_sa_create(&param);
+
+	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+
+	ipsec_test_part test = {
+		.pkt_in = &pkt_ipv4_null_aes_xcbc_esp,
+		.num_pkt = 1,
+		.out = {
+			{ .status.warn.all = 0,
+			  .status.error.all = 0,
+			  .l3_type = ODP_PROTO_L3_TYPE_IPV4,
+			  .l4_type = ODP_PROTO_L4_TYPE_UDP,
+			  .pkt_res = &pkt_ipv4_null_aes_xcbc_plain,
+			},
+		},
+	};
+
+	ipsec_check_in_one(&test, sa);
+
+	ipsec_sa_destroy(sa);
+}
+
 static void ipsec_test_capability(void)
 {
 	odp_ipsec_capability_t capa;
@@ -2312,5 +2365,7 @@ odp_testinfo_t ipsec_in_suite[] = {
 				  ipsec_check_esp_aes_gcm_128_reass_ipv6),
 	ODP_TEST_INFO_CONDITIONAL(test_in_ipv6_esp_reass_incomp,
 				  ipsec_check_esp_aes_gcm_128_reass_ipv6),
+	ODP_TEST_INFO_CONDITIONAL(test_in_ipv4_null_aes_xcbc_esp,
+				  ipsec_check_esp_null_aes_xcbc),
 	ODP_TEST_INFO_NULL,
 };

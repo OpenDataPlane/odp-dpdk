@@ -4,8 +4,8 @@ AC_PREREQ([2.5])
 ##########################################################################
 m4_define([odpapi_generation_version], [1])
 m4_define([odpapi_major_version], [32])
-m4_define([odpapi_minor_version], [0])
-m4_define([odpapi_point_version], [1])
+m4_define([odpapi_minor_version], [1])
+m4_define([odpapi_point_version], [0])
 m4_define([odpapi_version],
     [odpapi_generation_version.odpapi_major_version.odpapi_minor_version.odpapi_point_version])
 AC_INIT([OpenDataPlane],[odpapi_version],[odp@lists.opendataplane.org])
@@ -21,7 +21,7 @@ AC_SUBST(ODP_VERSION_API_MINOR)
 # Helper library version
 ##########################################################################
 m4_define([odph_version_generation], [1])
-m4_define([odph_version_major], [2])
+m4_define([odph_version_major], [3])
 m4_define([odph_version_minor], [0])
 
 m4_define([odph_version],
@@ -43,7 +43,12 @@ AS_IF([test "$ac_cv_env_CFLAGS_set" = ""], [user_cflags=0], [user_cflags=1])
 # Initialize automake
 AM_INIT_AUTOMAKE([1.9 tar-pax subdir-objects foreign nostdinc -Wall -Werror])
 AC_CONFIG_SRCDIR([include/odp/api/spec/init.h])
-AC_CONFIG_HEADERS([include/odp/autoheader_build.h include/odp/autoheader_external.h include/odp/autoheader_internal.h helper/include/odp/helper/autoheader_external.h])
+AC_CONFIG_HEADERS(m4_normalize([
+	include/odp/autoheader_build.h
+	include/odp/autoheader_external.h
+	include/odp/autoheader_internal.h
+	helper/include/odp/helper/autoheader_external.h
+]))
 
 AC_USE_SYSTEM_EXTENSIONS
 AC_SYS_LARGEFILE
@@ -89,11 +94,41 @@ PKG_PROG_PKG_CONFIG
 dnl breaks cross-compilation and malloc(0) behaviour is not that important
 dnl AC_FUNC_MALLOC
 AC_FUNC_MMAP
-AC_CHECK_FUNCS([bzero clock_gettime gethostbyname getpagesize gettimeofday malloc memset munmap socket strchr strerror strrchr strstr strtoull])
+AC_CHECK_FUNCS(m4_normalize([
+	bzero
+	clock_gettime
+	gethostbyname
+	getpagesize
+	gettimeofday
+	malloc
+	memset
+	munmap
+	socket
+	strchr
+	strerror
+	strrchr
+	strstr
+	strtoull
+]))
 
 # Checks for header files.
 AC_HEADER_RESOLV
-AC_CHECK_HEADERS([arpa/inet.h fcntl.h inttypes.h limits.h netdb.h netinet/in.h stddef.h stdint.h stdlib.h string.h sys/ioctl.h sys/socket.h sys/time.h unistd.h])
+AC_CHECK_HEADERS(m4_normalize([
+	arpa/inet.h
+	fcntl.h
+	inttypes.h
+	limits.h
+	netdb.h
+	netinet/in.h
+	stddef.h
+	stdint.h
+	stdlib.h
+	string.h
+	sys/ioctl.h
+	sys/socket.h
+	sys/time.h
+	unistd.h
+]))
 
 # Checks for typedefs, structures, and compiler characteristics.
 AC_HEADER_STDBOOL
@@ -137,7 +172,7 @@ AS_IF([test "$GCC" == yes],
       )
 )
 
-ODP_CFLAGS="$ODP_CFLAGS -std=c99 -D_GNU_SOURCE"
+ODP_CFLAGS="$ODP_CFLAGS -std=c11 -D_GNU_SOURCE"
 ODP_CXXFLAGS="$ODP_CXXFLAGS -std=c++11"
 
 # Extra flags for example to suppress certain warning types
@@ -506,6 +541,7 @@ AC_MSG_RESULT([
 	ABI compatible:		${abi_compat}
 	link time optimization:	${lto_enabled}
 	deprecated APIs:	${deprecated}
+	deprecated helper APIs:	${enable_helper_deprecated}
 	debug:			${debug_settings}
 	cunit:			${cunit_support}
 	static tests linkage:	${enable_static_applications}
