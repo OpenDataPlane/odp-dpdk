@@ -106,6 +106,25 @@ static inline pool_t *pool_entry_from_hdl(odp_pool_t pool_hdl)
 	return &_odp_pool_glb->pool[_odp_typeval(pool_hdl) - 1];
 }
 
+static inline int _odp_buffer_alloc_multi(pool_t *pool,
+					  odp_buffer_hdr_t *buf_hdr[], int num)
+{
+	int i;
+	struct rte_mempool *mp = pool->rte_mempool;
+
+	for (i = 0; i < num; i++) {
+		struct rte_mbuf *mbuf;
+
+		mbuf = rte_mbuf_raw_alloc(mp);
+		if (odp_unlikely(mbuf == NULL))
+			return i;
+
+		buf_hdr[i] = mbuf_to_buf_hdr(mbuf);
+	}
+
+	return i;
+}
+
 static inline void _odp_buffer_free_multi(odp_buffer_hdr_t *buf_hdr[], int num)
 {
 	int i;

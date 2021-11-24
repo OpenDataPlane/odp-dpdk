@@ -244,7 +244,7 @@ static inline timer_pool_t *handle_to_tp(odp_timer_t hdl)
 		if (odp_likely(tp != NULL))
 			return timer_global->timer_pool[tp_idx];
 	}
-	ODP_ABORT("Invalid timer handle %p\n", hdl);
+	ODP_ABORT("Invalid timer handle %p\n", (void *)hdl);
 }
 
 static inline uint32_t handle_to_idx(odp_timer_t hdl,
@@ -255,7 +255,7 @@ static inline uint32_t handle_to_idx(odp_timer_t hdl,
 	__builtin_prefetch(&tp->tick_buf[idx], 0, 0);
 	if (odp_likely(idx < odp_atomic_load_u32(&tp->high_wm)))
 		return idx;
-	ODP_ABORT("Invalid timer handle %p\n", hdl);
+	ODP_ABORT("Invalid timer handle %p\n", (void *)hdl);
 }
 
 static inline odp_timer_t tp_idx_to_handle(timer_pool_t *tp,
@@ -1496,20 +1496,29 @@ void *odp_timeout_user_ptr(odp_timeout_t tmo)
 	return (void *)(uintptr_t)timeout_hdr(tmo)->user_ptr;
 }
 
-odp_timeout_t odp_timeout_alloc(odp_pool_t pool)
+odp_timeout_t odp_timeout_alloc(odp_pool_t pool_hdl)
 {
-	odp_buffer_t buf = odp_buffer_alloc(pool);
+	odp_timeout_t tmo;
+	pool_t *pool;
+	int ret;
 
-	if (odp_unlikely(buf == ODP_BUFFER_INVALID))
-		return ODP_TIMEOUT_INVALID;
-	return odp_timeout_from_event(odp_buffer_to_event(buf));
+	ODP_ASSERT(pool_hdl != ODP_POOL_INVALID);
+
+	pool = pool_entry_from_hdl(pool_hdl);
+
+	ODP_ASSERT(pool->type == ODP_POOL_TIMEOUT);
+
+	ret = _odp_buffer_alloc_multi(pool, (odp_buffer_hdr_t **)&tmo, 1);
+
+	if (odp_likely(ret == 1))
+		return tmo;
+
+	return ODP_TIMEOUT_INVALID;
 }
 
 void odp_timeout_free(odp_timeout_t tmo)
 {
-	odp_event_t ev = odp_timeout_to_event(tmo);
-
-	odp_buffer_free(odp_buffer_from_event(ev));
+	_odp_buffer_free_multi((odp_buffer_hdr_t **)&tmo, 1);
 }
 
 void odp_timer_pool_print(odp_timer_pool_t timer_pool)
@@ -1525,7 +1534,7 @@ void odp_timer_pool_print(odp_timer_pool_t timer_pool)
 
 	ODP_PRINT("\nTimer pool info\n");
 	ODP_PRINT("---------------\n");
-	ODP_PRINT("  timer pool     %p\n", tp);
+	ODP_PRINT("  timer pool     %p\n", (void *)tp);
 	ODP_PRINT("  tp index       %u\n", tp->tp_idx);
 	ODP_PRINT("  num timers     %u\n", tp->num_alloc);
 	ODP_PRINT("  num tp         %i\n", timer_global->num_timer_pools);
@@ -1550,7 +1559,7 @@ void odp_timer_print(odp_timer_t timer)
 
 	ODP_PRINT("\nTimer info\n");
 	ODP_PRINT("----------\n");
-	ODP_PRINT("  timer pool     %p\n", tp);
+	ODP_PRINT("  timer pool     %p\n", (void *)tp);
 	ODP_PRINT("  timer index    %u\n", idx);
 	ODP_PRINT("  dest queue     0x%" PRIx64 "\n", odp_queue_to_u64(tim->queue));
 	ODP_PRINT("  user ptr       %p\n", tim->user_ptr);
@@ -1580,7 +1589,7 @@ void odp_timeout_print(odp_timeout_t tmo)
 	ODP_PRINT("\nTimeout info\n");
 	ODP_PRINT("------------\n");
 	ODP_PRINT("  tmo handle     0x%" PRIx64 "\n", odp_timeout_to_u64(tmo));
-	ODP_PRINT("  timer pool     %p\n", tp);
+	ODP_PRINT("  timer pool     %p\n", (void *)tp);
 	ODP_PRINT("  timer index    %u\n", idx);
 	ODP_PRINT("  expiration     %" PRIu64 "\n", tmo_hdr->expiration);
 	ODP_PRINT("  user ptr       %p\n", tmo_hdr->user_ptr);

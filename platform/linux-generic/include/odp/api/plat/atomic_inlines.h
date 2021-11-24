@@ -100,7 +100,7 @@ _ODP_INLINE uint32_t odp_atomic_fetch_add_u32(odp_atomic_u32_t *atom,
 
 _ODP_INLINE void odp_atomic_add_u32(odp_atomic_u32_t *atom, uint32_t val)
 {
-	(void)__atomic_fetch_add(&atom->v, val, __ATOMIC_RELAXED);
+	_odp_atomic_add_u32(atom, val);
 }
 
 _ODP_INLINE uint32_t odp_atomic_fetch_sub_u32(odp_atomic_u32_t *atom,
@@ -111,7 +111,7 @@ _ODP_INLINE uint32_t odp_atomic_fetch_sub_u32(odp_atomic_u32_t *atom,
 
 _ODP_INLINE void odp_atomic_sub_u32(odp_atomic_u32_t *atom, uint32_t val)
 {
-	(void)__atomic_fetch_sub(&atom->v, val, __ATOMIC_RELAXED);
+	_odp_atomic_sub_u32(atom, val);
 }
 
 _ODP_INLINE uint32_t odp_atomic_fetch_inc_u32(odp_atomic_u32_t *atom)
@@ -121,7 +121,7 @@ _ODP_INLINE uint32_t odp_atomic_fetch_inc_u32(odp_atomic_u32_t *atom)
 
 _ODP_INLINE void odp_atomic_inc_u32(odp_atomic_u32_t *atom)
 {
-	(void)__atomic_fetch_add(&atom->v, 1, __ATOMIC_RELAXED);
+	_odp_atomic_inc_u32(atom);
 }
 
 _ODP_INLINE uint32_t odp_atomic_fetch_dec_u32(odp_atomic_u32_t *atom)
@@ -131,7 +131,7 @@ _ODP_INLINE uint32_t odp_atomic_fetch_dec_u32(odp_atomic_u32_t *atom)
 
 _ODP_INLINE void odp_atomic_dec_u32(odp_atomic_u32_t *atom)
 {
-	(void)__atomic_fetch_sub(&atom->v, 1, __ATOMIC_RELAXED);
+	_odp_atomic_dec_u32(atom);
 }
 
 _ODP_INLINE int odp_atomic_cas_u32(odp_atomic_u32_t *atom, uint32_t *old_val,
@@ -180,7 +180,7 @@ _ODP_INLINE void odp_atomic_min_u32(odp_atomic_u32_t *atom, uint32_t new_min)
  * CAS operation expression for the ATOMIC_OP macro
  */
 #define ATOMIC_CAS_OP(ret_ptr, old_val, new_val) \
-({ \
+__extension__ ({ \
 	if (atom->v == (old_val)) { \
 		atom->v = (new_val); \
 		*(ret_ptr) = 1; \
@@ -197,7 +197,7 @@ _ODP_INLINE void odp_atomic_min_u32(odp_atomic_u32_t *atom, uint32_t new_min)
  * @return The old value of the variable.
  */
 #define ATOMIC_OP(atom, expr) \
-({ \
+__extension__ ({ \
 	uint64_t _old_val; \
 	/* Loop while lock is already taken, stop when lock becomes clear */ \
 	while (__atomic_test_and_set(&(atom)->lock, __ATOMIC_ACQUIRE)) \
@@ -350,7 +350,7 @@ _ODP_INLINE uint64_t odp_atomic_fetch_add_u64(odp_atomic_u64_t *atom,
 
 _ODP_INLINE void odp_atomic_add_u64(odp_atomic_u64_t *atom, uint64_t val)
 {
-	(void)__atomic_fetch_add(&atom->v, val, __ATOMIC_RELAXED);
+	_odp_atomic_add_u64(atom, val);
 }
 
 _ODP_INLINE uint64_t odp_atomic_fetch_sub_u64(odp_atomic_u64_t *atom,
@@ -361,7 +361,7 @@ _ODP_INLINE uint64_t odp_atomic_fetch_sub_u64(odp_atomic_u64_t *atom,
 
 _ODP_INLINE void odp_atomic_sub_u64(odp_atomic_u64_t *atom, uint64_t val)
 {
-	(void)__atomic_fetch_sub(&atom->v, val, __ATOMIC_RELAXED);
+	_odp_atomic_sub_u64(atom, val);
 }
 
 _ODP_INLINE uint64_t odp_atomic_fetch_inc_u64(odp_atomic_u64_t *atom)
@@ -371,7 +371,7 @@ _ODP_INLINE uint64_t odp_atomic_fetch_inc_u64(odp_atomic_u64_t *atom)
 
 _ODP_INLINE void odp_atomic_inc_u64(odp_atomic_u64_t *atom)
 {
-	(void)__atomic_fetch_add(&atom->v, 1, __ATOMIC_RELAXED);
+	_odp_atomic_inc_u64(atom);
 }
 
 _ODP_INLINE uint64_t odp_atomic_fetch_dec_u64(odp_atomic_u64_t *atom)
@@ -381,7 +381,7 @@ _ODP_INLINE uint64_t odp_atomic_fetch_dec_u64(odp_atomic_u64_t *atom)
 
 _ODP_INLINE void odp_atomic_dec_u64(odp_atomic_u64_t *atom)
 {
-	(void)__atomic_fetch_sub(&atom->v, 1, __ATOMIC_RELAXED);
+	_odp_atomic_dec_u64(atom);
 }
 
 _ODP_INLINE int odp_atomic_cas_u64(odp_atomic_u64_t *atom, uint64_t *old_val,
@@ -411,12 +411,12 @@ _ODP_INLINE void odp_atomic_store_rel_u64(odp_atomic_u64_t *atom, uint64_t val)
 
 _ODP_INLINE void odp_atomic_add_rel_u64(odp_atomic_u64_t *atom, uint64_t val)
 {
-	(void)__atomic_fetch_add(&atom->v, val, __ATOMIC_RELEASE);
+	_odp_atomic_add_rel_u64(atom, val);
 }
 
 _ODP_INLINE void odp_atomic_sub_rel_u64(odp_atomic_u64_t *atom, uint64_t val)
 {
-	(void)__atomic_fetch_sub(&atom->v, val, __ATOMIC_RELEASE);
+	_odp_atomic_sub_rel_u64(atom, val);
 }
 
 _ODP_INLINE int odp_atomic_cas_acq_u64(odp_atomic_u64_t *atom,
@@ -485,12 +485,12 @@ _ODP_INLINE void odp_atomic_store_rel_u32(odp_atomic_u32_t *atom, uint32_t val)
 
 _ODP_INLINE void odp_atomic_add_rel_u32(odp_atomic_u32_t *atom, uint32_t val)
 {
-	(void)__atomic_fetch_add(&atom->v, val, __ATOMIC_RELEASE);
+	_odp_atomic_add_rel_u32(atom, val);
 }
 
 _ODP_INLINE void odp_atomic_sub_rel_u32(odp_atomic_u32_t *atom, uint32_t val)
 {
-	(void)__atomic_fetch_sub(&atom->v, val, __ATOMIC_RELEASE);
+	_odp_atomic_sub_rel_u32(atom, val);
 }
 
 _ODP_INLINE int odp_atomic_cas_acq_u32(odp_atomic_u32_t *atom,

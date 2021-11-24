@@ -1008,7 +1008,7 @@ static void queue_print(odp_queue_t handle)
 	}
 	ODP_PRINT("\nQueue info\n");
 	ODP_PRINT("----------\n");
-	ODP_PRINT("  handle          %p\n", handle);
+	ODP_PRINT("  handle          %p\n", (void *)handle);
 	ODP_PRINT("  index           %" PRIu32 "\n", queue->s.index);
 	ODP_PRINT("  name            %s\n", queue->s.name);
 	ODP_PRINT("  enq mode        %s\n",

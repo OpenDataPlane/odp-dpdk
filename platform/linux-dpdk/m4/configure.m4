@@ -72,6 +72,13 @@ AS_VAR_APPEND([PLAT_CFG_TEXT], ["
 	default_config_path:	${default_config_path}"])
 
 ODP_CHECK_CFLAG([-Wno-error=cast-align])
+
+# Ignore Clang specific errors about fields with variable sized type not at the
+# end of a struct or usage of these structs in arrays. This style is used by
+# e.g. timer_pool_t.
+ODP_CHECK_CFLAG([-Wno-error=gnu-variable-sized-type-not-at-end])
+ODP_CHECK_CFLAG([-Wno-error=flexible-array-extensions])
+
 AC_DEFINE([_ODP_PKTIO_DPDK], [1])
 AC_CONFIG_COMMANDS_PRE([dnl
 AM_CONDITIONAL([PLATFORM_IS_LINUX_DPDK],

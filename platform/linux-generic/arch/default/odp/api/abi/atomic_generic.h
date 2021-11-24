@@ -10,6 +10,68 @@
 
 #include <odp/api/atomic.h>
 
+static inline void _odp_atomic_add_u32(odp_atomic_u32_t *atom, uint32_t val)
+{
+	(void)__atomic_fetch_add(&atom->v, val, __ATOMIC_RELAXED);
+}
+
+static inline void _odp_atomic_sub_u32(odp_atomic_u32_t *atom, uint32_t val)
+{
+	(void)__atomic_fetch_sub(&atom->v, val, __ATOMIC_RELAXED);
+}
+
+static inline void _odp_atomic_inc_u32(odp_atomic_u32_t *atom)
+{
+	(void)__atomic_fetch_add(&atom->v, 1, __ATOMIC_RELAXED);
+}
+
+static inline void _odp_atomic_dec_u32(odp_atomic_u32_t *atom)
+{
+	(void)__atomic_fetch_sub(&atom->v, 1, __ATOMIC_RELAXED);
+}
+
+static inline void _odp_atomic_add_rel_u32(odp_atomic_u32_t *atom, uint32_t val)
+{
+	(void)__atomic_fetch_add(&atom->v, val, __ATOMIC_RELEASE);
+}
+
+static inline void _odp_atomic_sub_rel_u32(odp_atomic_u32_t *atom, uint32_t val)
+{
+	(void)__atomic_fetch_sub(&atom->v, val, __ATOMIC_RELEASE);
+}
+
+static inline void _odp_atomic_add_u64(odp_atomic_u64_t *atom, uint64_t val)
+{
+	(void)__atomic_fetch_add(&atom->v, val, __ATOMIC_RELAXED);
+}
+
+static inline void _odp_atomic_sub_u64(odp_atomic_u64_t *atom, uint64_t val)
+{
+	(void)__atomic_fetch_sub(&atom->v, val, __ATOMIC_RELAXED);
+}
+
+static inline void _odp_atomic_inc_u64(odp_atomic_u64_t *atom)
+{
+	(void)__atomic_fetch_add(&atom->v, 1, __ATOMIC_RELAXED);
+}
+
+static inline void _odp_atomic_dec_u64(odp_atomic_u64_t *atom)
+{
+	(void)__atomic_fetch_sub(&atom->v, 1, __ATOMIC_RELAXED);
+}
+
+#ifndef ODP_ATOMIC_U64_LOCK
+static inline void _odp_atomic_add_rel_u64(odp_atomic_u64_t *atom, uint64_t val)
+{
+	(void)__atomic_fetch_add(&atom->v, val, __ATOMIC_RELEASE);
+}
+
+static inline void _odp_atomic_sub_rel_u64(odp_atomic_u64_t *atom, uint64_t val)
+{
+	(void)__atomic_fetch_sub(&atom->v, val, __ATOMIC_RELEASE);
+}
+#endif
+
 #ifdef __SIZEOF_INT128__
 
 static inline void _odp_atomic_init_u128(odp_atomic_u128_t *atom, odp_u128_t val)
@@ -78,7 +140,7 @@ static inline int _odp_atomic_cas_acq_rel_u128(odp_atomic_u128_t *atom, odp_u128
  * 128 bit CAS operation expression for the ATOMIC_OP macro
  */
 #define ATOMIC_CAS_OP_128(ret_ptr, old_val, new_val) \
-({ \
+__extension__ ({ \
 	int *_ret_ptr = ret_ptr; \
 	odp_u128_t *_old_val = old_val; \
 	odp_u128_t _new_val = new_val; \
@@ -99,7 +161,7 @@ static inline int _odp_atomic_cas_acq_rel_u128(odp_atomic_u128_t *atom, odp_u128
  * @return The old value of the variable.
  */
 #define ATOMIC_OP_128(atom, expr) \
-({ \
+__extension__ ({ \
 	odp_u128_t _old_val; \
 	odp_atomic_u128_t *_atom = atom; \
 	/* Loop while lock is already taken, stop when lock becomes clear */ \

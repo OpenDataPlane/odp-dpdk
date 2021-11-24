@@ -29,16 +29,10 @@
 #include <odp_ishmpool_internal.h>
 #include <odp/api/plat/queue_inline_types.h>
 #include <odp_global_data.h>
+#include <odp_macros_internal.h>
 
 #include <string.h>
 #include <inttypes.h>
-
-#define MIN(a, b) \
-	({ \
-		__typeof__(a) tmp_a = (a); \
-		__typeof__(b) tmp_b = (b); \
-		tmp_a < tmp_b ? tmp_a : tmp_b; \
-	})
 
 #define LOCK(a)      odp_ticketlock_lock(a)
 #define UNLOCK(a)    odp_ticketlock_unlock(a)
@@ -745,7 +739,7 @@ int _odp_queue_deq_sc(sched_elem_t *q, odp_event_t *evp, int num)
 	return actual;
 }
 
-inline int _odp_queue_deq(sched_elem_t *q, odp_buffer_hdr_t *buf_hdr[], int num)
+int _odp_queue_deq(sched_elem_t *q, odp_buffer_hdr_t *buf_hdr[], int num)
 {
 	int actual;
 	ringidx_t old_read;
@@ -812,7 +806,7 @@ inline int _odp_queue_deq(sched_elem_t *q, odp_buffer_hdr_t *buf_hdr[], int num)
 	return actual;
 }
 
-inline int _odp_queue_deq_mc(sched_elem_t *q, odp_event_t *evp, int num)
+int _odp_queue_deq_mc(sched_elem_t *q, odp_event_t *evp, int num)
 {
 	int ret, evt_idx;
 	odp_buffer_hdr_t *hdr_tbl[QUEUE_MULTI_MAX];
@@ -965,7 +959,7 @@ static void queue_print(odp_queue_t handle)
 	}
 	ODP_PRINT("\nQueue info\n");
 	ODP_PRINT("----------\n");
-	ODP_PRINT("  handle          %p\n", queue->s.handle);
+	ODP_PRINT("  handle          %p\n", (void *)queue->s.handle);
 	ODP_PRINT("  index           %" PRIu32 "\n", queue->s.index);
 	ODP_PRINT("  name            %s\n", queue->s.name);
 	ODP_PRINT("  enq mode        %s\n",

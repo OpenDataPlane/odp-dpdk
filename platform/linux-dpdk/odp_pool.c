@@ -858,29 +858,6 @@ odp_pool_t odp_pool_lookup(const char *name)
 	return ODP_POOL_INVALID;
 }
 
-static inline int buffer_alloc_multi(pool_t *pool, odp_buffer_hdr_t *buf_hdr[],
-				     int num)
-{
-	int i;
-	struct rte_mempool *mp = pool->rte_mempool;
-
-	ODP_ASSERT(pool->type == ODP_POOL_BUFFER ||
-		   pool->type == ODP_POOL_TIMEOUT ||
-		   pool->type == ODP_POOL_VECTOR);
-
-	for (i = 0; i < num; i++) {
-		struct rte_mbuf *mbuf;
-
-		mbuf = rte_mbuf_raw_alloc(mp);
-		if (odp_unlikely(mbuf == NULL))
-			return i;
-
-		buf_hdr[i] = mbuf_to_buf_hdr(mbuf);
-	}
-
-	return i;
-}
-
 odp_buffer_t odp_buffer_alloc(odp_pool_t pool_hdl)
 {
 	odp_buffer_t buf;
@@ -890,7 +867,10 @@ odp_buffer_t odp_buffer_alloc(odp_pool_t pool_hdl)
 	ODP_ASSERT(ODP_POOL_INVALID != pool_hdl);
 
 	pool = pool_entry_from_hdl(pool_hdl);
-	ret  = buffer_alloc_multi(pool, (odp_buffer_hdr_t **)&buf, 1);
+
+	ODP_ASSERT(pool->type == ODP_POOL_BUFFER);
+
+	ret  = _odp_buffer_alloc_multi(pool, (odp_buffer_hdr_t **)&buf, 1);
 
 	if (odp_likely(ret == 1))
 		return buf;
@@ -906,7 +886,9 @@ int odp_buffer_alloc_multi(odp_pool_t pool_hdl, odp_buffer_t buf[], int num)
 
 	pool = pool_entry_from_hdl(pool_hdl);
 
-	return buffer_alloc_multi(pool, (odp_buffer_hdr_t **)buf, num);
+	ODP_ASSERT(pool->type == ODP_POOL_BUFFER);
+
+	return _odp_buffer_alloc_multi(pool, (odp_buffer_hdr_t **)buf, num);
 }
 
 void odp_buffer_free(odp_buffer_t buf)
@@ -924,6 +906,56 @@ void odp_pool_print(odp_pool_t pool_hdl)
 	pool_t *pool = pool_entry_from_hdl(pool_hdl);
 
 	rte_mempool_dump(stdout, pool->rte_mempool);
+}
+
+void odp_pool_print_all(void)
+{
+	uint64_t available;
+	uint32_t i, index, tot, cache_size;
+	uint32_t elt_size, elt_len = 0;
+	uint8_t type, ext;
+	const int col_width = 24;
+	const char *name;
+	char type_c;
+
+	ODP_PRINT("\nList of all pools\n");
+	ODP_PRINT("-----------------\n");
+	ODP_PRINT(" idx %-*s type   free    tot  cache  elt_len  ext\n", col_width, "name");
+
+	for (i = 0; i < ODP_CONFIG_POOLS; i++) {
+		pool_t *pool = pool_entry(i);
+
+		LOCK(&pool->lock);
+
+		if (pool->rte_mempool == NULL) {
+			UNLOCK(&pool->lock);
+			continue;
+		}
+
+		available  = rte_mempool_avail_count(pool->rte_mempool);
+		cache_size = pool->rte_mempool->cache_size;
+		ext        = pool->pool_ext;
+		index      = pool->pool_idx;
+		name       = pool->name;
+		tot        = pool->rte_mempool->size;
+		type       = pool->type;
+		elt_size   = pool->rte_mempool->elt_size;
+
+		UNLOCK(&pool->lock);
+
+		if (type == ODP_POOL_BUFFER || type == ODP_POOL_PACKET)
+			elt_len = elt_size;
+
+		type_c = (type == ODP_POOL_BUFFER) ? 'B' :
+			 (type == ODP_POOL_PACKET) ? 'P' :
+			 (type == ODP_POOL_TIMEOUT) ? 'T' :
+			 (type == ODP_POOL_VECTOR) ? 'V' : '-';
+
+		ODP_PRINT("%4u %-*s    %c %6" PRIu64 " %6" PRIu32 " %6" PRIu32 " %8" PRIu32 "    "
+			  "%" PRIu8 "\n", index, col_width, name, type_c, available, tot,
+			  cache_size, elt_len, ext);
+	}
+	ODP_PRINT("\n");
 }
 
 static void mempool_addr_range(struct rte_mempool *mp ODP_UNUSED, void *opaque,

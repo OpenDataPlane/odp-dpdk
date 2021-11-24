@@ -19,8 +19,8 @@ jobs:
       fail-fast: false
       matrix:
         cc: [gcc, clang]
-        conf: ['', 'CFLAGS=-O3', 'CFLAGS=-O1', 'CFLAGS=-O0 --enable-debug=full', '--enable-lto',
-               '--enable-lto --enable-abi-compat', '--enable-pcapng-support']
+        conf: ['', 'CFLAGS=-O3', 'CFLAGS=-O1', 'CFLAGS=-O0 --enable-debug=full', 'CFLAGS=-pedantic',
+               '--enable-lto', '--enable-lto --enable-abi-compat', '--enable-pcapng-support']
         exclude:
           - cc: clang
             conf: '--enable-lto'
@@ -95,7 +95,7 @@ jobs:
       fail-fast: false
       matrix:
         cc: [gcc, clang]
-        conf: ['', '--enable-abi-compat', '--enable-deprecated --enable-debug=full',
+        conf: ['', '--enable-abi-compat', '--enable-deprecated --enable-helper-deprecated --enable-debug=full',
                '--enable-dpdk-zero-copy --disable-static-applications',
                '--disable-host-optimization', '--disable-host-optimization --enable-abi-compat',
                '--without-openssl --without-pcap']
@@ -104,6 +104,23 @@ jobs:
       - uses: actions/checkout@v2
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${{matrix.cc}}" -e ARCH="${ARCH}"
                -e CXX=g++-10 -e CONF="${{matrix.conf}}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-native /odp/scripts/ci/check.sh
+      - name: Failure log
+        if: ${{ failure() }}
+        run: find . -name "*.trs" | xargs grep -l '^.test-result. FAIL' | while read trs ; do echo FAILURE detected at $trs; cat ${trs%%.trs}.log ; done
+
+  Run_CFLAGS:
+    if: ${{ github.repository == 'OpenDataPlane/odp' }}
+    runs-on: [self-hosted, ARM64]
+    strategy:
+      fail-fast: false
+      matrix:
+        cc: [gcc, clang]
+        cflags: ['-march=armv8.2-a -O2', '-march=armv8-a+lse -O2']
+    steps:
+      - uses: AutoModality/action-clean@v1.1.0
+      - uses: actions/checkout@v2
+      - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${{matrix.cc}}" -e ARCH="${ARCH}"
+               -e CXX=g++-10 -e CFLAGS="${{matrix.cflags}}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-native /odp/scripts/ci/check.sh
       - name: Failure log
         if: ${{ failure() }}
         run: find . -name "*.trs" | xargs grep -l '^.test-result. FAIL' | while read trs ; do echo FAILURE detected at $trs; cat ${trs%%.trs}.log ; done

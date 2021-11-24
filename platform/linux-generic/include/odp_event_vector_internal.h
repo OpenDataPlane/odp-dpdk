@@ -17,6 +17,8 @@
 #include <odp/api/packet.h>
 #include <odp_buffer_internal.h>
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
 /**
  * Internal event vector header
  */
@@ -28,9 +30,10 @@ typedef struct {
 	uint32_t size;
 
 	/* Vector of packet handles */
-	odp_packet_t packet[0];
+	odp_packet_t packet[];
 
 } odp_event_vector_hdr_t;
+#pragma GCC diagnostic pop
 
 /**
  * Return the vector header
