@@ -91,6 +91,7 @@
 	#define RTE_ETH_TX_OFFLOAD_SCTP_CKSUM DEV_TX_OFFLOAD_SCTP_CKSUM
 	#define RTE_ETH_TX_OFFLOAD_TCP_CKSUM DEV_TX_OFFLOAD_TCP_CKSUM
 	#define RTE_ETH_TX_OFFLOAD_UDP_CKSUM DEV_TX_OFFLOAD_UDP_CKSUM
+	#define RTE_ETH_TX_OFFLOAD_MULTI_SEGS DEV_TX_OFFLOAD_MULTI_SEGS
 
 	#define RTE_ETH_FC_FULL RTE_FC_FULL
 	#define RTE_ETH_FC_RX_PAUSE RTE_FC_RX_PAUSE
@@ -121,6 +122,7 @@ typedef struct {
 	int num_rx_desc_default;
 	int num_tx_desc_default;
 	int rx_drop_en;
+	int tx_offload_multi_segs;
 } dpdk_opt_t;
 
 /* DPDK pktio specific data */
@@ -229,12 +231,18 @@ static int init_options(pktio_entry_t *pktio_entry,
 		return -1;
 	opt->multicast_enable = !!opt->multicast_enable;
 
+	if (!lookup_opt("tx_offload_multi_segs", dev_info->driver_name,
+			&opt->tx_offload_multi_segs))
+		return -1;
+	opt->tx_offload_multi_segs = !!opt->tx_offload_multi_segs;
+
 	_ODP_DBG("DPDK interface (%s): %" PRIu16 "\n", dev_info->driver_name,
 		 pkt_priv(pktio_entry)->port_id);
 	_ODP_DBG("  multicast:   %d\n", opt->multicast_enable);
 	_ODP_DBG("  num_rx_desc: %d\n", opt->num_rx_desc_default);
 	_ODP_DBG("  num_tx_desc: %d\n", opt->num_tx_desc_default);
 	_ODP_DBG("  rx_drop_en:  %d\n", opt->rx_drop_en);
+	_ODP_DBG("  tx_offload_multi_segs: %d\n", opt->tx_offload_multi_segs);
 
 	return 0;
 }
@@ -294,7 +302,7 @@ static int dpdk_maxlen_set(pktio_entry_t *pktio_entry, uint32_t maxlen_input,
 	return ret;
 }
 
-static int dpdk_setup_eth_dev(pktio_entry_t *pktio_entry)
+static int dpdk_setup_eth_dev(pktio_entry_t *pktio_entry, const struct rte_eth_dev_info *dev_info)
 {
 	int ret;
 	pkt_dpdk_t *pkt_dpdk = pkt_priv(pktio_entry);
@@ -334,10 +342,19 @@ static int dpdk_setup_eth_dev(pktio_entry_t *pktio_entry)
 	if (pktio_entry->config.pktout.bit.sctp_chksum_ena)
 		tx_offloads |= RTE_ETH_TX_OFFLOAD_SCTP_CKSUM;
 
-	eth_conf.txmode.offloads = tx_offloads;
-
 	if (tx_offloads)
 		pktio_entry->enabled.chksum_insert = 1;
+
+	/* Enable multi segment transmit offload */
+	if (pkt_dpdk->opt.tx_offload_multi_segs) {
+		if ((dev_info->tx_offload_capa & RTE_ETH_TX_OFFLOAD_MULTI_SEGS) == 0) {
+			_ODP_ERR("TX multi segment offload not supported by PMD\n");
+			return -1;
+		}
+		tx_offloads |= RTE_ETH_TX_OFFLOAD_MULTI_SEGS;
+	}
+
+	eth_conf.txmode.offloads = tx_offloads;
 
 	/* RX packet len same size as pool segment minus headroom and double
 	 * VLAN tag
@@ -863,7 +880,7 @@ static int dpdk_start(pktio_entry_t *pktio_entry)
 	rte_eth_dev_info_get(port_id, &dev_info);
 
 	/* Setup device */
-	if (dpdk_setup_eth_dev(pktio_entry)) {
+	if (dpdk_setup_eth_dev(pktio_entry, &dev_info)) {
 		_ODP_ERR("Failed to configure device\n");
 		return -1;
 	}
