@@ -719,14 +719,6 @@ odp_pool_t odp_pool_create(const char *name, const odp_pool_param_t *params)
 					params->pkt.num;
 			blk_size = ROUNDUP_ALIGN(headroom + blk_size +
 						 tailroom, min_align);
-			/* Segment size minus headroom might be rounded down by
-			 * the driver to the nearest multiple of 1024. Round it
-			 * up here to make sure the requested size still going
-			 * to fit there without segmentation.
-			 */
-			blk_size = ROUNDUP_ALIGN(blk_size - headroom,
-						 min_seg_len) + headroom;
-
 			hdr_size = sizeof(odp_packet_hdr_t);
 			CHECK_U16_OVERFLOW(blk_size);
 			mbp_ctor_arg.mbuf_data_room_size = blk_size;
