@@ -405,6 +405,11 @@ static int check_params(const odp_pool_param_t *params)
 			return -1;
 		}
 
+		if (!CHECK_IS_POWER2(params->buf.align)) {
+			ODP_ERR("buf.align not power of two %u\n", params->buf.align);
+			return -1;
+		}
+
 		if (params->buf.cache_size > capa.buf.max_cache_size) {
 			ODP_ERR("buf.cache_size too large %u\n",
 				params->buf.cache_size);
@@ -423,6 +428,12 @@ static int check_params(const odp_pool_param_t *params)
 			ODP_ERR("pkt.align too large %u\n", params->pkt.align);
 			return -1;
 		}
+
+		if (!CHECK_IS_POWER2(params->pkt.align)) {
+			ODP_ERR("pkt.align not power of two %u\n", params->pkt.align);
+			return -1;
+		}
+
 		if (params->pkt.num > capa.pkt.max_num) {
 			ODP_ERR("pkt.num too large %u\n", params->pkt.num);
 			return -1;
@@ -665,14 +676,6 @@ odp_pool_t odp_pool_create(const char *name, const odp_pool_param_t *params)
 			buf_align = params->buf.align;
 			blk_size = params->buf.size;
 			cache_size = params->buf.cache_size;
-
-			/* Validate requested buffer alignment */
-			if (buf_align > ODP_CONFIG_BUFFER_ALIGN_MAX ||
-			    buf_align !=
-			    ROUNDDOWN_POWER2(buf_align, buf_align)) {
-				UNLOCK(&pool->lock);
-				return ODP_POOL_INVALID;
-			}
 
 			/* Set correct alignment based on input request */
 			if (buf_align == 0)
