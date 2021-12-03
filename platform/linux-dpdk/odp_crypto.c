@@ -1894,7 +1894,7 @@ static void crypto_fill_sym_param(crypto_session_entry_t *session,
  */
 static int linearize_pkt(const crypto_session_entry_t *session, odp_packet_t pkt)
 {
-	const uint32_t new_headroom = CONFIG_PACKET_HEADROOM;
+	const uint32_t new_headroom = RTE_PKTMBUF_HEADROOM;
 	uint32_t headroom;
 	uint32_t len;
 	uint32_t shift;
