@@ -262,8 +262,8 @@ int odp_pool_capability(odp_pool_capability_t *capa)
 	capa->pkt.max_pools        = max_pools;
 	capa->pkt.max_len          = 0;
 	capa->pkt.max_num	   = _odp_pool_glb->config.pkt_max_num;
-	capa->pkt.min_headroom     = CONFIG_PACKET_HEADROOM;
-	capa->pkt.max_headroom     = CONFIG_PACKET_HEADROOM;
+	capa->pkt.min_headroom     = RTE_PKTMBUF_HEADROOM;
+	capa->pkt.max_headroom     = RTE_PKTMBUF_HEADROOM;
 	capa->pkt.min_tailroom     = CONFIG_PACKET_TAILROOM;
 	capa->pkt.max_segs_per_pkt = PKT_MAX_SEGS;
 	capa->pkt.min_seg_len      = CONFIG_PACKET_SEG_LEN_MIN;
@@ -462,7 +462,7 @@ static int check_params(const odp_pool_param_t *params)
 			return -1;
 		}
 
-		if (params->pkt.headroom > CONFIG_PACKET_HEADROOM) {
+		if (params->pkt.headroom > capa.pkt.max_headroom) {
 			ODP_ERR("pkt.headroom too large %u\n",
 				params->pkt.headroom);
 			return -1;
@@ -697,7 +697,7 @@ odp_pool_t odp_pool_create(const char *name, const odp_pool_param_t *params)
 				pool_name, num, params->buf.size, params->buf.align);
 			break;
 		case ODP_POOL_PACKET:
-			headroom = CONFIG_PACKET_HEADROOM;
+			headroom = RTE_PKTMBUF_HEADROOM;
 			tailroom = CONFIG_PACKET_TAILROOM;
 			min_seg_len = CONFIG_PACKET_SEG_LEN_MIN;
 			min_align = ODP_CONFIG_BUFFER_ALIGN_MIN;
@@ -1031,7 +1031,7 @@ odp_pool_t odp_buffer_pool(odp_buffer_t buf)
 void odp_pool_param_init(odp_pool_param_t *params)
 {
 	memset(params, 0, sizeof(odp_pool_param_t));
-	params->pkt.headroom = CONFIG_PACKET_HEADROOM;
+	params->pkt.headroom = RTE_PKTMBUF_HEADROOM;
 	params->buf.cache_size = RTE_MEMPOOL_CACHE_MAX_SIZE;
 	params->pkt.cache_size = RTE_MEMPOOL_CACHE_MAX_SIZE;
 	params->tmo.cache_size = RTE_MEMPOOL_CACHE_MAX_SIZE;
@@ -1125,8 +1125,8 @@ int odp_pool_ext_capability(odp_pool_type_t type,
 	capa->pkt.min_buf_align = ODP_CACHE_LINE_SIZE;
 	capa->pkt.min_head_align = EXT_MIN_HEAD_ALIGN;
 	capa->pkt.buf_size_aligned = 0;
-	capa->pkt.max_headroom = CONFIG_PACKET_HEADROOM;
-	capa->pkt.max_headroom_size = CONFIG_PACKET_HEADROOM;
+	capa->pkt.max_headroom = RTE_PKTMBUF_HEADROOM;
+	capa->pkt.max_headroom_size = RTE_PKTMBUF_HEADROOM;
 	capa->pkt.max_segs_per_pkt = PKT_MAX_SEGS;
 	capa->pkt.max_uarea_size = MAX_SIZE;
 
@@ -1144,7 +1144,7 @@ void odp_pool_ext_param_init(odp_pool_type_t type, odp_pool_ext_param_t *param)
 
 	param->type = ODP_POOL_PACKET;
 	param->cache_size = default_cache_size;
-	param->pkt.headroom = CONFIG_PACKET_HEADROOM;
+	param->pkt.headroom = RTE_PKTMBUF_HEADROOM;
 }
 
 static int check_pool_ext_param(const odp_pool_ext_param_t *param)

@@ -12,6 +12,8 @@
 extern "C" {
 #endif
 
+#include <rte_config.h>
+
 #include <stdint.h>
 
 /*
@@ -82,20 +84,6 @@ extern "C" {
 #define ODP_CONFIG_BUFFER_ALIGN_MAX (4 * 1024)
 
 /*
- * Default packet headroom
- *
- * This defines the minimum number of headroom bytes that newly created packets
- * have by default. The default apply to both ODP packet input and user
- * allocated packets. Implementations may reserve a larger than minimum headroom
- * size e.g. due to HW or a protocol specific alignment requirement.
- *
- * @internal In odp-dpdk implementation:
- * The default value (128) allows a 1500-byte packet to be received into a
- * single segment with room for some header expansion.
- */
-#define CONFIG_PACKET_HEADROOM 128
-
-/*
  * Default packet tailroom
  *
  * This defines the minimum number of tailroom bytes that newly created packets
@@ -128,7 +116,7 @@ extern "C" {
  * this.
  */
 #define CONFIG_PACKET_MAX_SEG_LEN (CONFIG_PACKET_SEG_SIZE - \
-				   CONFIG_PACKET_HEADROOM - \
+				   RTE_PKTMBUF_HEADROOM - \
 				   CONFIG_PACKET_TAILROOM - \
 				   ODP_CONFIG_BUFFER_ALIGN_MIN)
 
