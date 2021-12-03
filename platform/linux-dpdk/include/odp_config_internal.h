@@ -12,6 +12,8 @@
 extern "C" {
 #endif
 
+#include <stdint.h>
+
 /*
  * Maximum number of supported CPU identifiers. The maximum supported CPU ID is
  * CONFIG_NUM_CPU_IDS - 1. Note that the maximum number of ODP threads is
@@ -107,7 +109,7 @@ extern "C" {
 /*
  * Maximum packet segment size including head- and tailrooms
  */
-#define CONFIG_PACKET_SEG_SIZE (60 * 1024)
+#define CONFIG_PACKET_SEG_SIZE (UINT16_MAX)
 
 /*
  * Minimum packet segment length
@@ -127,7 +129,8 @@ extern "C" {
  */
 #define CONFIG_PACKET_MAX_SEG_LEN (CONFIG_PACKET_SEG_SIZE - \
 				   CONFIG_PACKET_HEADROOM - \
-				   CONFIG_PACKET_TAILROOM)
+				   CONFIG_PACKET_TAILROOM - \
+				   ODP_CONFIG_BUFFER_ALIGN_MIN)
 
 /*
  * Number of shared memory blocks reserved for implementation internal use.
