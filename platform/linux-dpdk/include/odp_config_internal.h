@@ -105,8 +105,11 @@ extern "C" {
  * This defines the minimum packet segment buffer length in bytes. The user
  * defined segment length (seg_len in odp_pool_param_t) will be rounded up into
  * this value.
+ *
+ * Some PMDs operate with 1KB chunks, so 2KB segments are required to receive
+ * standard MTU Ethernet frames without splitting them into multiple segments.
  */
-#define CONFIG_PACKET_SEG_LEN_MIN 1024
+#define CONFIG_PACKET_SEG_LEN_MIN 2048
 
 /*
  * Maximum packet segment length
