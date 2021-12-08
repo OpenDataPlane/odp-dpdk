@@ -260,7 +260,7 @@ int odp_pool_capability(odp_pool_capability_t *capa)
 	/* Packet pools */
 	capa->pkt.max_align        = ODP_CONFIG_BUFFER_ALIGN_MIN;
 	capa->pkt.max_pools        = max_pools;
-	capa->pkt.max_len          = 0;
+	capa->pkt.max_len          = CONFIG_PACKET_MAX_SEG_LEN;
 	capa->pkt.max_num	   = _odp_pool_glb->config.pkt_max_num;
 	capa->pkt.min_headroom     = RTE_PKTMBUF_HEADROOM;
 	capa->pkt.max_headroom     = RTE_PKTMBUF_HEADROOM;
