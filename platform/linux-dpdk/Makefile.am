@@ -1,5 +1,7 @@
 include $(top_srcdir)/platform/Makefile.inc
+if PLATFORM_IS_LINUX_DPDK
 include $(top_srcdir)/platform/@with_platform@/Makefile.inc
+endif
 lib_LTLIBRARIES += $(LIB)/libodp-dpdk.la
 
 AM_CPPFLAGS  =  $(ODP_INCLUDES)
