@@ -73,6 +73,7 @@ typedef struct ODP_ALIGNED_CACHE {
 	uint32_t		hdr_size;
 	uint32_t		num;
 	uint32_t		num_populated;
+	odp_pool_type_t		type_2;
 	uint8_t			type;
 	uint8_t			pool_ext;
 	odp_pool_param_t	params;
@@ -157,6 +158,9 @@ static inline void _odp_event_free_multi(_odp_event_hdr_t *event_hdr[], int num_
 {
 	_odp_buffer_free_multi((odp_buffer_hdr_t **)event_hdr, num_free);
 }
+
+odp_pool_t _odp_pool_create(const char *name, const odp_pool_param_t *params,
+			    odp_pool_type_t type_2);
 
 #ifdef __cplusplus
 }

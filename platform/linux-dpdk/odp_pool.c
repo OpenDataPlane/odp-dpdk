@@ -629,7 +629,10 @@ static int reserve_uarea(pool_t *pool, uint32_t uarea_size, uint32_t num_pkt)
 	return 0;
 }
 
-odp_pool_t odp_pool_create(const char *name, const odp_pool_param_t *params)
+/* Create pool according to params. Actual type of the pool is type_2, which is recorded for pool
+ * info calls. */
+odp_pool_t _odp_pool_create(const char *name, const odp_pool_param_t *params,
+			    odp_pool_type_t type_2)
 {
 	struct rte_pktmbuf_pool_private mbp_ctor_arg;
 	struct mbuf_ctor_arg mb_ctor_arg;
@@ -644,9 +647,6 @@ odp_pool_t odp_pool_create(const char *name, const odp_pool_param_t *params)
 	int8_t event_type;
 	char pool_name[ODP_POOL_NAME_LEN];
 	char rte_name[RTE_MEMPOOL_NAMESIZE];
-
-	if (check_params(params))
-		return ODP_POOL_INVALID;
 
 	if (name == NULL) {
 		pool_name[0] = 0;
@@ -820,6 +820,7 @@ odp_pool_t odp_pool_create(const char *name, const odp_pool_param_t *params)
 		}
 
 		pool->type = type;
+		pool->type_2 = type_2;
 		pool->params = *params;
 
 		if (reserve_uarea(pool, uarea_size, num)) {
@@ -844,6 +845,14 @@ odp_pool_t odp_pool_create(const char *name, const odp_pool_param_t *params)
 	}
 
 	return pool_hdl;
+}
+
+odp_pool_t odp_pool_create(const char *name, const odp_pool_param_t *params)
+{
+	if (check_params(params))
+		return ODP_POOL_INVALID;
+
+	return _odp_pool_create(name, params, params->type);
 }
 
 odp_pool_t odp_pool_lookup(const char *name)
@@ -1003,11 +1012,17 @@ int odp_pool_info(odp_pool_t pool_hdl, odp_pool_info_t *info)
 
 	memset(info, 0, sizeof(odp_pool_info_t));
 
+	info->type = pool->type_2;
 	info->name = pool->name;
 
 	if (pool->pool_ext) {
 		info->pool_ext = 1;
 		info->pool_ext_param = pool->ext_param;
+
+	} else if (pool->type_2 == ODP_POOL_DMA_COMPL) {
+		info->dma_pool_param.num        = pool->params.buf.num;
+		info->dma_pool_param.cache_size = pool->params.buf.cache_size;
+
 	} else {
 		info->params = pool->params;
 	}

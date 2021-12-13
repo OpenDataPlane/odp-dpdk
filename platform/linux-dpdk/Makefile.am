@@ -61,6 +61,7 @@ odpapiabiarchinclude_HEADERS += \
 		  include-abi/odp/api/abi/cpumask.h \
 		  include-abi/odp/api/abi/crypto.h \
 		  include-abi/odp/api/abi/debug.h \
+		  include-abi/odp/api/abi/dma_types.h \
 		  include-abi/odp/api/abi/errno.h \
 		  include-abi/odp/api/abi/event.h \
 		  include-abi/odp/api/abi/hash.h \
@@ -170,6 +171,7 @@ __LIB__libodp_dpdk_la_SOURCES = \
 			   ../linux-generic/miniz/miniz_tinfl.c ../linux-generic/miniz/miniz_tinfl.h \
 			   ../linux-generic/odp_cpumask.c \
 			   ../linux-generic/odp_cpumask_task.c \
+			   ../linux-generic/odp_dma.c \
 			   odp_crypto.c \
 			   odp_errno.c \
 			   ../linux-generic/odp_event.c \
