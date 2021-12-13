@@ -118,6 +118,7 @@ noinst_HEADERS = \
 		  ${top_srcdir}/platform/linux-generic/include/odp_name_table_internal.h \
 		  include/odp_packet_io_internal.h \
 		  include/odp_errno_define.h \
+		  include/odp_event_internal.h \
 		  include/odp_packet_dpdk.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_pcapng.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_pkt_queue_internal.h \
