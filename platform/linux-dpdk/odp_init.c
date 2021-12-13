@@ -59,6 +59,9 @@ enum init_stage {
 odp_global_data_ro_t odp_global_ro;
 odp_global_data_rw_t *odp_global_rw;
 
+/* odp_init_local() call status */
+static __thread uint8_t init_local_called;
+
 static void disable_features(odp_global_data_ro_t *global_ro,
 			     const odp_init_t *init_param)
 {
@@ -763,6 +766,13 @@ int odp_init_local(odp_instance_t instance, odp_thread_type_t thr_type)
 		goto init_fail;
 	}
 
+	/* Detect if odp_init_local() has been already called from this thread */
+	if (getpid() == odp_global_ro.main_pid && init_local_called) {
+		ODP_ERR("%s() called multiple times by the same thread\n", __func__);
+		goto init_fail;
+	}
+	init_local_called = 1;
+
 	if (_odp_shm_init_local()) {
 		ODP_ERR("ODP shm local init failed.\n");
 		goto init_fail;
@@ -826,6 +836,13 @@ init_fail:
 
 int odp_term_local(void)
 {
+	/* Check that odp_init_local() has been called by this thread */
+	if (!init_local_called) {
+		ODP_ERR("%s() called by a non-initialized thread\n", __func__);
+		return -1;
+	}
+	init_local_called = 0;
+
 	return term_local(ALL_INIT);
 }
 
