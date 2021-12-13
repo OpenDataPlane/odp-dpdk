@@ -18,17 +18,17 @@
 extern "C" {
 #endif
 
+#include <odp/api/hints.h>
 #include <odp/api/packet_io.h>
 #include <odp/api/plat/pktio_inlines.h>
 #include <odp/api/spinlock.h>
 #include <odp/api/ticketlock.h>
-#include <odp_classification_datamodel.h>
+
 #include <odp_align_internal.h>
+#include <odp_classification_datamodel.h>
+#include <odp_config_internal.h>
 #include <odp_debug_internal.h>
 #include <odp_queue_if.h>
-
-#include <odp_config_internal.h>
-#include <odp/api/hints.h>
 
 #include <linux/if_ether.h>
 #include <sys/select.h>

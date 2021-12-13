@@ -1745,7 +1745,7 @@ static uint8_t *crypto_prepare_digest(crypto_session_entry_t *session,
 	_odp_packet_set_data(pkt, param->hash_result_offset, 0,
 			     session->p.auth_digest_len);
 	data = pkt_hdr->crypto_digest_buf;
-	mb = &pkt_hdr->buf_hdr.mb;
+	mb = &pkt_hdr->event_hdr.mb;
 	*phys_addr =
 		rte_pktmbuf_iova_offset(mb, data -
 					rte_pktmbuf_mtod(mb, uint8_t *));
@@ -1782,9 +1782,9 @@ static void crypto_fill_aead_param(crypto_session_entry_t *session,
 		       aead_xform->aead.aad_length);
 	op->sym->aead.aad.data = pkt_hdr->crypto_aad_buf;
 	op->sym->aead.aad.phys_addr =
-		rte_pktmbuf_iova_offset(&pkt_hdr->buf_hdr.mb,
+		rte_pktmbuf_iova_offset(&pkt_hdr->event_hdr.mb,
 					op->sym->aead.aad.data -
-					rte_pktmbuf_mtod(&pkt_hdr->buf_hdr.mb,
+					rte_pktmbuf_mtod(&pkt_hdr->event_hdr.mb,
 							 uint8_t *));
 	iv_ptr = rte_crypto_op_ctod_offset(op, uint8_t *, IV_OFFSET);
 	if (aead_xform->aead.algo == RTE_CRYPTO_AEAD_AES_CCM) {
