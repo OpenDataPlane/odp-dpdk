@@ -599,7 +599,6 @@ static int reserve_uarea(pool_t *pool, uint32_t uarea_size, uint32_t num_pkt)
 {
 	odp_shm_t shm;
 	char uarea_name[ODP_SHM_NAME_LEN];
-	uint32_t shm_flags = 0;
 
 	pool->uarea_shm = ODP_SHM_INVALID;
 
@@ -616,11 +615,7 @@ static int reserve_uarea(pool_t *pool, uint32_t uarea_size, uint32_t num_pkt)
 	pool->uarea_size = ROUNDUP_CACHE_LINE(uarea_size);
 	pool->uarea_shm_size = num_pkt * (uint64_t)pool->uarea_size;
 
-	if (odp_global_ro.shm_single_va)
-		shm_flags |= ODP_SHM_SINGLE_VA;
-
-	shm = odp_shm_reserve(uarea_name, pool->uarea_shm_size, ODP_PAGE_SIZE,
-			      shm_flags);
+	shm = odp_shm_reserve(uarea_name, pool->uarea_shm_size, ODP_PAGE_SIZE, 0);
 
 	if (shm == ODP_SHM_INVALID)
 		return -1;

@@ -6,14 +6,17 @@
  */
 
 #include <odp_posix_extensions.h>
-#include <odp_align_internal.h>
-#include <odp_config_internal.h>
+
 #include <odp/api/debug.h>
-#include <odp_debug_internal.h>
+#include <odp/api/plat/strong_types.h>
 #include <odp/api/shared_memory.h>
 #include <odp/api/spinlock.h>
-#include <odp/api/plat/strong_types.h>
+
+#include <odp_align_internal.h>
+#include <odp_config_internal.h>
+#include <odp_debug_internal.h>
 #include <odp_shm_internal.h>
+
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/syscall.h>
@@ -23,6 +26,9 @@
 #include <rte_config.h>
 #include <rte_lcore.h>
 #include <rte_memzone.h>
+
+/* Supported ODP_SHM_* flags */
+#define SUPPORTED_SHM_FLAGS (ODP_SHM_SW_ONLY | ODP_SHM_EXPORT | ODP_SHM_HP)
 
 #define SHM_MAX_ALIGN (0x80000000)
 #define SHM_BLOCK_NAME "%" PRIu64 "-%d-%s"
@@ -226,6 +232,7 @@ int odp_shm_capability(odp_shm_capability_t *capa)
 	capa->max_blocks = CONFIG_SHM_BLOCKS;
 	capa->max_size = 0;
 	capa->max_align = SHM_MAX_ALIGN;
+	capa->flags = SUPPORTED_SHM_FLAGS;
 
 	return 0;
 }
@@ -238,6 +245,12 @@ odp_shm_t odp_shm_reserve(const char *name, uint64_t size, uint64_t align,
 	char mz_name[RTE_MEMZONE_NAMESIZE];
 	uint32_t mz_flags = RTE_MEMZONE_1GB | RTE_MEMZONE_SIZE_HINT_ONLY;
 	int idx;
+	uint32_t supported_flgs = SUPPORTED_SHM_FLAGS;
+
+	if (flags & ~supported_flgs) {
+		ODP_ERR("Unsupported SHM flag\n");
+		return ODP_SHM_INVALID;
+	}
 
 	if (align > SHM_MAX_ALIGN) {
 		ODP_ERR("Align too large: %" PRIu64 "\n", align);
