@@ -20,7 +20,6 @@ extern "C" {
 
 #include <odp/api/std_types.h>
 #include <odp/api/pool.h>
-#include <odp_buffer_internal.h>
 #include <odp_event_internal.h>
 #include <odp/api/packet_io.h>
 #include <odp/api/align.h>
@@ -108,8 +107,7 @@ static inline pool_t *pool_entry_from_hdl(odp_pool_t pool_hdl)
 	return &_odp_pool_glb->pool[_odp_typeval(pool_hdl) - 1];
 }
 
-static inline int _odp_buffer_alloc_multi(pool_t *pool,
-					  odp_buffer_hdr_t *buf_hdr[], int num)
+static inline int _odp_event_alloc_multi(pool_t *pool, _odp_event_hdr_t *event_hdr[], int num)
 {
 	int i;
 	struct rte_mempool *mp = pool->rte_mempool;
@@ -121,43 +119,39 @@ static inline int _odp_buffer_alloc_multi(pool_t *pool,
 		if (odp_unlikely(mbuf == NULL))
 			return i;
 
-		buf_hdr[i] = mbuf_to_buf_hdr(mbuf);
+		event_hdr[i] = _odp_event_hdr(_odp_event_from_mbuf(mbuf));
 	}
 
 	return i;
 }
 
-static inline void _odp_buffer_free_multi(odp_buffer_hdr_t *buf_hdr[], int num)
+static inline odp_event_t _odp_event_alloc(pool_t *pool)
 {
-	int i;
+	odp_event_t event;
+	int ret;
 
-	for (i = 0; i < num; i++)
-		rte_mbuf_raw_free((struct rte_mbuf *)(uintptr_t)buf_hdr[i]);
-}
+	ret  = _odp_event_alloc_multi(pool, (_odp_event_hdr_t **)&event, 1);
 
-int _odp_buffer_is_valid(odp_buffer_t buf);
+	if (odp_likely(ret == 1))
+		return event;
 
-odp_event_t _odp_event_alloc(pool_t *pool);
-
-static inline int _odp_event_is_valid(odp_event_t event)
-{
-	return _odp_buffer_is_valid((odp_buffer_t)event);
-}
-
-static inline int _odp_event_alloc_multi(pool_t *pool, _odp_event_hdr_t *event_hdr[], int num)
-{
-	return _odp_buffer_alloc_multi(pool, (odp_buffer_hdr_t **)event_hdr, num);
-}
-
-static inline void _odp_event_free(odp_event_t event)
-{
-	_odp_buffer_free_multi((odp_buffer_hdr_t **)&event, 1);
+	return ODP_EVENT_INVALID;
 }
 
 static inline void _odp_event_free_multi(_odp_event_hdr_t *event_hdr[], int num_free)
 {
-	_odp_buffer_free_multi((odp_buffer_hdr_t **)event_hdr, num_free);
+	int i;
+
+	for (i = 0; i < num_free; i++)
+		rte_mbuf_raw_free(_odp_event_to_mbuf(_odp_event_from_hdr(event_hdr[i])));
 }
+
+static inline void _odp_event_free(odp_event_t event)
+{
+	_odp_event_free_multi((_odp_event_hdr_t **)&event, 1);
+}
+
+int _odp_event_is_valid(odp_event_t event);
 
 odp_pool_t _odp_pool_create(const char *name, const odp_pool_param_t *params,
 			    odp_pool_type_t type_2);

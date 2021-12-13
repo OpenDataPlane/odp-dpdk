@@ -100,7 +100,7 @@ static void ptr_from_mempool(struct rte_mempool *mp ODP_UNUSED, void *opaque,
 		args->match = true;
 }
 
-static pool_t *find_pool(odp_buffer_hdr_t *buf_hdr)
+static pool_t *find_pool(_odp_event_hdr_t *event_hdr)
 {
 	int i;
 
@@ -111,7 +111,7 @@ static pool_t *find_pool(odp_buffer_hdr_t *buf_hdr)
 		if (pool->rte_mempool == NULL)
 			continue;
 
-		args.addr = (uint8_t *)buf_hdr;
+		args.addr = (uint8_t *)event_hdr;
 		args.match = false;
 		rte_mempool_mem_iter(pool->rte_mempool, ptr_from_mempool, &args);
 
@@ -179,6 +179,7 @@ int _odp_pool_init_global(void)
 	}
 
 	ODP_DBG("\nPool init global\n");
+	ODP_DBG("  event_hdr_t size:            %zu\n", sizeof(_odp_event_hdr_t));
 	ODP_DBG("  odp_buffer_hdr_t size:       %zu\n", sizeof(odp_buffer_hdr_t));
 	ODP_DBG("  odp_packet_hdr_t size:       %zu\n", sizeof(odp_packet_hdr_t));
 	ODP_DBG("  odp_timeout_hdr_t size:      %zu\n", sizeof(odp_timeout_hdr_t));
@@ -213,23 +214,23 @@ int _odp_pool_term_local(void)
 	return 0;
 }
 
-int _odp_buffer_is_valid(odp_buffer_t buf)
+int _odp_event_is_valid(odp_event_t event)
 {
 	pool_t *pool;
-	odp_buffer_hdr_t *buf_hdr = _odp_buf_hdr(buf);
+	_odp_event_hdr_t *event_hdr = _odp_event_hdr(event);
 
-	if (buf == ODP_BUFFER_INVALID)
+	if (event == ODP_EVENT_INVALID)
 		return 0;
 
 	/* Check that buffer header is from a known pool */
-	pool = find_pool(buf_hdr);
+	pool = find_pool(event_hdr);
 	if (pool == NULL)
 		return 0;
 
-	if (pool != buf_hdr->pool_ptr)
+	if (pool != event_hdr->pool_ptr)
 		return 0;
 
-	if (buf_hdr->index >= pool->rte_mempool->size)
+	if (event_hdr->index >= pool->rte_mempool->size)
 		return 0;
 
 	return 1;
@@ -311,7 +312,7 @@ odp_dpdk_mbuf_ctor(struct rte_mempool *mp,
 {
 	struct mbuf_ctor_arg *mb_ctor_arg;
 	struct rte_mbuf *mb = raw_mbuf;
-	struct odp_buffer_hdr_t *buf_hdr;
+	_odp_event_hdr_t *event_hdr;
 
 	/* The rte_mbuf is at the begninning in all cases */
 	mb_ctor_arg = (struct mbuf_ctor_arg *)opaque_arg;
@@ -356,12 +357,12 @@ odp_dpdk_mbuf_ctor(struct rte_mempool *mp,
 	mb->next = NULL;
 
 	/* Save index, might be useful for debugging purposes */
-	buf_hdr = (struct odp_buffer_hdr_t *)raw_mbuf;
-	buf_hdr->index = i;
-	buf_hdr->pool_ptr = mb_ctor_arg->pool;
-	buf_hdr->type = mb_ctor_arg->type;
-	buf_hdr->event_type = mb_ctor_arg->event_type;
-	buf_hdr->uarea_addr = mb_ctor_arg->pool->uarea_base_addr +
+	event_hdr = (_odp_event_hdr_t *)raw_mbuf;
+	event_hdr->index = i;
+	event_hdr->pool_ptr = mb_ctor_arg->pool;
+	event_hdr->type = mb_ctor_arg->type;
+	event_hdr->event_type = mb_ctor_arg->event_type;
+	event_hdr->uarea_addr = mb_ctor_arg->pool->uarea_base_addr +
 			      i * mb_ctor_arg->pool->uarea_size;
 
 	/* Initialize event vector metadata */
@@ -887,25 +888,12 @@ odp_buffer_t odp_buffer_alloc(odp_pool_t pool_hdl)
 
 	ODP_ASSERT(pool->type == ODP_POOL_BUFFER);
 
-	ret  = _odp_buffer_alloc_multi(pool, (odp_buffer_hdr_t **)&buf, 1);
+	ret  = _odp_event_alloc_multi(pool, (_odp_event_hdr_t **)&buf, 1);
 
 	if (odp_likely(ret == 1))
 		return buf;
 
 	return ODP_BUFFER_INVALID;
-}
-
-odp_event_t _odp_event_alloc(pool_t *pool)
-{
-	odp_event_t event;
-	int ret;
-
-	ret  = _odp_buffer_alloc_multi(pool, (odp_buffer_hdr_t **)&event, 1);
-
-	if (odp_likely(ret == 1))
-		return event;
-
-	return ODP_EVENT_INVALID;
 }
 
 int odp_buffer_alloc_multi(odp_pool_t pool_hdl, odp_buffer_t buf[], int num)
@@ -918,17 +906,17 @@ int odp_buffer_alloc_multi(odp_pool_t pool_hdl, odp_buffer_t buf[], int num)
 
 	ODP_ASSERT(pool->type == ODP_POOL_BUFFER);
 
-	return _odp_buffer_alloc_multi(pool, (odp_buffer_hdr_t **)buf, num);
+	return _odp_event_alloc_multi(pool, (_odp_event_hdr_t **)buf, num);
 }
 
 void odp_buffer_free(odp_buffer_t buf)
 {
-	rte_mbuf_raw_free(_odp_buf_to_mbuf(buf));
+	_odp_event_free(odp_buffer_to_event(buf));
 }
 
 void odp_buffer_free_multi(const odp_buffer_t buf[], int num)
 {
-	_odp_buffer_free_multi((odp_buffer_hdr_t **)(uintptr_t)buf, num);
+	_odp_event_free_multi((_odp_event_hdr_t **)(uintptr_t)buf, num);
 }
 
 void odp_pool_print(odp_pool_t pool_hdl)
@@ -1064,7 +1052,7 @@ int odp_pool_destroy(odp_pool_t pool_hdl)
 
 odp_pool_t odp_buffer_pool(odp_buffer_t buf)
 {
-	pool_t *pool = _odp_buf_hdr(buf)->pool_ptr;
+	pool_t *pool = _odp_buf_hdr(buf)->event_hdr.pool_ptr;
 
 	return pool->pool_hdl;
 }
