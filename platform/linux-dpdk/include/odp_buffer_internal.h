@@ -1,4 +1,5 @@
 /* Copyright (c) 2013-2018, Linaro Limited
+ * Copyright (c) 2021, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -17,18 +18,20 @@
 extern "C" {
 #endif
 
-#include <odp/api/std_types.h>
-#include <odp/api/pool.h>
-#include <odp/api/buffer.h>
-#include <odp/api/debug.h>
 #include <odp/api/align.h>
+#include <odp/api/buffer.h>
+#include <odp/api/byteorder.h>
+#include <odp/api/debug.h>
+#include <odp/api/event.h>
+#include <odp/api/pool.h>
+#include <odp/api/std_types.h>
+#include <odp/api/thread.h>
+
 #include <odp_align_internal.h>
 #include <odp_config_internal.h>
-#include <odp/api/byteorder.h>
-#include <odp/api/thread.h>
+#include <odp_event_internal.h>
+
 #include <sys/types.h>
-#include <odp/api/event.h>
-#include <odp_forward_typedefs_internal.h>
 #include <stddef.h>
 
 /* DPDK */
@@ -45,36 +48,12 @@ extern "C" {
 /* Type size limits number of flow IDs supported */
 #define BUF_HDR_MAX_FLOW_ID 255
 
-struct odp_buffer_hdr_t {
-	/* Underlying DPDK rte_mbuf */
-	struct rte_mbuf mb;
+/* Internal buffer header */
+typedef struct ODP_ALIGNED_CACHE odp_buffer_hdr_t {
+	/* Common event header */
+	_odp_event_hdr_t event_hdr;
 
-	/* Buffer index in the pool */
-	uint32_t  index;
-
-	/* Total size of all allocated segs */
-	uint32_t  totsize;
-
-	/* Pool type */
-	int8_t    type;
-
-	/* Event type. Maybe different than pool type (crypto compl event) */
-	int8_t    event_type;
-
-	/* Event flow id */
-	uint8_t   flow_id;
-
-	/* --- Mostly read only data --- */
-
-	/* User pointer */
-	const void *user_ptr;
-
-	/* Pool pointer */
-	void *pool_ptr;
-
-	/* User area pointer */
-	void *uarea_addr;
-};
+} odp_buffer_hdr_t;
 
 /*
  * Buffer type
@@ -94,48 +73,28 @@ int _odp_buffer_type(odp_buffer_t buf);
  */
 void _odp_buffer_type_set(odp_buffer_t buf, int type);
 
-static inline struct rte_mbuf *buf_to_mbuf(odp_buffer_t buf)
+static inline struct rte_mbuf *_odp_buf_to_mbuf(odp_buffer_t buf)
 {
 	return (struct rte_mbuf *)(uintptr_t)buf;
 }
 
-static inline odp_buffer_hdr_t *mbuf_to_buf_hdr(struct rte_mbuf *mbuf)
-{
-	return (odp_buffer_hdr_t *)(uintptr_t)mbuf;
-}
-
-static inline odp_buffer_t buf_from_buf_hdr(odp_buffer_hdr_t *hdr)
-{
-	return (odp_buffer_t)hdr;
-}
-
-static inline odp_buffer_hdr_t *buf_hdl_to_hdr(odp_buffer_t buf)
+static inline odp_buffer_hdr_t *_odp_buf_hdr(odp_buffer_t buf)
 {
 	return (odp_buffer_hdr_t *)(uintptr_t)buf;
-}
-
-static inline odp_event_type_t _odp_buffer_event_type(odp_buffer_t buf)
-{
-	return buf_hdl_to_hdr(buf)->event_type;
-}
-
-static inline void _odp_buffer_event_type_set(odp_buffer_t buf, int ev)
-{
-	buf_hdl_to_hdr(buf)->event_type = ev;
 }
 
 static inline uint32_t event_flow_id(odp_event_t ev)
 {
 	odp_buffer_hdr_t *buf_hdr = (odp_buffer_hdr_t *)(uintptr_t)ev;
 
-	return buf_hdr->flow_id;
+	return buf_hdr->event_hdr.flow_id;
 }
 
 static inline void event_flow_id_set(odp_event_t ev, uint32_t flow_id)
 {
 	odp_buffer_hdr_t *buf_hdr = (odp_buffer_hdr_t *)(uintptr_t)ev;
 
-	buf_hdr->flow_id = flow_id;
+	buf_hdr->event_hdr.flow_id = flow_id;
 }
 
 #ifdef __cplusplus

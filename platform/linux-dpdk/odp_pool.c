@@ -216,7 +216,7 @@ int _odp_pool_term_local(void)
 int _odp_buffer_is_valid(odp_buffer_t buf)
 {
 	pool_t *pool;
-	odp_buffer_hdr_t *buf_hdr = buf_hdl_to_hdr(buf);
+	odp_buffer_hdr_t *buf_hdr = _odp_buf_hdr(buf);
 
 	if (buf == ODP_BUFFER_INVALID)
 		return 0;
@@ -914,7 +914,7 @@ int odp_buffer_alloc_multi(odp_pool_t pool_hdl, odp_buffer_t buf[], int num)
 
 void odp_buffer_free(odp_buffer_t buf)
 {
-	rte_mbuf_raw_free(buf_to_mbuf(buf));
+	rte_mbuf_raw_free(_odp_buf_to_mbuf(buf));
 }
 
 void odp_buffer_free_multi(const odp_buffer_t buf[], int num)
@@ -1049,7 +1049,7 @@ int odp_pool_destroy(odp_pool_t pool_hdl)
 
 odp_pool_t odp_buffer_pool(odp_buffer_t buf)
 {
-	pool_t *pool = buf_hdl_to_hdr(buf)->pool_ptr;
+	pool_t *pool = _odp_buf_hdr(buf)->pool_ptr;
 
 	return pool->pool_hdl;
 }
