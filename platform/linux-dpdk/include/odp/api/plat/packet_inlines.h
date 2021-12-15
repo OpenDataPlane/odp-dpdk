@@ -1,5 +1,5 @@
 /* Copyright (c) 2016-2018, Linaro Limited
- * Copyright (c) 2019, Nokia
+ * Copyright (c) 2019-2022, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier: BSD-3-Clause
@@ -94,6 +94,8 @@ extern "C" {
 	#define odp_packet_free_sp __odp_packet_free_sp
 	#define odp_packet_seg_data __odp_packet_seg_data
 	#define odp_packet_seg_data_len __odp_packet_seg_data_len
+	#define odp_packet_ref_static __odp_packet_ref_static
+	#define odp_packet_has_ref __odp_packet_has_ref
 #else
 	#undef _ODP_INLINE
 	#define _ODP_INLINE
@@ -452,6 +454,18 @@ _ODP_INLINE uint32_t odp_packet_seg_data_len(odp_packet_t pkt ODP_UNUSED,
 					     odp_packet_seg_t seg)
 {
 	return odp_packet_seg_len((odp_packet_t)seg);
+}
+
+_ODP_INLINE odp_packet_t odp_packet_ref_static(odp_packet_t pkt)
+{
+	rte_pktmbuf_refcnt_update((struct rte_mbuf *)(pkt), 1);
+
+	return pkt;
+}
+
+_ODP_INLINE int odp_packet_has_ref(odp_packet_t pkt)
+{
+	return (rte_mbuf_refcnt_read((struct rte_mbuf *)(pkt)) > 1);
 }
 
 #ifdef __cplusplus

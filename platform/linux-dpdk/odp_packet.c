@@ -1,5 +1,5 @@
 /* Copyright (c) 2013-2018, Linaro Limited
- * Copyright (c) 2019-2021, Nokia
+ * Copyright (c) 2019-2022, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -2261,15 +2261,12 @@ uint64_t odp_packet_seg_to_u64(odp_packet_seg_t hdl)
 	return _odp_pri(hdl);
 }
 
-odp_packet_t odp_packet_ref_static(odp_packet_t pkt)
-{
-	return odp_packet_copy(pkt, odp_packet_pool(pkt));
-}
-
 odp_packet_t odp_packet_ref(odp_packet_t pkt, uint32_t offset)
 {
 	odp_packet_t new;
 	int ret;
+
+	ODP_ASSERT(!odp_packet_has_ref(pkt));
 
 	new = odp_packet_copy(pkt, odp_packet_pool(pkt));
 
@@ -2294,6 +2291,8 @@ odp_packet_t odp_packet_ref_pkt(odp_packet_t pkt, uint32_t offset,
 {
 	odp_packet_t new;
 	int ret;
+
+	ODP_ASSERT(!odp_packet_has_ref(pkt));
 
 	new = odp_packet_copy(pkt, odp_packet_pool(pkt));
 
@@ -2321,13 +2320,6 @@ odp_packet_t odp_packet_ref_pkt(odp_packet_t pkt, uint32_t offset,
 	}
 
 	return hdr;
-}
-
-int odp_packet_has_ref(odp_packet_t pkt)
-{
-	(void)pkt;
-
-	return 0;
 }
 
 odp_proto_l2_type_t odp_packet_l2_type(odp_packet_t pkt)
