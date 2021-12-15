@@ -127,15 +127,14 @@ static inline int _odp_event_alloc_multi(pool_t *pool, _odp_event_hdr_t *event_h
 
 static inline odp_event_t _odp_event_alloc(pool_t *pool)
 {
-	odp_event_t event;
-	int ret;
+	struct rte_mbuf *mbuf;
+	struct rte_mempool *mp = pool->rte_mempool;
 
-	ret  = _odp_event_alloc_multi(pool, (_odp_event_hdr_t **)&event, 1);
+	mbuf = rte_mbuf_raw_alloc(mp);
+	if (odp_unlikely(mbuf == NULL))
+		return ODP_EVENT_INVALID;
 
-	if (odp_likely(ret == 1))
-		return event;
-
-	return ODP_EVENT_INVALID;
+	return _odp_event_from_mbuf(mbuf);
 }
 
 static inline void _odp_event_free_multi(_odp_event_hdr_t *event_hdr[], int num_free)
@@ -148,7 +147,7 @@ static inline void _odp_event_free_multi(_odp_event_hdr_t *event_hdr[], int num_
 
 static inline void _odp_event_free(odp_event_t event)
 {
-	_odp_event_free_multi((_odp_event_hdr_t **)&event, 1);
+	rte_mbuf_raw_free(_odp_event_to_mbuf(event));
 }
 
 int _odp_event_is_valid(odp_event_t event);
