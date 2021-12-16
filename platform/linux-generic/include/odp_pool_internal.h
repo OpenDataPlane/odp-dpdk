@@ -23,6 +23,7 @@ extern "C" {
 #include <odp/api/align.h>
 
 #include <odp_buffer_internal.h>
+#include <odp_event_internal.h>
 #include <odp_config_internal.h>
 #include <odp_ring_ptr_internal.h>
 #include <odp/api/plat/strong_types.h>
@@ -31,22 +32,22 @@ typedef struct ODP_ALIGNED_CACHE pool_cache_t {
 	/* Number of buffers in cache */
 	uint32_t cache_num;
 	/* Cached buffers */
-	odp_buffer_hdr_t *buf_hdr[CONFIG_POOL_CACHE_MAX_SIZE];
+	_odp_event_hdr_t *event_hdr[CONFIG_POOL_CACHE_MAX_SIZE];
 
 } pool_cache_t;
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wpedantic"
-/* Buffer header ring */
+/* Event header ring */
 typedef struct ODP_ALIGNED_CACHE {
 	/* Ring header */
 	ring_ptr_t hdr;
 
 	/* Ring data: buffer handles */
-	odp_buffer_hdr_t *buf_hdr[CONFIG_POOL_MAX_NUM + 1];
+	_odp_event_hdr_t *event_hdr[CONFIG_POOL_MAX_NUM + 1];
 
 	/* Index to pointer look-up table for external memory pool */
-	odp_buffer_hdr_t *buf_hdr_by_index[];
+	_odp_event_hdr_t *event_hdr_by_index[];
 
 } pool_ring_t;
 #pragma GCC diagnostic pop
@@ -88,6 +89,7 @@ typedef struct pool_t {
 	uint8_t         *base_addr;
 	uint8_t         *max_addr;
 	uint8_t         *uarea_base_addr;
+	odp_pool_type_t  type_2;
 	odp_pool_ext_param_t ext_param;
 
 	/* Used by DPDK zero-copy pktio */
@@ -140,27 +142,22 @@ static inline pool_t *pool_entry_from_hdl(odp_pool_t pool_hdl)
 	return &_odp_pool_glb->pool[_odp_typeval(pool_hdl) - 1];
 }
 
-static inline odp_buffer_hdr_t *buf_hdl_to_hdr(odp_buffer_t buf)
-{
-	return (odp_buffer_hdr_t *)(uintptr_t)buf;
-}
-
-static inline odp_buffer_hdr_t *buf_hdr_from_index(pool_t *pool,
-						   uint32_t buffer_idx)
+static inline _odp_event_hdr_t *event_hdr_from_index(pool_t *pool,
+						     uint32_t event_idx)
 {
 	uint64_t block_offset;
-	odp_buffer_hdr_t *buf_hdr;
+	_odp_event_hdr_t *event_hdr;
 
-	block_offset = (buffer_idx * (uint64_t)pool->block_size) +
+	block_offset = (event_idx * (uint64_t)pool->block_size) +
 			pool->block_offset;
 
 	/* clang requires cast to uintptr_t */
-	buf_hdr = (odp_buffer_hdr_t *)(uintptr_t)&pool->base_addr[block_offset];
+	event_hdr = (_odp_event_hdr_t *)(uintptr_t)&pool->base_addr[block_offset];
 
-	return buf_hdr;
+	return event_hdr;
 }
 
-static inline odp_buffer_hdr_t *buf_hdr_from_index_u32(uint32_t u32)
+static inline _odp_event_hdr_t *_odp_event_hdr_from_index_u32(uint32_t u32)
 {
 	buffer_index_t index;
 	uint32_t pool_idx, buffer_idx;
@@ -171,12 +168,21 @@ static inline odp_buffer_hdr_t *buf_hdr_from_index_u32(uint32_t u32)
 	buffer_idx = index.buffer;
 	pool       = pool_entry(pool_idx);
 
-	return buf_hdr_from_index(pool, buffer_idx);
+	return event_hdr_from_index(pool, buffer_idx);
 }
 
-int _odp_buffer_alloc_multi(pool_t *pool, odp_buffer_hdr_t *buf_hdr[], int num);
-void _odp_buffer_free_multi(odp_buffer_hdr_t *buf_hdr[], int num_free);
-int _odp_buffer_is_valid(odp_buffer_t buf);
+odp_event_t _odp_event_alloc(pool_t *pool);
+int _odp_event_alloc_multi(pool_t *pool, _odp_event_hdr_t *event_hdr[], int num);
+void _odp_event_free_multi(_odp_event_hdr_t *event_hdr[], int num_free);
+int _odp_event_is_valid(odp_event_t event);
+
+static inline void _odp_event_free(odp_event_t event)
+{
+	_odp_event_free_multi((_odp_event_hdr_t **)&event, 1);
+}
+
+odp_pool_t _odp_pool_create(const char *name, const odp_pool_param_t *params,
+			    odp_pool_type_t type_2);
 
 #ifdef __cplusplus
 }

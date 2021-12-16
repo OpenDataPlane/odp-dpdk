@@ -325,6 +325,70 @@ static inline int copy_packets(odp_packet_t *pkt_tbl, int pkts)
 }
 
 /*
+ * Return number of packets remaining in the pkt_tbl
+ */
+static int process_extra_features(odp_packet_t *pkt_tbl, int pkts, stats_t *stats)
+{
+	if (odp_unlikely(gbl_args->appl.extra_feat)) {
+		if (gbl_args->appl.packet_copy) {
+			int fails;
+
+			fails = copy_packets(pkt_tbl, pkts);
+			stats->s.copy_fails += fails;
+		}
+
+		if (gbl_args->appl.chksum)
+			chksum_insert(pkt_tbl, pkts);
+
+		if (gbl_args->appl.error_check) {
+			int rx_drops;
+
+			/* Drop packets with errors */
+			rx_drops = drop_err_pkts(pkt_tbl, pkts);
+
+			if (odp_unlikely(rx_drops)) {
+				stats->s.rx_drops += rx_drops;
+				if (pkts == rx_drops)
+					return 0;
+
+				pkts -= rx_drops;
+			}
+		}
+	}
+	return pkts;
+}
+
+static void send_packets(odp_packet_t *pkt_tbl,
+			 int pkts,
+			 int use_event_queue,
+			 odp_queue_t tx_queue,
+			 odp_pktout_queue_t pktout_queue,
+			 stats_t *stats)
+{
+	int sent;
+	unsigned int tx_drops;
+	int i;
+
+	if (odp_unlikely(use_event_queue))
+		sent = event_queue_send(tx_queue, pkt_tbl, pkts);
+	else
+		sent = odp_pktout_send(pktout_queue, pkt_tbl, pkts);
+
+	sent = odp_unlikely(sent < 0) ? 0 : sent;
+	tx_drops = pkts - sent;
+
+	if (odp_unlikely(tx_drops)) {
+		stats->s.tx_drops += tx_drops;
+
+		/* Drop rejected packets */
+		for (i = sent; i < pkts; i++)
+			odp_packet_free(pkt_tbl[i]);
+	}
+
+	stats->s.packets += pkts;
+}
+
+/*
  * Packet IO worker thread using scheduled queues and vector mode.
  *
  * arg  thread arguments of type 'thread_args_t *'
@@ -383,52 +447,35 @@ static int run_worker_sched_mode_vector(void *arg)
 	/* Loop packets */
 	while (!odp_atomic_load_u32(&gbl_args->exit_threads)) {
 		odp_event_t  ev_tbl[MAX_PKT_BURST];
-		int pktvs;
+		int events;
 
-		pktvs = odp_schedule_multi_no_wait(NULL, ev_tbl, max_burst);
+		events = odp_schedule_multi_no_wait(NULL, ev_tbl, max_burst);
 
-		if (pktvs <= 0)
+		if (events <= 0)
 			continue;
 
-		for (i = 0; i < pktvs; i++) {
-			odp_packet_vector_t pkt_vec;
+		for (i = 0; i < events; i++) {
+			odp_packet_vector_t pkt_vec = ODP_PACKET_VECTOR_INVALID;
 			odp_packet_t *pkt_tbl;
-			unsigned int tx_drops;
+			odp_packet_t pkt;
 			int src_idx, dst_idx;
-			int pkts, sent;
+			int pkts;
 
-			ODPH_ASSERT(odp_event_type(ev_tbl[i]) == ODP_EVENT_PACKET_VECTOR);
-			pkt_vec = odp_packet_vector_from_event(ev_tbl[i]);
-			pkts = odp_packet_vector_tbl(pkt_vec, &pkt_tbl);
+			if (odp_event_type(ev_tbl[i]) == ODP_EVENT_PACKET) {
+				pkt = odp_packet_from_event(ev_tbl[i]);
+				pkt_tbl = &pkt;
+				pkts = 1;
+			} else {
+				ODPH_ASSERT(odp_event_type(ev_tbl[i]) == ODP_EVENT_PACKET_VECTOR);
+				pkt_vec = odp_packet_vector_from_event(ev_tbl[i]);
+				pkts = odp_packet_vector_tbl(pkt_vec, &pkt_tbl);
+			}
 
-			if (odp_unlikely(gbl_args->appl.extra_feat)) {
-				if (gbl_args->appl.packet_copy) {
-					int fails;
-
-					fails = copy_packets(pkt_tbl, pkts);
-					stats->s.copy_fails += fails;
-				}
-
-				if (gbl_args->appl.chksum)
-					chksum_insert(pkt_tbl, pkts);
-
-				if (gbl_args->appl.error_check) {
-					int rx_drops;
-
-					/* Drop packets with errors */
-					rx_drops = drop_err_pkts(pkt_tbl, pkts);
-
-					if (odp_unlikely(rx_drops)) {
-						stats->s.rx_drops += rx_drops;
-						if (pkts == rx_drops) {
-							odp_packet_vector_free(pkt_vec);
-							continue;
-						}
-
-						pkts -= rx_drops;
-						odp_packet_vector_size_set(pkt_vec, pkts);
-					}
-				}
+			pkts = process_extra_features(pkt_tbl, pkts, stats);
+			if (odp_unlikely(pkts) == 0) {
+				if (pkt_vec != ODP_PACKET_VECTOR_INVALID)
+					odp_packet_vector_free(pkt_vec);
+				continue;
 			}
 
 			/* packets from the same queue are from the same interface */
@@ -437,31 +484,14 @@ static int run_worker_sched_mode_vector(void *arg)
 			dst_idx = gbl_args->dst_port_from_idx[src_idx];
 			fill_eth_addrs(pkt_tbl, pkts, dst_idx);
 
-			if (odp_unlikely(use_event_queue)) {
-				odp_event_t event = odp_packet_vector_to_event(pkt_vec);
+			send_packets(pkt_tbl, pkts,
+				     use_event_queue,
+				     tx_queue[dst_idx],
+				     pktout[dst_idx],
+				     stats);
 
-				sent = odp_queue_enq(tx_queue[dst_idx], event);
-				sent = odp_likely(sent == 0) ? pkts : 0;
-			} else {
-				sent = odp_pktout_send(pktout[dst_idx], pkt_tbl, pkts);
-				sent = odp_unlikely(sent < 0) ? 0 : sent;
-			}
-
-			tx_drops = pkts - sent;
-			if (odp_unlikely(tx_drops)) {
-				int j;
-
-				stats->s.tx_drops += tx_drops;
-				/* Drop rejected packets */
-				for (j = sent; j < pkts; j++)
-					odp_packet_free(pkt_tbl[j]);
-			}
-
-			/* Free packet vector if sending failed or in direct mode. */
-			if (tx_drops || !use_event_queue)
+			if (pkt_vec != ODP_PACKET_VECTOR_INVALID)
 				odp_packet_vector_free(pkt_vec);
-
-			stats->s.packets += pkts;
 		}
 	}
 
@@ -567,8 +597,6 @@ static int run_worker_sched_mode(void *arg)
 	while (!odp_atomic_load_u32(&gbl_args->exit_threads)) {
 		odp_event_t  ev_tbl[MAX_PKT_BURST];
 		odp_packet_t pkt_tbl[MAX_PKT_BURST];
-		int sent;
-		unsigned tx_drops;
 		int src_idx;
 
 		pkts = odp_schedule_multi_no_wait(NULL, ev_tbl, max_burst);
@@ -578,32 +606,9 @@ static int run_worker_sched_mode(void *arg)
 
 		odp_packet_from_event_multi(pkt_tbl, ev_tbl, pkts);
 
-		if (odp_unlikely(gbl_args->appl.extra_feat)) {
-			if (gbl_args->appl.packet_copy) {
-				int fails;
-
-				fails = copy_packets(pkt_tbl, pkts);
-				stats->s.copy_fails += fails;
-			}
-
-			if (gbl_args->appl.chksum)
-				chksum_insert(pkt_tbl, pkts);
-
-			if (gbl_args->appl.error_check) {
-				int rx_drops;
-
-				/* Drop packets with errors */
-				rx_drops = drop_err_pkts(pkt_tbl, pkts);
-
-				if (odp_unlikely(rx_drops)) {
-					stats->s.rx_drops += rx_drops;
-					if (pkts == rx_drops)
-						continue;
-
-					pkts -= rx_drops;
-				}
-			}
-		}
+		pkts = process_extra_features(pkt_tbl, pkts, stats);
+		if (odp_unlikely(pkts) == 0)
+			continue;
 
 		/* packets from the same queue are from the same interface */
 		src_idx = odp_packet_input_index(pkt_tbl[0]);
@@ -611,24 +616,11 @@ static int run_worker_sched_mode(void *arg)
 		dst_idx = gbl_args->dst_port_from_idx[src_idx];
 		fill_eth_addrs(pkt_tbl, pkts, dst_idx);
 
-		if (odp_unlikely(use_event_queue))
-			sent = event_queue_send(tx_queue[dst_idx], pkt_tbl,
-						pkts);
-		else
-			sent = odp_pktout_send(pktout[dst_idx], pkt_tbl, pkts);
-
-		sent     = odp_unlikely(sent < 0) ? 0 : sent;
-		tx_drops = pkts - sent;
-
-		if (odp_unlikely(tx_drops)) {
-			stats->s.tx_drops += tx_drops;
-
-			/* Drop rejected packets */
-			for (i = sent; i < pkts; i++)
-				odp_packet_free(pkt_tbl[i]);
-		}
-
-		stats->s.packets += pkts;
+		send_packets(pkt_tbl, pkts,
+			     use_event_queue,
+			     tx_queue[dst_idx],
+			     pktout[dst_idx],
+			     stats);
 	}
 
 	/*
@@ -707,8 +699,6 @@ static int run_worker_plain_queue_mode(void *arg)
 
 	/* Loop packets */
 	while (!odp_atomic_load_u32(&gbl_args->exit_threads)) {
-		int sent;
-		unsigned tx_drops;
 		odp_event_t event[MAX_PKT_BURST];
 
 		if (num_pktio > 1) {
@@ -729,54 +719,17 @@ static int run_worker_plain_queue_mode(void *arg)
 
 		odp_packet_from_event_multi(pkt_tbl, event, pkts);
 
-		if (odp_unlikely(gbl_args->appl.extra_feat)) {
-			if (gbl_args->appl.packet_copy) {
-				int fails;
-
-				fails = copy_packets(pkt_tbl, pkts);
-				stats->s.copy_fails += fails;
-			}
-
-			if (gbl_args->appl.chksum)
-				chksum_insert(pkt_tbl, pkts);
-
-			if (gbl_args->appl.error_check) {
-				int rx_drops;
-
-				/* Drop packets with errors */
-				rx_drops = drop_err_pkts(pkt_tbl, pkts);
-
-				if (odp_unlikely(rx_drops)) {
-					stats->s.rx_drops += rx_drops;
-					if (pkts == rx_drops)
-						continue;
-
-					pkts -= rx_drops;
-				}
-			}
-		}
+		pkts = process_extra_features(pkt_tbl, pkts, stats);
+		if (odp_unlikely(pkts) == 0)
+			continue;
 
 		fill_eth_addrs(pkt_tbl, pkts, dst_idx);
 
-		if (odp_unlikely(use_event_queue))
-			sent = event_queue_send(tx_queue, pkt_tbl, pkts);
-		else
-			sent = odp_pktout_send(pktout, pkt_tbl, pkts);
-
-		sent     = odp_unlikely(sent < 0) ? 0 : sent;
-		tx_drops = pkts - sent;
-
-		if (odp_unlikely(tx_drops)) {
-			int i;
-
-			stats->s.tx_drops += tx_drops;
-
-			/* Drop rejected packets */
-			for (i = sent; i < pkts; i++)
-				odp_packet_free(pkt_tbl[i]);
-		}
-
-		stats->s.packets += pkts;
+		send_packets(pkt_tbl, pkts,
+			     use_event_queue,
+			     tx_queue,
+			     pktout,
+			     stats);
 	}
 
 	/* Make sure that latest stat writes are visible to other threads */
@@ -842,9 +795,6 @@ static int run_worker_direct_mode(void *arg)
 
 	/* Loop packets */
 	while (!odp_atomic_load_u32(&gbl_args->exit_threads)) {
-		int sent;
-		unsigned tx_drops;
-
 		if (num_pktio > 1) {
 			dst_idx   = thr_args->pktio[pktio].tx_idx;
 			pktin     = thr_args->pktio[pktio].pktin;
@@ -861,54 +811,17 @@ static int run_worker_direct_mode(void *arg)
 		if (odp_unlikely(pkts <= 0))
 			continue;
 
-		if (odp_unlikely(gbl_args->appl.extra_feat)) {
-			if (gbl_args->appl.packet_copy) {
-				int fails;
-
-				fails = copy_packets(pkt_tbl, pkts);
-				stats->s.copy_fails += fails;
-			}
-
-			if (gbl_args->appl.chksum)
-				chksum_insert(pkt_tbl, pkts);
-
-			if (gbl_args->appl.error_check) {
-				int rx_drops;
-
-				/* Drop packets with errors */
-				rx_drops = drop_err_pkts(pkt_tbl, pkts);
-
-				if (odp_unlikely(rx_drops)) {
-					stats->s.rx_drops += rx_drops;
-					if (pkts == rx_drops)
-						continue;
-
-					pkts -= rx_drops;
-				}
-			}
-		}
+		pkts = process_extra_features(pkt_tbl, pkts, stats);
+		if (odp_unlikely(pkts) == 0)
+			continue;
 
 		fill_eth_addrs(pkt_tbl, pkts, dst_idx);
 
-		if (odp_unlikely(use_event_queue))
-			sent = event_queue_send(tx_queue, pkt_tbl, pkts);
-		else
-			sent = odp_pktout_send(pktout, pkt_tbl, pkts);
-
-		sent     = odp_unlikely(sent < 0) ? 0 : sent;
-		tx_drops = pkts - sent;
-
-		if (odp_unlikely(tx_drops)) {
-			int i;
-
-			stats->s.tx_drops += tx_drops;
-
-			/* Drop rejected packets */
-			for (i = sent; i < pkts; i++)
-				odp_packet_free(pkt_tbl[i]);
-		}
-
-		stats->s.packets += pkts;
+		send_packets(pkt_tbl, pkts,
+			     use_event_queue,
+			     tx_queue,
+			     pktout,
+			     stats);
 	}
 
 	/* Make sure that latest stat writes are visible to other threads */

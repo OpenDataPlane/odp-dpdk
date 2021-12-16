@@ -1,5 +1,5 @@
-/* Copyright (c) 2019, Nokia
- * Copyright (c) 2014-2018, Linaro Limited
+/* Copyright (c) 2014-2018, Linaro Limited
+ * Copyright (c) 2019-2021, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -7,6 +7,7 @@
 
 #include <odp_api.h>
 #include <odp_cunit_common.h>
+#include <odp/helper/odph_api.h>
 #include <stdlib.h>
 
 #define ALIGN_SIZE  (128)
@@ -70,6 +71,9 @@ typedef struct {
 typedef struct {
 	int data[BIG_MEM];
 } shared_test_data_big_t;
+
+/* SHM capability saved at suite init phase */
+static odp_shm_capability_t _global_shm_capa;
 
 /*
  * thread part for the shmem_test_basic test
@@ -212,6 +216,35 @@ static void shmem_test_multi_thread(void)
 	CU_ASSERT(0 == odp_shm_free(shm));
 }
 
+static void shmem_test_capability(void)
+{
+	odp_shm_capability_t capa;
+
+	CU_ASSERT_FATAL(odp_shm_capability(&capa) == 0);
+
+	CU_ASSERT(capa.max_blocks);
+
+	printf("\nSHM capability\n--------------\n");
+
+	printf("  max_blocks: %u\n", capa.max_blocks);
+	printf("  max_size:   %" PRIu64 "\n", capa.max_size);
+	printf("  max_align:  %" PRIu64 "\n", capa.max_align);
+	printf("  flags:      ");
+	if (capa.flags & ODP_SHM_PROC)
+		printf("ODP_SHM_PROC ");
+	if (capa.flags & ODP_SHM_SINGLE_VA)
+		printf("ODP_SHM_SINGLE_VA ");
+	if (capa.flags & ODP_SHM_EXPORT)
+		printf("ODP_SHM_EXPORT ");
+	if (capa.flags & ODP_SHM_HP)
+		printf("ODP_SHM_HP ");
+	if (capa.flags & ODP_SHM_HW_ACCESS)
+		printf("ODP_SHM_HW_ACCESS ");
+	if (capa.flags & ODP_SHM_NO_HP)
+		printf("ODP_SHM_NO_HP ");
+	printf("\n\n");
+}
+
 static void shmem_test_reserve(void)
 {
 	odp_shm_t shm;
@@ -227,6 +260,13 @@ static void shmem_test_reserve(void)
 		memset(addr, 0, MEDIUM_MEM);
 
 	CU_ASSERT(odp_shm_free(shm) == 0);
+}
+
+static int shmem_check_flag_hp(void)
+{
+	if (_global_shm_capa.flags & ODP_SHM_HP)
+		return ODP_TEST_ACTIVE;
+	return ODP_TEST_INACTIVE;
 }
 
 /*
@@ -268,17 +308,47 @@ static void shmem_test_flag_hp(void)
 	CU_ASSERT(odp_shm_free(shm) == 0);
 }
 
+static int shmem_check_flag_no_hp(void)
+{
+	if (_global_shm_capa.flags & ODP_SHM_NO_HP)
+		return ODP_TEST_ACTIVE;
+	return ODP_TEST_INACTIVE;
+}
+
+/*
+ * Test reserving memory from normal pages
+ */
+static void shmem_test_flag_no_hp(void)
+{
+	odp_shm_t shm;
+	odp_shm_info_t info;
+
+	shm = odp_shm_reserve(MEM_NAME, sizeof(shared_test_data_t), 0,
+			      ODP_SHM_NO_HP);
+	CU_ASSERT_FATAL(shm != ODP_SHM_INVALID);
+
+	/* Make sure that the memory is reserved from normal pages */
+	CU_ASSERT_FATAL(odp_shm_info(shm, &info) == 0);
+
+	CU_ASSERT(info.page_size == odp_sys_page_size());
+
+	CU_ASSERT(odp_shm_free(shm) == 0);
+}
+
+static int shmem_check_flag_proc(void)
+{
+	if (_global_shm_capa.flags & ODP_SHM_PROC)
+		return ODP_TEST_ACTIVE;
+	return ODP_TEST_INACTIVE;
+}
+
 static void shmem_test_flag_proc(void)
 {
 	odp_shm_t shm;
 	void *addr;
 
 	shm = odp_shm_reserve(MEM_NAME, MEDIUM_MEM, ALIGN_SIZE, ODP_SHM_PROC);
-
-	if (shm == ODP_SHM_INVALID) {
-		printf("    ODP_SHM_PROC flag not supported\n");
-		return;
-	}
+	CU_ASSERT_FATAL(shm != ODP_SHM_INVALID);
 
 	addr = odp_shm_addr(shm);
 
@@ -290,17 +360,20 @@ static void shmem_test_flag_proc(void)
 	CU_ASSERT(odp_shm_free(shm) == 0);
 }
 
+static int shmem_check_flag_export(void)
+{
+	if (_global_shm_capa.flags & ODP_SHM_EXPORT)
+		return ODP_TEST_ACTIVE;
+	return ODP_TEST_INACTIVE;
+}
+
 static void shmem_test_flag_export(void)
 {
 	odp_shm_t shm;
 	void *addr;
 
 	shm = odp_shm_reserve(MEM_NAME, MEDIUM_MEM, ALIGN_SIZE, ODP_SHM_EXPORT);
-
-	if (shm == ODP_SHM_INVALID) {
-		printf("    ODP_SHM_EXPORT flag not supported\n");
-		return;
-	}
+	CU_ASSERT_FATAL(shm != ODP_SHM_INVALID);
 
 	addr = odp_shm_addr(shm);
 
@@ -310,6 +383,13 @@ static void shmem_test_flag_export(void)
 		memset(addr, 0, MEDIUM_MEM);
 
 	CU_ASSERT(odp_shm_free(shm) == 0);
+}
+
+static int shmem_check_flag_hw_access(void)
+{
+	if (_global_shm_capa.flags & ODP_SHM_HW_ACCESS)
+		return ODP_TEST_ACTIVE;
+	return ODP_TEST_INACTIVE;
 }
 
 static void shmem_test_flag_hw_access(void)
@@ -319,11 +399,7 @@ static void shmem_test_flag_hw_access(void)
 
 	shm = odp_shm_reserve(MEM_NAME, MEDIUM_MEM, ALIGN_SIZE,
 			      ODP_SHM_HW_ACCESS);
-
-	if (shm == ODP_SHM_INVALID) {
-		printf("    ODP_SHM_HW_ACCESS flag not supported\n");
-		return;
-	}
+	CU_ASSERT_FATAL(shm != ODP_SHM_INVALID);
 
 	addr = odp_shm_addr(shm);
 
@@ -645,6 +721,13 @@ static int run_test_singleva_after_fork(void *arg ODP_UNUSED)
 	return CU_get_number_of_failures();
 }
 
+static int shmem_check_flag_single_va(void)
+{
+	if (_global_shm_capa.flags & ODP_SHM_SINGLE_VA)
+		return ODP_TEST_ACTIVE;
+	return ODP_TEST_INACTIVE;
+}
+
 /*
  * test sharing memory reserved after odp_thread creation (e.g. fork()):
  * with single VA flag.
@@ -793,7 +876,9 @@ static int run_test_stress(void *arg ODP_UNUSED)
 			/* we just play with the VA flag. randomly setting
 			 * the mlock flag may exceed user ulimit -l
 			 */
-			flags = random_bytes[2] & ODP_SHM_SINGLE_VA;
+			flags = (_global_shm_capa.flags & ODP_SHM_SINGLE_VA) ?
+					(random_bytes[2] & ODP_SHM_SINGLE_VA) : 0;
+
 			align = (random_bytes[3] + 1) << 6;/* up to 16Kb */
 			data  = random_bytes[4];
 
@@ -938,22 +1023,33 @@ static void shmem_test_stress(void)
 	/* check that no memory is left over: */
 }
 
+static int shm_suite_init(void)
+{
+	if (odp_shm_capability(&_global_shm_capa)) {
+		ODPH_ERR("Failed to read SHM capability\n");
+		return -1;
+	}
+	return 0;
+}
+
 odp_testinfo_t shmem_suite[] = {
+	ODP_TEST_INFO(shmem_test_capability),
 	ODP_TEST_INFO(shmem_test_reserve),
-	ODP_TEST_INFO(shmem_test_flag_hp),
-	ODP_TEST_INFO(shmem_test_flag_proc),
-	ODP_TEST_INFO(shmem_test_flag_export),
-	ODP_TEST_INFO(shmem_test_flag_hw_access),
+	ODP_TEST_INFO_CONDITIONAL(shmem_test_flag_hp, shmem_check_flag_hp),
+	ODP_TEST_INFO_CONDITIONAL(shmem_test_flag_no_hp, shmem_check_flag_no_hp),
+	ODP_TEST_INFO_CONDITIONAL(shmem_test_flag_proc, shmem_check_flag_proc),
+	ODP_TEST_INFO_CONDITIONAL(shmem_test_flag_export, shmem_check_flag_export),
+	ODP_TEST_INFO_CONDITIONAL(shmem_test_flag_hw_access, shmem_check_flag_hw_access),
 	ODP_TEST_INFO(shmem_test_max_reserve),
 	ODP_TEST_INFO(shmem_test_multi_thread),
 	ODP_TEST_INFO(shmem_test_reserve_after_fork),
-	ODP_TEST_INFO(shmem_test_singleva_after_fork),
+	ODP_TEST_INFO_CONDITIONAL(shmem_test_singleva_after_fork, shmem_check_flag_single_va),
 	ODP_TEST_INFO(shmem_test_stress),
 	ODP_TEST_INFO_NULL,
 };
 
 odp_suiteinfo_t shmem_suites[] = {
-	{"Shared Memory", NULL, NULL, shmem_suite},
+	{"Shared Memory", shm_suite_init, NULL, shmem_suite},
 	ODP_SUITE_INFO_NULL,
 };
 

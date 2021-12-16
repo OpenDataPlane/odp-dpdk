@@ -21,6 +21,7 @@ AS_IF([test "x$with_pcap" != xno],
 AM_CONDITIONAL([ODP_PKTIO_PCAP], [test x$have_pcap = xyes])
 
 m4_include([platform/linux-generic/m4/odp_libconfig.m4])
+m4_include([platform/linux-generic/m4/odp_openssl.m4])
 m4_include([platform/linux-generic/m4/odp_pcapng.m4])
 m4_include([platform/linux-generic/m4/odp_netmap.m4])
 m4_include([platform/linux-generic/m4/odp_dpdk.m4])
@@ -31,6 +32,8 @@ AS_VAR_APPEND([PLAT_DEP_LIBS], ["${ATOMIC_LIBS} ${LIBCONFIG_LIBS} ${OPENSSL_LIBS
 # Add text to the end of configure with platform specific settings.
 # Make sure it's aligned same as other lines in configure.ac.
 AS_VAR_APPEND([PLAT_CFG_TEXT], ["
+	openssl:                ${with_openssl}
+	openssl_rand:           ${openssl_rand}
 	pcap:			${have_pcap}
 	pcapng:			${have_pcapng}
 	default_config_path:	${default_config_path}"])

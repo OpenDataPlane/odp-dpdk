@@ -364,6 +364,9 @@ typedef struct odp_ipsec_capability_t {
 	 *  be used for many SAs. */
 	uint32_t max_queues;
 
+	/** Support for returning completion packets as vectors */
+	odp_pktin_vector_capability_t vector;
+
 	/** Maximum anti-replay window size. */
 	uint32_t max_antireplay_ws;
 
@@ -454,6 +457,16 @@ typedef struct odp_ipsec_config_t {
 	 *  @see odp_ipsec_stats(), odp_ipsec_stats_multi()
 	 */
 	odp_bool_t stats_en;
+
+	/**
+	 * Packet vector configuration for async and inline operations
+	 *
+	 * This packet vector configuration affects packets delivered to
+	 * the application through the default queue and the SA destination
+	 * queues. It does not affect packets delivered through pktio
+	 * input queues.
+	 */
+	odp_pktin_vector_config_t vector;
 
 } odp_ipsec_config_t;
 
@@ -1177,6 +1190,9 @@ void odp_ipsec_sa_param_init(odp_ipsec_sa_param_t *param);
  * Create IPSEC SA
  *
  * Create a new IPSEC SA according to the parameters.
+ *
+ * The parameter structure as well as all key, address and other memory
+ * buffers pointed to by it can be freed after the call.
  *
  * @param param   IPSEC SA parameters
  *
