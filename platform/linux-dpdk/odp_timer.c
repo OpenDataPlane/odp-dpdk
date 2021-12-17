@@ -462,6 +462,12 @@ int odp_timer_res_capability(odp_timer_clk_src_t clk_src,
 	return 0;
 }
 
+void odp_timer_pool_param_init(odp_timer_pool_param_t *param)
+{
+	memset(param, 0, sizeof(odp_timer_pool_param_t));
+	param->clk_src = ODP_CLOCK_DEFAULT;
+}
+
 odp_timer_pool_t odp_timer_pool_create(const char *name,
 				       const odp_timer_pool_param_t *param)
 {
@@ -959,9 +965,8 @@ void *odp_timeout_user_ptr(odp_timeout_t tmo)
 
 odp_timeout_t odp_timeout_alloc(odp_pool_t pool_hdl)
 {
-	odp_timeout_t tmo;
+	odp_event_t event;
 	pool_t *pool;
-	int ret;
 
 	ODP_ASSERT(pool_hdl != ODP_POOL_INVALID);
 
@@ -969,17 +974,16 @@ odp_timeout_t odp_timeout_alloc(odp_pool_t pool_hdl)
 
 	ODP_ASSERT(pool->type == ODP_POOL_TIMEOUT);
 
-	ret = _odp_buffer_alloc_multi(pool, (odp_buffer_hdr_t **)&tmo, 1);
+	event = _odp_event_alloc(pool);
+	if (odp_unlikely(event == ODP_EVENT_INVALID))
+		return ODP_TIMEOUT_INVALID;
 
-	if (odp_likely(ret == 1))
-		return tmo;
-
-	return ODP_TIMEOUT_INVALID;
+	return odp_timeout_from_event(event);
 }
 
 void odp_timeout_free(odp_timeout_t tmo)
 {
-	_odp_buffer_free_multi((odp_buffer_hdr_t **)&tmo, 1);
+	_odp_event_free(odp_timeout_to_event(tmo));
 }
 
 void odp_timer_pool_print(odp_timer_pool_t timer_pool)

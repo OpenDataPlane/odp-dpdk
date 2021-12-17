@@ -1,4 +1,5 @@
 /* Copyright (c) 2014-2018, Linaro Limited
+ * Copyright (c) 2021, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -18,20 +19,19 @@ extern "C" {
 #endif
 
 #include <odp/api/align.h>
-#include <odp_debug_internal.h>
 #include <odp/api/debug.h>
-#include <odp_buffer_internal.h>
-#include <odp_pool_internal.h>
 #include <odp/api/packet.h>
 #include <odp/api/plat/packet_inline_types.h>
 #include <odp/api/packet_io.h>
 #include <odp/api/crypto.h>
 #include <odp/api/comp.h>
-#include <odp_ipsec_internal.h>
 #include <odp/api/abi/packet.h>
-#include <protocols/eth.h>
-#include <odp_queue_if.h>
+
 #include <odp_config_internal.h>
+#include <odp_event_internal.h>
+#include <odp_pool_internal.h>
+
+#include <protocols/eth.h>
 
 #include <rte_config.h>
 #if defined(__clang__)
@@ -112,9 +112,9 @@ ODP_STATIC_ASSERT(CONFIG_PACKET_MAX_SEG_LEN <= UINT16_MAX,
  * packet_init(). Because of this any new fields added must be reviewed for
  * initialization requirements.
  */
-typedef struct {
-	/* common buffer header */
-	odp_buffer_hdr_t buf_hdr;
+typedef struct odp_packet_hdr_t {
+	/* Common event header */
+	_odp_event_hdr_t event_hdr;
 
 	packet_parser_t p;
 
@@ -179,19 +179,19 @@ static inline odp_packet_t packet_handle(odp_packet_hdr_t *pkt_hdr)
 	return (odp_packet_t)pkt_hdr;
 }
 
+static inline _odp_event_hdr_t *packet_to_event_hdr(odp_packet_t pkt)
+{
+	return (_odp_event_hdr_t *)(uintptr_t)&packet_hdr(pkt)->event_hdr;
+}
+
+static inline odp_packet_t packet_from_event_hdr(_odp_event_hdr_t *event_hdr)
+{
+	return (odp_packet_t)(uintptr_t)event_hdr;
+}
+
 static inline struct rte_mbuf *pkt_to_mbuf(odp_packet_t  pkt)
 {
 	return (struct rte_mbuf *)(uintptr_t)pkt;
-}
-
-static inline odp_buffer_hdr_t *packet_to_buf_hdr(odp_packet_t pkt)
-{
-	return &packet_hdr(pkt)->buf_hdr;
-}
-
-static inline odp_packet_t packet_from_buf_hdr(odp_buffer_hdr_t *buf_hdr)
-{
-	return (odp_packet_t)(odp_packet_hdr_t *)buf_hdr;
 }
 
 static inline void packet_subtype_set(odp_packet_t pkt, int ev)
@@ -236,12 +236,12 @@ static inline void copy_packet_cls_metadata(odp_packet_hdr_t *src_hdr,
 
 static inline uint32_t packet_len(odp_packet_hdr_t *pkt_hdr)
 {
-	return rte_pktmbuf_pkt_len(&pkt_hdr->buf_hdr.mb);
+	return rte_pktmbuf_pkt_len(&pkt_hdr->event_hdr.mb);
 }
 
 static inline void packet_set_len(odp_packet_hdr_t *pkt_hdr, uint32_t len)
 {
-	rte_pktmbuf_pkt_len(&pkt_hdr->buf_hdr.mb) = len;
+	rte_pktmbuf_pkt_len(&pkt_hdr->event_hdr.mb) = len;
 }
 
 /* Forward declarations */

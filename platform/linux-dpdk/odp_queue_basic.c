@@ -10,8 +10,6 @@
 #include <odp_queue_if.h>
 #include <odp/api/std_types.h>
 #include <odp/api/align.h>
-#include <odp/api/buffer.h>
-#include <odp_buffer_internal.h>
 #include <odp_pool_internal.h>
 #include <odp_init_internal.h>
 #include <odp/api/shared_memory.h>
@@ -28,6 +26,8 @@
 #include <odp_timer_internal.h>
 #include <odp/api/plat/queue_inline_types.h>
 #include <odp_global_data.h>
+#include <odp_queue_basic_internal.h>
+#include <odp_event_internal.h>
 
 #include <odp/api/plat/ticketlock_inlines.h>
 #define LOCK(queue_ptr)      odp_ticketlock_lock(&((queue_ptr)->s.lock))
@@ -465,7 +465,7 @@ static odp_queue_t queue_lookup(const char *name)
 }
 
 static inline int _plain_queue_enq_multi(odp_queue_t handle,
-					 odp_buffer_hdr_t *buf_hdr[], int num)
+					 _odp_event_hdr_t *event_hdr[], int num)
 {
 	queue_entry_t *queue;
 	int ret, num_enq;
@@ -474,16 +474,16 @@ static inline int _plain_queue_enq_multi(odp_queue_t handle,
 	queue = qentry_from_handle(handle);
 	ring_mpmc = queue->s.ring_mpmc;
 
-	if (_odp_sched_fn->ord_enq_multi(handle, (void **)buf_hdr, num, &ret))
+	if (_odp_sched_fn->ord_enq_multi(handle, (void **)event_hdr, num, &ret))
 		return ret;
 
-	num_enq = ring_mpmc_enq_multi(ring_mpmc, (void **)buf_hdr, num);
+	num_enq = ring_mpmc_enq_multi(ring_mpmc, (void **)event_hdr, num);
 
 	return num_enq;
 }
 
 static inline int _plain_queue_deq_multi(odp_queue_t handle,
-					 odp_buffer_hdr_t *buf_hdr[], int num)
+					 _odp_event_hdr_t *event_hdr[], int num)
 {
 	int num_deq;
 	queue_entry_t *queue;
@@ -492,22 +492,22 @@ static inline int _plain_queue_deq_multi(odp_queue_t handle,
 	queue = qentry_from_handle(handle);
 	ring_mpmc = queue->s.ring_mpmc;
 
-	num_deq = ring_mpmc_deq_multi(ring_mpmc, (void **)buf_hdr, num);
+	num_deq = ring_mpmc_deq_multi(ring_mpmc, (void **)event_hdr, num);
 
 	return num_deq;
 }
 
 static int plain_queue_enq_multi(odp_queue_t handle,
-				 odp_buffer_hdr_t *buf_hdr[], int num)
+				 _odp_event_hdr_t *event_hdr[], int num)
 {
-	return _plain_queue_enq_multi(handle, buf_hdr, num);
+	return _plain_queue_enq_multi(handle, event_hdr, num);
 }
 
-static int plain_queue_enq(odp_queue_t handle, odp_buffer_hdr_t *buf_hdr)
+static int plain_queue_enq(odp_queue_t handle, _odp_event_hdr_t *event_hdr)
 {
 	int ret;
 
-	ret = _plain_queue_enq_multi(handle, &buf_hdr, 1);
+	ret = _plain_queue_enq_multi(handle, &event_hdr, 1);
 
 	if (ret == 1)
 		return 0;
@@ -516,27 +516,27 @@ static int plain_queue_enq(odp_queue_t handle, odp_buffer_hdr_t *buf_hdr)
 }
 
 static int plain_queue_deq_multi(odp_queue_t handle,
-				 odp_buffer_hdr_t *buf_hdr[], int num)
+				 _odp_event_hdr_t *event_hdr[], int num)
 {
-	return _plain_queue_deq_multi(handle, buf_hdr, num);
+	return _plain_queue_deq_multi(handle, event_hdr, num);
 }
 
-static odp_buffer_hdr_t *plain_queue_deq(odp_queue_t handle)
+static _odp_event_hdr_t *plain_queue_deq(odp_queue_t handle)
 {
-	odp_buffer_hdr_t *buf_hdr = NULL;
+	_odp_event_hdr_t *event_hdr = NULL;
 	int ret;
 
-	ret = _plain_queue_deq_multi(handle, &buf_hdr, 1);
+	ret = _plain_queue_deq_multi(handle, &event_hdr, 1);
 
 	if (ret == 1)
-		return buf_hdr;
+		return event_hdr;
 	else
 		return NULL;
 }
 
-static int error_enqueue(odp_queue_t handle, odp_buffer_hdr_t *buf_hdr)
+static int error_enqueue(odp_queue_t handle, _odp_event_hdr_t *event_hdr)
 {
-	(void)buf_hdr;
+	(void)event_hdr;
 
 	ODP_ERR("Enqueue not supported (0x%" PRIx64 ")\n",
 		odp_queue_to_u64(handle));
@@ -545,10 +545,10 @@ static int error_enqueue(odp_queue_t handle, odp_buffer_hdr_t *buf_hdr)
 }
 
 static int error_enqueue_multi(odp_queue_t handle,
-			       odp_buffer_hdr_t *buf_hdr[], int num)
+			       _odp_event_hdr_t *event_hdr[], int num)
 
 {
-	(void)buf_hdr;
+	(void)event_hdr;
 	(void)num;
 
 	ODP_ERR("Enqueue multi not supported (0x%" PRIx64 ")\n",
@@ -557,7 +557,7 @@ static int error_enqueue_multi(odp_queue_t handle,
 	return -1;
 }
 
-static odp_buffer_hdr_t *error_dequeue(odp_queue_t handle)
+static _odp_event_hdr_t *error_dequeue(odp_queue_t handle)
 {
 	ODP_ERR("Dequeue not supported (0x%" PRIx64 ")\n",
 		odp_queue_to_u64(handle));
@@ -566,9 +566,9 @@ static odp_buffer_hdr_t *error_dequeue(odp_queue_t handle)
 }
 
 static int error_dequeue_multi(odp_queue_t handle,
-			       odp_buffer_hdr_t *buf_hdr[], int num)
+			       _odp_event_hdr_t *event_hdr[], int num)
 {
-	(void)buf_hdr;
+	(void)event_hdr;
 	(void)num;
 
 	ODP_ERR("Dequeue multi not supported (0x%" PRIx64 ")\n",
@@ -841,7 +841,7 @@ static void queue_print_all(void)
 }
 
 static inline int _sched_queue_enq_multi(odp_queue_t handle,
-					 odp_buffer_hdr_t *buf_hdr[], int num)
+					 _odp_event_hdr_t *event_hdr[], int num)
 {
 	int sched = 0;
 	int ret;
@@ -852,12 +852,12 @@ static inline int _sched_queue_enq_multi(odp_queue_t handle,
 	queue = qentry_from_handle(handle);
 	ring_st = queue->s.ring_st;
 
-	if (_odp_sched_fn->ord_enq_multi(handle, (void **)buf_hdr, num, &ret))
+	if (_odp_sched_fn->ord_enq_multi(handle, (void **)event_hdr, num, &ret))
 		return ret;
 
 	LOCK(queue);
 
-	num_enq = ring_st_enq_multi(ring_st, (void **)buf_hdr, num);
+	num_enq = ring_st_enq_multi(ring_st, (void **)event_hdr, num);
 
 	if (odp_unlikely(num_enq == 0)) {
 		UNLOCK(queue);
@@ -921,16 +921,16 @@ int _odp_sched_queue_deq(uint32_t queue_index, odp_event_t ev[], int max_num,
 }
 
 static int sched_queue_enq_multi(odp_queue_t handle,
-				 odp_buffer_hdr_t *buf_hdr[], int num)
+				 _odp_event_hdr_t *event_hdr[], int num)
 {
-	return _sched_queue_enq_multi(handle, buf_hdr, num);
+	return _sched_queue_enq_multi(handle, event_hdr, num);
 }
 
-static int sched_queue_enq(odp_queue_t handle, odp_buffer_hdr_t *buf_hdr)
+static int sched_queue_enq(odp_queue_t handle, _odp_event_hdr_t *event_hdr)
 {
 	int ret;
 
-	ret = _sched_queue_enq_multi(handle, &buf_hdr, 1);
+	ret = _sched_queue_enq_multi(handle, &event_hdr, 1);
 
 	if (ret == 1)
 		return 0;
@@ -1116,11 +1116,11 @@ static void queue_set_enq_deq_func(odp_queue_t handle,
 }
 
 static int queue_orig_multi(odp_queue_t handle,
-			    odp_buffer_hdr_t **buf_hdr, int num)
+			    _odp_event_hdr_t **event_hdr, int num)
 {
 	queue_entry_t *queue = qentry_from_handle(handle);
 
-	return queue->s.orig_dequeue_multi(handle, buf_hdr, num);
+	return queue->s.orig_dequeue_multi(handle, event_hdr, num);
 }
 
 static int queue_api_enq_multi(odp_queue_t handle,
@@ -1135,7 +1135,7 @@ static int queue_api_enq_multi(odp_queue_t handle,
 		num = QUEUE_MULTI_MAX;
 
 	return queue->s.enqueue_multi(handle,
-				      (odp_buffer_hdr_t **)(uintptr_t)ev, num);
+				      (_odp_event_hdr_t **)(uintptr_t)ev, num);
 }
 
 static void queue_timer_add(odp_queue_t handle)
@@ -1157,7 +1157,7 @@ static int queue_api_enq(odp_queue_t handle, odp_event_t ev)
 	queue_entry_t *queue = qentry_from_handle(handle);
 
 	return queue->s.enqueue(handle,
-				(odp_buffer_hdr_t *)(uintptr_t)ev);
+				(_odp_event_hdr_t *)(uintptr_t)ev);
 }
 
 static int queue_api_deq_multi(odp_queue_t handle, odp_event_t ev[], int num)
@@ -1168,7 +1168,7 @@ static int queue_api_deq_multi(odp_queue_t handle, odp_event_t ev[], int num)
 	if (num > QUEUE_MULTI_MAX)
 		num = QUEUE_MULTI_MAX;
 
-	ret = queue->s.dequeue_multi(handle, (odp_buffer_hdr_t **)ev, num);
+	ret = queue->s.dequeue_multi(handle, (_odp_event_hdr_t **)ev, num);
 
 	if (odp_global_rw->inline_timers &&
 	    odp_atomic_load_u64(&queue->s.num_timers))

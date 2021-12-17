@@ -20,7 +20,7 @@ extern "C" {
 
 #include <odp/api/std_types.h>
 #include <odp/api/pool.h>
-#include <odp_buffer_internal.h>
+#include <odp_event_internal.h>
 #include <odp/api/packet_io.h>
 #include <odp/api/align.h>
 #include <odp/api/hints.h>
@@ -72,6 +72,7 @@ typedef struct ODP_ALIGNED_CACHE {
 	uint32_t		hdr_size;
 	uint32_t		num;
 	uint32_t		num_populated;
+	odp_pool_type_t		type_2;
 	uint8_t			type;
 	uint8_t			pool_ext;
 	odp_pool_param_t	params;
@@ -106,8 +107,7 @@ static inline pool_t *pool_entry_from_hdl(odp_pool_t pool_hdl)
 	return &_odp_pool_glb->pool[_odp_typeval(pool_hdl) - 1];
 }
 
-static inline int _odp_buffer_alloc_multi(pool_t *pool,
-					  odp_buffer_hdr_t *buf_hdr[], int num)
+static inline int _odp_event_alloc_multi(pool_t *pool, _odp_event_hdr_t *event_hdr[], int num)
 {
 	int i;
 	struct rte_mempool *mp = pool->rte_mempool;
@@ -119,21 +119,41 @@ static inline int _odp_buffer_alloc_multi(pool_t *pool,
 		if (odp_unlikely(mbuf == NULL))
 			return i;
 
-		buf_hdr[i] = mbuf_to_buf_hdr(mbuf);
+		event_hdr[i] = _odp_event_hdr(_odp_event_from_mbuf(mbuf));
 	}
 
 	return i;
 }
 
-static inline void _odp_buffer_free_multi(odp_buffer_hdr_t *buf_hdr[], int num)
+static inline odp_event_t _odp_event_alloc(pool_t *pool)
+{
+	struct rte_mbuf *mbuf;
+	struct rte_mempool *mp = pool->rte_mempool;
+
+	mbuf = rte_mbuf_raw_alloc(mp);
+	if (odp_unlikely(mbuf == NULL))
+		return ODP_EVENT_INVALID;
+
+	return _odp_event_from_mbuf(mbuf);
+}
+
+static inline void _odp_event_free_multi(_odp_event_hdr_t *event_hdr[], int num_free)
 {
 	int i;
 
-	for (i = 0; i < num; i++)
-		rte_mbuf_raw_free((struct rte_mbuf *)(uintptr_t)buf_hdr[i]);
+	for (i = 0; i < num_free; i++)
+		rte_mbuf_raw_free(_odp_event_to_mbuf(_odp_event_from_hdr(event_hdr[i])));
 }
 
-int _odp_buffer_is_valid(odp_buffer_t buf);
+static inline void _odp_event_free(odp_event_t event)
+{
+	rte_mbuf_raw_free(_odp_event_to_mbuf(event));
+}
+
+int _odp_event_is_valid(odp_event_t event);
+
+odp_pool_t _odp_pool_create(const char *name, const odp_pool_param_t *params,
+			    odp_pool_type_t type_2);
 
 #ifdef __cplusplus
 }

@@ -72,12 +72,12 @@ typedef struct odp_global_data_ro_t {
 	uint8_t has_config_rt;
 	config_t libconfig_default;
 	config_t libconfig_runtime;
-	odp_random_kind_t ipsec_rand_kind;
 
 	/* Disabled features during global init */
 	struct {
 		uint8_t compress;
 		uint8_t crypto;
+		uint8_t dma;
 		uint8_t ipsec;
 		uint8_t stash;
 		uint8_t traffic_mngr;

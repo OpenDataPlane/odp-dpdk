@@ -3,8 +3,8 @@ AC_PREREQ([2.5])
 # ODP API version
 ##########################################################################
 m4_define([odpapi_generation_version], [1])
-m4_define([odpapi_major_version], [32])
-m4_define([odpapi_minor_version], [1])
+m4_define([odpapi_major_version], [33])
+m4_define([odpapi_minor_version], [0])
 m4_define([odpapi_point_version], [0])
 m4_define([odpapi_version],
     [odpapi_generation_version.odpapi_major_version.odpapi_minor_version.odpapi_point_version])
@@ -324,22 +324,6 @@ then
 fi
 
 ##########################################################################
-# Configure/disable usage of OpenSSL library
-##########################################################################
-AC_ARG_WITH([openssl],
-	    [AS_HELP_STRING([--without-openssl],
-			    [compile without OpenSSL (may result in disabled crypto and random support)]
-			    [[default=with]])],
-	    [],
-	    [with_openssl=yes])
-AS_IF([test "$with_openssl" != "no"],
-      [ODP_OPENSSL
-       have_openssl=1], [have_openssl=0])
-AM_CONDITIONAL([WITH_OPENSSL], [test x$with_openssl != xno])
-AC_DEFINE_UNQUOTED([_ODP_OPENSSL], [$have_openssl],
-	  [Define to 1 to enable OpenSSL support])
-
-##########################################################################
 # Include m4 files
 ##########################################################################
 m4_include([./doc/m4/configure.m4])
@@ -524,7 +508,6 @@ AC_MSG_RESULT([
 	includedir:		${includedir}
 	testdir:		${testdir}
 	WITH_ARCH:              ${WITH_ARCH}
-	with_openssl:           ${with_openssl}
 
 	cc:			${CC}
 	cc version:             ${CC_VERSION}
@@ -555,7 +538,3 @@ AC_MSG_RESULT([
 	user_guides:		${user_guides}
 ${PLAT_CFG_TEXT}
 ])
-
-AS_IF([test "${with_openssl}" = "no"],
-      [AC_MSG_WARN([Strong cryptography is not available without OpenSSL])]
-      )

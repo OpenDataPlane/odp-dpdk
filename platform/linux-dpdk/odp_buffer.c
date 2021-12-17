@@ -1,4 +1,5 @@
 /* Copyright (c) 2013-2018, Linaro Limited
+ * Copyright (c) 2021, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -18,36 +19,36 @@
 
 /* Fill in buffer header field offsets for inline functions */
 const _odp_buffer_inline_offset_t _odp_buffer_inline_offset ODP_ALIGNED_CACHE = {
-	.event_type = offsetof(odp_buffer_hdr_t, event_type),
-	.base_data  = offsetof(odp_buffer_hdr_t, mb.buf_addr)
+	.event_type = offsetof(odp_buffer_hdr_t, event_hdr.event_type),
+	.base_data  = offsetof(odp_buffer_hdr_t, event_hdr.mb.buf_addr)
 };
 
 #include <odp/visibility_end.h>
 
 uint32_t odp_buffer_size(odp_buffer_t buf)
 {
-	struct rte_mbuf *mbuf = buf_to_mbuf(buf);
+	struct rte_mbuf *mbuf = _odp_buf_to_mbuf(buf);
 
 	return mbuf->buf_len;
 }
 
 int _odp_buffer_type(odp_buffer_t buf)
 {
-	odp_buffer_hdr_t *hdr = buf_hdl_to_hdr(buf);
+	odp_buffer_hdr_t *hdr = _odp_buf_hdr(buf);
 
-	return hdr->type;
+	return hdr->event_hdr.type;
 }
 
 void _odp_buffer_type_set(odp_buffer_t buf, int type)
 {
-	odp_buffer_hdr_t *hdr = buf_hdl_to_hdr(buf);
+	odp_buffer_hdr_t *hdr = _odp_buf_hdr(buf);
 
-	hdr->type = type;
+	hdr->event_hdr.type = type;
 }
 
 int odp_buffer_is_valid(odp_buffer_t buf)
 {
-	if (_odp_buffer_is_valid(buf) == 0)
+	if (odp_event_is_valid(odp_buffer_to_event(buf)) == 0)
 		return 0;
 
 	if (odp_event_type(odp_buffer_to_event(buf)) != ODP_EVENT_BUFFER)
@@ -70,12 +71,12 @@ void odp_buffer_print(odp_buffer_t buf)
 		return;
 	}
 
-	hdr = buf_hdl_to_hdr(buf);
-	pool = hdr->pool_ptr;
+	hdr = _odp_buf_hdr(buf);
+	pool = hdr->event_hdr.pool_ptr;
 
 	len += snprintf(&str[len], n - len, "Buffer\n------\n");
 	len += snprintf(&str[len], n - len, "  pool index    %u\n", pool->pool_idx);
-	len += snprintf(&str[len], n - len, "  buffer index  %u\n", hdr->index);
+	len += snprintf(&str[len], n - len, "  buffer index  %u\n", hdr->event_hdr.index);
 	len += snprintf(&str[len], n - len, "  addr          %p\n", odp_buffer_addr(buf));
 	len += snprintf(&str[len], n - len, "  size          %u\n", odp_buffer_size(buf));
 	str[len] = 0;
