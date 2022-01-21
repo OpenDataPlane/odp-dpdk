@@ -24,3 +24,6 @@ pushd ./test/validation/api/
 ODP_SCHEDULER=sp       make check
 popd
 
+# Convert gcno files into gcov (required by Codecov)
+find . -type f -name '*.gcno' -exec gcov -pb {} +
+
