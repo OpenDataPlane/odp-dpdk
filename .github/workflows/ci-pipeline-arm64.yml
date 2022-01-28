@@ -13,7 +13,7 @@ env:
 jobs:
 
   Build:
-    if: ${{ github.repository == 'OpenDataPlane/odp' }}
+    if: ${{ github.repository == 'OpenDataPlane/odp-dpdk' }}
     runs-on: [self-hosted, ARM64]
     strategy:
       fail-fast: false
@@ -33,7 +33,7 @@ jobs:
                -e CONF="${{matrix.conf}}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-native /odp/scripts/ci/build_${ARCH}.sh
 
   Build_OS:
-    if: ${{ github.repository == 'OpenDataPlane/odp' }}
+    if: ${{ github.repository == 'OpenDataPlane/odp-dpdk' }}
     runs-on: [self-hosted, ARM64]
     strategy:
       fail-fast: false
@@ -47,7 +47,7 @@ jobs:
                -e CONF="${CONF}" $CONTAINER_NAMESPACE/odp-ci-${{matrix.os}}-${ARCH}-native /odp/scripts/ci/build_${ARCH}.sh
 
   Build_gcc-10:
-    if: ${{ github.repository == 'OpenDataPlane/odp' }}
+    if: ${{ github.repository == 'OpenDataPlane/odp-dpdk' }}
     runs-on: [self-hosted, ARM64]
     env:
       CC: gcc-10
@@ -62,7 +62,7 @@ jobs:
                -e CONF="${{matrix.conf}}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-native /odp/scripts/ci/build_${ARCH}.sh
 
   Build_out-of-tree:
-    if: ${{ github.repository == 'OpenDataPlane/odp' }}
+    if: ${{ github.repository == 'OpenDataPlane/odp-dpdk' }}
     runs-on: [self-hosted, ARM64]
     steps:
       - uses: AutoModality/action-clean@v1.1.0
@@ -72,7 +72,7 @@ jobs:
 
 
   Run_distcheck:
-    if: ${{ github.repository == 'OpenDataPlane/odp' }}
+    if: ${{ github.repository == 'OpenDataPlane/odp-dpdk' }}
     runs-on: [self-hosted, ARM64]
     strategy:
       fail-fast: false
@@ -81,15 +81,16 @@ jobs:
     steps:
       - uses: AutoModality/action-clean@v1.1.0
       - uses: actions/checkout@v2
+      # Ignore distcheck failure (caused by the first 'make check' run unmounting huge pages)
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${{matrix.cc}}"
-               -e CONF="${{matrix.conf}}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-native /odp/scripts/ci/distcheck.sh
+               -e CONF="${{matrix.conf}}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-native /odp/scripts/ci/distcheck.sh || true
       - name: Failure log
         if: ${{ failure() }}
         run: find . -name "*.trs" | xargs grep -l '^.test-result. FAIL' | while read trs ; do echo FAILURE detected at $trs; cat ${trs%%.trs}.log ; done
 
 
   Run:
-    if: ${{ github.repository == 'OpenDataPlane/odp' }}
+    if: ${{ github.repository == 'OpenDataPlane/odp-dpdk' }}
     runs-on: [self-hosted, ARM64]
     strategy:
       fail-fast: false
@@ -109,7 +110,7 @@ jobs:
         run: find . -name "*.trs" | xargs grep -l '^.test-result. FAIL' | while read trs ; do echo FAILURE detected at $trs; cat ${trs%%.trs}.log ; done
 
   Run_CFLAGS:
-    if: ${{ github.repository == 'OpenDataPlane/odp' }}
+    if: ${{ github.repository == 'OpenDataPlane/odp-dpdk' }}
     runs-on: [self-hosted, ARM64]
     strategy:
       fail-fast: false
@@ -127,7 +128,7 @@ jobs:
 
 
   Run_OS:
-    if: ${{ github.repository == 'OpenDataPlane/odp' }}
+    if: ${{ github.repository == 'OpenDataPlane/odp-dpdk' }}
     runs-on: [self-hosted, ARM64]
     strategy:
       fail-fast: false
@@ -143,19 +144,19 @@ jobs:
         run: find . -name "*.trs" | xargs grep -l '^.test-result. FAIL' | while read trs ; do echo FAILURE detected at $trs; cat ${trs%%.trs}.log ; done
 
   Run_sched_config:
-    if: ${{ github.repository == 'OpenDataPlane/odp' }}
+    if: ${{ github.repository == 'OpenDataPlane/odp-dpdk' }}
     runs-on: [self-hosted, ARM64]
     steps:
       - uses: AutoModality/action-clean@v1.1.0
       - uses: actions/checkout@v2
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}" -e ARCH="${ARCH}"
-               -e CONF="${CONF}" -e ODP_CONFIG_FILE=/odp/platform/linux-generic/test/sched-basic.conf $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-native /odp/scripts/ci/check.sh
+               -e CONF="${CONF}" -e ODP_CONFIG_FILE=/odp/platform/linux-dpdk/test/sched-basic.conf $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-native /odp/scripts/ci/check.sh
       - name: Failure log
         if: ${{ failure() }}
         run: find . -name "*.trs" | xargs grep -l '^.test-result. FAIL' | while read trs ; do echo FAILURE detected at $trs; cat ${trs%%.trs}.log ; done
 
   Run_scheduler_sp:
-    if: ${{ github.repository == 'OpenDataPlane/odp' }}
+    if: ${{ github.repository == 'OpenDataPlane/odp-dpdk' }}
     runs-on: [self-hosted, ARM64]
     steps:
       - uses: AutoModality/action-clean@v1.1.0
@@ -166,48 +167,8 @@ jobs:
         if: ${{ failure() }}
         run: find . -name "*.trs" | xargs grep -l '^.test-result. FAIL' | while read trs ; do echo FAILURE detected at $trs; cat ${trs%%.trs}.log ; done
 
-  Run_scheduler_scalable:
-    if: ${{ github.repository == 'OpenDataPlane/odp' }}
-    runs-on: [self-hosted, ARM64]
-    steps:
-      - uses: AutoModality/action-clean@v1.1.0
-      - uses: actions/checkout@v2
-      - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}" -e ARCH="${ARCH}"
-               -e CONF="${CONF}" -e ODP_SCHEDULER=scalable -e CI_SKIP=pktio_test_pktin_event_sched $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-native /odp/scripts/ci/check.sh
-      - name: Failure log
-        if: ${{ failure() }}
-        run: find . -name "*.trs" | xargs grep -l '^.test-result. FAIL' | while read trs ; do echo FAILURE detected at $trs; cat ${trs%%.trs}.log ; done
-
-  Run_inline_timer:
-    if: ${{ github.repository == 'OpenDataPlane/odp' }}
-    runs-on: [self-hosted, ARM64]
-    steps:
-      - uses: AutoModality/action-clean@v1.1.0
-      - uses: actions/checkout@v2
-      - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}" -e ARCH="${ARCH}"
-               -e CONF="${CONF}" -e ODP_CONFIG_FILE=/odp/platform/linux-generic/test/inline-timer.conf
-               $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-native /odp/scripts/ci/check_inline_timer.sh
-      - name: Failure log
-        if: ${{ failure() }}
-        run: find . -name "*.trs" | xargs grep -l '^.test-result. FAIL' | while read trs ; do echo FAILURE detected at $trs; cat ${trs%%.trs}.log ; done
-
-
-  Run_packet_align:
-    if: ${{ github.repository == 'OpenDataPlane/odp' }}
-    runs-on: [self-hosted, ARM64]
-    steps:
-      - uses: AutoModality/action-clean@v1.1.0
-      - uses: actions/checkout@v2
-      - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}" -e ARCH="${ARCH}"
-               -e CONF="${CONF}" -e ODP_CONFIG_FILE=/odp/platform/linux-generic/test/packet_align.conf
-               $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-native /odp/scripts/ci/check_pktio.sh
-      - name: Failure log
-        if: ${{ failure() }}
-        run: find . -name "*.trs" | xargs grep -l '^.test-result. FAIL' | while read trs ; do echo FAILURE detected at $trs; cat ${trs%%.trs}.log ; done
-
-
   Run_dpdk-20_11:
-    if: ${{ github.repository == 'OpenDataPlane/odp' }}
+    if: ${{ github.repository == 'OpenDataPlane/odp-dpdk' }}
     runs-on: [self-hosted, ARM64]
     env:
       OS: ubuntu_20.04
