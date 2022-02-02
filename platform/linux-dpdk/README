@@ -82,7 +82,8 @@ Prepare the build directory:
     meson build
     cd build
 
-Configure the location where DPDK will be installed:
+Optionally, configure the location where DPDK will be installed. By default,
+DPDK will be installed in /usr/local:
     meson configure -Dprefix=$(pwd)/../install
 
 Build and install DPDK:
@@ -105,7 +106,10 @@ SHARED libraries (requires building DPDK with -fPIC, see above):
 STATIC libraries (better performance):
     ./configure --with-dpdk-path=<dpdk-dir>/install --disable-shared
 
-With DPDK 20.11, instead of --with-dpdk-path option, set PKG_CONFIG_PATH:
+Starting from DPDK 20.11, --with-dpdk-path option is not used anymore:
+    ./configure
+
+Or, if DPDK was not installed to the default location, set PKG_CONFIG_PATH:
     PKG_CONFIG_PATH=<dpdk-dir>/install/lib/x86_64-linux-gnu/pkgconfig ./configure
 
 Once configure has completed successfully:
