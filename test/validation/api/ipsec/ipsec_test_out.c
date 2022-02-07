@@ -25,6 +25,8 @@ typedef struct {
 	enum ipsec_test_stats stats;
 } ipsec_test_flags;
 
+static void test_out_in_all(const ipsec_test_flags *flags);
+
 struct cipher_param {
 	const char *name;
 	odp_cipher_alg_t algo;
@@ -70,6 +72,16 @@ static struct auth_param auths[] = {
 	ALG(ODP_AUTH_ALG_SHA512_HMAC, &key_5a_512, NULL),
 	ALG(ODP_AUTH_ALG_AES_CMAC, &key_5a_128, NULL),
 	ALG(ODP_AUTH_ALG_AES_XCBC_MAC, &key_5a_128, NULL)
+};
+
+/*
+ * Integrity algorithms that can be used in AH but not in ESP as
+ * individual algorithms (combined with a cipher).
+ */
+static struct auth_param ah_auths[] = {
+	ALG(ODP_AUTH_ALG_AES_GMAC, &key_a5_128, &key_mcgrew_gcm_salt_2),
+	ALG(ODP_AUTH_ALG_AES_GMAC, &key_a5_192, &key_mcgrew_gcm_salt_2),
+	ALG(ODP_AUTH_ALG_AES_GMAC, &key_a5_256, &key_mcgrew_gcm_salt_2),
 };
 
 struct cipher_auth_comb_param {
@@ -126,7 +138,7 @@ static void test_out_ipv4_ah_sha256(void)
 	odp_ipsec_sa_t sa;
 
 	ipsec_sa_param_fill(&param,
-			    false, true, 123, NULL,
+			    ODP_IPSEC_DIR_OUTBOUND, ODP_IPSEC_AH, 123, NULL,
 			    ODP_CIPHER_ALG_NULL, NULL,
 			    ODP_AUTH_ALG_SHA256_HMAC, &key_5a_256,
 			    NULL, NULL);
@@ -165,7 +177,7 @@ static void test_out_ipv4_ah_sha256_tun_ipv4(void)
 	tunnel.ipv4.ttl = 64;
 
 	ipsec_sa_param_fill(&param,
-			    false, true, 123, &tunnel,
+			    ODP_IPSEC_DIR_OUTBOUND, ODP_IPSEC_AH, 123, &tunnel,
 			    ODP_CIPHER_ALG_NULL, NULL,
 			    ODP_AUTH_ALG_SHA256_HMAC, &key_5a_256,
 			    NULL, NULL);
@@ -210,7 +222,7 @@ static void test_out_ipv4_ah_sha256_tun_ipv6(void)
 	tunnel.ipv6.hlimit = 64;
 
 	ipsec_sa_param_fill(&param,
-			    false, true, 123, &tunnel,
+			    ODP_IPSEC_DIR_OUTBOUND, ODP_IPSEC_AH, 123, &tunnel,
 			    ODP_CIPHER_ALG_NULL, NULL,
 			    ODP_AUTH_ALG_SHA256_HMAC, &key_5a_256,
 			    NULL, NULL);
@@ -240,7 +252,7 @@ static void test_out_ipv4_esp_null_sha256(void)
 	odp_ipsec_sa_t sa;
 
 	ipsec_sa_param_fill(&param,
-			    false, false, 123, NULL,
+			    ODP_IPSEC_DIR_OUTBOUND, ODP_IPSEC_ESP, 123, NULL,
 			    ODP_CIPHER_ALG_NULL, NULL,
 			    ODP_AUTH_ALG_SHA256_HMAC, &key_5a_256,
 			    NULL, NULL);
@@ -279,7 +291,7 @@ static void test_out_ipv4_esp_null_sha256_tun_ipv4(void)
 	tunnel.ipv4.ttl = 64;
 
 	ipsec_sa_param_fill(&param,
-			    false, false, 123, &tunnel,
+			    ODP_IPSEC_DIR_OUTBOUND, ODP_IPSEC_ESP, 123, &tunnel,
 			    ODP_CIPHER_ALG_NULL, NULL,
 			    ODP_AUTH_ALG_SHA256_HMAC, &key_5a_256,
 			    NULL, NULL);
@@ -325,7 +337,7 @@ static void test_out_ipv4_esp_null_sha256_tun_ipv6(void)
 	tunnel.ipv6.hlimit = 64;
 
 	ipsec_sa_param_fill(&param,
-			    false, false, 123, &tunnel,
+			    ODP_IPSEC_DIR_OUTBOUND, ODP_IPSEC_ESP, 123, &tunnel,
 			    ODP_CIPHER_ALG_NULL, NULL,
 			    ODP_AUTH_ALG_SHA256_HMAC, &key_5a_256,
 			    NULL, NULL);
@@ -483,6 +495,7 @@ static void test_out_in_common(const ipsec_test_flags *flags,
 	};
 	odp_ipsec_sa_param_t param;
 	odp_ipsec_stats_t stats;
+	odp_ipsec_protocol_t proto = flags->ah ? ODP_IPSEC_AH : ODP_IPSEC_ESP;
 	odp_ipsec_sa_t sa_out;
 	odp_ipsec_sa_t sa_in;
 	odp_proto_l3_type_t out_l3_type = ODP_PROTO_L3_TYPE_IPV4;
@@ -514,7 +527,7 @@ static void test_out_in_common(const ipsec_test_flags *flags,
 	}
 
 	ipsec_sa_param_fill(&param,
-			    false, flags->ah, 123, tun_ptr,
+			    ODP_IPSEC_DIR_OUTBOUND, proto, 123, tun_ptr,
 			    cipher, cipher_key,
 			    auth, auth_key,
 			    cipher_key_extra, auth_key_extra);
@@ -527,7 +540,7 @@ static void test_out_in_common(const ipsec_test_flags *flags,
 	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa_out);
 
 	ipsec_sa_param_fill(&param,
-			    true, flags->ah, 123, tun_ptr,
+			    ODP_IPSEC_DIR_INBOUND, proto, 123, tun_ptr,
 			    cipher, cipher_key,
 			    auth, auth_key,
 			    cipher_key_extra, auth_key_extra);
@@ -665,21 +678,22 @@ static void test_esp_out_in(struct cipher_param *cipher,
 			   cipher->key_extra, auth->key_extra);
 }
 
-static void test_esp_out_in_all(ipsec_test_flags *flags)
+static void test_esp_out_in_all(const ipsec_test_flags *flags_in)
 {
 	uint32_t c;
 	uint32_t a;
+	ipsec_test_flags flags = *flags_in;
 
-	flags->ah = false;
+	flags.ah = false;
 
 	for (c = 0; c < ARRAY_SIZE(ciphers); c++)
 		for (a = 0; a < ARRAY_SIZE(auths); a++)
-			test_esp_out_in(&ciphers[c], &auths[a], flags);
+			test_esp_out_in(&ciphers[c], &auths[a], &flags);
 
 	for (c = 0; c < ARRAY_SIZE(cipher_auth_comb); c++)
 		test_esp_out_in(&cipher_auth_comb[c].cipher,
 				&cipher_auth_comb[c].auth,
-				flags);
+				&flags);
 }
 
 /*
@@ -703,25 +717,26 @@ static int is_out_mode_inline(void)
 	return suite_context.outbound_op_mode == ODP_IPSEC_OP_MODE_INLINE;
 }
 
-static void test_esp_out_in_all_hdr_in_packet(void)
+static void test_inline_hdr_in_packet(void)
 {
 	ipsec_test_flags flags = {
 		.part_flags.inline_hdr_in_packet = true,
 	};
-	test_esp_out_in_all(&flags);
+	test_out_in_all(&flags);
 }
 
-static void test_ah_out_in(struct auth_param *auth)
+static void test_ah_out_in(struct auth_param *auth,
+			   const ipsec_test_flags *flags_in)
 {
 	int auth_keylen = auth->key ? 8 * auth->key->length : 0;
-	ipsec_test_flags flags;
+	ipsec_test_flags flags = *flags_in;
 
 	if (ipsec_check_ah(auth->algo, auth_keylen) != ODP_TEST_ACTIVE)
 		return;
 
-	printf("\n    %s (keylen %d) ", auth->name, auth_keylen);
+	if (flags.display_algo)
+		printf("\n    %s (keylen %d) ", auth->name, auth_keylen);
 
-	memset(&flags, 0, sizeof(flags));
 	flags.ah = true;
 
 	test_out_in_common(&flags, ODP_CIPHER_ALG_NULL, NULL,
@@ -729,13 +744,32 @@ static void test_ah_out_in(struct auth_param *auth)
 			   NULL, auth->key_extra);
 }
 
-static void test_ah_out_in_all(void)
+static void test_ah_out_in_all(const ipsec_test_flags *flags)
 {
 	uint32_t a;
 
 	for (a = 0; a < ARRAY_SIZE(auths); a++)
-		test_ah_out_in(&auths[a]);
+		test_ah_out_in(&auths[a], flags);
+	for (a = 0; a < ARRAY_SIZE(ah_auths); a++)
+		test_ah_out_in(&ah_auths[a], flags);
+}
+
+static void test_ah_out_in_all_basic(void)
+{
+	ipsec_test_flags flags;
+
+	memset(&flags, 0, sizeof(flags));
+	flags.display_algo = true;
+
+	test_ah_out_in_all(&flags);
+
 	printf("\n  ");
+}
+
+static void test_out_in_all(const ipsec_test_flags *flags)
+{
+	test_esp_out_in_all(flags);
+	test_ah_out_in_all(flags);
 }
 
 static void test_out_ipv4_esp_udp_null_sha256(void)
@@ -744,7 +778,7 @@ static void test_out_ipv4_esp_udp_null_sha256(void)
 	odp_ipsec_sa_t sa;
 
 	ipsec_sa_param_fill(&param,
-			    false, false, 123, NULL,
+			    ODP_IPSEC_DIR_OUTBOUND, ODP_IPSEC_ESP, 123, NULL,
 			    ODP_CIPHER_ALG_NULL, NULL,
 			    ODP_AUTH_ALG_SHA256_HMAC, &key_5a_256,
 			    NULL, NULL);
@@ -769,42 +803,6 @@ static void test_out_ipv4_esp_udp_null_sha256(void)
 	ipsec_sa_destroy(sa);
 }
 
-static void test_out_ipv4_ah_aes_gmac_128(void)
-{
-	ipsec_test_flags flags;
-
-	memset(&flags, 0, sizeof(flags));
-	flags.ah = true;
-
-	test_out_in_common(&flags, ODP_CIPHER_ALG_NULL, NULL,
-			   ODP_AUTH_ALG_AES_GMAC, &key_a5_128,
-			   NULL, &key_mcgrew_gcm_salt_2);
-}
-
-static void test_out_ipv4_ah_aes_gmac_192(void)
-{
-	ipsec_test_flags flags;
-
-	memset(&flags, 0, sizeof(flags));
-	flags.ah = true;
-
-	test_out_in_common(&flags, ODP_CIPHER_ALG_NULL, NULL,
-			   ODP_AUTH_ALG_AES_GMAC, &key_a5_192,
-			   NULL, &key_mcgrew_gcm_salt_2);
-}
-
-static void test_out_ipv4_ah_aes_gmac_256(void)
-{
-	ipsec_test_flags flags;
-
-	memset(&flags, 0, sizeof(flags));
-	flags.ah = true;
-
-	test_out_in_common(&flags, ODP_CIPHER_ALG_NULL, NULL,
-			   ODP_AUTH_ALG_AES_GMAC, &key_a5_256,
-			   NULL, &key_mcgrew_gcm_salt_2);
-}
-
 static void test_out_ipv4_ah_sha256_frag_check(void)
 {
 	odp_ipsec_sa_param_t param;
@@ -816,7 +814,7 @@ static void test_out_ipv4_ah_sha256_frag_check(void)
 	memset(&test2, 0, sizeof(ipsec_test_part));
 
 	ipsec_sa_param_fill(&param,
-			    false, true, 123, NULL,
+			    ODP_IPSEC_DIR_OUTBOUND, ODP_IPSEC_AH, 123, NULL,
 			    ODP_CIPHER_ALG_NULL, NULL,
 			    ODP_AUTH_ALG_SHA256_HMAC, &key_5a_256,
 			    NULL, NULL);
@@ -856,7 +854,7 @@ static void test_out_ipv4_ah_sha256_frag_check_2(void)
 	memset(&test, 0, sizeof(ipsec_test_part));
 
 	ipsec_sa_param_fill(&param,
-			    false, true, 123, NULL,
+			    ODP_IPSEC_DIR_OUTBOUND, ODP_IPSEC_AH, 123, NULL,
 			    ODP_CIPHER_ALG_NULL, NULL,
 			    ODP_AUTH_ALG_SHA256_HMAC, &key_5a_256,
 			    NULL, NULL);
@@ -903,7 +901,7 @@ static void test_out_ipv4_esp_null_sha256_frag_check(void)
 	memset(&test2, 0, sizeof(ipsec_test_part));
 
 	ipsec_sa_param_fill(&param,
-			    false, false, 123, NULL,
+			    ODP_IPSEC_DIR_OUTBOUND, ODP_IPSEC_ESP, 123, NULL,
 			    ODP_CIPHER_ALG_NULL, NULL,
 			    ODP_AUTH_ALG_SHA256_HMAC, &key_5a_256,
 			    NULL, NULL);
@@ -944,7 +942,7 @@ static void test_out_ipv4_esp_null_sha256_frag_check_2(void)
 	memset(&test, 0, sizeof(ipsec_test_part));
 
 	ipsec_sa_param_fill(&param,
-			    false, false, 123, NULL,
+			    ODP_IPSEC_DIR_OUTBOUND, ODP_IPSEC_ESP, 123, NULL,
 			    ODP_CIPHER_ALG_NULL, NULL,
 			    ODP_AUTH_ALG_SHA256_HMAC, &key_5a_256,
 			    NULL, NULL);
@@ -987,7 +985,7 @@ static void test_out_ipv6_ah_sha256(void)
 	odp_ipsec_sa_t sa;
 
 	ipsec_sa_param_fill(&param,
-			    false, true, 123, NULL,
+			    ODP_IPSEC_DIR_OUTBOUND, ODP_IPSEC_AH, 123, NULL,
 			    ODP_CIPHER_ALG_NULL, NULL,
 			    ODP_AUTH_ALG_SHA256_HMAC, &key_5a_256,
 			    NULL, NULL);
@@ -1026,7 +1024,7 @@ static void test_out_ipv6_ah_sha256_tun_ipv4(void)
 	tunnel.ipv4.ttl = 64;
 
 	ipsec_sa_param_fill(&param,
-			    false, true, 123, &tunnel,
+			    ODP_IPSEC_DIR_OUTBOUND, ODP_IPSEC_AH, 123, &tunnel,
 			    ODP_CIPHER_ALG_NULL, NULL,
 			    ODP_AUTH_ALG_SHA256_HMAC, &key_5a_256,
 			    NULL, NULL);
@@ -1071,7 +1069,7 @@ static void test_out_ipv6_ah_sha256_tun_ipv6(void)
 	tunnel.ipv6.hlimit = 64;
 
 	ipsec_sa_param_fill(&param,
-			    false, true, 123, &tunnel,
+			    ODP_IPSEC_DIR_OUTBOUND, ODP_IPSEC_AH, 123, &tunnel,
 			    ODP_CIPHER_ALG_NULL, NULL,
 			    ODP_AUTH_ALG_SHA256_HMAC, &key_5a_256,
 			    NULL, NULL);
@@ -1101,7 +1099,7 @@ static void test_out_ipv6_esp_null_sha256(void)
 	odp_ipsec_sa_t sa;
 
 	ipsec_sa_param_fill(&param,
-			    false, false, 123, NULL,
+			    ODP_IPSEC_DIR_OUTBOUND, ODP_IPSEC_ESP, 123, NULL,
 			    ODP_CIPHER_ALG_NULL, NULL,
 			    ODP_AUTH_ALG_SHA256_HMAC, &key_5a_256,
 			    NULL, NULL);
@@ -1140,7 +1138,7 @@ static void test_out_ipv6_esp_null_sha256_tun_ipv4(void)
 	tunnel.ipv4.ttl = 64;
 
 	ipsec_sa_param_fill(&param,
-			    false, false, 123, &tunnel,
+			    ODP_IPSEC_DIR_OUTBOUND, ODP_IPSEC_ESP, 123, &tunnel,
 			    ODP_CIPHER_ALG_NULL, NULL,
 			    ODP_AUTH_ALG_SHA256_HMAC, &key_5a_256,
 			    NULL, NULL);
@@ -1186,7 +1184,7 @@ static void test_out_ipv6_esp_null_sha256_tun_ipv6(void)
 	tunnel.ipv6.hlimit = 64;
 
 	ipsec_sa_param_fill(&param,
-			    false, false, 123, &tunnel,
+			    ODP_IPSEC_DIR_OUTBOUND, ODP_IPSEC_ESP, 123, &tunnel,
 			    ODP_CIPHER_ALG_NULL, NULL,
 			    ODP_AUTH_ALG_SHA256_HMAC, &key_5a_256,
 			    NULL, NULL);
@@ -1217,7 +1215,7 @@ static void test_out_ipv6_esp_udp_null_sha256(void)
 	odp_ipsec_sa_t sa;
 
 	ipsec_sa_param_fill(&param,
-			    false, false, 123, NULL,
+			    ODP_IPSEC_DIR_OUTBOUND, ODP_IPSEC_ESP, 123, NULL,
 			    ODP_CIPHER_ALG_NULL, NULL,
 			    ODP_AUTH_ALG_SHA256_HMAC, &key_5a_256,
 			    NULL, NULL);
@@ -1265,7 +1263,7 @@ static void test_out_dummy_esp_null_sha256_tun(odp_ipsec_tunnel_param_t tunnel)
 		return;
 
 	ipsec_sa_param_fill(&param,
-			    false, false, 123, &tunnel,
+			    ODP_IPSEC_DIR_OUTBOUND, ODP_IPSEC_ESP, 123, &tunnel,
 			    ODP_CIPHER_ALG_NULL, NULL,
 			    ODP_AUTH_ALG_SHA256_HMAC, &key_5a_256,
 			    NULL, NULL);
@@ -1275,7 +1273,7 @@ static void test_out_dummy_esp_null_sha256_tun(odp_ipsec_tunnel_param_t tunnel)
 	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
 
 	ipsec_sa_param_fill(&param,
-			    true, false, 123, &tunnel,
+			    ODP_IPSEC_DIR_INBOUND, ODP_IPSEC_ESP, 123, &tunnel,
 			    ODP_CIPHER_ALG_NULL, NULL,
 			    ODP_AUTH_ALG_SHA256_HMAC, &key_5a_256,
 			    NULL, NULL);
@@ -1353,7 +1351,7 @@ static void test_out_ipv4_udp_esp_null_sha256(void)
 	odp_ipsec_sa_t sa;
 
 	ipsec_sa_param_fill(&param,
-			    false, false, 123, NULL,
+			    ODP_IPSEC_DIR_OUTBOUND, ODP_IPSEC_ESP, 123, NULL,
 			    ODP_CIPHER_ALG_NULL, NULL,
 			    ODP_AUTH_ALG_SHA256_HMAC, &key_5a_256,
 			    NULL, NULL);
@@ -1394,7 +1392,8 @@ static void test_out_ipv4_null_aes_xcbc(void)
 	tunnel.ipv4.ttl = 64;
 
 	ipsec_sa_param_fill(&param,
-			    false, false, 0x100, &tunnel,
+			    ODP_IPSEC_DIR_OUTBOUND, ODP_IPSEC_ESP,
+			    0x100, &tunnel,
 			    ODP_CIPHER_ALG_NULL, NULL,
 			    ODP_AUTH_ALG_AES_XCBC_MAC, &key_auth_aes_xcbc_128,
 			    NULL, NULL);
@@ -1431,11 +1430,8 @@ static void test_sa_info(void)
 	odp_ipsec_sa_param_t param_in;
 	odp_ipsec_sa_info_t info_out;
 	odp_ipsec_sa_info_t info_in;
-	odp_ipsec_capability_t capa;
 	odp_ipsec_sa_t sa_out;
 	odp_ipsec_sa_t sa_in;
-
-	CU_ASSERT_EQUAL(0, odp_ipsec_capability(&capa));
 
 	memset(&tunnel_out, 0, sizeof(tunnel_out));
 	memset(&tunnel_in, 0, sizeof(tunnel_in));
@@ -1445,7 +1441,8 @@ static void test_sa_info(void)
 	tunnel_out.ipv4.dst_addr = &dst;
 
 	ipsec_sa_param_fill(&param_out,
-			    false, false, 123, &tunnel_out,
+			    ODP_IPSEC_DIR_OUTBOUND, ODP_IPSEC_ESP,
+			    123, &tunnel_out,
 			    ODP_CIPHER_ALG_AES_CBC, &key_a5_128,
 			    ODP_AUTH_ALG_SHA1_HMAC, &key_5a_160,
 			    NULL, NULL);
@@ -1455,7 +1452,8 @@ static void test_sa_info(void)
 	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa_out);
 
 	ipsec_sa_param_fill(&param_in,
-			    true, false, 123, &tunnel_in,
+			    ODP_IPSEC_DIR_INBOUND, ODP_IPSEC_ESP,
+			    123, &tunnel_in,
 			    ODP_CIPHER_ALG_AES_CBC, &key_a5_128,
 			    ODP_AUTH_ALG_SHA1_HMAC, &key_5a_160,
 			    NULL, NULL);
@@ -1557,7 +1555,7 @@ static void test_sa_info(void)
 	 * mode SA and ODP_IPSEC_DSTADD_SPI lookup mode.
 	 */
 	ipsec_sa_param_fill(&param_in,
-			    true, false, 123, NULL,
+			    ODP_IPSEC_DIR_INBOUND, ODP_IPSEC_ESP, 123, NULL,
 			    ODP_CIPHER_ALG_AES_CBC, &key_a5_128,
 			    ODP_AUTH_ALG_SHA1_HMAC, &key_5a_160,
 			    NULL, NULL);
@@ -1588,7 +1586,7 @@ static void test_test_sa_update_seq_num(void)
 	flags.display_algo = true;
 	flags.part_flags.test_sa_seq_num = true;
 
-	test_esp_out_in_all(&flags);
+	test_out_in_all(&flags);
 
 	printf("\n  ");
 }
@@ -1664,15 +1662,15 @@ static void test_ipsec_stats(void)
 
 	printf("\n        Stats : success");
 	flags.stats = IPSEC_TEST_STATS_SUCCESS;
-	test_esp_out_in_all(&flags);
+	test_out_in_all(&flags);
 
 	printf("\n        Stats : proto err");
 	flags.stats = IPSEC_TEST_STATS_PROTO_ERR;
-	test_esp_out_in_all(&flags);
+	test_out_in_all(&flags);
 
 	printf("\n        Stats : auth err");
 	flags.stats = IPSEC_TEST_STATS_AUTH_ERR;
-	test_esp_out_in_all(&flags);
+	test_out_in_all(&flags);
 
 	printf("\n  ");
 }
@@ -1793,7 +1791,8 @@ static void test_max_num_sa(void)
 		tun_dst = 0x0a800000 + n;
 
 		ipsec_sa_param_fill(&param,
-				    false, false, spi_start + n, &tun,
+				    ODP_IPSEC_DIR_OUTBOUND, ODP_IPSEC_ESP,
+				    spi_start + n, &tun,
 				    ODP_CIPHER_ALG_AES_CBC, &cipher_key,
 				    ODP_AUTH_ALG_SHA1_HMAC, &auth_key,
 				    NULL, NULL);
@@ -1801,7 +1800,8 @@ static void test_max_num_sa(void)
 		CU_ASSERT_FATAL(sa_out[n] != ODP_IPSEC_SA_INVALID);
 
 		ipsec_sa_param_fill(&param,
-				    true, false, spi_start + n, &tun,
+				    ODP_IPSEC_DIR_INBOUND, ODP_IPSEC_ESP,
+				    spi_start + n, &tun,
 				    ODP_CIPHER_ALG_AES_CBC, &cipher_key,
 				    ODP_AUTH_ALG_SHA1_HMAC, &auth_key,
 				    NULL, NULL);
@@ -1820,7 +1820,8 @@ static void test_max_num_sa(void)
 		tun_dst = 0x0a800000 + n;
 
 		ipsec_sa_param_fill(&param,
-				    false, false, spi_start + n, &tun,
+				    ODP_IPSEC_DIR_OUTBOUND, ODP_IPSEC_ESP,
+				    spi_start + n, &tun,
 				    ODP_CIPHER_ALG_AES_CBC, &cipher_key,
 				    ODP_AUTH_ALG_SHA1_HMAC, &auth_key,
 				    NULL, NULL);
@@ -1860,12 +1861,6 @@ odp_testinfo_t ipsec_out_suite[] = {
 				  ipsec_check_esp_null_sha256),
 	ODP_TEST_INFO_CONDITIONAL(test_out_ipv4_esp_udp_null_sha256,
 				  ipsec_check_esp_null_sha256),
-	ODP_TEST_INFO_CONDITIONAL(test_out_ipv4_ah_aes_gmac_128,
-				  ipsec_check_ah_aes_gmac_128),
-	ODP_TEST_INFO_CONDITIONAL(test_out_ipv4_ah_aes_gmac_192,
-				  ipsec_check_ah_aes_gmac_192),
-	ODP_TEST_INFO_CONDITIONAL(test_out_ipv4_ah_aes_gmac_256,
-				  ipsec_check_ah_aes_gmac_256),
 	ODP_TEST_INFO_CONDITIONAL(test_out_ipv4_ah_sha256_frag_check,
 				  ipsec_check_ah_sha256),
 	ODP_TEST_INFO_CONDITIONAL(test_out_ipv4_ah_sha256_frag_check_2,
@@ -1901,9 +1896,9 @@ odp_testinfo_t ipsec_out_suite[] = {
 	ODP_TEST_INFO_CONDITIONAL(test_test_sa_update_seq_num,
 				  ipsec_check_test_sa_update_seq_num),
 	ODP_TEST_INFO(test_esp_out_in_all_basic),
-	ODP_TEST_INFO_CONDITIONAL(test_esp_out_in_all_hdr_in_packet,
+	ODP_TEST_INFO_CONDITIONAL(test_inline_hdr_in_packet,
 				  is_out_mode_inline),
-	ODP_TEST_INFO(test_ah_out_in_all),
+	ODP_TEST_INFO(test_ah_out_in_all_basic),
 	ODP_TEST_INFO(test_ipsec_stats),
 	ODP_TEST_INFO(test_udp_encap),
 	ODP_TEST_INFO_CONDITIONAL(test_max_num_sa,

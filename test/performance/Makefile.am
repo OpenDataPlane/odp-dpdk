@@ -15,7 +15,8 @@ EXECUTABLES = odp_atomic_perf \
 	      odp_queue_perf \
 	      odp_random
 
-COMPILE_ONLY = odp_l2fwd \
+COMPILE_ONLY = odp_dma_perf \
+	       odp_l2fwd \
 	       odp_packet_gen \
 	       odp_pktio_ordered \
 	       odp_sched_latency \
@@ -24,7 +25,8 @@ COMPILE_ONLY = odp_l2fwd \
 	       odp_scheduling \
 	       odp_timer_perf
 
-TESTSCRIPTS = odp_l2fwd_run.sh \
+TESTSCRIPTS = odp_dma_perf_run.sh \
+	      odp_l2fwd_run.sh \
 	      odp_packet_gen_run.sh \
 	      odp_sched_latency_run.sh \
 	      odp_sched_perf_run.sh \
@@ -49,6 +51,7 @@ odp_bench_packet_SOURCES = odp_bench_packet.c
 odp_cpu_bench_SOURCES = odp_cpu_bench.c
 odp_crc_SOURCES = odp_crc.c
 odp_crypto_SOURCES = odp_crypto.c
+odp_dma_perf_SOURCES = odp_dma_perf.c
 odp_ipsec_SOURCES = odp_ipsec.c
 odp_lock_perf_SOURCES = odp_lock_perf.c
 odp_mem_perf_SOURCES = odp_mem_perf.c

@@ -1,5 +1,5 @@
 /* Copyright (c) 2013-2018, Linaro Limited
- * Copyright (c) 2019-2021, Nokia
+ * Copyright (c) 2019-2022, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -19,6 +19,7 @@ extern "C" {
 #endif
 
 #include <odp/api/align.h>
+#include <odp/api/atomic.h>
 #include <odp/api/debug.h>
 #include <odp/api/packet.h>
 #include <odp/api/plat/packet_inline_types.h>
@@ -117,8 +118,17 @@ typedef struct ODP_ALIGNED_CACHE odp_packet_hdr_t {
 	/* Classifier destination queue */
 	odp_queue_t dst_queue;
 
+	/* Reference count */
+	odp_atomic_u32_t ref_cnt;
+
 	/* Flow hash value */
 	uint32_t flow_hash;
+
+	/* User area pointer */
+	void *uarea_addr;
+
+	/* User context pointer */
+	const void *user_ptr;
 
 	/* Classifier mark */
 	uint16_t cls_mark;

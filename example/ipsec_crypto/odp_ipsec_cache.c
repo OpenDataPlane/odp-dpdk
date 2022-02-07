@@ -95,13 +95,11 @@ int create_ipsec_cache_entry(sa_db_entry_t *cipher_sa,
 		params.cipher_alg  = cipher_sa->alg.u.cipher;
 		params.cipher_key.data  = cipher_sa->key.data;
 		params.cipher_key.length  = cipher_sa->key.length;
-		params.cipher_iv.data = entry->state.iv;
-		params.cipher_iv.length = cipher_sa->iv_len;
+		params.cipher_iv_len = cipher_sa->iv_len;
 		mode = cipher_sa->mode;
 	} else {
 		params.cipher_alg = ODP_CIPHER_ALG_NULL;
-		params.cipher_iv.data = NULL;
-		params.cipher_iv.length = 0;
+		params.cipher_iv_len = 0;
 	}
 
 	/* Auth */
@@ -111,23 +109,15 @@ int create_ipsec_cache_entry(sa_db_entry_t *cipher_sa,
 		params.auth_key.length = auth_sa->key.length;
 		params.auth_digest_len = auth_sa->icv_len;
 		mode = auth_sa->mode;
+		params.hash_result_in_auth_range = true;
 	} else {
 		params.auth_alg = ODP_AUTH_ALG_NULL;
-	}
-
-	/* Generate an IV */
-	if (params.cipher_iv.length) {
-		int32_t size = params.cipher_iv.length;
-
-		int32_t ret = odp_random_data(params.cipher_iv.data, size, 1);
-		if (ret != size)
-			return -1;
 	}
 
 	/* Synchronous session create for now */
 	if (odp_crypto_session_create(&params, &session, &ses_create_rc))
 		return -1;
-	if (ODP_CRYPTO_SES_CREATE_ERR_NONE != ses_create_rc)
+	if (ODP_CRYPTO_SES_ERR_NONE != ses_create_rc)
 		return -1;
 
 	/* Copy remainder */

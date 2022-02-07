@@ -1,4 +1,5 @@
 /* Copyright (c) 2014-2018, Linaro Limited
+ * Copyright (c) 2021-2022, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -232,12 +233,14 @@ typedef enum {
 	 *  cipher.
 	 *
 	 *  NIST and RFC specifications of GMAC refer to all data to be
-	 *  authenticated as AAD. In constrast to that, ODP API specifies
-	 *  the bulk of authenticated data to be located in packet payload for
-	 *  all authentication algorithms. Thus GMAC operation authenticates
-	 *  only packet payload and AAD is not used. GMAC needs
-	 *  an initialization vector, which can be passed via session (auth_iv)
-	 *  or packet (auth_iv_ptr) level parameters.
+	 *  authenticated as AAD. In ODP the data to be authenticated, i.e.
+	 *  AAD, is ODP packet data and specified using the auth_range
+	 *  parameter. The aad_length and aad_ptr parameters, which would
+	 *  require the data to be contiguous in memory, are ignored with
+	 *  AES-GMAC.
+	 *
+	 *  GMAC needs an initialization vector, which can be passed via
+	 *  session (auth_iv) or packet (auth_iv_ptr) level parameters.
 	 */
 	ODP_AUTH_ALG_AES_GMAC,
 
@@ -524,15 +527,25 @@ typedef struct odp_crypto_key {
 
 /**
  * Crypto API IV structure
+ *
+ * @deprecated
  */
 typedef struct odp_crypto_iv {
-	/** IV data */
+	/** IV data
+	 *
+	 *  Ignored when length is zero. Null value indicates that an
+	 *  IV will be provided for each packet through the crypto
+	 *  operation parameters. In that case the per-operation
+	 *  IV parameter must always point to a valid IV.
+	 *
+	 *  Default value is NULL.
+	 */
 	uint8_t *data;
 
-	/** IV length in bytes */
+	/** IV length in bytes. Default value is zero. */
 	uint32_t length;
 
-} odp_crypto_iv_t;
+} ODP_DEPRECATE(odp_crypto_iv_t);
 
 /**
  * Crypto API data range specifier
@@ -559,12 +572,25 @@ typedef struct odp_crypto_session_param_t {
 	 *  after the cipher operation else before. When decoding, TRUE
 	 *  indicates the reverse order of operation.
 	 *
+	 *  The value is ignored with authenticated encryption algorithms
+	 *  such as AES-GCM.
+	 *
 	 *  true:  Authenticate cipher text
 	 *  false: Authenticate plain text
 	 *
 	 *  The default value is false.
 	 */
 	odp_bool_t auth_cipher_text;
+
+	/** Hash result location may overlap authentication range
+	 *
+	 *  This flag indicates that the hash result location may (but is
+	 *  not required to) overlap authentication range. Setting this
+	 *  flag may reduce performance.
+	 *
+	 *  Default value is false.
+	 */
+	odp_bool_t hash_result_in_auth_range;
 
 	/** Preferred sync vs. async for odp_crypto_operation()
 	 *
@@ -595,13 +621,31 @@ typedef struct odp_crypto_session_param_t {
 	 */
 	odp_crypto_key_t cipher_key;
 
-	/** Cipher Initialization Vector (IV) */
+	/** Cipher Initialization Vector (IV)
+	 *
+	 *  Unless using the deprecated API, this specifies the length of
+	 *  the IV only. The actual IV must then be provided in per-packet
+	 *  parameters of crypto operations.
+	 */
 	union {
+#if ODP_DEPRECATED_API
 		/** @deprecated Use cipher_iv */
 		odp_crypto_iv_t ODP_DEPRECATE(iv);
 
 		/** Cipher Initialization Vector (IV) */
-		odp_crypto_iv_t cipher_iv;
+		odp_crypto_iv_t ODP_DEPRECATE(cipher_iv);
+#endif
+		/** Cipher IV length */
+		struct {
+#if ODP_DEPRECATED_API
+			/** Unused padding field */
+			uint8_t *dummy_padding_0;
+#endif
+			/** Length of cipher initialization vector.
+			 *  Default value is zero.
+			 */
+			uint32_t cipher_iv_len;
+		};
 	};
 
 	/** Authentication algorithm
@@ -627,8 +671,28 @@ typedef struct odp_crypto_session_param_t {
 	 */
 	odp_crypto_key_t auth_key;
 
-	/** Authentication Initialization Vector (IV) */
-	odp_crypto_iv_t auth_iv;
+	/** Authentication Initialization Vector (IV)
+	 *
+	 *  Unless using the deprecated API, this specifies the length of
+	 *  the IV only. The actual IV must then be provided in per-packet
+	 *  parameters of crypto operations.
+	 */
+	union {
+#if ODP_DEPRECATED_API
+		odp_crypto_iv_t ODP_DEPRECATE(auth_iv);
+#endif
+		/** Authentication IV length */
+		struct {
+#if ODP_DEPRECATED_API
+			/** Unused padding field */
+			uint8_t *dummy_padding_1;
+#endif
+			/** Length of authentication initialization vector.
+			 *  Default value is zero.
+			 */
+			uint32_t auth_iv_len;
+		};
+	};
 
 	/** Authentication digest length in bytes
 	 *
@@ -697,24 +761,30 @@ typedef struct odp_crypto_op_param_t {
 	 */
 	odp_packet_t out_pkt;
 
-	/** Override session IV pointer for cipher */
+	/** IV pointer for cipher */
 	union {
 		/** @deprecated use cipher_iv_ptr */
 		uint8_t *ODP_DEPRECATE(override_iv_ptr);
-		/** Override session IV pointer for cipher */
+		/** IV pointer for cipher */
 		uint8_t *cipher_iv_ptr;
 	};
 
-	/** Override session authentication IV pointer */
+	/** Authentication IV pointer */
 	uint8_t *auth_iv_ptr;
 
 	/** Offset from start of packet for hash result
 	 *
-	 *  Specifies the offset where the hash result is to be stored. In case
-	 *  of decode sessions, input hash values will be read from this offset,
-	 *  and overwritten with hash results. If this offset lies within
-	 *  specified 'auth_range', implementation will mute this field before
-	 *  calculating the hash result.
+	 *  In case of decode sessions, the expected hash will be read from
+	 *  this offset and compared with the calculated hash. After the
+	 *  operation the hash bytes will have undefined values.
+	 *
+	 *  In case of encode sessions the calculated hash will be stored in
+	 *  this offset.
+	 *
+	 *  If the hash_result_in_auth_range session parameter is true,
+	 *  the hash result location may overlap auth_range. In that case
+	 *  the result location will be zeroed in decode sessions before
+	 *  hash calculation. Zeroing is not done in encode sessions.
 	 */
 	uint32_t hash_result_offset;
 
@@ -723,10 +793,18 @@ typedef struct odp_crypto_op_param_t {
 	 */
 	uint8_t *aad_ptr;
 
-	/** Data range to apply cipher */
+	/** Data range to be ciphered */
 	odp_packet_data_range_t cipher_range;
 
-	/** Data range to authenticate */
+	/** Data range to be authenticated
+	 *
+	 *  The value is ignored with authenticated encryption algorithms,
+	 *  such as AES-GCM, which authenticate data in the cipher range
+	 *  and the AAD.
+	 *
+	 *  As a special case AES-GMAC uses this field instead of aad_ptr
+	 *  for the data bytes to be authenticated.
+	 */
 	odp_packet_data_range_t auth_range;
 
 } odp_crypto_op_param_t;
@@ -741,24 +819,30 @@ typedef struct odp_crypto_packet_op_param_t {
 	/** Session handle from creation */
 	odp_crypto_session_t session;
 
-	/** Override session IV pointer for cipher */
+	/** IV pointer for cipher */
 	union {
 		/** @deprecated use cipher_iv_ptr */
 		uint8_t *ODP_DEPRECATE(override_iv_ptr);
-		/** Override session IV pointer for cipher */
+		/** IV pointer for cipher */
 		uint8_t *cipher_iv_ptr;
 	};
 
-	/** Override session IV pointer for authentication */
+	/** IV pointer for authentication */
 	uint8_t *auth_iv_ptr;
 
 	/** Offset from start of packet for hash result
 	 *
-	 *  Specifies the offset where the hash result is to be stored. In case
-	 *  of decode sessions, input hash values will be read from this offset,
-	 *  and overwritten with hash results. If this offset lies within
-	 *  specified 'auth_range', implementation will mute this field before
-	 *  calculating the hash result.
+	 *  In case of decode sessions, the expected hash will be read from
+	 *  this offset and compared with the calculated hash. After the
+	 *  operation the hash bytes will have undefined values.
+	 *
+	 *  In case of encode sessions the calculated hash will be stored in
+	 *  this offset.
+	 *
+	 *  If the hash_result_not_in_auth_range session parameter is false,
+	 *  the hash result location may overlap auth_range. In that case the
+	 *  result location will be zeroed in decode sessions before hash
+	 *  calculation. Zeroing is not done in encode sessions.
 	 */
 	uint32_t hash_result_offset;
 
@@ -780,14 +864,49 @@ typedef struct odp_crypto_packet_op_param_t {
  */
 typedef enum {
 	/** Session created */
-	ODP_CRYPTO_SES_CREATE_ERR_NONE,
+	ODP_CRYPTO_SES_ERR_NONE,
 	/** Creation failed, no resources */
-	ODP_CRYPTO_SES_CREATE_ERR_ENOMEM,
+	ODP_CRYPTO_SES_ERR_ENOMEM,
 	/** Creation failed, bad cipher params */
-	ODP_CRYPTO_SES_CREATE_ERR_INV_CIPHER,
+	ODP_CRYPTO_SES_ERR_CIPHER,
 	/** Creation failed, bad auth params */
-	ODP_CRYPTO_SES_CREATE_ERR_INV_AUTH,
+	ODP_CRYPTO_SES_ERR_AUTH,
+
+	/** Unsupported combination of algorithms
+	 *
+	 *  The combination of cipher and auth algorithms with their
+	 *  specific parameters is not supported even if the algorithms
+	 *  appear in capabilities and are supported in combination with
+	 *  other algorithms or other algorithm specific parameters.
+	 */
+	ODP_CRYPTO_SES_ERR_ALG_COMBO,
+
+	/** Unsupported order of cipher and auth
+	 *
+	 *  The requested mutual order of ciphering and authentication
+	 *  is not supported with the chosen individual cipher and
+	 *  authentication algorithms.
+	 */
+	ODP_CRYPTO_SES_ERR_ALG_ORDER,
+
+	/** Unsupported combination of session creation parameters
+	 *
+	 *  The combination of provided session creation parameters is not
+	 *  supported. This error can occur when there are limitations that
+	 *  are not expressible through crypto capabilities or other error
+	 *  status values.
+	 */
+	ODP_CRYPTO_SES_ERR_PARAMS,
 } odp_crypto_ses_create_err_t;
+
+/** This synonym for backward compatibility will be deprecated later */
+#define ODP_CRYPTO_SES_CREATE_ERR_NONE       ODP_CRYPTO_SES_ERR_NONE
+/** This synonym for backward compatibility will be deprecated later */
+#define ODP_CRYPTO_SES_CREATE_ERR_ENOMEM     ODP_CRYPTO_SES_ERR_ENOMEM
+/** This synonym for backward compatibility will be deprecated later */
+#define ODP_CRYPTO_SES_CREATE_ERR_INV_CIPHER ODP_CRYPTO_SES_ERR_CIPHER
+/** This synonym for backward compatibility will be deprecated later */
+#define ODP_CRYPTO_SES_CREATE_ERR_INV_AUTH   ODP_CRYPTO_SES_ERR_AUTH
 
 /**
  * Crypto API algorithm return code
