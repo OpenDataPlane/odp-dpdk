@@ -126,6 +126,9 @@ typedef struct odp_packet_hdr_t {
 	/* Classifier destination queue */
 	odp_queue_t dst_queue;
 
+	/* User area pointer */
+	void *uarea_addr;
+
 	/* User context pointer */
 	const void *user_ptr;
 

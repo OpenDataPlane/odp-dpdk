@@ -57,9 +57,6 @@ typedef struct _odp_event_hdr_t {
 	/* Pool pointer */
 	void *pool_ptr;
 
-	/* User area pointer */
-	void *uarea_addr;
-
 } _odp_event_hdr_t;
 
 static inline odp_event_t _odp_event_from_hdr(_odp_event_hdr_t *hdr)

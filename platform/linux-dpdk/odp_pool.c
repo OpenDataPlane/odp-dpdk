@@ -365,8 +365,14 @@ odp_dpdk_mbuf_ctor(struct rte_mempool *mp,
 	event_hdr->pool_ptr = mb_ctor_arg->pool;
 	event_hdr->type = mb_ctor_arg->type;
 	event_hdr->event_type = mb_ctor_arg->event_type;
-	event_hdr->uarea_addr = mb_ctor_arg->pool->uarea_base_addr +
-			      i * mb_ctor_arg->pool->uarea_size;
+
+	/* Initialize packet metadata */
+	if (mb_ctor_arg->type == ODP_POOL_PACKET) {
+		odp_packet_hdr_t *pkt_hdr = (odp_packet_hdr_t *)raw_mbuf;
+
+		pkt_hdr->uarea_addr = mb_ctor_arg->pool->uarea_base_addr +
+					i * mb_ctor_arg->pool->uarea_size;
+	}
 
 	/* Initialize event vector metadata */
 	if (mb_ctor_arg->type == ODP_POOL_VECTOR) {
