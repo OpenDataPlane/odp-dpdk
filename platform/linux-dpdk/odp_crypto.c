@@ -1439,14 +1439,14 @@ int odp_crypto_session_create(const odp_crypto_session_param_t *param,
 		ODP_ERR("Crypto is disabled\n");
 		/* Dummy output to avoid compiler warning about uninitialized
 		 * variables */
-		*status = ODP_CRYPTO_SES_CREATE_ERR_ENOMEM;
+		*status = ODP_CRYPTO_SES_ERR_ENOMEM;
 		*session_out = ODP_CRYPTO_SESSION_INVALID;
 		return -1;
 	}
 
 	if (rte_cryptodev_count() == 0) {
 		ODP_ERR("No crypto devices available\n");
-		*status = ODP_CRYPTO_SES_CREATE_ERR_ENOMEM;
+		*status = ODP_CRYPTO_SES_ERR_ENOMEM;
 		goto err;
 	}
 
@@ -1454,7 +1454,7 @@ int odp_crypto_session_create(const odp_crypto_session_param_t *param,
 	session = alloc_session();
 	if (session == NULL) {
 		ODP_ERR("Failed to allocate a session session");
-		*status = ODP_CRYPTO_SES_CREATE_ERR_ENOMEM;
+		*status = ODP_CRYPTO_SES_ERR_ENOMEM;
 		goto err;
 	}
 
@@ -1481,7 +1481,7 @@ int odp_crypto_session_create(const odp_crypto_session_param_t *param,
 
 	if (cipher_is_aead(param->cipher_alg)) {
 		if (crypto_fill_aead_xform(&cipher_xform, &session->p) < 0) {
-			*status = ODP_CRYPTO_SES_CREATE_ERR_INV_CIPHER;
+			*status = ODP_CRYPTO_SES_ERR_CIPHER;
 			goto err;
 		}
 
@@ -1493,12 +1493,12 @@ int odp_crypto_session_create(const odp_crypto_session_param_t *param,
 		odp_bool_t do_cipher_first;
 
 		if (crypto_fill_cipher_xform(&cipher_xform, &session->p) < 0) {
-			*status = ODP_CRYPTO_SES_CREATE_ERR_INV_CIPHER;
+			*status = ODP_CRYPTO_SES_ERR_CIPHER;
 			goto err;
 		}
 
 		if (crypto_fill_auth_xform(&auth_xform, &session->p) < 0) {
-			*status = ODP_CRYPTO_SES_CREATE_ERR_INV_AUTH;
+			*status = ODP_CRYPTO_SES_ERR_AUTH;
 			goto err;
 		}
 
@@ -1534,7 +1534,7 @@ int odp_crypto_session_create(const odp_crypto_session_param_t *param,
 	}
 	if (rc) {
 		ODP_ERR("Couldn't find a crypto device");
-		*status = ODP_CRYPTO_SES_CREATE_ERR_ENOMEM;
+		*status = ODP_CRYPTO_SES_ERR_ENOMEM;
 		goto err;
 	}
 
@@ -1544,7 +1544,7 @@ int odp_crypto_session_create(const odp_crypto_session_param_t *param,
 	/* Setup session */
 	rte_session = rte_cryptodev_sym_session_create(sess_mp);
 	if (rte_session == NULL) {
-		*status = ODP_CRYPTO_SES_CREATE_ERR_ENOMEM;
+		*status = ODP_CRYPTO_SES_ERR_ENOMEM;
 		goto err;
 	}
 
@@ -1552,7 +1552,7 @@ int odp_crypto_session_create(const odp_crypto_session_param_t *param,
 					   first_xform, sess_mp) < 0) {
 		/* remove the crypto_session_entry_t */
 		rte_cryptodev_sym_session_free(rte_session);
-		*status = ODP_CRYPTO_SES_CREATE_ERR_ENOMEM;
+		*status = ODP_CRYPTO_SES_ERR_ENOMEM;
 		goto err;
 	}
 
@@ -1578,7 +1578,7 @@ out_null:
 
 	/* We're happy */
 	*session_out = (intptr_t)session;
-	*status = ODP_CRYPTO_SES_CREATE_ERR_NONE;
+	*status = ODP_CRYPTO_SES_ERR_NONE;
 
 	return 0;
 
