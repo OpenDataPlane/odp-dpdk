@@ -1,5 +1,5 @@
 /* Copyright (c) 2017-2018, Linaro Limited
- * Copyright (c) 2018-2021, Nokia
+ * Copyright (c) 2018-2022, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -1738,12 +1738,14 @@ static uint8_t *crypto_prepare_digest(crypto_session_entry_t *session,
 	uint8_t *data;
 	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
 
-	if (verify)
+	if (verify) {
 		odp_packet_copy_to_mem(pkt, param->hash_result_offset,
 				       session->p.auth_digest_len,
 				       pkt_hdr->crypto_digest_buf);
-	_odp_packet_set_data(pkt, param->hash_result_offset, 0,
-			     session->p.auth_digest_len);
+		if (odp_unlikely(session->p.hash_result_in_auth_range))
+			_odp_packet_set_data(pkt, param->hash_result_offset, 0,
+					     session->p.auth_digest_len);
+	}
 	data = pkt_hdr->crypto_digest_buf;
 	mb = &pkt_hdr->event_hdr.mb;
 	*phys_addr =
@@ -2073,7 +2075,8 @@ int odp_crypto_int(odp_packet_t pkt_in,
 		result_ok = false;
 	}
 
-	if (session->p.auth_digest_len != 0 &&
+	if (session->p.op == ODP_CRYPTO_OP_ENCODE &&
+	    session->p.auth_digest_len != 0 &&
 	    op->status == RTE_CRYPTO_OP_STATUS_SUCCESS) {
 		odp_packet_hdr_t *pkt_hdr = packet_hdr(out_pkt);
 
