@@ -267,32 +267,10 @@ int ipsec_check_ah_aes_gmac_128(void)
 	return  ipsec_check_ah(ODP_AUTH_ALG_AES_GMAC, 128);
 }
 
-int ipsec_check_ah_aes_gmac_192(void)
-{
-	return  ipsec_check_ah(ODP_AUTH_ALG_AES_GMAC, 192);
-}
-
-int ipsec_check_ah_aes_gmac_256(void)
-{
-	return  ipsec_check_ah(ODP_AUTH_ALG_AES_GMAC, 256);
-}
-
 int ipsec_check_esp_null_aes_gmac_128(void)
 {
 	return  ipsec_check_esp(ODP_CIPHER_ALG_NULL, 0,
 				ODP_AUTH_ALG_AES_GMAC, 128);
-}
-
-int ipsec_check_esp_null_aes_gmac_192(void)
-{
-	return  ipsec_check_esp(ODP_CIPHER_ALG_NULL, 0,
-				ODP_AUTH_ALG_AES_GMAC, 192);
-}
-
-int ipsec_check_esp_null_aes_gmac_256(void)
-{
-	return  ipsec_check_esp(ODP_CIPHER_ALG_NULL, 0,
-				ODP_AUTH_ALG_AES_GMAC, 256);
 }
 
 int ipsec_check_esp_chacha20_poly1305(void)
@@ -336,8 +314,8 @@ int ipsec_check_esp_null_aes_xcbc(void)
 }
 
 void ipsec_sa_param_fill(odp_ipsec_sa_param_t *param,
-			 odp_bool_t in,
-			 odp_bool_t ah,
+			 odp_ipsec_dir_t dir,
+			 odp_ipsec_protocol_t proto,
 			 uint32_t spi,
 			 odp_ipsec_tunnel_param_t *tun,
 			 odp_cipher_alg_t cipher_alg,
@@ -348,18 +326,16 @@ void ipsec_sa_param_fill(odp_ipsec_sa_param_t *param,
 			 const odp_crypto_key_t *auth_key_extra)
 {
 	odp_ipsec_sa_param_init(param);
-	param->dir = in ? ODP_IPSEC_DIR_INBOUND :
-			  ODP_IPSEC_DIR_OUTBOUND;
-	if (in) {
+	param->dir = dir;
+	if (dir == ODP_IPSEC_DIR_INBOUND) {
 		param->inbound.lookup_mode = ODP_IPSEC_LOOKUP_SPI;
 		param->inbound.antireplay_ws = capa.max_antireplay_ws;
 	}
-	param->proto = ah ? ODP_IPSEC_AH :
-			    ODP_IPSEC_ESP;
+	param->proto = proto;
 
 	if (tun) {
 		param->mode = ODP_IPSEC_MODE_TUNNEL;
-		if (!in)
+		if (dir == ODP_IPSEC_DIR_OUTBOUND)
 			param->outbound.tunnel = *tun;
 	} else {
 		param->mode = ODP_IPSEC_MODE_TRANSPORT;

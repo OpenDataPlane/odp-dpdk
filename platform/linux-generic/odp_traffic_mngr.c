@@ -1,6 +1,7 @@
 /* Copyright 2015 EZchip Semiconductor Ltd. All Rights Reserved.
  *
  * Copyright (c) 2015-2018, Linaro Limited
+ * Copyright (c) 2022, Marvell
  * All rights reserved.
  *
  * SPDX-License-Identifier: BSD-3-Clause
@@ -48,6 +49,10 @@ static const pkt_desc_t EMPTY_PKT_DESC = { .word = 0 };
 
 #define MAX_PRIORITIES ODP_TM_MAX_PRIORITIES
 #define NUM_SHAPER_COLORS ODP_NUM_SHAPER_COLORS
+
+/* Shaper BW limits in bits/sec */
+#define TM_MIN_SHAPER_BW  8000ULL
+#define TM_MAX_SHAPER_BW  (100ULL * 1000ULL * 1000ULL * 1000ULL)
 
 static const tm_prop_t basic_prop_tbl[MAX_PRIORITIES][NUM_SHAPER_COLORS] = {
 	[0] = {
@@ -165,24 +170,6 @@ static inline tm_queue_obj_t *tm_qobj_from_index(uint32_t queue_id)
 static inline tm_node_obj_t *tm_nobj_from_index(uint32_t node_id)
 {
 	return &tm_glb->node_obj.obj[node_id];
-}
-
-static int queue_tm_reenq(odp_queue_t queue, _odp_event_hdr_t *event_hdr)
-{
-	odp_tm_queue_t tm_queue = MAKE_ODP_TM_QUEUE(odp_queue_context(queue));
-	odp_packet_t pkt = packet_from_event_hdr(event_hdr);
-
-	return odp_tm_enq(tm_queue, pkt);
-}
-
-static int queue_tm_reenq_multi(odp_queue_t queue, _odp_event_hdr_t *event[],
-				int num)
-{
-	(void)queue;
-	(void)event;
-	(void)num;
-	ODP_ABORT("Invalid call to queue_tm_reenq_multi()\n");
-	return 0;
 }
 
 static tm_queue_obj_t *get_tm_queue_obj(tm_system_t *tm_system,
@@ -632,7 +619,7 @@ static void tm_shaper_params_cvt_to(const odp_tm_shaper_params_t *shaper_params,
 	commit_burst = (int64_t)shaper_params->commit_burst;
 
 	peak_rate = tm_bps_to_rate(shaper_params->peak_rate);
-	if ((shaper_params->peak_rate == 0) || (peak_rate == 0)) {
+	if ((!shaper_params->dual_rate) || (peak_rate == 0)) {
 		peak_rate = 0;
 		max_peak_time_delta = 0;
 		peak_burst = 0;
@@ -829,7 +816,7 @@ static void update_shaper_elapsed_time(tm_system_t        *tm_system,
 
 	shaper_obj->commit_cnt = (int64_t)MIN(max_commit, commit + commit_inc);
 
-	if (shaper_params->peak_rate != 0) {
+	if (shaper_params->dual_rate) {
 		peak = shaper_obj->peak_cnt;
 		max_peak = shaper_params->max_peak;
 		if (shaper_params->max_peak_time_delta <= time_delta)
@@ -860,7 +847,7 @@ static uint64_t time_till_not_red(tm_shaper_params_t *shaper_params,
 	min_time_delay =
 	    MAX(shaper_obj->shaper_params->min_time_delta, UINT64_C(256));
 	commit_delay = MAX(commit_delay, min_time_delay);
-	if (shaper_params->peak_rate == 0)
+	if (!shaper_params->dual_rate)
 		return commit_delay;
 
 	peak_delay = 0;
@@ -1064,7 +1051,7 @@ static odp_bool_t rm_pkt_from_shaper(tm_system_t *tm_system,
 		    (shaper_action == DECR_COMMIT))
 			shaper_obj->commit_cnt -= tkn_count;
 
-		if (shaper_params->peak_rate != 0)
+		if (shaper_params->dual_rate)
 			if ((shaper_action == DECR_BOTH) ||
 			    (shaper_action == DECR_PEAK))
 				shaper_obj->peak_cnt -= tkn_count;
@@ -1096,7 +1083,7 @@ static odp_bool_t run_shaper(tm_system_t     *tm_system,
 		if (shaper_params->enabled) {
 			if (0 < shaper_obj->commit_cnt)
 				shaper_color = ODP_TM_SHAPER_GREEN;
-			else if (shaper_params->peak_rate == 0)
+			else if (!shaper_params->dual_rate)
 				shaper_color = ODP_TM_SHAPER_RED;
 			else if (shaper_obj->peak_cnt <= 0)
 				shaper_color = ODP_TM_SHAPER_RED;
@@ -2608,6 +2595,10 @@ static int tm_capabilities(odp_tm_capabilities_t capabilities[],
 		per_level_cap->max_priority       = ODP_TM_MAX_PRIORITIES - 1;
 		per_level_cap->min_weight         = ODP_TM_MIN_SCHED_WEIGHT;
 		per_level_cap->max_weight         = ODP_TM_MAX_SCHED_WEIGHT;
+		per_level_cap->min_burst          = 0;
+		per_level_cap->max_burst          = UINT32_MAX;
+		per_level_cap->min_rate           = TM_MIN_SHAPER_BW;
+		per_level_cap->max_rate           = TM_MAX_SHAPER_BW;
 
 		per_level_cap->tm_node_shaper_supported     = true;
 		per_level_cap->tm_node_wred_supported       = true;
@@ -2730,6 +2721,10 @@ static void tm_system_capabilities_set(odp_tm_capabilities_t *cap_ptr,
 		per_level_cap->max_priority       = max_priority;
 		per_level_cap->min_weight         = min_weight;
 		per_level_cap->max_weight         = max_weight;
+		per_level_cap->min_burst          = 0;
+		per_level_cap->max_burst          = UINT32_MAX;
+		per_level_cap->min_rate           = TM_MIN_SHAPER_BW;
+		per_level_cap->max_rate           = TM_MAX_SHAPER_BW;
 
 		per_level_cap->tm_node_shaper_supported     = shaper_supported;
 		per_level_cap->tm_node_wred_supported       = wred_supported;
@@ -3923,6 +3918,7 @@ int odp_tm_node_shaper_config(odp_tm_node_t tm_node,
 {
 	tm_node_obj_t *tm_node_obj;
 	tm_system_t *tm_system;
+	odp_bool_t sync_needed;
 
 	tm_node_obj = GET_TM_NODE_OBJ(tm_node);
 	if (!tm_node_obj)
@@ -3933,8 +3929,13 @@ int odp_tm_node_shaper_config(odp_tm_node_t tm_node,
 		return -1;
 
 	odp_ticketlock_lock(&tm_glb->profile_lock);
+	sync_needed = tm_glb->main_loop_running;
+	if (sync_needed)
+		signal_request();
 	tm_shaper_config_set(tm_system, shaper_profile,
 			     &tm_node_obj->shaper_obj);
+	if (sync_needed)
+		signal_request_done();
 	odp_ticketlock_unlock(&tm_glb->profile_lock);
 	return 0;
 }
@@ -4052,7 +4053,6 @@ odp_tm_queue_t odp_tm_queue_create(odp_tm_t odp_tm,
 	_odp_int_pkt_queue_t _odp_int_pkt_queue;
 	tm_queue_obj_t *queue_obj;
 	odp_tm_queue_t odp_tm_queue = ODP_TM_INVALID;
-	odp_queue_t queue;
 	odp_tm_wred_t wred_profile;
 	tm_system_t *tm_system;
 	uint32_t color;
@@ -4089,25 +4089,6 @@ odp_tm_queue_t odp_tm_queue_create(odp_tm_t odp_tm,
 		odp_atomic_init_u64(&queue_obj->stats.discards, 0);
 		odp_atomic_init_u64(&queue_obj->stats.errors, 0);
 		odp_atomic_init_u64(&queue_obj->stats.packets, 0);
-
-		queue = odp_queue_create(NULL, NULL);
-		if (queue == ODP_QUEUE_INVALID) {
-			odp_tm_queue = ODP_TM_INVALID;
-			continue;
-		}
-
-		queue_obj->queue = queue;
-		if (odp_queue_context_set(queue, queue_obj, sizeof(tm_queue_obj_t))) {
-			ODP_ERR("Queue context set failed\n");
-			if (odp_queue_destroy(queue))
-				ODP_ERR("Queue destroy failed\n");
-
-			odp_tm_queue = ODP_TM_INVALID;
-			break;
-		}
-
-		_odp_queue_fn->set_enq_deq_fn(queue, queue_tm_reenq,
-					      queue_tm_reenq_multi, NULL, NULL);
 
 		tm_system->queue_num_tbl[queue_obj->queue_num - 1] = queue_obj;
 
@@ -4168,8 +4149,6 @@ int odp_tm_queue_destroy(odp_tm_queue_t tm_queue)
 	/* Now that all of the checks are done, time to so some freeing. */
 	odp_ticketlock_lock(&tm_system->tm_system_lock);
 	tm_system->queue_num_tbl[tm_queue_obj->queue_num - 1] = NULL;
-
-	odp_queue_destroy(tm_queue_obj->queue);
 
 	odp_ticketlock_lock(&tm_glb->queue_obj.lock);
 	_odp_pkt_queue_destroy(tm_system->_odp_int_queue_pool,
@@ -4485,6 +4464,7 @@ int odp_tm_enq(odp_tm_queue_t tm_queue, odp_packet_t pkt)
 {
 	tm_queue_obj_t *tm_queue_obj;
 	tm_system_t *tm_system;
+	int rc;
 
 	tm_queue_obj = GET_TM_QUEUE_OBJ(tm_queue);
 	if (!tm_queue_obj)
@@ -4497,7 +4477,10 @@ int odp_tm_enq(odp_tm_queue_t tm_queue, odp_packet_t pkt)
 	if (odp_atomic_load_u64(&tm_system->destroying))
 		return -1;
 
-	return tm_enqueue(tm_system, tm_queue_obj, pkt);
+	rc = tm_enqueue(tm_system, tm_queue_obj, pkt);
+	if (rc < 0)
+		return rc;
+	return 0;
 }
 
 int odp_tm_enq_with_cnt(odp_tm_queue_t tm_queue, odp_packet_t pkt)

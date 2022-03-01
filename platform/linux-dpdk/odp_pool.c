@@ -1,5 +1,5 @@
 /* Copyright (c) 2013-2018, Linaro Limited
- * Copyright (c) 2019-2021, Nokia
+ * Copyright (c) 2019-2022, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -58,6 +58,9 @@
 
 /* Define a practical limit for contiguous memory allocations */
 #define MAX_SIZE   (10 * 1024 * 1024)
+
+/* Maximum packet user area size */
+#define MAX_UAREA_SIZE 2048
 
 /* The pool table ptr - resides in shared memory */
 pool_global_t *_odp_pool_glb;
@@ -269,7 +272,7 @@ int odp_pool_capability(odp_pool_capability_t *capa)
 	capa->pkt.max_segs_per_pkt = PKT_MAX_SEGS;
 	capa->pkt.min_seg_len      = CONFIG_PACKET_SEG_LEN_MIN;
 	capa->pkt.max_seg_len      = CONFIG_PACKET_MAX_SEG_LEN;
-	capa->pkt.max_uarea_size   = MAX_SIZE;
+	capa->pkt.max_uarea_size   = MAX_UAREA_SIZE;
 	capa->pkt.min_cache_size   = 0;
 	capa->pkt.max_cache_size   = RTE_MEMPOOL_CACHE_MAX_SIZE;
 	capa->pkt.stats.all = supported_stats.all;
@@ -362,8 +365,14 @@ odp_dpdk_mbuf_ctor(struct rte_mempool *mp,
 	event_hdr->pool_ptr = mb_ctor_arg->pool;
 	event_hdr->type = mb_ctor_arg->type;
 	event_hdr->event_type = mb_ctor_arg->event_type;
-	event_hdr->uarea_addr = mb_ctor_arg->pool->uarea_base_addr +
-			      i * mb_ctor_arg->pool->uarea_size;
+
+	/* Initialize packet metadata */
+	if (mb_ctor_arg->type == ODP_POOL_PACKET) {
+		odp_packet_hdr_t *pkt_hdr = (odp_packet_hdr_t *)raw_mbuf;
+
+		pkt_hdr->uarea_addr = mb_ctor_arg->pool->uarea_base_addr +
+					i * mb_ctor_arg->pool->uarea_size;
+	}
 
 	/* Initialize event vector metadata */
 	if (mb_ctor_arg->type == ODP_POOL_VECTOR) {
@@ -1152,7 +1161,7 @@ int odp_pool_ext_capability(odp_pool_type_t type,
 	capa->pkt.max_headroom = RTE_PKTMBUF_HEADROOM;
 	capa->pkt.max_headroom_size = RTE_PKTMBUF_HEADROOM;
 	capa->pkt.max_segs_per_pkt = PKT_MAX_SEGS;
-	capa->pkt.max_uarea_size = MAX_SIZE;
+	capa->pkt.max_uarea_size = MAX_UAREA_SIZE;
 
 	return 0;
 }

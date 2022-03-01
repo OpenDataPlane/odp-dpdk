@@ -1,4 +1,5 @@
 /* Copyright (c) 2013-2018, Linaro Limited
+ * Copyright (c) 2021, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -772,6 +773,20 @@ pkt_disposition_e do_ipsec_in_finish(odp_packet_t pkt,
 	return PKT_CONTINUE;
 }
 
+static int generate_iv(uint8_t *buf, uint32_t size)
+{
+	uint32_t n = 0;
+	int32_t ret;
+
+	while (n < size) {
+		ret = odp_random_data(buf + n, size - n, ODP_RANDOM_CRYPTO);
+		if (ret < 0)
+			return 1;
+		n += ret;
+	}
+	return 0;
+}
+
 /**
  * Packet Processing - Output IPsec packet classification
  *
@@ -859,7 +874,9 @@ pkt_disposition_e do_ipsec_out_classify(odp_packet_t pkt,
 		trl_len = encrypt_len - ip_data_len;
 
 		esp->spi = odp_cpu_to_be_32(entry->esp.spi);
-		memcpy(esp + 1, entry->state.iv, entry->esp.iv_len);
+		if (generate_iv(esp->iv, entry->esp.iv_len))
+			return PKT_DROP;
+		params.cipher_iv_ptr = esp->iv;
 
 		esp_t = (odph_esptrl_t *)(ip_data + encrypt_len) - 1;
 		esp_t->pad_len     = trl_len - sizeof(*esp_t);
@@ -957,20 +974,9 @@ pkt_disposition_e do_ipsec_out_seq(odp_packet_t *pkt,
 	}
 	if (ctx->ipsec.tun_hdr_offset) {
 		odph_ipv4hdr_t *ip;
-		int ret;
 
 		ip = (odph_ipv4hdr_t *)(ctx->ipsec.tun_hdr_offset + buf);
 		ip->id = odp_cpu_to_be_16((*ctx->ipsec.tun_hdr_id)++);
-		if (!ip->id) {
-			/* re-init tunnel hdr id */
-			ret = odp_random_data((uint8_t *)ctx->ipsec.tun_hdr_id,
-					      sizeof(*ctx->ipsec.tun_hdr_id),
-					      1);
-			if (ret != sizeof(*ctx->ipsec.tun_hdr_id)) {
-				ODPH_ERR("Error: Not enough random data\n");
-				exit(EXIT_FAILURE);
-			}
-		}
 	}
 
 	out_pkt = entry->in_place ? *pkt : ODP_PACKET_INVALID;

@@ -144,7 +144,7 @@ noinst_HEADERS = \
 		  ${top_srcdir}/platform/linux-generic/include/odp_sysinfo_internal.h \
 		  include/odp_shm_internal.h \
 		  include/odp_thread_internal.h \
-		  ${top_srcdir}/platform/linux-generic/include/odp_timer_internal.h \
+		  include/odp_timer_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_timer_wheel_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_traffic_mngr_internal.h \
 		  include/odp_event_vector_internal.h \
@@ -292,7 +292,7 @@ noinst_HEADERS += arch/aarch64/odp_atomic.h \
 		  arch/aarch64/cpu_flags.h \
 		  arch/aarch64/odp_cpu_idling.h \
 		  arch/aarch64/odp_llsc.h \
-		  arch/default/odp_random.h
+		  arch/aarch64/odp_random.h
 endif
 if ARCH_IS_DEFAULT
 __LIB__libodp_dpdk_la_SOURCES += arch/default/odp_atomic.c \
@@ -309,26 +309,6 @@ odpapiabiarchinclude_HEADERS += arch/default/odp/api/abi/atomic_generic.h \
 				arch/default/odp/api/abi/cpu_generic.h \
 				arch/default/odp/api/abi/cpu_inlines.h \
 				arch/default/odp/api/abi/cpu.h
-endif
-noinst_HEADERS += arch/default/odp_atomic.h \
-		  arch/default/odp_cpu.h \
-		  arch/default/odp_cpu_idling.h \
-		  arch/default/odp_random.h
-endif
-if ARCH_IS_MIPS64
-__LIB__libodp_dpdk_la_SOURCES += arch/default/odp_atomic.c \
-				 arch/default/odp_global_time.c \
-				 arch/default/odp_hash_crc32.c \
-				 arch/default/odp_random.c \
-				 arch/mips64/odp_sysinfo_parse.c
-odpapiabiarchinclude_HEADERS += arch/default/odp/api/abi/cpu_time.h \
-				arch/default/odp/api/abi/hash_crc32.h
-if !ODP_ABI_COMPAT
-odpapiabiarchinclude_HEADERS += arch/default/odp/api/abi/atomic_generic.h \
-				arch/default/odp/api/abi/atomic_inlines.h \
-				arch/default/odp/api/abi/cpu_generic.h \
-				arch/mips64/odp/api/abi/cpu_inlines.h \
-				arch/mips64/odp/api/abi/cpu.h
 endif
 noinst_HEADERS += arch/default/odp_atomic.h \
 		  arch/default/odp_cpu.h \

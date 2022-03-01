@@ -1,5 +1,5 @@
 /* Copyright (c) 2014-2018, Linaro Limited
- * Copyright (c) 2021, Nokia
+ * Copyright (c) 2021-2022, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -125,6 +125,12 @@ typedef struct odp_packet_hdr_t {
 
 	/* Classifier destination queue */
 	odp_queue_t dst_queue;
+
+	/* User area pointer */
+	void *uarea_addr;
+
+	/* User context pointer */
+	const void *user_ptr;
 
 	/* Classifier mark */
 	uint16_t cls_mark;

@@ -1,5 +1,5 @@
 /* Copyright (c) 2013-2018, Linaro Limited
- * Copyright (c) 2019-2021, Nokia
+ * Copyright (c) 2019-2022, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -46,6 +46,9 @@
 
 /* Define a practical limit for contiguous memory allocations */
 #define MAX_SIZE   (10 * 1024 * 1024)
+
+/* Maximum packet user area size */
+#define MAX_UAREA_SIZE 2048
 
 ODP_STATIC_ASSERT(CONFIG_PACKET_SEG_LEN_MIN >= 256,
 		  "ODP Segment size must be a minimum of 256 bytes");
@@ -419,7 +422,7 @@ static pool_t *reserve_pool(uint32_t shmflags, uint8_t pool_ext, uint32_t num)
 	return NULL;
 }
 
-static void init_event_hdr(pool_t *pool, _odp_event_hdr_t *event_hdr, uint32_t buf_index,
+static void init_event_hdr(pool_t *pool, _odp_event_hdr_t *event_hdr, uint32_t event_index,
 			   uint32_t hdr_len, uint8_t *data_ptr, void *uarea)
 {
 	odp_pool_type_t type = pool->type;
@@ -429,12 +432,10 @@ static void init_event_hdr(pool_t *pool, _odp_event_hdr_t *event_hdr, uint32_t b
 	/* Initialize common event metadata */
 	event_hdr->index.u32    = 0;
 	event_hdr->index.pool   = pool->pool_idx;
-	event_hdr->index.buffer = buf_index;
+	event_hdr->index.event  = event_index;
 	event_hdr->type         = type;
 	event_hdr->event_type   = type;
 	event_hdr->pool_ptr     = pool;
-	event_hdr->uarea_addr   = uarea;
-	odp_atomic_init_u32(&event_hdr->ref_cnt, 0);
 
 	/* Store base values for fast init */
 	if (type == ODP_POOL_BUFFER || type == ODP_POOL_PACKET) {
@@ -446,10 +447,14 @@ static void init_event_hdr(pool_t *pool, _odp_event_hdr_t *event_hdr, uint32_t b
 	if (type == ODP_POOL_PACKET) {
 		odp_packet_hdr_t *pkt_hdr = (void *)event_hdr;
 
+		pkt_hdr->user_ptr  = NULL;
+		pkt_hdr->uarea_addr = uarea;
 		pkt_hdr->seg_data  = data_ptr;
 		pkt_hdr->seg_len   = pool->seg_len;
 		pkt_hdr->seg_count = 1;
 		pkt_hdr->seg_next  = NULL;
+
+		odp_atomic_init_u32(&pkt_hdr->ref_cnt, 0);
 	}
 
 	/* Initialize event vector metadata */
@@ -1388,7 +1393,7 @@ int odp_pool_capability(odp_pool_capability_t *capa)
 	capa->pkt.max_segs_per_pkt = PKT_MAX_SEGS;
 	capa->pkt.min_seg_len      = CONFIG_PACKET_SEG_LEN_MIN;
 	capa->pkt.max_seg_len      = max_seg_len;
-	capa->pkt.max_uarea_size   = MAX_SIZE;
+	capa->pkt.max_uarea_size   = MAX_UAREA_SIZE;
 	capa->pkt.min_cache_size   = 0;
 	capa->pkt.max_cache_size   = CONFIG_POOL_CACHE_MAX_SIZE;
 	capa->pkt.stats.all = supported_stats.all;
@@ -1634,7 +1639,7 @@ int _odp_event_is_valid(odp_event_t event)
 	if (pool != event_hdr->pool_ptr)
 		return 0;
 
-	if (event_hdr->index.buffer >= (pool->num + pool->skipped_blocks))
+	if (event_hdr->index.event >= (pool->num + pool->skipped_blocks))
 		return 0;
 
 	return 1;
@@ -1682,7 +1687,7 @@ int odp_pool_ext_capability(odp_pool_type_t type, odp_pool_ext_capability_t *cap
 	capa->pkt.max_headroom        = CONFIG_PACKET_HEADROOM;
 	capa->pkt.max_headroom_size   = CONFIG_PACKET_HEADROOM;
 	capa->pkt.max_segs_per_pkt    = PKT_MAX_SEGS;
-	capa->pkt.max_uarea_size      = MAX_SIZE;
+	capa->pkt.max_uarea_size      = MAX_UAREA_SIZE;
 
 	return 0;
 }

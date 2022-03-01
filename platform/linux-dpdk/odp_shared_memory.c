@@ -1,5 +1,5 @@
 /* Copyright (c) 2017-2018, Linaro Limited
- * Copyright (c) 2021, Nokia
+ * Copyright (c) 2021-2022, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -8,6 +8,7 @@
 #include <odp_posix_extensions.h>
 
 #include <odp/api/debug.h>
+#include <odp/api/deprecated.h>
 #include <odp/api/plat/strong_types.h>
 #include <odp/api/shared_memory.h>
 #include <odp/api/spinlock.h>
@@ -28,7 +29,13 @@
 #include <rte_memzone.h>
 
 /* Supported ODP_SHM_* flags */
-#define SUPPORTED_SHM_FLAGS (ODP_SHM_SW_ONLY | ODP_SHM_EXPORT | ODP_SHM_HP)
+#if ODP_DEPRECATED_API
+	#define DEPRECATED_SHM_FLAGS (ODP_SHM_SW_ONLY)
+#else
+	#define DEPRECATED_SHM_FLAGS 0
+#endif
+
+#define SUPPORTED_SHM_FLAGS (ODP_SHM_EXPORT | ODP_SHM_HP | DEPRECATED_SHM_FLAGS)
 
 #define SHM_MAX_ALIGN (0x80000000)
 #define SHM_BLOCK_NAME "%" PRIu64 "-%d-%s"

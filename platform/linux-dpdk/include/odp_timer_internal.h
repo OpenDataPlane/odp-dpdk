@@ -40,9 +40,6 @@ typedef struct ODP_ALIGNED_CACHE odp_timeout_hdr_t {
 
 } odp_timeout_hdr_t;
 
-ODP_STATIC_ASSERT(sizeof(odp_timeout_hdr_t) <= ODP_CACHE_LINE_SIZE,
-		  "TIMEOUT_HDR_SIZE_ERROR");
-
 /* A larger decrement value should be used after receiving events compared to
  * an 'empty' call. */
 void _odp_timer_run_inline(int dec);

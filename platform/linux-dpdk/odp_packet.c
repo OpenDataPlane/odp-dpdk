@@ -44,7 +44,7 @@ const _odp_packet_inline_offset_t _odp_packet_inline ODP_ALIGNED_CACHE = {
 	.mb               = offsetof(odp_packet_hdr_t, event_hdr.mb),
 	.pool             = offsetof(odp_packet_hdr_t, event_hdr.pool_ptr),
 	.input            = offsetof(odp_packet_hdr_t, input),
-	.user_ptr         = offsetof(odp_packet_hdr_t, event_hdr.user_ptr),
+	.user_ptr         = offsetof(odp_packet_hdr_t, user_ptr),
 	.l2_offset        = offsetof(odp_packet_hdr_t, p.l2_offset),
 	.l3_offset        = offsetof(odp_packet_hdr_t, p.l3_offset),
 	.l4_offset        = offsetof(odp_packet_hdr_t, p.l4_offset),
@@ -57,7 +57,7 @@ const _odp_packet_inline_offset_t _odp_packet_inline ODP_ALIGNED_CACHE = {
 	.pkt_len          = offsetof(odp_packet_hdr_t, event_hdr.mb.pkt_len),
 	.seg_len          = offsetof(odp_packet_hdr_t, event_hdr.mb.data_len),
 	.nb_segs          = offsetof(odp_packet_hdr_t, event_hdr.mb.nb_segs),
-	.user_area        = offsetof(odp_packet_hdr_t, event_hdr.uarea_addr),
+	.user_area        = offsetof(odp_packet_hdr_t, uarea_addr),
 	.rss              = offsetof(odp_packet_hdr_t, event_hdr.mb.hash.rss),
 	.ol_flags         = offsetof(odp_packet_hdr_t, event_hdr.mb.ol_flags),
 	.rss_flag         = PKT_RX_RSS_HASH
@@ -593,7 +593,7 @@ void odp_packet_user_ptr_set(odp_packet_t pkt, const void *ptr)
 		return;
 	}
 
-	pkt_hdr->event_hdr.user_ptr = ptr;
+	pkt_hdr->user_ptr = ptr;
 	pkt_hdr->p.flags.user_ptr_set = 1;
 }
 
@@ -1227,8 +1227,8 @@ int _odp_packet_copy_md_to_packet(odp_packet_t srcpkt, odp_packet_t dstpkt)
 	dsthdr->dst_queue = srchdr->dst_queue;
 	dsthdr->cos = srchdr->cos;
 	dsthdr->cls_mark = srchdr->cls_mark;
+	dsthdr->user_ptr = srchdr->user_ptr;
 
-	dsthdr->event_hdr.user_ptr = srchdr->event_hdr.user_ptr;
 	dsthdr->event_hdr.mb.port = srchdr->event_hdr.mb.port;
 	dsthdr->event_hdr.mb.ol_flags = srchdr->event_hdr.mb.ol_flags;
 	dsthdr->event_hdr.mb.packet_type = srchdr->event_hdr.mb.packet_type;

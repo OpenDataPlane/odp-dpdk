@@ -624,6 +624,8 @@ odp_ipsec_sa_t odp_ipsec_sa_create(const odp_ipsec_sa_param_t *param)
 			ODP_CRYPTO_OP_DECODE :
 			ODP_CRYPTO_OP_ENCODE;
 	crypto_param.auth_cipher_text = 1;
+	if (param->proto == ODP_IPSEC_AH)
+		crypto_param.hash_result_in_auth_range = 1;
 
 	crypto_param.op_mode   = ODP_CRYPTO_SYNC;
 	crypto_param.compl_queue = ODP_QUEUE_INVALID;
@@ -634,7 +636,7 @@ odp_ipsec_sa_t odp_ipsec_sa_create(const odp_ipsec_sa_param_t *param)
 	crypto_param.auth_alg = param->crypto.auth_alg;
 	crypto_param.auth_key = param->crypto.auth_key;
 
-	crypto_param.cipher_iv.length =
+	crypto_param.cipher_iv_len =
 		_odp_ipsec_cipher_iv_len(crypto_param.cipher_alg);
 
 	crypto_param.auth_digest_len =
@@ -644,7 +646,7 @@ odp_ipsec_sa_t odp_ipsec_sa_create(const odp_ipsec_sa_param_t *param)
 	    param->crypto.icv_len != crypto_param.auth_digest_len)
 		goto error;
 
-	if ((uint32_t)-1 == crypto_param.cipher_iv.length ||
+	if ((uint32_t)-1 == crypto_param.cipher_iv_len ||
 	    (uint32_t)-1 == crypto_param.auth_digest_len)
 		goto error;
 
@@ -729,7 +731,7 @@ odp_ipsec_sa_t odp_ipsec_sa_create(const odp_ipsec_sa_param_t *param)
 		ipsec_sa->use_counter_iv = 1;
 		ipsec_sa->esp_iv_len = 8;
 		ipsec_sa->esp_pad_mask = esp_block_len_to_mask(1);
-		crypto_param.auth_iv.length = 12;
+		crypto_param.auth_iv_len = 12;
 		ipsec_sa->salt_length = 4;
 		salt_param = &param->crypto.auth_key_extra;
 		break;

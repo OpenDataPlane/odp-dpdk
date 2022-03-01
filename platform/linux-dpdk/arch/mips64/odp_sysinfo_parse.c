@@ -1,1 +1,0 @@
-../../../linux-generic/arch/mips64/odp_sysinfo_parse.c

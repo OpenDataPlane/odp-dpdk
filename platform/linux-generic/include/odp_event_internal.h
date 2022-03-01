@@ -1,4 +1,4 @@
-/* Copyright (c) 2021, Nokia
+/* Copyright (c) 2021-2022, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -17,21 +17,21 @@
 extern "C" {
 #endif
 
-#include <odp/api/atomic.h>
 #include <odp/api/debug.h>
 #include <odp/api/event.h>
 #include <odp/api/std_types.h>
 
 #include <odp_config_internal.h>
 
-typedef union buffer_index_t {
+/* Combined pool and event index */
+typedef union _odp_event_index_t {
 	uint32_t u32;
 
 	struct {
 		uint32_t pool   :8;
-		uint32_t buffer :24;
+		uint32_t event  :24;
 	};
-} buffer_index_t;
+} _odp_event_index_t;
 
 /* Check that pool index fit into bit field */
 ODP_STATIC_ASSERT(ODP_CONFIG_POOLS    <= (0xFF + 1), "TOO_MANY_POOLS");
@@ -51,19 +51,12 @@ typedef struct _odp_event_hdr_t {
 	void     *pool_ptr;
 
 	/* --- Mostly read only data --- */
-	const void *user_ptr;
 
 	/* Initial buffer tail pointer */
 	uint8_t  *buf_end;
 
-	/* User area pointer */
-	void    *uarea_addr;
-
-	/* Combined pool and buffer index */
-	buffer_index_t index;
-
-	/* Reference count */
-	odp_atomic_u32_t ref_cnt;
+	/* Combined pool and event index */
+	_odp_event_index_t index;
 
 	/* Pool type */
 	int8_t    type;
