@@ -62,8 +62,6 @@ typedef struct crypto_session_entry_s {
 	/* Session creation parameters */
 	odp_crypto_session_param_t p;
 	struct rte_cryptodev_sym_session *rte_session;
-	struct rte_crypto_sym_xform cipher_xform;
-	struct rte_crypto_sym_xform auth_xform;
 	struct {
 		unsigned int cdev_qpairs_shared:1;
 		unsigned int chained_bufs_ok:1;
@@ -1530,8 +1528,6 @@ int odp_crypto_session_create(const odp_crypto_session_param_t *param,
 out_null:
 	session->rte_session  = rte_session;
 	session->cdev_id = cdev_id;
-	session->cipher_xform = cipher_xform;
-	session->auth_xform = auth_xform;
 #if ODP_DEPRECATED_API
 	if (param->cipher_iv.data)
 		memcpy(session->cipher_iv_data,
@@ -1697,14 +1693,13 @@ int odp_crypto_result(odp_crypto_packet_result_t *result,
 static uint8_t *crypto_prepare_digest(crypto_session_entry_t *session,
 				      odp_packet_t pkt,
 				      const odp_crypto_packet_op_param_t *param,
-				      odp_bool_t verify,
 				      rte_iova_t *phys_addr)
 {
 	struct rte_mbuf *mb;
 	uint8_t *data;
 	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
 
-	if (verify) {
+	if (session->p.op == ODP_CRYPTO_OP_DECODE) {
 		odp_packet_copy_to_mem(pkt, param->hash_result_offset,
 				       session->p.auth_digest_len,
 				       pkt_hdr->crypto_digest_buf);
@@ -1727,25 +1722,21 @@ static void crypto_fill_aead_param(crypto_session_entry_t *session,
 				   struct rte_crypto_op *op)
 {
 	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
-	struct rte_crypto_sym_xform *aead_xform;
+	uint32_t iv_len = session->p.cipher_iv_len;
 	uint8_t *iv_ptr;
-
-	aead_xform = &session->cipher_xform;
 
 	op->sym->aead.digest.data =
 		crypto_prepare_digest(session, pkt, param,
-				      aead_xform->aead.op ==
-				      RTE_CRYPTO_AEAD_OP_DECRYPT,
 				      &op->sym->aead.digest.phys_addr);
 
-	if (aead_xform->aead.algo == RTE_CRYPTO_AEAD_AES_CCM)
+	if (session->p.cipher_alg == ODP_CIPHER_ALG_AES_CCM)
 		memcpy(pkt_hdr->crypto_aad_buf + AES_CCM_AAD_OFFSET,
 		       param->aad_ptr,
-		       aead_xform->aead.aad_length);
+		       session->p.auth_aad_len);
 	else
 		memcpy(pkt_hdr->crypto_aad_buf,
 		       param->aad_ptr,
-		       aead_xform->aead.aad_length);
+		       session->p.auth_aad_len);
 	op->sym->aead.aad.data = pkt_hdr->crypto_aad_buf;
 	op->sym->aead.aad.phys_addr =
 		rte_pktmbuf_iova_offset(&pkt_hdr->event_hdr.mb,
@@ -1753,25 +1744,21 @@ static void crypto_fill_aead_param(crypto_session_entry_t *session,
 					rte_pktmbuf_mtod(&pkt_hdr->event_hdr.mb,
 							 uint8_t *));
 	iv_ptr = rte_crypto_op_ctod_offset(op, uint8_t *, IV_OFFSET);
-	if (aead_xform->aead.algo == RTE_CRYPTO_AEAD_AES_CCM) {
-		*iv_ptr = aead_xform->aead.iv.length;
+	if (session->p.cipher_alg == ODP_CIPHER_ALG_AES_CCM) {
+		*iv_ptr = iv_len;
 		iv_ptr++;
 	}
 
 #if ODP_DEPRECATED_API
 	if (param->cipher_iv_ptr)
-		memcpy(iv_ptr,
-		       param->cipher_iv_ptr,
-		       aead_xform->aead.iv.length);
+		memcpy(iv_ptr, param->cipher_iv_ptr, iv_len);
 	else if (session->p.cipher_iv.data)
-		memcpy(iv_ptr,
-		       session->cipher_iv_data,
-		       aead_xform->aead.iv.length);
+		memcpy(iv_ptr, session->cipher_iv_data, iv_len);
 	else
-		ODP_ASSERT(aead_xform->aead.iv.length == 0);
+		ODP_ASSERT(iv_len == 0);
 #else
-	ODP_ASSERT(aead_xform->aead.iv.length == 0 || param->cipher_iv_ptr != NULL);
-	memcpy(iv_ptr, param->cipher_iv_ptr, aead_xform->aead.iv.length);
+	ODP_ASSERT(iv_len == 0 || param->cipher_iv_ptr != NULL);
+	memcpy(iv_ptr, param->cipher_iv_ptr, iv_len);
 #endif
 
 	op->sym->aead.data.offset = param->cipher_range.offset;
@@ -1783,12 +1770,9 @@ static void crypto_fill_sym_param(crypto_session_entry_t *session,
 				  const odp_crypto_packet_op_param_t *param,
 				  struct rte_crypto_op *op)
 {
-	struct rte_crypto_sym_xform *cipher_xform;
-	struct rte_crypto_sym_xform *auth_xform;
+	uint32_t cipher_iv_len = session->p.cipher_iv_len;
+	uint32_t auth_iv_len = session->p.auth_iv_len;
 	uint8_t *iv_ptr;
-
-	cipher_xform = &session->cipher_xform;
-	auth_xform = &session->auth_xform;
 
 	if (session->p.auth_digest_len == 0) {
 		op->sym->auth.digest.data = NULL;
@@ -1796,50 +1780,40 @@ static void crypto_fill_sym_param(crypto_session_entry_t *session,
 	} else {
 		op->sym->auth.digest.data =
 			crypto_prepare_digest(session, pkt, param,
-					      auth_xform->auth.op ==
-					      RTE_CRYPTO_AUTH_OP_VERIFY,
 					      &op->sym->auth.digest.phys_addr);
 	}
 
 #if ODP_DEPRECATED_API
 	if (param->cipher_iv_ptr) {
 		iv_ptr = rte_crypto_op_ctod_offset(op, uint8_t *, IV_OFFSET);
-		memcpy(iv_ptr,
-		       param->cipher_iv_ptr,
-		       cipher_xform->cipher.iv.length);
+		memcpy(iv_ptr, param->cipher_iv_ptr, cipher_iv_len);
 	} else if (session->p.cipher_iv.data) {
 		iv_ptr = rte_crypto_op_ctod_offset(op, uint8_t *, IV_OFFSET);
-		memcpy(iv_ptr,
-		       session->cipher_iv_data,
-		       cipher_xform->cipher.iv.length);
+		memcpy(iv_ptr, session->cipher_iv_data, cipher_iv_len);
 	} else {
-		ODP_ASSERT(cipher_xform->cipher.iv.length == 0);
+		ODP_ASSERT(cipher_iv_len == 0);
 	}
 
 	if (param->auth_iv_ptr) {
 		iv_ptr = rte_crypto_op_ctod_offset(op, uint8_t *,
 						   IV_OFFSET + MAX_IV_LENGTH);
-		memcpy(iv_ptr,
-		       param->auth_iv_ptr,
-		       auth_xform->auth.iv.length);
+		memcpy(iv_ptr, param->auth_iv_ptr, auth_iv_len);
 	} else if (session->p.auth_iv.data) {
 		iv_ptr = rte_crypto_op_ctod_offset(op, uint8_t *,
 						   IV_OFFSET + MAX_IV_LENGTH);
-		memcpy(iv_ptr,
-		       session->auth_iv_data,
-		       auth_xform->auth.iv.length);
+		memcpy(iv_ptr, session->auth_iv_data, auth_iv_len);
 	} else {
-		ODP_ASSERT(auth_xform->auth.iv.length == 0);
+		ODP_ASSERT(auth_iv_len == 0);
 	}
 #else
-	ODP_ASSERT(cipher_xform->cipher.iv.length == 0 || param->cipher_iv_ptr != NULL);
-	ODP_ASSERT(auth_xform->auth.iv.length == 0 || param->auth_iv_ptr != NULL);
+	ODP_ASSERT(cipher_iv_len == 0 || param->cipher_iv_ptr != NULL);
+	ODP_ASSERT(auth_iv_len == 0 || param->auth_iv_ptr != NULL);
 	iv_ptr = rte_crypto_op_ctod_offset(op, uint8_t *, IV_OFFSET);
-	memcpy(iv_ptr, param->cipher_iv_ptr, cipher_xform->cipher.iv.length);
+	memcpy(iv_ptr, param->cipher_iv_ptr, cipher_iv_len);
 
-	if (odp_unlikely(auth_xform->auth.iv.length > 0)) {
+	if (odp_unlikely(auth_iv_len > 0)) {
 		iv_ptr = rte_crypto_op_ctod_offset(op, uint8_t *, IV_OFFSET + MAX_IV_LENGTH);
-		memcpy(iv_ptr, param->auth_iv_ptr, auth_xform->auth.iv.length);
+		memcpy(iv_ptr, param->auth_iv_ptr, auth_iv_len);
 	}
 #endif
 
