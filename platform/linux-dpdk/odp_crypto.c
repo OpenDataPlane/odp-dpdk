@@ -1293,32 +1293,6 @@ static int chained_bufs_ok(const odp_crypto_session_param_t *param,
 	return chained_bufs_ok;
 }
 
-#if RTE_VERSION < RTE_VERSION_NUM(19, 8, 0, 0)
-static int crypto_init_key(uint8_t **data, uint16_t *length,
-			   odp_crypto_key_t *key, const char *type)
-#else
-static int crypto_init_key(const uint8_t **data, uint16_t *length,
-			   odp_crypto_key_t *key, const char *type)
-#endif
-{
-	uint8_t *p = NULL;
-
-	if (key->length) {
-		p = rte_malloc(type, key->length, 0);
-		if (p == NULL) {
-			ODP_ERR("Failed to allocate memory for %s\n", type);
-			return -1;
-		}
-
-		memcpy(p, key->data, key->length);
-	}
-
-	*data = p;
-	*length = key->length;
-
-	return 0;
-}
-
 static int crypto_fill_cipher_xform(struct rte_crypto_sym_xform *cipher_xform,
 				    odp_crypto_session_param_t *param)
 {
@@ -1328,11 +1302,8 @@ static int crypto_fill_cipher_xform(struct rte_crypto_sym_xform *cipher_xform,
 	if (cipher_alg_odp_to_rte(param->cipher_alg, cipher_xform))
 		return -1;
 
-	if (crypto_init_key(&cipher_xform->cipher.key.data,
-			    &cipher_xform->cipher.key.length,
-			    &param->cipher_key,
-			    "cipher key"))
-		return -1;
+	cipher_xform->cipher.key.data = param->cipher_key.data;
+	cipher_xform->cipher.key.length = param->cipher_key.length;
 	cipher_xform->cipher.iv.offset = IV_OFFSET;
 	cipher_xform->cipher.iv.length = param->cipher_iv_len;
 
@@ -1360,12 +1331,8 @@ static int crypto_fill_auth_xform(struct rte_crypto_sym_xform *auth_xform,
 		return -1;
 	}
 
-	if (crypto_init_key(&auth_xform->auth.key.data,
-			    &auth_xform->auth.key.length,
-			    &param->auth_key,
-			    "auth key"))
-		return -1;
-
+	auth_xform->auth.key.data = param->auth_key.data;
+	auth_xform->auth.key.length = param->auth_key.length;
 	auth_xform->auth.iv.offset = IV_OFFSET + MAX_IV_LENGTH;
 	auth_xform->auth.iv.length = param->auth_iv_len;
 
@@ -1386,12 +1353,8 @@ static int crypto_fill_aead_xform(struct rte_crypto_sym_xform *aead_xform,
 	if (cipher_aead_alg_odp_to_rte(param->cipher_alg, aead_xform))
 		return -1;
 
-	if (crypto_init_key(&aead_xform->aead.key.data,
-			    &aead_xform->aead.key.length,
-			    &param->cipher_key,
-			    "aead key"))
-		return -1;
-
+	aead_xform->aead.key.data = param->cipher_key.data;
+	aead_xform->aead.key.length = param->cipher_key.length;
 	aead_xform->aead.iv.offset = IV_OFFSET;
 	aead_xform->aead.iv.length = param->cipher_iv_len;
 
