@@ -1,5 +1,5 @@
 /* Copyright (c) 2013-2018, Linaro Limited
- * Copyright (c) 2019-2021, Nokia
+ * Copyright (c) 2019-2022, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -20,9 +20,10 @@ extern "C" {
 
 #include <odp/api/hints.h>
 #include <odp/api/packet_io.h>
-#include <odp/api/plat/packet_io_inlines.h>
 #include <odp/api/spinlock.h>
 #include <odp/api/ticketlock.h>
+
+#include <odp/api/plat/packet_io_inlines.h>
 
 #include <odp_align_internal.h>
 #include <odp_classification_datamodel.h>
@@ -30,9 +31,9 @@ extern "C" {
 #include <odp_debug_internal.h>
 #include <odp_queue_if.h>
 
+#include <inttypes.h>
 #include <linux/if_ether.h>
 #include <sys/select.h>
-#include <inttypes.h>
 
 #define PKTIO_MAX_QUEUES 64
 #define PKTIO_LSO_PROFILES 16
