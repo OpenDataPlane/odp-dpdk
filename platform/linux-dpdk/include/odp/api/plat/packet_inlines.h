@@ -18,20 +18,23 @@
 extern "C" {
 #endif
 
-#include <odp/api/abi/packet.h>
+#include <odp/api/hints.h>
 #include <odp/api/packet_types.h>
 #include <odp/api/pool.h>
-#include <odp/api/abi/packet_io.h>
-#include <odp/api/hints.h>
 #include <odp/api/time.h>
+
 #include <odp/api/abi/buffer.h>
 #include <odp/api/abi/event.h>
+#include <odp/api/abi/packet.h>
+#include <odp/api/abi/packet_io.h>
 
+#include <odp/api/plat/packet_io_inlines.h>
 #include <odp/api/plat/packet_inline_types.h>
 #include <odp/api/plat/pool_inline_types.h>
-#include <odp/api/plat/packet_io_inlines.h>
 
+#include <stdint.h>
 #include <string.h>
+
 /* Required by rte_mbuf.h */
 #include <sys/types.h>
 #include <rte_config.h>
