@@ -11,7 +11,7 @@
 #include <odp/api/byteorder.h>
 #include <odp/api/plat/byteorder_inlines.h>
 #include <odp/api/packet_io.h>
-#include <odp/api/plat/pktio_inlines.h>
+#include <odp/api/plat/packet_io_inlines.h>
 #include <odp/api/proto_stats.h>
 
 #include <odp_align_internal.h>

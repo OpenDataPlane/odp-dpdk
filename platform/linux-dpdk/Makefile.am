@@ -39,7 +39,7 @@ odpapiplatinclude_HEADERS = \
 		  include/odp/api/plat/packet_inline_types.h \
 		  include/odp/api/plat/packet_inlines.h \
 		  include/odp/api/plat/packet_vector_inlines.h \
-		  include/odp/api/plat/pktio_inlines.h \
+		  include/odp/api/plat/packet_io_inlines.h \
 		  include/odp/api/plat/pool_inline_types.h \
 		  include/odp/api/plat/queue_inlines.h \
 		  include/odp/api/plat/queue_inline_types.h \
@@ -234,7 +234,7 @@ __LIB__libodp_dpdk_la_SOURCES += \
 			   ../linux-generic/odp_hash_api.c \
 			   ../linux-generic/odp_packet_api.c \
 			   ../linux-generic/odp_packet_flags_api.c \
-			   ../linux-generic/odp_pktio_api.c \
+			   ../linux-generic/odp_packet_io_api.c \
 			   ../linux-generic/odp_queue_api.c \
 			   odp_std_api.c \
 			   ../linux-generic/odp_sync_api.c \
