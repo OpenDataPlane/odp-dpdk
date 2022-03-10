@@ -124,7 +124,8 @@ typedef struct odp_packet_hdr_t {
 	/* Timestamp value */
 	odp_time_t timestamp;
 
-	/* Classifier destination queue */
+	/* Used as classifier destination queue, in IPsec inline input
+	 * processing and as Tx completion event queue. */
 	odp_queue_t dst_queue;
 
 	/* User area pointer */
