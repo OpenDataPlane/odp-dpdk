@@ -1,5 +1,5 @@
 /* Copyright (c) 2013-2018, Linaro Limited
- * Copyright (c) 2021, Nokia
+ * Copyright (c) 2021-2022, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -18,16 +18,21 @@
 extern "C" {
 #endif
 
-#include <odp/api/std_types.h>
-#include <odp/api/pool.h>
-#include <odp_event_internal.h>
-#include <odp/api/packet_io.h>
 #include <odp/api/align.h>
+#include <odp/api/event.h>
 #include <odp/api/hints.h>
-#include <odp_config_internal.h>
-#include <odp/api/debug.h>
-#include <odp_debug_internal.h>
+#include <odp/api/pool.h>
+#include <odp/api/shared_memory.h>
+#include <odp/api/spinlock.h>
+#include <odp/api/std_types.h>
+#include <odp/api/ticketlock.h>
+
 #include <odp/api/plat/strong_types.h>
+
+#include <odp_config_internal.h>
+#include <odp_debug_internal.h>
+#include <odp_event_internal.h>
+
 #include <string.h>
 
 /* for DPDK */
