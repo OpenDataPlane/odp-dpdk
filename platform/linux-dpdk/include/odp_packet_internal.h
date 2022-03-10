@@ -20,6 +20,7 @@ extern "C" {
 
 #include <odp/api/align.h>
 #include <odp/api/debug.h>
+#include <odp/api/ipsec.h>
 #include <odp/api/packet.h>
 #include <odp/api/plat/packet_inline_types.h>
 #include <odp/api/packet_io.h>
