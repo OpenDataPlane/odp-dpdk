@@ -122,9 +122,6 @@ static int cipher_is_aead(odp_cipher_alg_t cipher_alg)
 	switch (cipher_alg) {
 	case ODP_CIPHER_ALG_AES_GCM:
 	case ODP_CIPHER_ALG_AES_CCM:
-#if ODP_DEPRECATED_API
-	case ODP_CIPHER_ALG_AES128_GCM:
-#endif
 		return 1;
 	default:
 		return 0;
@@ -152,9 +149,6 @@ static int cipher_aead_alg_odp_to_rte(odp_cipher_alg_t cipher_alg,
 
 	switch (cipher_alg) {
 	case ODP_CIPHER_ALG_AES_GCM:
-#if ODP_DEPRECATED_API
-	case ODP_CIPHER_ALG_AES128_GCM:
-#endif
 		aead_xform->aead.algo = RTE_CRYPTO_AEAD_AES_GCM;
 		break;
 	case ODP_CIPHER_ALG_AES_CCM:
@@ -206,9 +200,6 @@ static int cipher_alg_odp_to_rte(odp_cipher_alg_t cipher_alg,
 		cipher_xform->cipher.algo = RTE_CRYPTO_CIPHER_3DES_ECB;
 		break;
 	case ODP_CIPHER_ALG_AES_CBC:
-#if ODP_DEPRECATED_API
-	case ODP_CIPHER_ALG_AES128_CBC:
-#endif
 		cipher_xform->cipher.algo = RTE_CRYPTO_CIPHER_AES_CBC;
 		break;
 	case ODP_CIPHER_ALG_AES_CTR:
