@@ -335,7 +335,7 @@ static void _copy_head_metadata(struct rte_mbuf *newhead,
 {
 	rte_mbuf_refcnt_set(newhead, rte_mbuf_refcnt_read(oldhead));
 
-	_odp_packet_copy_md_to_packet((odp_packet_t)oldhead, (odp_packet_t)newhead);
+	_odp_packet_copy_md((odp_packet_hdr_t *)newhead, (odp_packet_hdr_t *)oldhead, 0);
 }
 
 int odp_packet_extend_head(odp_packet_t *pkt, uint32_t len, void **data_ptr,
@@ -729,7 +729,7 @@ int odp_packet_add_data(odp_packet_t *pkt_ptr, uint32_t offset, uint32_t len)
 		return -1;
 	}
 
-	_odp_packet_copy_md_to_packet(pkt, newpkt);
+	_odp_packet_copy_md(packet_hdr(newpkt), pkt_hdr, 0);
 	odp_packet_free(pkt);
 	*pkt_ptr = newpkt;
 
@@ -759,7 +759,7 @@ int odp_packet_rem_data(odp_packet_t *pkt_ptr, uint32_t offset, uint32_t len)
 		return -1;
 	}
 
-	_odp_packet_copy_md_to_packet(pkt, newpkt);
+	_odp_packet_copy_md(packet_hdr(newpkt), pkt_hdr, 0);
 	odp_packet_free(pkt);
 	*pkt_ptr = newpkt;
 
@@ -872,15 +872,23 @@ int odp_packet_split(odp_packet_t *pkt, uint32_t len, odp_packet_t *tail)
 odp_packet_t odp_packet_copy(odp_packet_t pkt, odp_pool_t pool)
 {
 	uint32_t pktlen = odp_packet_len(pkt);
-	odp_packet_t newpkt = odp_packet_alloc(pool, pktlen);
+	odp_packet_t newpkt;
 
-	if (newpkt != ODP_PACKET_INVALID) {
-		if (_odp_packet_copy_md_to_packet(pkt, newpkt) ||
-		    odp_packet_copy_from_pkt(newpkt, 0, pkt, 0, pktlen)) {
-			odp_packet_free(newpkt);
-			newpkt = ODP_PACKET_INVALID;
-		}
+	if (odp_unlikely(_odp_packet_copy_md_possible(pool, odp_packet_pool(pkt)) < 0)) {
+		ODP_ERR("Unable to copy packet metadata\n");
+		return ODP_PACKET_INVALID;
 	}
+
+	newpkt = odp_packet_alloc(pool, pktlen);
+	if (odp_unlikely(newpkt == ODP_PACKET_INVALID))
+		return ODP_PACKET_INVALID;
+
+	if (odp_unlikely(odp_packet_copy_from_pkt(newpkt, 0, pkt, 0, pktlen))) {
+		odp_packet_free(newpkt);
+		newpkt = ODP_PACKET_INVALID;
+	}
+
+	_odp_packet_copy_md(packet_hdr(newpkt), packet_hdr(pkt), 1);
 
 	return newpkt;
 }
@@ -1219,53 +1227,6 @@ int odp_packet_is_valid(odp_packet_t pkt)
  * ********************************************************
  *
  */
-
-int _odp_packet_copy_md_to_packet(odp_packet_t srcpkt, odp_packet_t dstpkt)
-{
-	odp_packet_hdr_t *srchdr = packet_hdr(srcpkt);
-	odp_packet_hdr_t *dsthdr = packet_hdr(dstpkt);
-	uint32_t src_size = odp_packet_user_area_size(srcpkt);
-	uint32_t dst_size = odp_packet_user_area_size(dstpkt);
-
-	dsthdr->input = srchdr->input;
-	dsthdr->dst_queue = srchdr->dst_queue;
-	dsthdr->cos = srchdr->cos;
-	dsthdr->cls_mark = srchdr->cls_mark;
-	dsthdr->user_ptr = srchdr->user_ptr;
-
-	dsthdr->event_hdr.mb.port = srchdr->event_hdr.mb.port;
-	dsthdr->event_hdr.mb.ol_flags = srchdr->event_hdr.mb.ol_flags;
-	dsthdr->event_hdr.mb.packet_type = srchdr->event_hdr.mb.packet_type;
-	dsthdr->event_hdr.mb.vlan_tci = srchdr->event_hdr.mb.vlan_tci;
-	dsthdr->event_hdr.mb.hash.rss = srchdr->event_hdr.mb.hash.rss;
-	dsthdr->event_hdr.mb.hash = srchdr->event_hdr.mb.hash;
-	dsthdr->event_hdr.mb.vlan_tci_outer = srchdr->event_hdr.mb.vlan_tci_outer;
-	dsthdr->event_hdr.mb.tx_offload = srchdr->event_hdr.mb.tx_offload;
-
-	if (dst_size != 0)
-		memcpy(odp_packet_user_area(dstpkt),
-		       odp_packet_user_area(srcpkt),
-		       dst_size <= src_size ? dst_size : src_size);
-
-	if (srchdr->p.input_flags.timestamp)
-		dsthdr->timestamp = srchdr->timestamp;
-
-	if (srchdr->p.flags.lso) {
-		dsthdr->lso_max_payload = srchdr->lso_max_payload;
-		dsthdr->lso_profile_idx = srchdr->lso_profile_idx;
-	}
-
-	if (srchdr->p.flags.payload_off)
-		dsthdr->payload_offset = srchdr->payload_offset;
-
-	dsthdr->p = srchdr->p;
-
-	/* Metadata copied, but return indication of whether the packet
-	 * user area was truncated in the process. Note this can only
-	 * happen when copying between different pools.
-	 */
-	return dst_size < src_size;
-}
 
 static uint64_t packet_sum_partial(odp_packet_hdr_t *pkt_hdr,
 				   uint32_t l3_offset,

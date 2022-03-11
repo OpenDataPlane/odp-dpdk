@@ -1977,6 +1977,14 @@ int odp_crypto_int(odp_packet_t pkt_in,
 
 	if (pkt_in != out_pkt) {
 		int ret;
+		int md_copy;
+
+		md_copy = _odp_packet_copy_md_possible(session->p.output_pool,
+						       odp_packet_pool(pkt_in));
+		if (odp_unlikely(md_copy < 0)) {
+			ODP_ERR("Unable to copy packet metadata\n");
+			goto err;
+		}
 
 		ret = odp_packet_copy_from_pkt(out_pkt,
 					       0,
@@ -1986,7 +1994,7 @@ int odp_crypto_int(odp_packet_t pkt_in,
 		if (odp_unlikely(ret < 0))
 			goto err;
 
-		_odp_packet_copy_md_to_packet(pkt_in, out_pkt);
+		_odp_packet_copy_md(packet_hdr(out_pkt), packet_hdr(pkt_in), md_copy);
 		odp_packet_free(pkt_in);
 		pkt_in = ODP_PACKET_INVALID;
 	}
