@@ -226,8 +226,8 @@ static inline void packet_init(odp_packet_hdr_t *pkt_hdr, odp_pktio_t input)
 	pkt_hdr->input = input;
 }
 
-static inline void copy_packet_cls_metadata(odp_packet_hdr_t *src_hdr,
-					    odp_packet_hdr_t *dst_hdr)
+static inline void _odp_packet_copy_cls_md(odp_packet_hdr_t *dst_hdr,
+					   odp_packet_hdr_t *src_hdr)
 {
 	dst_hdr->p = src_hdr->p;
 	dst_hdr->dst_queue = src_hdr->dst_queue;
