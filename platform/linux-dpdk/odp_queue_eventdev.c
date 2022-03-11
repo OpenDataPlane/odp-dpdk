@@ -134,22 +134,6 @@ static int queue_capa(odp_queue_capability_t *capa, int sched ODP_UNUSED)
 	capa->plain.lockfree.max_num  = 0;
 	capa->plain.lockfree.max_size = 0;
 
-#if ODP_DEPRECATED_API
-	uint16_t max_sched;
-
-	max_sched = RTE_MAX(RTE_MAX(_odp_eventdev_gbl->event_queue.num_atomic,
-				    _odp_eventdev_gbl->event_queue.num_ordered),
-			    _odp_eventdev_gbl->event_queue.num_parallel);
-	capa->sched.max_num     = RTE_MIN(CONFIG_MAX_SCHED_QUEUES, max_sched);
-	capa->sched.max_size    = _odp_eventdev_gbl->config.nb_events_limit;
-
-	if (sched) {
-		capa->max_ordered_locks = _odp_sched_fn->max_ordered_locks();
-		capa->max_sched_groups  = _odp_sched_fn->num_grps();
-		capa->sched_prios       = odp_schedule_num_prio();
-	}
-#endif
-
 	return 0;
 }
 
