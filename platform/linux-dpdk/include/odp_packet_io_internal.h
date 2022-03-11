@@ -35,7 +35,7 @@ extern "C" {
 #include <linux/if_ether.h>
 #include <sys/select.h>
 
-#define PKTIO_MAX_QUEUES 64
+#define PKTIO_MAX_QUEUES ODP_PKTOUT_MAX_QUEUES
 #define PKTIO_LSO_PROFILES 16
 /* Assume at least Ethernet header per each segment */
 #define PKTIO_LSO_MIN_PAYLOAD_OFFSET 14
