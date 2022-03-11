@@ -537,18 +537,10 @@ static void capability_process(struct rte_cryptodev_info *dev_info,
 			enum rte_crypto_auth_algorithm cap_auth_algo;
 
 			cap_auth_algo = cap->sym.auth.algo;
-			if (cap_auth_algo == RTE_CRYPTO_AUTH_MD5_HMAC) {
+			if (cap_auth_algo == RTE_CRYPTO_AUTH_MD5_HMAC)
 				auths->bit.md5_hmac = 1;
-#if ODP_DEPRECATED_API
-				auths->bit.md5_96 = 1;
-#endif
-			}
-			if (cap_auth_algo == RTE_CRYPTO_AUTH_SHA256_HMAC) {
+			if (cap_auth_algo == RTE_CRYPTO_AUTH_SHA256_HMAC)
 				auths->bit.sha256_hmac = 1;
-#if ODP_DEPRECATED_API
-				auths->bit.sha256_128 = 1;
-#endif
-			}
 			if (cap_auth_algo == RTE_CRYPTO_AUTH_SHA1_HMAC)
 				auths->bit.sha1_hmac = 1;
 			if (cap_auth_algo == RTE_CRYPTO_AUTH_SHA224_HMAC)
@@ -587,9 +579,6 @@ static void capability_process(struct rte_cryptodev_info *dev_info,
 			if (cap_aead_algo == RTE_CRYPTO_AEAD_AES_GCM) {
 				ciphers->bit.aes_gcm = 1;
 				auths->bit.aes_gcm = 1;
-#if ODP_DEPRECATED_API
-				auths->bit.aes128_gcm = 1;
-#endif
 			}
 			/* AES-CCM algorithm produces errors in Ubuntu Trusty,
 			 * so it is disabled for now
