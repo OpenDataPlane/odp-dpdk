@@ -133,9 +133,6 @@ static int auth_is_aead(odp_auth_alg_t auth_alg)
 	switch (auth_alg) {
 	case ODP_AUTH_ALG_AES_GCM:
 	case ODP_AUTH_ALG_AES_CCM:
-#if ODP_DEPRECATED_API
-	case ODP_AUTH_ALG_AES128_GCM:
-#endif
 		return 1;
 	default:
 		return 0;
@@ -168,9 +165,6 @@ static int auth_aead_alg_odp_to_rte(odp_auth_alg_t auth_alg,
 
 	switch (auth_alg) {
 	case ODP_AUTH_ALG_AES_GCM:
-#if ODP_DEPRECATED_API
-	case ODP_AUTH_ALG_AES128_GCM:
-#endif
 		aead_xform->aead.algo = RTE_CRYPTO_AEAD_AES_GCM;
 		break;
 	case ODP_AUTH_ALG_AES_CCM:
@@ -229,15 +223,9 @@ static int auth_alg_odp_to_rte(odp_auth_alg_t auth_alg,
 		auth_xform->auth.algo = RTE_CRYPTO_AUTH_NULL;
 		break;
 	case ODP_AUTH_ALG_MD5_HMAC:
-#if ODP_DEPRECATED_API
-	case ODP_AUTH_ALG_MD5_96:
-#endif
 		auth_xform->auth.algo = RTE_CRYPTO_AUTH_MD5_HMAC;
 		break;
 	case ODP_AUTH_ALG_SHA256_HMAC:
-#if ODP_DEPRECATED_API
-	case ODP_AUTH_ALG_SHA256_128:
-#endif
 		auth_xform->auth.algo = RTE_CRYPTO_AUTH_SHA256_HMAC;
 		break;
 	case ODP_AUTH_ALG_SHA1_HMAC:
@@ -1457,24 +1445,6 @@ int odp_crypto_session_create(const odp_crypto_session_param_t *param,
 
 	/* Copy parameters */
 	session->p = *param;
-
-#if ODP_DEPRECATED_API
-	/* Fixed digest tag length with deprecated algo */
-	switch (param->auth_alg) {
-	case ODP_AUTH_ALG_MD5_96:
-		session->p.auth_digest_len = 96 / 8;
-		break;
-	case ODP_AUTH_ALG_SHA256_128:
-		/* Fixed digest tag length with deprecated algo */
-		session->p.auth_digest_len = 128 / 8;
-		break;
-	case ODP_AUTH_ALG_AES128_GCM:
-		session->p.auth_digest_len = 16;
-		break;
-	default:
-		break;
-	}
-#endif
 
 	if (cipher_is_aead(param->cipher_alg)) {
 		if (crypto_fill_aead_xform(&cipher_xform, &session->p) < 0) {
