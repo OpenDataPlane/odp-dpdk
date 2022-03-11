@@ -980,7 +980,7 @@ int _odp_input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int nu
 			}
 			packet_set_ts(pkt_hdr, ts);
 			pktio_entry->s.stats.in_octets += odp_packet_len(pkt);
-			copy_packet_cls_metadata(&parsed_hdr, pkt_hdr);
+			_odp_packet_copy_cls_md(pkt_hdr, &parsed_hdr);
 			if (success != i)
 				pkt_table[success] = pkt;
 			++success;
