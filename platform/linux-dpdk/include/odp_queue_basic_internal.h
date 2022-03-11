@@ -11,21 +11,26 @@
 extern "C" {
 #endif
 
-#include <odp/api/plat/strong_types.h>
-#include <odp/api/queue.h>
-#include <odp_forward_typedefs_internal.h>
-#include <odp_queue_if.h>
-#include <odp_buffer_internal.h>
-#include <odp_align_internal.h>
-#include <odp/api/packet_io.h>
 #include <odp/api/align.h>
+#include <odp/api/atomic.h>
+#include <odp/api/event.h>
 #include <odp/api/hints.h>
+#include <odp/api/packet_io.h>
+#include <odp/api/queue.h>
+#include <odp/api/shared_memory.h>
 #include <odp/api/ticketlock.h>
+
+#include <odp_align_internal.h>
+#include <odp_buffer_internal.h>
 #include <odp_config_internal.h>
+#include <odp_forward_typedefs_internal.h>
 #include <odp_ptr_ring_mpmc_internal.h>
 #include <odp_ptr_ring_st_internal.h>
 #include <odp_ptr_ring_spsc_internal.h>
+#include <odp_queue_if.h>
 #include <odp_queue_lf.h>
+
+#include <stdint.h>
 
 #define QUEUE_STATUS_FREE         0
 #define QUEUE_STATUS_DESTROYED    1

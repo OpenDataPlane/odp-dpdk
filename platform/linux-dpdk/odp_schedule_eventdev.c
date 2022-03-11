@@ -6,11 +6,16 @@
 
 #include <odp_posix_extensions.h>
 
-#include <odp_eventdev_internal.h>
+#include <odp/api/cpu.h>
+#include <odp/api/event.h>
+#include <odp/api/packet_io.h>
+#include <odp/api/queue.h>
 #include <odp/api/ticketlock.h>
 #include <odp/api/thrmask.h>
+
 #include <odp_config_internal.h>
 #include <odp_debug_internal.h>
+#include <odp_eventdev_internal.h>
 #include <odp_packet_io_internal.h>
 #include <odp_schedule_if.h>
 #include <odp_timer_internal.h>
