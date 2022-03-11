@@ -17,6 +17,8 @@
 extern "C" {
 #endif
 
+#include <odp/api/abi/byteorder.h>
+
 #include <rte_config.h>
 #include <rte_byteorder.h>
 
