@@ -523,12 +523,8 @@ static void capability_process(struct rte_cryptodev_info *dev_info,
 				ciphers->bit.trides_ecb = 1;
 				ciphers->bit.des = 1;
 			}
-			if (cap_cipher_algo == RTE_CRYPTO_CIPHER_AES_CBC) {
+			if (cap_cipher_algo == RTE_CRYPTO_CIPHER_AES_CBC)
 				ciphers->bit.aes_cbc = 1;
-#if ODP_DEPRECATED_API
-				ciphers->bit.aes128_cbc = 1;
-#endif
-			}
 			if (cap_cipher_algo == RTE_CRYPTO_CIPHER_AES_CTR)
 				ciphers->bit.aes_ctr = 1;
 			if (cap_cipher_algo == RTE_CRYPTO_CIPHER_AES_ECB)
@@ -592,7 +588,6 @@ static void capability_process(struct rte_cryptodev_info *dev_info,
 				ciphers->bit.aes_gcm = 1;
 				auths->bit.aes_gcm = 1;
 #if ODP_DEPRECATED_API
-				ciphers->bit.aes128_gcm = 1;
 				auths->bit.aes128_gcm = 1;
 #endif
 			}
