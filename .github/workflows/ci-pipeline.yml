@@ -120,7 +120,7 @@ jobs:
 
       - name: Ubuntu 20.04
         env:
-          CONF: "--enable-dpdk-shared"
+          CONF: "--enable-dpdk-shared --disable-test-cpp"
           OS: ubuntu_20.04
         run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${{matrix.compiler}}"
                -e CONF="${CONF}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH} /odp/scripts/ci/build_${ARCH}.sh
