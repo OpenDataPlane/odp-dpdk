@@ -1,5 +1,5 @@
 /* Copyright (c) 2015-2018, Linaro Limited
- * Copyright (c) 2019-2021, Nokia
+ * Copyright (c) 2019-2022, Nokia
  * Copyright (c) 2020, Marvell
  * All rights reserved.
  *
@@ -187,6 +187,8 @@ static inline void print_cls_statistics(appl_args_t *args)
 		infinite = 1;
 
 	for (; timeout > 0 || infinite; timeout--) {
+		sleep(1);
+		printf("\r");
 		for (i = 0; i < args->policy_count; i++) {
 			printf("%-6" PRIu64 " ",
 			       odp_atomic_load_u64(&args->stats[i]
@@ -198,13 +200,10 @@ static inline void print_cls_statistics(appl_args_t *args)
 
 		printf("%-" PRIu64, odp_atomic_load_u64(&args->
 							total_packets));
+		fflush(stdout);
 
 		if (args->shutdown_sig)
 			break;
-
-		sleep(1);
-		printf("\r");
-		fflush(stdout);
 	}
 
 	printf("\n");
@@ -401,7 +400,7 @@ static odp_cos_t configure_default_cos(odp_pktio_t pktio, appl_args_t *args)
 
 	odp_queue_param_init(&qparam);
 	qparam.type       = ODP_QUEUE_TYPE_SCHED;
-	qparam.sched.prio = ODP_SCHED_PRIO_DEFAULT;
+	qparam.sched.prio = odp_schedule_default_prio();
 	qparam.sched.sync = ODP_SCHED_SYNC_PARALLEL;
 	qparam.sched.group = ODP_SCHED_GROUP_ALL;
 	queue_default = odp_queue_create(queue_name, &qparam);

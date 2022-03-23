@@ -16,6 +16,7 @@
 #include <odp/visibility_begin.h>
 
 #include <odp/api/deprecated.h>
+#include <odp/api/pool_types.h>
 #include <odp/api/std_types.h>
 
 #ifdef __cplusplus
@@ -164,12 +165,6 @@ typedef enum {
 	 *  COUNT || BEARER || DIRECTION || 0...0 ||
 	 */
 	ODP_CIPHER_ALG_ZUC_EEA3,
-
-	/** @deprecated  Use ODP_CIPHER_ALG_AES_CBC instead */
-	ODP_DEPRECATE(ODP_CIPHER_ALG_AES128_CBC),
-
-	/** @deprecated  Use ODP_CIPHER_ALG_AES_GCM instead */
-	ODP_DEPRECATE(ODP_CIPHER_ALG_AES128_GCM),
 
 } odp_cipher_alg_t;
 
@@ -340,15 +335,6 @@ typedef enum {
 	/** 512 bit SHA2 algorithm */
 	ODP_AUTH_ALG_SHA512,
 
-	/** @deprecated  Use ODP_AUTH_ALG_MD5_HMAC instead */
-	ODP_DEPRECATE(ODP_AUTH_ALG_MD5_96),
-
-	/** @deprecated  Use ODP_AUTH_ALG_SHA256_HMAC instead */
-	ODP_DEPRECATE(ODP_AUTH_ALG_SHA256_128),
-
-	/** @deprecated  Use ODP_AUTH_ALG_AES_GCM instead */
-	ODP_DEPRECATE(ODP_AUTH_ALG_AES128_GCM)
-
 } odp_auth_alg_t;
 
 /**
@@ -404,12 +390,6 @@ typedef union odp_crypto_cipher_algos_t {
 
 		/** ODP_CIPHER_ALG_ZUC_EEA3 */
 		uint32_t zuc_eea3    : 1;
-
-		/** @deprecated  Use aes_cbc instead */
-		uint32_t ODP_DEPRECATE(aes128_cbc) : 1;
-
-		/** @deprecated  Use aes_gcm instead */
-		uint32_t ODP_DEPRECATE(aes128_gcm) : 1;
 
 	} bit;
 
@@ -495,15 +475,6 @@ typedef union odp_crypto_auth_algos_t {
 		/** ODP_AUTH_ALG_SHA512 */
 		uint32_t sha512 : 1;
 
-		/** @deprecated  Use md5_hmac instead */
-		uint32_t ODP_DEPRECATE(md5_96)     : 1;
-
-		/** @deprecated  Use sha256_hmac instead */
-		uint32_t ODP_DEPRECATE(sha256_128) : 1;
-
-		/** @deprecated  Use aes_gcm instead */
-		uint32_t ODP_DEPRECATE(aes128_gcm) : 1;
-
 	} bit;
 
 	/** All bits of the bit field structure
@@ -546,13 +517,6 @@ typedef struct odp_crypto_iv {
 	uint32_t length;
 
 } ODP_DEPRECATE(odp_crypto_iv_t);
-
-/**
- * Crypto API data range specifier
- *
- * @deprecated  Use odp_packet_data_range_t instead
- */
-typedef odp_packet_data_range_t ODP_DEPRECATE(odp_crypto_data_range_t);
 
 /**
  * Crypto API session creation parameters
@@ -629,9 +593,6 @@ typedef struct odp_crypto_session_param_t {
 	 */
 	union {
 #if ODP_DEPRECATED_API
-		/** @deprecated Use cipher_iv */
-		odp_crypto_iv_t ODP_DEPRECATE(iv);
-
 		/** Cipher Initialization Vector (IV) */
 		odp_crypto_iv_t ODP_DEPRECATE(cipher_iv);
 #endif
@@ -726,9 +687,6 @@ typedef struct odp_crypto_session_param_t {
 
 } odp_crypto_session_param_t;
 
-/** @deprecated  Use odp_crypto_session_param_t instead */
-typedef odp_crypto_session_param_t ODP_DEPRECATE(odp_crypto_session_params_t);
-
 /**
  * Crypto API per packet operation parameters
  */
@@ -762,12 +720,7 @@ typedef struct odp_crypto_op_param_t {
 	odp_packet_t out_pkt;
 
 	/** IV pointer for cipher */
-	union {
-		/** @deprecated use cipher_iv_ptr */
-		uint8_t *ODP_DEPRECATE(override_iv_ptr);
-		/** IV pointer for cipher */
-		uint8_t *cipher_iv_ptr;
-	};
+	uint8_t *cipher_iv_ptr;
 
 	/** Authentication IV pointer */
 	uint8_t *auth_iv_ptr;
@@ -809,9 +762,6 @@ typedef struct odp_crypto_op_param_t {
 
 } odp_crypto_op_param_t;
 
-/** @deprecated  Use odp_crypto_op_param_t instead */
-typedef odp_crypto_op_param_t ODP_DEPRECATE(odp_crypto_op_params_t);
-
 /**
  * Crypto packet API per packet operation parameters
  */
@@ -820,12 +770,7 @@ typedef struct odp_crypto_packet_op_param_t {
 	odp_crypto_session_t session;
 
 	/** IV pointer for cipher */
-	union {
-		/** @deprecated use cipher_iv_ptr */
-		uint8_t *ODP_DEPRECATE(override_iv_ptr);
-		/** IV pointer for cipher */
-		uint8_t *cipher_iv_ptr;
-	};
+	uint8_t *cipher_iv_ptr;
 
 	/** IV pointer for authentication */
 	uint8_t *auth_iv_ptr;
@@ -947,9 +892,6 @@ typedef struct odp_crypto_op_status {
 	odp_crypto_hw_err_t  hw_err;
 
 } odp_crypto_op_status_t;
-
-/** @deprecated  Use ODP_DEPRECATE(odp_crypto_op_status_t) instead */
-typedef odp_crypto_op_status_t ODP_DEPRECATE(odp_crypto_compl_status_t);
 
 /**
  * Crypto API operation result

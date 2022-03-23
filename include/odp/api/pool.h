@@ -18,8 +18,6 @@ extern "C" {
 #endif
 
 #include <odp/api/abi/pool.h>
-#include <odp/api/abi/shared_memory.h>
-#include <odp/api/abi/event.h>
 
 #include <odp/api/spec/pool.h>
 

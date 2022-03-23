@@ -1,5 +1,5 @@
 /* Copyright (c) 2013-2018, Linaro Limited
- * Copyright (c) 2019-2021, Nokia
+ * Copyright (c) 2019-2022, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -18,27 +18,28 @@
 extern "C" {
 #endif
 
-#include <odp/autoheader_internal.h>
-
+#include <odp/api/hints.h>
 #include <odp/api/packet_io.h>
-#include <odp/api/plat/pktio_inlines.h>
 #include <odp/api/spinlock.h>
 #include <odp/api/ticketlock.h>
-#include <odp_classification_datamodel.h>
+
+#include <odp/api/plat/packet_io_inlines.h>
+
+#include <odp/autoheader_internal.h>
 #include <odp_align_internal.h>
+#include <odp_classification_datamodel.h>
+#include <odp_config_internal.h>
 #include <odp_debug_internal.h>
 #include <odp_packet_io_stats_common.h>
 #include <odp_queue_if.h>
 
-#include <odp_config_internal.h>
-#include <odp/api/hints.h>
-#include <string.h>
-#include <net/if.h>
-#include <linux/if_ether.h>
-#include <sys/select.h>
 #include <inttypes.h>
+#include <linux/if_ether.h>
+#include <net/if.h>
+#include <string.h>
+#include <sys/select.h>
 
-#define PKTIO_MAX_QUEUES 64
+#define PKTIO_MAX_QUEUES ODP_PKTOUT_MAX_QUEUES
 #define PKTIO_LSO_PROFILES 16
 /* Assume at least Ethernet header per each segment */
 #define PKTIO_LSO_MIN_PAYLOAD_OFFSET 14
@@ -78,14 +79,24 @@ struct pktio_entry {
 	odp_ticketlock_t rxl;		/**< RX ticketlock */
 	odp_ticketlock_t txl;		/**< TX ticketlock */
 	uint16_t pktin_frame_offset;
+
 	struct {
-		/* Pktout checksum offload */
-		uint8_t chksum_insert : 1;
-		/* Classifier */
-		uint8_t cls : 1;
-		/* Tx timestamp */
-		uint8_t tx_ts : 1;
+		union {
+			uint8_t all_flags;
+
+			struct {
+				/* Pktout checksum offload */
+				uint8_t chksum_insert : 1;
+				/* Classifier */
+				uint8_t cls : 1;
+				/* Tx timestamp */
+				uint8_t tx_ts : 1;
+				/* Tx completion events */
+				uint8_t tx_compl : 1;
+			};
+		};
 	} enabled;
+
 	odp_pktio_t handle;		/**< pktio handle */
 	unsigned char pkt_priv[PKTIO_PRIVATE_SIZE] ODP_ALIGNED_CACHE;
 	enum {
@@ -127,6 +138,9 @@ struct pktio_entry {
 	odp_pool_t pool;
 	odp_pktio_param_t param;
 	odp_pktio_capability_t capa;	/**< Packet IO capabilities */
+
+	/* Pool for Tx completion events */
+	odp_pool_t tx_compl_pool;
 
 	/* Storage for queue handles
 	 * Multi-queue support is pktio driver specific */
@@ -174,6 +188,8 @@ typedef struct {
 	struct {
 		/* Frame start offset from base pointer at packet input */
 		uint16_t pktin_frame_offset;
+		/* Pool size for potential completion events */
+		uint32_t tx_compl_pool_size;
 	} config;
 
 	pktio_entry_t entries[ODP_CONFIG_PKTIO_ENTRIES];
@@ -236,6 +252,10 @@ typedef struct pktio_if_ops {
 				    const odp_pktout_queue_param_t *p);
 } pktio_if_ops_t;
 
+typedef struct {
+	const void *user_ptr;
+} _odp_pktio_tx_compl_t;
+
 extern void *_odp_pktio_entry_ptr[];
 
 static inline pktio_entry_t *get_pktio_entry(odp_pktio_t pktio)
@@ -261,14 +281,14 @@ static inline int pktio_cls_enabled(pktio_entry_t *entry)
 	return entry->s.enabled.cls;
 }
 
-static inline void pktio_cls_enabled_set(pktio_entry_t *entry, int ena)
-{
-	entry->s.enabled.cls = !!ena;
-}
-
 static inline int _odp_pktio_tx_ts_enabled(pktio_entry_t *entry)
 {
 	return entry->s.enabled.tx_ts;
+}
+
+static inline int _odp_pktio_tx_compl_enabled(const pktio_entry_t *entry)
+{
+	return entry->s.enabled.tx_compl;
 }
 
 static inline void _odp_pktio_tx_ts_set(pktio_entry_t *entry)
@@ -314,6 +334,19 @@ int _odp_sock_recv_mq_tmo_try_int_driven(const struct odp_pktin_queue_t queues[]
 /* Setup PKTOUT with single queue for TM */
 int _odp_pktio_pktout_tm_config(odp_pktio_t pktio_hdl,
 				odp_pktout_queue_t *queue, bool reconf);
+
+/* LSO functions shared with TM */
+odp_lso_profile_t _odp_lso_prof_from_idx(uint8_t idx);
+
+int _odp_lso_num_packets(odp_packet_t packet, const odp_packet_lso_opt_t *lso_opt,
+			 uint32_t *len_out, uint32_t *left_over_out);
+
+int _odp_lso_create_packets(odp_packet_t packet, const odp_packet_lso_opt_t *lso_opt,
+			    uint32_t payload_len, uint32_t left_over_len,
+			    odp_packet_t pkt_out[], int num_pkt);
+
+void _odp_pktio_allocate_and_send_tx_compl_events(const pktio_entry_t *entry,
+						  const odp_packet_t packets[], int num);
 
 #ifdef __cplusplus
 }

@@ -19,11 +19,10 @@ extern "C" {
 
 #include <odp/api/std_types.h>
 #include <odp/api/abi/event.h>
-#include <odp/api/abi/packet_io.h>
+#include <odp/api/abi/packet_io_types.h>
 #include <odp/api/abi/packet_types.h>
 #include <odp/api/abi/packet.h>
 #include <odp/api/abi/buffer.h>
-#include <odp/api/abi/pool.h>
 
 #include <odp/api/spec/packet.h>
 

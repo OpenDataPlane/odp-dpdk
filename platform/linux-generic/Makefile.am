@@ -14,6 +14,7 @@ AM_CPPFLAGS +=  -I$(top_srcdir)/platform/$(with_platform)/arch/default
 AM_CPPFLAGS +=  $(OPENSSL_CPPFLAGS)
 AM_CPPFLAGS +=  $(NETMAP_CPPFLAGS)
 
+AM_CFLAGS +=  $(AARCH64CRYPTO_CFLAGS)
 AM_CFLAGS +=  $(DPDK_CFLAGS)
 AM_CFLAGS +=  $(LIBCONFIG_CFLAGS)
 
@@ -39,7 +40,7 @@ odpapiplatinclude_HEADERS = \
 		  include/odp/api/plat/packet_inline_types.h \
 		  include/odp/api/plat/packet_inlines.h \
 		  include/odp/api/plat/packet_vector_inlines.h \
-		  include/odp/api/plat/pktio_inlines.h \
+		  include/odp/api/plat/packet_io_inlines.h \
 		  include/odp/api/plat/pool_inline_types.h \
 		  include/odp/api/plat/queue_inlines.h \
 		  include/odp/api/plat/queue_inline_types.h \
@@ -71,11 +72,14 @@ odpapiabiarchinclude_HEADERS += \
 		  include-abi/odp/api/abi/packet_types.h \
 		  include-abi/odp/api/abi/packet_flags.h \
 		  include-abi/odp/api/abi/packet_io.h \
+		  include-abi/odp/api/abi/packet_io_types.h \
 		  include-abi/odp/api/abi/proto_stats.h \
 		  include-abi/odp/api/abi/proto_stats_types.h \
 		  include-abi/odp/api/abi/pool.h \
+		  include-abi/odp/api/abi/pool_types.h \
 		  include-abi/odp/api/abi/queue.h \
 		  include-abi/odp/api/abi/queue_types.h \
+		  include-abi/odp/api/abi/random.h \
 		  include-abi/odp/api/abi/rwlock.h \
 		  include-abi/odp/api/abi/rwlock_recursive.h \
 		  include-abi/odp/api/abi/schedule.h \
@@ -247,12 +251,17 @@ __LIB__libodp_linux_la_SOURCES = \
 			   pktio/socket_mmap.c \
 			   pktio/tap.c
 
-if WITH_OPENSSL
+if WITH_OPENSSL_CRYPTO
 __LIB__libodp_linux_la_SOURCES += \
 			   odp_crypto_openssl.c
 else
+if WITH_ARMV8_CRYPTO
+__LIB__libodp_linux_la_SOURCES += \
+			   arch/aarch64/odp_crypto_armv8.c
+else
 __LIB__libodp_linux_la_SOURCES += \
 			   odp_crypto_null.c
+endif
 endif
 if ODP_ABI_COMPAT
 __LIB__libodp_linux_la_SOURCES += \
@@ -264,7 +273,7 @@ __LIB__libodp_linux_la_SOURCES += \
 			   odp_hash_api.c \
 			   odp_packet_api.c \
 			   odp_packet_flags_api.c \
-			   odp_pktio_api.c \
+			   odp_packet_io_api.c \
 			   odp_queue_api.c \
 			   odp_std_api.c \
 			   odp_sync_api.c \
@@ -394,7 +403,8 @@ if ODP_PKTIO_PCAP
 __LIB__libodp_linux_la_SOURCES += pktio/pcap.c
 endif
 
-__LIB__libodp_linux_la_LIBADD = $(ATOMIC_LIBS)
+__LIB__libodp_linux_la_LIBADD =  $(AARCH64CRYPTO_LIBS)
+__LIB__libodp_linux_la_LIBADD += $(ATOMIC_LIBS)
 __LIB__libodp_linux_la_LIBADD += $(OPENSSL_LIBS)
 __LIB__libodp_linux_la_LIBADD += $(LIBCONFIG_LIBS)
 __LIB__libodp_linux_la_LIBADD += $(DPDK_LIBS_LIBODP)

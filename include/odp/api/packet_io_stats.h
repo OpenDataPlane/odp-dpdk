@@ -17,6 +17,8 @@
 extern "C" {
 #endif
 
+#include <odp/api/abi/packet_io_types.h>
+
 #include <odp/api/spec/packet_io_stats.h>
 
 #ifdef __cplusplus

@@ -2,12 +2,34 @@
  *
  * Copyright (c) 2015-2018, Linaro Limited
  * Copyright (c) 2022, Marvell
+ * Copyright (c) 2022, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier: BSD-3-Clause
  */
 
 #include <odp_posix_extensions.h>
+
+#include <odp/api/packet.h>
+#include <odp/api/packet_flags.h>
+#include <odp/api/std_types.h>
+#include <odp/api/time.h>
+
+#include <odp/api/plat/byteorder_inlines.h>
+#include <odp/api/plat/packet_inlines.h>
+#include <odp/api/plat/time_inlines.h>
+
+#include <odp_packet_io_internal.h>
+#include <odp_traffic_mngr_internal.h>
+#include <odp_macros_internal.h>
+#include <odp_init_internal.h>
+#include <odp_errno_define.h>
+#include <odp_global_data.h>
+#include <odp_schedule_if.h>
+#include <odp_event_internal.h>
+
+#include <protocols/eth.h>
+#include <protocols/ip.h>
 
 #include <stdint.h>
 #include <string.h>
@@ -20,21 +42,6 @@
 #include <sched.h>
 #include <unistd.h>
 #include <pthread.h>
-#include <odp/api/std_types.h>
-#include <protocols/eth.h>
-#include <protocols/ip.h>
-#include <odp_packet_io_internal.h>
-#include <odp_traffic_mngr_internal.h>
-#include <odp/api/plat/packet_inlines.h>
-#include <odp/api/plat/byteorder_inlines.h>
-#include <odp/api/time.h>
-#include <odp/api/plat/time_inlines.h>
-#include <odp_macros_internal.h>
-#include <odp_init_internal.h>
-#include <odp_errno_define.h>
-#include <odp_global_data.h>
-#include <odp_schedule_if.h>
-#include <odp_event_internal.h>
 
 /* Local vars */
 static const
@@ -2224,6 +2231,7 @@ static void tm_send_pkt(tm_system_t *tm_system, uint32_t max_sends)
 	pkt_desc_t *pkt_desc;
 	uint32_t cnt;
 	int ret;
+	pktio_entry_t *pktio_entry;
 
 	for (cnt = 1; cnt <= max_sends; cnt++) {
 		pkt_desc = &tm_system->egress_pkt_desc;
@@ -2244,6 +2252,10 @@ static void tm_send_pkt(tm_system_t *tm_system, uint32_t max_sends)
 		if (tm_system->egress.egress_kind == ODP_TM_EGRESS_PKT_IO) {
 			ret = odp_pktout_send(tm_system->pktout, &odp_pkt, 1);
 			if (odp_unlikely(ret != 1)) {
+				pktio_entry = get_pktio_entry(tm_system->pktout.pktio);
+				if (odp_unlikely(_odp_pktio_tx_compl_enabled(pktio_entry)))
+					_odp_pktio_allocate_and_send_tx_compl_events(pktio_entry,
+										     &odp_pkt, 1);
 				odp_packet_free(odp_pkt);
 				if (odp_unlikely(ret < 0))
 					odp_atomic_inc_u64(&tm_queue_obj->stats.errors);
@@ -4539,6 +4551,82 @@ int odp_tm_enq_multi(odp_tm_queue_t tm_queue, const odp_packet_t packets[],
 			odp_atomic_inc_u64(&tm_queue_obj->stats.discards);
 		}
 	}
+
+	return i;
+}
+
+int odp_tm_enq_multi_lso(odp_tm_queue_t tm_queue, const odp_packet_t packets[], int num,
+			 const odp_packet_lso_opt_t *opt)
+{
+	int i, ret, num_pkt;
+	uint32_t payload_len, left_over_len;
+	odp_packet_t pkt;
+	odp_packet_lso_opt_t lso_opt;
+	const odp_packet_lso_opt_t *opt_ptr = &lso_opt;
+
+	if (odp_unlikely(num <= 0)) {
+		ODP_ERR("No packets\n");
+		return -1;
+	}
+
+	memset(&lso_opt, 0, sizeof(odp_packet_lso_opt_t));
+	if (opt)
+		opt_ptr = opt;
+
+	for (i = 0; i < num; i++) {
+		pkt = packets[i];
+
+		if (opt == NULL) {
+			odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
+
+			if (pkt_hdr->p.flags.lso == 0) {
+				ODP_ERR("No LSO options on packet %i\n", i);
+				goto error;
+			}
+			/* Fill in LSO options from packet */
+			lso_opt.lso_profile     = _odp_lso_prof_from_idx(pkt_hdr->lso_profile_idx);
+			lso_opt.payload_offset  = odp_packet_payload_offset(pkt);
+			lso_opt.max_payload_len = pkt_hdr->lso_max_payload;
+		}
+
+		/* Calculate number of packets */
+		num_pkt = _odp_lso_num_packets(pkt, opt_ptr, &payload_len, &left_over_len);
+		if (odp_unlikely(num_pkt <= 0)) {
+			ODP_DBG("LSO num packets failed on packet %i\n", i);
+			goto error;
+		}
+
+		/* Create packets */
+		odp_packet_t pkt_out[num_pkt];
+
+		ret = _odp_lso_create_packets(pkt, opt_ptr, payload_len, left_over_len, pkt_out,
+					      num_pkt);
+
+		if (odp_unlikely(ret))
+			goto error;
+
+		/* Enqueue resulting packets */
+		ret = odp_tm_enq_multi(tm_queue, pkt_out, num_pkt);
+
+		if (odp_unlikely(ret < num_pkt)) {
+			ODP_DBG("TM enqueue failed on packet %i\n", i);
+
+			if (ret < 0)
+				ret = 0;
+
+			odp_packet_free_multi(&pkt_out[ret], num_pkt - ret);
+			goto error;
+		}
+
+		/* Free original packet */
+		odp_packet_free(pkt);
+	}
+
+	return i;
+
+error:
+	if (i == 0)
+		return -1;
 
 	return i;
 }

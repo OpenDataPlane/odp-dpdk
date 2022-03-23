@@ -17,6 +17,8 @@
 
 #include <odp_ipsec_sa_db.h>
 
+odp_bool_t sa_config_supported(const sa_db_entry_t *sa, int *sa_flags);
+
 /** Global pointer to sa db */
 static sa_db_t *sa_db;
 
@@ -159,6 +161,11 @@ int create_sa_db_entry(char *input, odp_bool_t cipher)
 		printf("ERROR: \"%s\" contains %d tokens, expected 5\n",
 		       input,
 		       pos);
+		free(local);
+		return -1;
+	}
+
+	if (!sa_config_supported(entry, &entry->flags)) {
 		free(local);
 		return -1;
 	}

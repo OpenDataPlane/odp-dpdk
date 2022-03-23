@@ -1,5 +1,5 @@
 /* Copyright (c) 2014-2018, Linaro Limited
- * Copyright (c) 2020-2021, Nokia
+ * Copyright (c) 2020-2022, Nokia
  * Copyright (c) 2020, Marvell
  * All rights reserved.
  *
@@ -512,7 +512,7 @@ static odp_pktio_t create_pktv_pktio(int iface_idx, odp_pktin_mode_t imode,
 	odp_pktin_queue_param_init(&pktin_param);
 
 	if (imode == ODP_PKTIN_MODE_SCHED) {
-		pktin_param.queue_param.sched.prio = ODP_SCHED_PRIO_DEFAULT;
+		pktin_param.queue_param.sched.prio = odp_schedule_default_prio();
 		pktin_param.queue_param.sched.sync = sync_mode;
 		pktin_param.queue_param.sched.group = ODP_SCHED_GROUP_ALL;
 	}
@@ -1614,6 +1614,7 @@ static void pktio_test_default_values(void)
 	odp_pktout_queue_param_init(&qp_out);
 	CU_ASSERT_EQUAL(qp_out.op_mode, ODP_PKTIO_OP_MT);
 	CU_ASSERT_EQUAL(qp_out.num_queues, 1);
+	CU_ASSERT_EQUAL(qp_out.queue_size[0], 0);
 
 	memset(&pktio_conf, 0x55, sizeof(pktio_conf));
 	odp_pktio_config_init(&pktio_conf);
@@ -1989,11 +1990,17 @@ static void pktio_test_pktout_queue_config(void)
 	CU_ASSERT_FATAL(odp_pktio_capability(pktio, &capa) == 0 &&
 			capa.max_output_queues > 0);
 	num_queues = capa.max_output_queues;
+	CU_ASSERT_FATAL(num_queues <= ODP_PKTOUT_MAX_QUEUES);
+
+	CU_ASSERT(capa.min_output_queue_size <= capa.max_output_queue_size);
 
 	odp_pktout_queue_param_init(&queue_param);
 
 	queue_param.op_mode = ODP_PKTIO_OP_MT_UNSAFE;
 	queue_param.num_queues  = num_queues;
+	for (int i = 0; i < num_queues; i++)
+		queue_param.queue_size[i] = capa.max_output_queue_size;
+
 	CU_ASSERT(odp_pktout_queue_config(pktio, &queue_param) == 0);
 
 	CU_ASSERT(odp_pktout_queue(pktio, pktout_queues, MAX_QUEUES)
@@ -2001,6 +2008,8 @@ static void pktio_test_pktout_queue_config(void)
 
 	queue_param.op_mode = ODP_PKTIO_OP_MT;
 	queue_param.num_queues  = 1;
+	queue_param.queue_size[0] = capa.min_output_queue_size;
+
 	CU_ASSERT(odp_pktout_queue_config(pktio, &queue_param) == 0);
 
 	CU_ASSERT(odp_pktout_queue_config(ODP_PKTIO_INVALID, &queue_param) < 0);
@@ -3316,7 +3325,7 @@ static void pktio_test_pktout_compl(bool use_plain_queue)
 		opt.queue = compl_queue[i];
 		opt.mode = ODP_PACKET_TX_COMPL_ALL;
 		odp_packet_tx_compl_request(pkt_tbl[i], &opt);
-
+		CU_ASSERT(odp_packet_has_tx_compl_request(pkt_tbl[i]) != 0);
 		/* Set pkt sequence number as its user ptr */
 		odp_packet_user_ptr_set(pkt_tbl[i], (const void *)&pkt_seq[i]);
 	}
@@ -3339,6 +3348,7 @@ static void pktio_test_pktout_compl(bool use_plain_queue)
 
 			/* Event validation */
 			CU_ASSERT_FATAL(ev != ODP_EVENT_INVALID);
+			CU_ASSERT_FATAL(odp_event_is_valid(ev) == 1);
 			CU_ASSERT_FATAL(odp_event_type(ev) == ODP_EVENT_PACKET_TX_COMPL);
 			CU_ASSERT_FATAL(odp_packet_tx_compl_from_event(ev) !=
 					ODP_PACKET_TX_COMPL_INVALID);
@@ -3363,6 +3373,7 @@ static void pktio_test_pktout_compl(bool use_plain_queue)
 
 			/* Event validation */
 			CU_ASSERT_FATAL(ev != ODP_EVENT_INVALID);
+			CU_ASSERT_FATAL(odp_event_is_valid(ev) == 1);
 			CU_ASSERT_FATAL(odp_event_type(ev) == ODP_EVENT_PACKET_TX_COMPL);
 			CU_ASSERT_FATAL(odp_packet_tx_compl_from_event(ev) !=
 					ODP_PACKET_TX_COMPL_INVALID);
@@ -3394,13 +3405,26 @@ static void pktio_test_pktout_compl(bool use_plain_queue)
 		}
 	}
 
-	for (i = 0; i < TX_BATCH_LEN; i++)
-		odp_queue_destroy(compl_queue[i]);
-
 	for (i = 0; i < num_ifaces; i++) {
 		CU_ASSERT_FATAL(odp_pktio_stop(pktio[i]) == 0);
 		CU_ASSERT_FATAL(odp_pktio_close(pktio[i]) == 0);
 	}
+
+	odp_schedule_pause();
+
+	while (1) {
+		ev = odp_schedule(NULL, ODP_SCHED_NO_WAIT);
+
+		if (ev == ODP_EVENT_INVALID)
+			break;
+
+		odp_event_free(ev);
+	}
+
+	odp_schedule_resume();
+
+	for (i = 0; i < TX_BATCH_LEN; i++)
+		odp_queue_destroy(compl_queue[i]);
 }
 
 static int pktio_check_pktout_compl(bool plain)
@@ -4564,7 +4588,7 @@ static void pktio_test_pktin_event_queue(odp_pktin_mode_t pktin_mode)
 
 	if (pktin_mode == ODP_PKTIN_MODE_SCHED) {
 		in_queue_param.queue_param.type = ODP_QUEUE_TYPE_SCHED;
-		in_queue_param.queue_param.sched.prio  = ODP_SCHED_PRIO_DEFAULT;
+		in_queue_param.queue_param.sched.prio  = odp_schedule_default_prio();
 		in_queue_param.queue_param.sched.sync  = ODP_SCHED_SYNC_ATOMIC;
 		in_queue_param.queue_param.sched.group = ODP_SCHED_GROUP_ALL;
 	}

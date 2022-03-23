@@ -1,5 +1,5 @@
 /* Copyright (c) 2013-2018, Linaro Limited
- * Copyright (c) 2021, Nokia
+ * Copyright (c) 2021-2022, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -100,6 +100,7 @@ typedef struct {
 	int num_polled_queues;
 	/* Stop workers if set to 1 */
 	odp_atomic_u32_t exit_threads;
+	odp_crypto_capability_t crypto_capa;
 } global_data_t;
 
 /* helper funcs */
@@ -332,7 +333,7 @@ void ipsec_init_pre(void)
 	 */
 	odp_queue_param_init(&qparam);
 	qparam.type        = ODP_QUEUE_TYPE_SCHED;
-	qparam.sched.prio  = ODP_SCHED_PRIO_HIGHEST;
+	qparam.sched.prio  = odp_schedule_max_prio();
 	qparam.sched.sync  = ODP_SCHED_SYNC_ATOMIC;
 	qparam.sched.group = ODP_SCHED_GROUP_ALL;
 
@@ -343,7 +344,7 @@ void ipsec_init_pre(void)
 	}
 
 	qparam.type        = ODP_QUEUE_TYPE_SCHED;
-	qparam.sched.prio  = ODP_SCHED_PRIO_HIGHEST;
+	qparam.sched.prio  = odp_schedule_max_prio();
 	qparam.sched.sync  = ODP_SCHED_SYNC_ATOMIC;
 	qparam.sched.group = ODP_SCHED_GROUP_ALL;
 
@@ -663,6 +664,15 @@ pkt_disposition_e do_ipsec_in_classify(odp_packet_t *pkt,
 		params.cipher_range.offset = ipv4_data_p(ip) + hdr_len - buf;
 		params.cipher_range.length = ipv4_data_len(ip) - hdr_len;
 		params.cipher_iv_ptr = esp->iv;
+	}
+
+	if (entry->sa_flags & BIT_MODE_CIPHER) {
+		params.cipher_range.offset *= 8;
+		params.cipher_range.length *= 8;
+	}
+	if (entry->sa_flags & BIT_MODE_AUTH) {
+		params.auth_range.offset *= 8;
+		params.auth_range.length *= 8;
 	}
 
 	/* Issue crypto request */
@@ -1292,6 +1302,7 @@ main(int argc, char *argv[])
 	memset(global, 0, sizeof(global_data_t));
 	global->shm = shm;
 	odp_atomic_init_u32(&global->exit_threads, 0);
+	global->crypto_capa = crypto_capa;
 
 	/* Configure scheduler */
 	odp_schedule_config(NULL);
@@ -1391,7 +1402,7 @@ main(int argc, char *argv[])
 
 		do {
 			done = verify_stream_db_outputs();
-			sleep(1);
+			usleep(100000);
 		} while (!done);
 		printf("All received\n");
 		odp_atomic_store_u32(&global->exit_threads, 1);
@@ -1683,4 +1694,113 @@ static void usage(char *progname)
 	       " stream verification instead of single dequeue (default)\n"
 	       "\n", NO_PATH(progname), NO_PATH(progname)
 		);
+}
+
+static odp_bool_t cipher_supported(odp_cipher_alg_t alg, const sa_db_entry_t *sa, int *sa_flags)
+{
+	const odp_crypto_cipher_algos_t *algos = &global->crypto_capa.ciphers;
+	odp_bool_t alg_ok = true;
+	int num;
+
+	switch (alg) {
+	case ODP_CIPHER_ALG_NULL:
+		if (!algos->bit.null)
+			alg_ok = false;
+		break;
+	case ODP_CIPHER_ALG_3DES_CBC:
+		if (!algos->bit.trides_cbc)
+			alg_ok = false;
+		break;
+	default:
+		alg_ok = false;
+		break;
+	}
+	if (!alg_ok) {
+		printf("ERROR: cipher algorithm not supported\n");
+		return false;
+	}
+
+	num = odp_crypto_cipher_capability(alg, NULL, 0);
+	if (num < 0) {
+		printf("ERROR: odp_crypto_cipher_capability() failed\n");
+		return false;
+	}
+	odp_crypto_cipher_capability_t cipher_capa[num];
+
+	(void)odp_crypto_cipher_capability(alg, cipher_capa, num);
+	for (int n = 0; n < num; n++) {
+		odp_crypto_cipher_capability_t *capa = &cipher_capa[n];
+
+		if (capa->key_len == sa->key.length &&
+		    capa->iv_len == sa->iv_len) {
+			if (capa->bit_mode)
+				*sa_flags |= BIT_MODE_CIPHER;
+			return true;
+		}
+	}
+	printf("ERROR: cipher key length or IV length not supported\n");
+	return false;
+}
+
+static odp_bool_t auth_supported(odp_auth_alg_t alg, const sa_db_entry_t *sa, int *sa_flags)
+{
+	const odp_crypto_auth_algos_t *algos = &global->crypto_capa.auths;
+	odp_bool_t alg_ok = true;
+	int num;
+
+	switch (alg) {
+	case ODP_AUTH_ALG_NULL:
+		if (!algos->bit.null)
+			alg_ok = false;
+		break;
+	case ODP_AUTH_ALG_MD5_HMAC:
+		if (!algos->bit.md5_hmac)
+			alg_ok = false;
+		break;
+	case ODP_AUTH_ALG_SHA1_HMAC:
+		if (!algos->bit.sha1_hmac)
+			alg_ok = false;
+		break;
+	case ODP_AUTH_ALG_SHA256_HMAC:
+		if (!algos->bit.sha256_hmac)
+			alg_ok = false;
+		break;
+	default:
+		alg_ok = false;
+		break;
+	}
+	if (!alg_ok) {
+		printf("ERROR: auth algorithm not supported\n");
+		return false;
+	}
+
+	num = odp_crypto_auth_capability(alg, NULL, 0);
+	if (num < 0) {
+		printf("ERROR: odp_crypto_auth_capability() failed\n");
+		return false;
+	}
+	odp_crypto_auth_capability_t auth_capa[num];
+
+	(void)odp_crypto_auth_capability(alg, auth_capa, num);
+	for (int n = 0; n < num; n++) {
+		odp_crypto_auth_capability_t *capa = &auth_capa[n];
+
+		if (capa->digest_len == sa->icv_len &&
+		    capa->key_len == sa->key.length &&
+		    capa->iv_len == 0) {
+			if (capa->bit_mode)
+				*sa_flags |= BIT_MODE_AUTH;
+			return true;
+		}
+	}
+	printf("ERROR: auth ICV length or key length not supported\n");
+	return false;
+}
+
+odp_bool_t sa_config_supported(const sa_db_entry_t *sa, int *sa_flags);
+
+odp_bool_t sa_config_supported(const sa_db_entry_t *sa, int *sa_flags)
+{
+	return sa->alg.cipher ? cipher_supported(sa->alg.u.cipher, sa, sa_flags)
+			      : auth_supported(sa->alg.u.auth, sa, sa_flags);
 }

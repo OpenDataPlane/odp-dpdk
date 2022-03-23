@@ -1,24 +1,32 @@
 /* Copyright (c) 2013-2018, Linaro Limited
- * Copyright (c) 2013-2021, Nokia Solutions and Networks
+ * Copyright (c) 2013-2022, Nokia Solutions and Networks
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
  */
 
-#include <odp_api.h>
-#include <odp_packet_internal.h>
-#include <odp_packet_io_internal.h>
+#include <odp/api/debug.h>
+#include <odp/api/event.h>
+#include <odp/api/hints.h>
+#include <odp/api/packet.h>
+#include <odp/api/packet_io.h>
+#include <odp/api/queue.h>
+#include <odp/api/ticketlock.h>
+#include <odp/api/time.h>
+
+#include <odp/api/plat/byteorder_inlines.h>
+#include <odp/api/plat/packet_flag_inlines.h>
+#include <odp/api/plat/queue_inlines.h>
+
 #include <odp_classification_internal.h>
-#include <odp_ipsec_internal.h>
 #include <odp_debug_internal.h>
 #include <odp_errno_define.h>
-#include <odp/api/plat/packet_flag_inlines.h>
-#include <odp/api/hints.h>
-#include <odp/api/plat/byteorder_inlines.h>
-#include <odp_queue_if.h>
-#include <odp/api/plat/queue_inlines.h>
-#include <odp_global_data.h>
 #include <odp_event_internal.h>
+#include <odp_global_data.h>
+#include <odp_ipsec_internal.h>
+#include <odp_packet_internal.h>
+#include <odp_packet_io_internal.h>
+#include <odp_queue_if.h>
 
 #include <protocols/eth.h>
 #include <protocols/ip.h>
@@ -33,6 +41,8 @@
 
 #define LOOP_MTU_MIN 68
 #define LOOP_MTU_MAX UINT16_MAX
+
+#define LOOP_MAX_TX_QUEUE_SIZE 1024
 
 typedef struct {
 	odp_queue_t loopq;		/**< loopback queue for "loop" device */
@@ -55,12 +65,11 @@ static const uint8_t pktio_loop_mac[] = {0x02, 0xe9, 0x34, 0x80, 0x73, 0x01};
 static int loopback_stats_reset(pktio_entry_t *pktio_entry);
 static int loopback_init_capability(pktio_entry_t *pktio_entry);
 
-static int loopback_open(odp_pktio_t id, pktio_entry_t *pktio_entry,
+static int loopback_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t *pktio_entry,
 			 const char *devname, odp_pool_t pool ODP_UNUSED)
 {
 	pkt_loop_t *pkt_loop = pkt_priv(pktio_entry);
 	long idx;
-	char loopq_name[ODP_QUEUE_NAME_LEN];
 
 	if (!strcmp(devname, "loop")) {
 		idx = 0;
@@ -74,14 +83,9 @@ static int loopback_open(odp_pktio_t id, pktio_entry_t *pktio_entry,
 		return -1;
 	}
 
-	snprintf(loopq_name, sizeof(loopq_name), "%" PRIu64 "-pktio_loopq",
-		 odp_pktio_to_u64(id));
 	pkt_loop->idx = idx;
 	pkt_loop->mtu = LOOP_MTU_MAX;
-	pkt_loop->loopq = odp_queue_create(loopq_name, NULL);
-
-	if (pkt_loop->loopq == ODP_QUEUE_INVALID)
-		return -1;
+	pkt_loop->loopq = ODP_QUEUE_INVALID;
 
 	loopback_stats_reset(pktio_entry);
 	loopback_init_capability(pktio_entry);
@@ -89,9 +93,58 @@ static int loopback_open(odp_pktio_t id, pktio_entry_t *pktio_entry,
 	return 0;
 }
 
+static int loopback_queue_destroy(odp_queue_t queue)
+{
+	odp_event_t event;
+
+	do {
+		event = odp_queue_deq(queue);
+		if (event != ODP_EVENT_INVALID)
+			odp_event_free(event);
+
+	} while (event != ODP_EVENT_INVALID);
+
+	if (odp_queue_destroy(queue)) {
+		ODP_ERR("Destroying loopback pktio queue failed\n");
+		return -1;
+	}
+	return 0;
+}
+
+static int loopback_pktout_queue_config(pktio_entry_t *pktio_entry,
+					const odp_pktout_queue_param_t *param)
+{
+	pkt_loop_t *pkt_loop = pkt_priv(pktio_entry);
+	odp_queue_param_t queue_param;
+	char queue_name[ODP_QUEUE_NAME_LEN];
+
+	/* Destroy old queue */
+	if (pkt_loop->loopq != ODP_QUEUE_INVALID && loopback_queue_destroy(pkt_loop->loopq))
+		return -1;
+
+	odp_queue_param_init(&queue_param);
+	queue_param.size = param->queue_size[0];
+
+	snprintf(queue_name, sizeof(queue_name), "_odp_pktio_loopq-%" PRIu64 "",
+		 odp_pktio_to_u64(pktio_entry->s.handle));
+
+	pkt_loop->loopq = odp_queue_create(queue_name, &queue_param);
+	if (pkt_loop->loopq == ODP_QUEUE_INVALID) {
+		ODP_ERR("Creating loopback pktio queue failed\n");
+		return -1;
+	}
+
+	return 0;
+}
+
 static int loopback_close(pktio_entry_t *pktio_entry)
 {
-	return odp_queue_destroy(pkt_priv(pktio_entry)->loopq);
+	pkt_loop_t *pkt_loop = pkt_priv(pktio_entry);
+
+	if (pkt_loop->loopq != ODP_QUEUE_INVALID)
+		return loopback_queue_destroy(pkt_loop->loopq);
+
+	return 0;
 }
 
 static int loopback_recv(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
@@ -424,6 +477,12 @@ static int loopback_link_info(pktio_entry_t *pktio_entry ODP_UNUSED, odp_pktio_l
 static int loopback_init_capability(pktio_entry_t *pktio_entry)
 {
 	odp_pktio_capability_t *capa = &pktio_entry->s.capa;
+	odp_queue_capability_t queue_capa;
+
+	if (odp_queue_capability(&queue_capa)) {
+		ODP_ERR("Queue capability failed\n");
+		return -1;
+	}
 
 	memset(capa, 0, sizeof(odp_pktio_capability_t));
 
@@ -437,6 +496,11 @@ static int loopback_init_capability(pktio_entry_t *pktio_entry)
 	capa->maxlen.max_input = LOOP_MTU_MAX;
 	capa->maxlen.min_output = LOOP_MTU_MIN;
 	capa->maxlen.max_output = LOOP_MTU_MAX;
+
+	capa->min_output_queue_size = 1;
+	capa->max_output_queue_size = queue_capa.plain.max_size;
+	if (capa->max_output_queue_size == 0)
+		capa->max_output_queue_size = LOOP_MAX_TX_QUEUE_SIZE;
 
 	odp_pktio_config_init(&capa->config);
 	capa->config.enable_loop = 1;
@@ -568,5 +632,5 @@ const pktio_if_ops_t _odp_loopback_pktio_ops = {
 	.pktio_time = NULL,
 	.config = NULL,
 	.input_queues_config = NULL,
-	.output_queues_config = NULL,
+	.output_queues_config = loopback_pktout_queue_config,
 };

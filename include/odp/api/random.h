@@ -17,6 +17,8 @@
 extern "C" {
 #endif
 
+#include <odp/api/abi/random.h>
+
 #include <odp/api/spec/random.h>
 
 #ifdef __cplusplus
