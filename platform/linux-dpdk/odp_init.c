@@ -213,7 +213,7 @@ static int _odp_init_dpdk(const char *cmdline)
 			free(pci_cmd);
 		return -1;
 	}
-	cmdlen = snprintf(NULL, 0, "odpdpdk -m %" PRIu32 " %s ", mem_prealloc,
+	cmdlen = snprintf(NULL, 0, "odpdpdk --legacy-mem -m %" PRIu32 " %s ", mem_prealloc,
 			  cmdline) + pcicmdlen + ealcmdlen;
 
 	if (pci_cmd != NULL)
@@ -227,7 +227,7 @@ static int _odp_init_dpdk(const char *cmdline)
 	/* First argument is facility log, simply bind it to odpdpdk for now. In
 	 * process mode DPDK memory has to be preallocated. */
 	if (odp_global_ro.init_param.mem_model == ODP_MEM_MODEL_PROCESS)
-		cmdlen = snprintf(full_cmdline, cmdlen, "odpdpdk -m %" PRIu32 " %s %s %s",
+		cmdlen = snprintf(full_cmdline, cmdlen, "odpdpdk --legacy-mem -m %" PRIu32 " %s %s %s",
 				  mem_prealloc, cmdline, pci_str, eal_str);
 	else
 		cmdlen = snprintf(full_cmdline, cmdlen, "odpdpdk %s %s %s",
