@@ -168,7 +168,6 @@ jobs:
     if: ${{ github.repository == 'OpenDataPlane/odp-dpdk' }}
     runs-on: [self-hosted, ARM64]
     env:
-      CONF: "--disable-test-cpp"
       OS: ubuntu_20.04
     steps:
       - uses: AutoModality/action-clean@v1.1.0
