@@ -39,7 +39,7 @@ if [ "${TARGET_ARCH}" == "aarch64-linux-gnu" ] ; then
 fi
 
 CC="${CC:-${TARGET_ARCH}-gcc}"
-${CC} ${CFLAGS} ${EXTRA_CHECKS} ${OLDPWD}/example/hello/odp_hello.c -o odp_hello_inst_dynamic \
+${CC} ${CFLAGS} ${EXTRA_CHECKS} ${OLDPWD}/example/sysinfo/odp_sysinfo.c -o odp_sysinfo_inst_dynamic \
 	`PKG_CONFIG_PATH=/opt/odp/lib/pkgconfig ${PKG_CONFIG} --cflags --libs ${ODP_LIB_NAME}` \
 	`${PKG_CONFIG} --cflags --libs libdpdk`
 
@@ -49,7 +49,7 @@ mount -t hugetlbfs nodev /mnt/huge
 
 if [ -z "$TARGET_ARCH" ] || [ "$TARGET_ARCH" == "$BUILD_ARCH" ]
 then
-	LD_LIBRARY_PATH="/opt/odp/lib:$LD_LIBRARY_PATH" ./odp_hello_inst_dynamic
+	LD_LIBRARY_PATH="/opt/odp/lib:$LD_LIBRARY_PATH" ./odp_sysinfo_inst_dynamic
 fi
 popd
 

@@ -1,15 +1,20 @@
 /* Copyright (c) 2018-2018, Linaro Limited
+ * Copyright (c) 2022, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
  */
 
-#ifndef ODP_PLAT_PKTIO_INLINES_H_
-#define ODP_PLAT_PKTIO_INLINES_H_
+#ifndef ODP_PLAT_PACKET_IO_INLINES_H_
+#define ODP_PLAT_PACKET_IO_INLINES_H_
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+#include <odp/api/abi/packet_io_types.h>
+
+#include <stdint.h>
 
 /** @cond _ODP_HIDE_FROM_DOXYGEN_ */
 

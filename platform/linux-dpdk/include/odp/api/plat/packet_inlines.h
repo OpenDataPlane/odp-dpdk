@@ -18,20 +18,23 @@
 extern "C" {
 #endif
 
-#include <odp/api/abi/packet.h>
+#include <odp/api/hints.h>
 #include <odp/api/packet_types.h>
 #include <odp/api/pool.h>
-#include <odp/api/abi/packet_io.h>
-#include <odp/api/hints.h>
 #include <odp/api/time.h>
+
 #include <odp/api/abi/buffer.h>
 #include <odp/api/abi/event.h>
+#include <odp/api/abi/packet.h>
+#include <odp/api/abi/packet_io.h>
 
+#include <odp/api/plat/packet_io_inlines.h>
 #include <odp/api/plat/packet_inline_types.h>
 #include <odp/api/plat/pool_inline_types.h>
-#include <odp/api/plat/pktio_inlines.h>
 
+#include <stdint.h>
 #include <string.h>
+
 /* Required by rte_mbuf.h */
 #include <sys/types.h>
 #include <rte_config.h>
@@ -89,6 +92,8 @@ extern "C" {
 	#define odp_packet_from_event_multi __odp_packet_from_event_multi
 	#define odp_packet_to_event_multi __odp_packet_to_event_multi
 	#define odp_packet_subtype __odp_packet_subtype
+	#define odp_packet_tx_compl_from_event __odp_packet_tx_compl_from_event
+	#define odp_packet_tx_compl_to_event __odp_packet_tx_compl_to_event
 	#define odp_packet_free __odp_packet_free
 	#define odp_packet_free_multi __odp_packet_free_multi
 	#define odp_packet_free_sp __odp_packet_free_sp
@@ -424,6 +429,16 @@ _ODP_INLINE void odp_packet_to_event_multi(const odp_packet_t pkt[],
 _ODP_INLINE odp_event_subtype_t odp_packet_subtype(odp_packet_t pkt)
 {
 	return (odp_event_subtype_t)_odp_pkt_get(pkt, int8_t, subtype);
+}
+
+_ODP_INLINE odp_packet_tx_compl_t odp_packet_tx_compl_from_event(odp_event_t ev)
+{
+	return (odp_packet_tx_compl_t)(uintptr_t)ev;
+}
+
+_ODP_INLINE odp_event_t odp_packet_tx_compl_to_event(odp_packet_tx_compl_t tx_compl)
+{
+	return (odp_event_t)(uintptr_t)tx_compl;
 }
 
 _ODP_INLINE void odp_packet_free(odp_packet_t pkt)

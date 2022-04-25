@@ -1,5 +1,5 @@
 /* Copyright (c) 2017-2018, Linaro Limited
- * Copyright (c) 2018-2021, Nokia
+ * Copyright (c) 2018-2022, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -193,9 +193,6 @@ static int cipher_requires_randomness(odp_cipher_alg_t cipher)
 	switch (cipher) {
 	case ODP_CIPHER_ALG_NULL:
 	case ODP_CIPHER_ALG_AES_CTR:
-#if ODP_DEPRECATED_API
-	case ODP_CIPHER_ALG_AES128_GCM:
-#endif
 	case ODP_CIPHER_ALG_AES_GCM:
 	case ODP_CIPHER_ALG_AES_CCM:
 	case ODP_CIPHER_ALG_CHACHA20_POLY1305:
@@ -263,8 +260,7 @@ int odp_ipsec_auth_capability(odp_auth_alg_t auth,
 			continue;
 
 		if (ODP_AUTH_ALG_AES_GCM == auth ||
-		    ODP_AUTH_ALG_CHACHA20_POLY1305 == auth ||
-		    ODP_DEPRECATE(ODP_AUTH_ALG_AES128_GCM) == auth) {
+		    ODP_AUTH_ALG_CHACHA20_POLY1305 == auth) {
 			uint8_t aad_len = 12;
 
 			if (aad_len < crypto_capa[i].aad_len.min ||

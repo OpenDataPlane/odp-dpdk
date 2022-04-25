@@ -1,5 +1,5 @@
 /* Copyright (c) 2015-2018, Linaro Limited
- * Copyright (c) 2020-2021, Nokia
+ * Copyright (c) 2020-2022, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -8,9 +8,11 @@
 #include <odp/api/event.h>
 #include <odp/api/buffer.h>
 #include <odp/api/crypto.h>
+#include <odp/api/dma.h>
 #include <odp/api/packet.h>
 #include <odp/api/timer.h>
 #include <odp/api/pool.h>
+
 #include <odp_buffer_internal.h>
 #include <odp_ipsec_internal.h>
 #include <odp_debug_internal.h>
@@ -74,6 +76,9 @@ void odp_event_free(odp_event_t event)
 	case ODP_EVENT_IPSEC_STATUS:
 		_odp_ipsec_status_free(_odp_ipsec_status_from_event(event));
 		break;
+	case ODP_EVENT_PACKET_TX_COMPL:
+		odp_packet_tx_compl_free(odp_packet_tx_compl_from_event(event));
+		break;
 	case ODP_EVENT_DMA_COMPL:
 		odp_dma_compl_free(odp_dma_compl_from_event(event));
 		break;
@@ -122,6 +127,8 @@ int odp_event_is_valid(odp_event_t event)
 	case ODP_EVENT_PACKET_VECTOR:
 		/* Fall through */
 	case ODP_EVENT_DMA_COMPL:
+		/* Fall through */
+	case ODP_EVENT_PACKET_TX_COMPL:
 		break;
 	default:
 		return 0;

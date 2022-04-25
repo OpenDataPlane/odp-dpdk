@@ -1,5 +1,5 @@
 /* Copyright (c) 2018, Linaro Limited
- * Copyright (c) 2019-2021, Nokia
+ * Copyright (c) 2019-2022, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -7,10 +7,14 @@
 
 #include <odp_posix_extensions.h>
 
+#include <odp/api/queue.h>
 #include <odp/api/shared_memory.h>
+#include <odp/api/std.h>
 #include <odp/api/thread.h>
 #include <odp/api/ticketlock.h>
+#include <odp/api/time.h>
 #include <odp/api/timer.h>
+
 #include <odp/api/plat/queue_inlines.h>
 
 #include <odp_debug_internal.h>
@@ -52,6 +56,9 @@
 ODP_STATIC_ASSERT(MAX_TIMERS < MAX_TIMER_RING_SIZE,
 		  "MAX_TIMER_RING_SIZE too small");
 
+/* Special expiration tick used for detecting final periodic timer events */
+#define PERIODIC_CANCELLED  ((uint64_t)0xFFFFFFFFFFFFFFFF)
+
 /* Max timeout in capability. One year in nsec (0x0070 09D3 2DA3 0000). */
 #define MAX_TMO_NS       (365 * 24 * 3600 * ODP_TIME_SEC_IN_NS)
 
@@ -68,15 +75,29 @@ ODP_STATIC_ASSERT(MAX_TIMERS < MAX_TIMER_RING_SIZE,
 /* Duration of a spin loop */
 #define WAIT_SPINS 30
 
+/* Minimum periodic timer base frequency */
+#define MIN_BASE_HZ 1
+
+/* Maximum periodic timer base frequency */
+#define MAX_BASE_HZ MAX_RES_HZ
+
+/* Maximum periodic timer multiplier */
+#define MAX_MULTIPLIER 1000000
+
+/* Maximum number of periodic timers per pool */
+#define MAX_PERIODIC_TIMERS 100
+
 typedef struct {
 	odp_ticketlock_t     lock;
-	int                  state;
 	uint64_t             tick;
 	const void          *user_ptr;
 	odp_queue_t          queue;
 	odp_event_t          tmo_event;
 	struct timer_pool_s *timer_pool;
+	int                  state;
 	uint32_t             timer_idx;
+	/* Period of periodic timer in ticks, includes PERIODIC_CANCELLED flag. */
+	uint64_t             periodic_ticks;
 
 	struct rte_timer     rte_timer;
 
@@ -101,6 +122,9 @@ typedef struct timer_pool_s {
 	odp_ticketlock_t lock;
 	uint32_t cur_timers;
 	uint32_t hwm_timers;
+	double base_freq;
+	uint64_t max_multiplier;
+	uint8_t periodic;
 
 } timer_pool_t;
 #pragma GCC diagnostic pop
@@ -164,8 +188,10 @@ static void timer_cb(struct rte_timer *rte_timer, void *arg ODP_UNUSED)
 
 	queue = timer->queue;
 	event = timer->tmo_event;
-	timer->tmo_event = ODP_EVENT_INVALID;
 	timer->state = EXPIRED;
+
+	if (!timer->timer_pool->periodic)
+		timer->tmo_event = ODP_EVENT_INVALID;
 
 	odp_ticketlock_unlock(&timer->lock);
 
@@ -242,6 +268,20 @@ static inline odp_timer_pool_t timer_pool_to_hdl(timer_pool_t *tp)
 static inline timer_entry_t *timer_from_hdl(odp_timer_t timer_hdl)
 {
 	return (timer_entry_t *)(uintptr_t)timer_hdl;
+}
+
+static uint64_t max_multiplier_capa(double freq)
+{
+	uint64_t mult;
+
+	if (freq < MIN_BASE_HZ)
+		return 0;
+
+	mult = MAX_BASE_HZ / freq;
+	if (mult > MAX_MULTIPLIER)
+		mult = MAX_MULTIPLIER;
+
+	return mult;
 }
 
 int _odp_timer_init_global(const odp_init_t *params)
@@ -420,6 +460,8 @@ int odp_timer_capability(odp_timer_clk_src_t clk_src,
 	capa->max_pools_combined = MAX_TIMER_POOLS;
 	capa->max_pools = MAX_TIMER_POOLS;
 	capa->max_timers = MAX_TIMERS;
+	capa->periodic.max_pools  = MAX_TIMER_POOLS;
+	capa->periodic.max_timers = MAX_PERIODIC_TIMERS;
 	capa->highest_res_ns = MAX_RES_NS;
 	capa->max_res.res_ns  = MAX_RES_NS;
 	capa->max_res.res_hz  = MAX_RES_HZ;
@@ -431,6 +473,9 @@ int odp_timer_capability(odp_timer_clk_src_t clk_src,
 	capa->max_tmo.max_tmo = MAX_TMO_NS;
 	capa->queue_type_sched = true;
 	capa->queue_type_plain = true;
+
+	capa->periodic.min_base_freq_hz.integer = MIN_BASE_HZ;
+	capa->periodic.max_base_freq_hz.integer = MAX_BASE_HZ;
 
 	return 0;
 }
@@ -462,10 +507,46 @@ int odp_timer_res_capability(odp_timer_clk_src_t clk_src,
 	return 0;
 }
 
+int odp_timer_periodic_capability(odp_timer_clk_src_t clk_src,
+				  odp_timer_periodic_capability_t *capa)
+{
+	double freq;
+	uint64_t multiplier;
+
+	if (clk_src != ODP_CLOCK_DEFAULT) {
+		ODP_ERR("Only ODP_CLOCK_DEFAULT supported. Requested %i.\n", clk_src);
+		return -1;
+	}
+
+	freq = odp_fract_u64_to_dbl(&capa->base_freq_hz);
+	if (freq < MIN_BASE_HZ || freq > MAX_BASE_HZ) {
+		ODP_ERR("Base frequency not supported (min: %f, max %f)\n",
+			(double)MIN_BASE_HZ, (double)MAX_BASE_HZ);
+		return -1;
+	}
+
+	multiplier = max_multiplier_capa(freq);
+
+	if (capa->max_multiplier > multiplier)
+		return -1;
+
+	if (capa->res_ns && capa->res_ns < MAX_RES_NS)
+		return -1;
+
+	/* Update capa with supported values */
+	capa->max_multiplier = multiplier;
+	capa->res_ns = MAX_RES_NS;
+
+	/* All base frequencies within the range are supported */
+	return 1;
+}
+
 void odp_timer_pool_param_init(odp_timer_pool_param_t *param)
 {
 	memset(param, 0, sizeof(odp_timer_pool_param_t));
+	param->timer_type = ODP_TIMER_TYPE_SINGLE;
 	param->clk_src = ODP_CLOCK_DEFAULT;
+	param->exp_mode = ODP_TIMER_EXP_AFTER;
 }
 
 odp_timer_pool_t odp_timer_pool_create(const char *name,
@@ -475,9 +556,23 @@ odp_timer_pool_t odp_timer_pool_create(const char *name,
 	timer_entry_t *timer;
 	uint32_t i, num_timers;
 	uint64_t res_ns, nsec_per_scan;
+	uint64_t max_multiplier = 0;
+	double base_freq = 0.0;
+	int periodic = (param->timer_type == ODP_TIMER_TYPE_PERIODIC) ? 1 : 0;
 
 	if (odp_global_ro.init_param.not_used.feat.timer) {
 		ODP_ERR("Trying to use disabled ODP feature.\n");
+		return ODP_TIMER_POOL_INVALID;
+	}
+
+	if (param->clk_src != ODP_CLOCK_DEFAULT) {
+		ODP_ERR("Only ODP_CLOCK_DEFAULT supported. Requested %i.\n", param->clk_src);
+		return ODP_TIMER_POOL_INVALID;
+	}
+
+	if (param->timer_type != ODP_TIMER_TYPE_SINGLE &&
+	    param->timer_type != ODP_TIMER_TYPE_PERIODIC) {
+		ODP_ERR("Bad timer type %i\n", param->timer_type);
 		return ODP_TIMER_POOL_INVALID;
 	}
 
@@ -508,6 +603,30 @@ odp_timer_pool_t odp_timer_pool_create(const char *name,
 		res_ns = param->res_ns;
 	else
 		res_ns = GIGA_HZ / param->res_hz;
+
+	if (periodic) {
+		uint64_t max_capa, min_period_ns;
+
+		base_freq = odp_fract_u64_to_dbl(&param->periodic.base_freq_hz);
+		max_multiplier = param->periodic.max_multiplier;
+
+		if (base_freq < MIN_BASE_HZ || base_freq > MAX_BASE_HZ) {
+			ODP_ERR("Bad base frequency: %f\n", base_freq);
+			return ODP_TIMER_POOL_INVALID;
+		}
+
+		max_capa = max_multiplier_capa(base_freq);
+
+		if (max_multiplier == 0 || max_multiplier > max_capa) {
+			ODP_ERR("Bad max multiplier: %" PRIu64 "\n", max_multiplier);
+			return ODP_TIMER_POOL_INVALID;
+		}
+
+		min_period_ns = GIGA_HZ / (base_freq * max_multiplier);
+
+		if (res_ns > min_period_ns)
+			res_ns = min_period_ns;
+	}
 
 	/* Scan timer pool twice during resolution interval */
 	if (res_ns > ODP_TIME_USEC_IN_NS)
@@ -558,6 +677,10 @@ odp_timer_pool_t odp_timer_pool_create(const char *name,
 
 	timer_pool->param = *param;
 	timer_pool->param.res_ns = res_ns;
+
+	timer_pool->periodic = periodic;
+	timer_pool->base_freq = base_freq;
+	timer_pool->max_multiplier = max_multiplier;
 
 	ring_u32_init(&timer_pool->free_timer.ring_hdr);
 	timer_pool->free_timer.ring_mask = num_timers - 1;
@@ -888,6 +1011,127 @@ int odp_timer_set_rel(odp_timer_t timer_hdl, uint64_t rel_tick,
 	return timer_set(timer_hdl, rel_tick, tmo_ev, 0);
 }
 
+int odp_timer_start(odp_timer_t timer, const odp_timer_start_t *start_param)
+{
+	odp_event_t tmo_ev = start_param->tmo_ev;
+	int abs = start_param->tick_type == ODP_TIMER_TICK_ABS;
+	int ret;
+
+	ret = timer_set(timer, start_param->tick, &tmo_ev, abs);
+	if (odp_unlikely(ret != ODP_TIMER_SUCCESS))
+		return ret;
+
+	/* Check that timer was not active */
+	if (odp_unlikely(tmo_ev != ODP_EVENT_INVALID)) {
+		ODP_ERR("Timer was active already\n");
+		odp_event_free(tmo_ev);
+	}
+
+	return ODP_TIMER_SUCCESS;
+}
+
+int odp_timer_restart(odp_timer_t timer, const odp_timer_start_t *start_param)
+{
+	int abs = start_param->tick_type == ODP_TIMER_TICK_ABS;
+
+	/* Reset timer without changing the event */
+	return timer_set(timer, start_param->tick, NULL, abs);
+}
+
+int odp_timer_periodic_start(odp_timer_t timer_hdl,
+			     const odp_timer_periodic_start_t *start_param)
+{
+	uint64_t period_ns;
+	uint64_t first_tick;
+	odp_event_t tmo_ev = start_param->tmo_ev;
+	timer_entry_t *timer = timer_from_hdl(timer_hdl);
+	timer_pool_t *tp = timer->timer_pool;
+	uint64_t multiplier = start_param->freq_multiplier;
+	double freq = multiplier * tp->base_freq;
+	int absolute;
+	int ret;
+
+	if (odp_unlikely(!tp->periodic)) {
+		ODP_ERR("Not a periodic timer\n");
+		return ODP_TIMER_FAIL;
+	}
+
+	if (odp_unlikely(multiplier == 0 || multiplier > tp->max_multiplier)) {
+		ODP_ERR("Bad frequency multiplier: %" PRIu64 "\n", multiplier);
+		return ODP_TIMER_FAIL;
+	}
+
+	if (odp_unlikely(odp_event_type(tmo_ev) != ODP_EVENT_TIMEOUT)) {
+		ODP_ERR("Event type is not timeout\n");
+		return ODP_TIMER_FAIL;
+	}
+
+	period_ns = (uint64_t)((double)ODP_TIME_SEC_IN_NS / freq);
+	if (period_ns == 0) {
+		ODP_ERR("Too high periodic timer frequency: %f\n", freq);
+		return ODP_TIMER_FAIL;
+	}
+
+	timer->periodic_ticks = odp_timer_ns_to_tick(timer_pool_to_hdl(tp), period_ns);
+	first_tick = timer->periodic_ticks;
+	absolute = 0;
+
+	if (start_param->first_tick) {
+		first_tick = start_param->first_tick;
+		absolute = 1;
+	}
+
+	ret = timer_set(timer_hdl, first_tick, &tmo_ev, absolute);
+	if (odp_unlikely(ret != ODP_TIMER_SUCCESS))
+		return ret;
+
+	/* Check that timer was not active */
+	if (odp_unlikely(tmo_ev != ODP_EVENT_INVALID)) {
+		ODP_ERR("Timer was active already\n");
+		odp_event_free(tmo_ev);
+	}
+
+	return ODP_TIMER_SUCCESS;
+}
+
+int odp_timer_periodic_ack(odp_timer_t timer_hdl, odp_event_t tmo_ev)
+{
+	uint64_t abs_tick;
+	odp_timeout_t tmo = odp_timeout_from_event(tmo_ev);
+	timer_entry_t *timer = timer_from_hdl(timer_hdl);
+	odp_timeout_hdr_t *timeout_hdr;
+	int ret;
+
+	if (odp_unlikely(odp_event_type(tmo_ev) != ODP_EVENT_TIMEOUT)) {
+		ODP_ERR("Event type is not timeout\n");
+		return -1;
+	}
+
+	abs_tick = timer->periodic_ticks;
+
+	if (odp_unlikely(abs_tick == PERIODIC_CANCELLED))
+		return 2;
+
+	timeout_hdr = timeout_to_hdr(tmo);
+	abs_tick += timeout_hdr->expiration;
+	timeout_hdr->expiration = abs_tick;
+
+	ret = timer_set(timer_hdl, abs_tick, NULL, 1);
+	if (odp_likely(ret == ODP_TIMER_SUCCESS))
+		return 0;
+
+	/* Send delayed timeout immediately to catch-up */
+	if (ret == ODP_TIMER_TOO_NEAR) {
+		if (odp_unlikely(odp_queue_enq(timer->queue, tmo_ev))) {
+			ODP_ERR("Failed to enqueue catch-up timeout event\n");
+			return -1;
+		}
+		return 0;
+	}
+	ODP_ERR("Failed to re-arm periodic timer: %d\n", ret);
+	return -1;
+}
+
 int odp_timer_cancel(odp_timer_t timer_hdl, odp_event_t *tmo_ev)
 {
 	timer_entry_t *timer = timer_from_hdl(timer_hdl);
@@ -910,6 +1154,48 @@ int odp_timer_cancel(odp_timer_t timer_hdl, odp_event_t *tmo_ev)
 	timer->state = NOT_TICKING;
 
 	odp_ticketlock_unlock(&timer->lock);
+	return 0;
+}
+
+int odp_timer_periodic_cancel(odp_timer_t timer_hdl)
+{
+	timer_pool_t *tp;
+	timer_entry_t *timer;
+	odp_event_t event;
+	int ret;
+
+	if (odp_unlikely(timer_hdl == ODP_TIMER_INVALID)) {
+		ODP_ERR("Bad timer handle\n");
+		return -1;
+	}
+
+	timer = timer_from_hdl(timer_hdl);
+	tp = timer->timer_pool;
+	event = timer->tmo_event;
+
+	if (odp_unlikely(!tp->periodic)) {
+		ODP_ERR("Not a periodic timer\n");
+		return -1;
+	}
+
+	odp_ticketlock_lock(&timer->lock);
+
+	ret = timer_global->ops.stop(&timer->rte_timer);
+
+	/* Mark timer cancelled, so that a following ack call stops restarting it. */
+	timer->periodic_ticks = PERIODIC_CANCELLED;
+
+	/* Timer successfully cancelled, so send the final event manually. */
+	if (ret == 0 && timer->state == TICKING) {
+		timer->state = NOT_TICKING;
+		if (odp_unlikely(odp_queue_enq(timer->queue, event))) {
+			ODP_ERR("Failed to enqueue final timeout event\n");
+			_odp_event_free(event);
+		}
+	}
+
+	odp_ticketlock_unlock(&timer->lock);
+
 	return 0;
 }
 
@@ -938,6 +1224,9 @@ int odp_timeout_fresh(odp_timeout_t tmo)
 	odp_timeout_hdr_t *timeout_hdr = timeout_to_hdr(tmo);
 	timer_entry_t *timer = timer_from_hdl(timeout_hdr->timer);
 
+	if (timer->timer_pool->periodic)
+		return timer->periodic_ticks != PERIODIC_CANCELLED;
+
 	/* Check if timer has been reused after timeout sent. */
 	return timeout_hdr->expiration == timer->tick;
 }
@@ -951,9 +1240,7 @@ odp_timer_t odp_timeout_timer(odp_timeout_t tmo)
 
 uint64_t odp_timeout_tick(odp_timeout_t tmo)
 {
-	odp_timeout_hdr_t *timeout_hdr = timeout_to_hdr(tmo);
-
-	return timeout_hdr->expiration;
+	return timeout_to_hdr(tmo)->expiration;
 }
 
 void *odp_timeout_user_ptr(odp_timeout_t tmo)
@@ -1004,6 +1291,7 @@ void odp_timer_pool_print(odp_timer_pool_t timer_pool)
 	ODP_PRINT("  num timers     %u\n", tp->cur_timers);
 	ODP_PRINT("  hwm timers     %u\n", tp->hwm_timers);
 	ODP_PRINT("  num tp         %i\n", timer_global->num_timer_pools);
+	ODP_PRINT("  periodic       %" PRIu8 "\n", tp->periodic);
 	ODP_PRINT("\n");
 }
 
@@ -1025,36 +1313,37 @@ void odp_timer_print(odp_timer_t timer_hdl)
 	ODP_PRINT("  state          %s\n",
 		  (timer->state == NOT_TICKING) ? "not ticking" :
 		  (timer->state == EXPIRED ? "expired" : "ticking"));
+	ODP_PRINT("  periodic ticks %" PRIu64 "\n", timer->periodic_ticks);
 	ODP_PRINT("\n");
 }
 
 void odp_timeout_print(odp_timeout_t tmo)
 {
-	const odp_timeout_hdr_t *timeout_hdr = timeout_to_hdr(tmo);
-	odp_timer_t timer_hdl;
-	timer_pool_t *tp = NULL;
-	uint32_t idx = 0;
+	const odp_timeout_hdr_t *tmo_hdr;
+	odp_timer_t timer;
 
 	if (tmo == ODP_TIMEOUT_INVALID) {
 		ODP_ERR("Bad timeout handle\n");
 		return;
 	}
 
-	timer_hdl = timeout_hdr->timer;
-
-	if (timer_hdl != ODP_TIMER_INVALID) {
-		timer_entry_t *timer = timer_from_hdl(timer_hdl);
-
-		tp  = timer->timer_pool;
-		idx = timer->timer_idx;
-	}
+	tmo_hdr = timeout_to_hdr(tmo);
+	timer = tmo_hdr->timer;
 
 	ODP_PRINT("\nTimeout info\n");
 	ODP_PRINT("------------\n");
 	ODP_PRINT("  tmo handle     0x%" PRIx64 "\n", odp_timeout_to_u64(tmo));
-	ODP_PRINT("  timer pool     %p\n", (void *)tp);
-	ODP_PRINT("  timer index    %u\n", idx);
-	ODP_PRINT("  expiration     %" PRIu64 "\n", timeout_hdr->expiration);
-	ODP_PRINT("  user ptr       %p\n", timeout_hdr->user_ptr);
+	ODP_PRINT("  expiration     %" PRIu64 "\n", tmo_hdr->expiration);
+	ODP_PRINT("  user ptr       %p\n", tmo_hdr->user_ptr);
+
+	if (timer != ODP_TIMER_INVALID) {
+		timer_entry_t *timer_entry = timer_from_hdl(timer);
+		timer_pool_t *tp = timer_entry->timer_pool;
+
+		ODP_PRINT("  timer pool     %p\n", (void *)tp);
+		ODP_PRINT("  timer index    %u\n", timer_entry->timer_idx);
+		ODP_PRINT("  periodic       %i\n", tp->periodic);
+	}
+
 	ODP_PRINT("\n");
 }

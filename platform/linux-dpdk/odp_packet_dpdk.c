@@ -22,6 +22,7 @@
 #include <linux/ethtool.h>
 #include <linux/sockios.h>
 
+#include <odp_align_internal.h>
 #include <odp/api/cpu.h>
 #include <odp/api/hints.h>
 #include <odp/api/system_info.h>
@@ -44,6 +45,7 @@
 #if defined(__clang__)
 #undef RTE_TOOLCHAIN_GCC
 #endif
+#include <rte_common.h>
 #include <rte_ethdev.h>
 #include <rte_ip_frag.h>
 #include <rte_udp.h>
@@ -80,7 +82,7 @@
 typedef struct {
 	int multicast_enable;
 	int num_rx_desc;
-	int num_tx_desc;
+	int num_tx_desc_default;
 	int rx_drop_en;
 } dpdk_opt_t;
 
@@ -109,6 +111,8 @@ typedef struct ODP_ALIGNED_CACHE {
 	} flags;
 	/** Minimum RX burst size */
 	uint8_t min_rx_burst;
+	 /** Number of TX descriptors per queue */
+	uint16_t num_tx_desc[PKTIO_MAX_QUEUES];
 	/** RX queue locks */
 	odp_ticketlock_t rx_lock[PKTIO_MAX_QUEUES] ODP_ALIGNED_CACHE;
 	/** TX queue locks */
@@ -176,14 +180,8 @@ static int init_options(pktio_entry_t *pktio_entry,
 	}
 
 	if (!lookup_opt("num_tx_desc", dev_info->driver_name,
-			&opt->num_tx_desc))
+			&opt->num_tx_desc_default))
 		return -1;
-	if (opt->num_tx_desc < dev_info->tx_desc_lim.nb_min ||
-	    opt->num_tx_desc > dev_info->tx_desc_lim.nb_max ||
-	    opt->num_tx_desc % dev_info->tx_desc_lim.nb_align) {
-		ODP_ERR("Invalid number of TX descriptors\n");
-		return -1;
-	}
 
 	if (!lookup_opt("rx_drop_en", dev_info->driver_name,
 			&opt->rx_drop_en))
@@ -199,7 +197,7 @@ static int init_options(pktio_entry_t *pktio_entry,
 		pkt_priv(pktio_entry)->port_id);
 	ODP_DBG("  multicast:   %d\n", opt->multicast_enable);
 	ODP_DBG("  num_rx_desc: %d\n", opt->num_rx_desc);
-	ODP_DBG("  num_tx_desc: %d\n", opt->num_tx_desc);
+	ODP_DBG("  num_tx_desc: %d\n", opt->num_tx_desc_default);
 	ODP_DBG("  rx_drop_en:  %d\n", opt->rx_drop_en);
 
 	return 0;
@@ -418,8 +416,10 @@ static int dpdk_input_queues_config(pktio_entry_t *pktio_entry,
 static int dpdk_output_queues_config(pktio_entry_t *pktio_entry,
 				     const odp_pktout_queue_param_t *p)
 {
+	struct rte_eth_dev_info dev_info;
 	pkt_dpdk_t *pkt_dpdk = pkt_priv(pktio_entry);
 	uint8_t lockless;
+	int ret;
 
 	if (p->op_mode == ODP_PKTIO_OP_MT_UNSAFE)
 		lockless = 1;
@@ -428,6 +428,32 @@ static int dpdk_output_queues_config(pktio_entry_t *pktio_entry,
 
 	pkt_dpdk->flags.lockless_tx = lockless;
 
+	ret  = rte_eth_dev_info_get(pkt_dpdk->port_id, &dev_info);
+	if (ret) {
+		ODP_ERR("DPDK: rte_eth_dev_info_get() failed: %d\n", ret);
+		return -1;
+	}
+
+	/* Configure TX descriptors */
+	for (uint32_t i = 0; i  < p->num_queues; i++) {
+		uint16_t num_tx_desc = pkt_dpdk->opt.num_tx_desc_default;
+
+		if (p->queue_size[i] != 0) {
+			num_tx_desc = p->queue_size[i];
+			/* Make sure correct alignment is used */
+			if (dev_info.tx_desc_lim.nb_align)
+				num_tx_desc = RTE_ALIGN_MUL_CEIL(num_tx_desc,
+								 dev_info.tx_desc_lim.nb_align);
+		}
+
+		if (num_tx_desc < dev_info.tx_desc_lim.nb_min ||
+		    num_tx_desc > dev_info.tx_desc_lim.nb_max ||
+		    num_tx_desc % dev_info.tx_desc_lim.nb_align) {
+			ODP_ERR("DPDK: invalid number of TX descriptors\n");
+			return -1;
+		}
+		pkt_dpdk->num_tx_desc[i] = num_tx_desc;
+	}
 	return 0;
 }
 
@@ -476,6 +502,9 @@ static int dpdk_init_capability(pktio_entry_t *pktio_entry,
 
 	capa->max_output_queues = RTE_MIN(dev_info->max_tx_queues,
 					  PKTIO_MAX_QUEUES);
+	capa->min_output_queue_size = dev_info->tx_desc_lim.nb_min;
+	capa->max_output_queue_size = dev_info->tx_desc_lim.nb_max;
+
 	capa->set_op.op.promisc_mode = 1;
 
 	/* Check if setting default MAC address is supported */
@@ -707,7 +736,7 @@ static int dpdk_setup_eth_tx(pktio_entry_t *pktio_entry,
 
 	for (i = 0; i < pktio_entry->s.num_out_queue; i++) {
 		ret = rte_eth_tx_queue_setup(port_id, i,
-					     pkt_dpdk->opt.num_tx_desc,
+					     pkt_dpdk->num_tx_desc[i],
 					     rte_eth_dev_socket_id(port_id),
 					     &dev_info->default_txconf);
 		if (ret < 0) {
@@ -980,7 +1009,7 @@ int _odp_input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int nu
 			}
 			packet_set_ts(pkt_hdr, ts);
 			pktio_entry->s.stats.in_octets += odp_packet_len(pkt);
-			copy_packet_cls_metadata(&parsed_hdr, pkt_hdr);
+			_odp_packet_copy_cls_md(pkt_hdr, &parsed_hdr);
 			if (success != i)
 				pkt_table[success] = pkt;
 			++success;

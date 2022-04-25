@@ -1,5 +1,5 @@
 /* Copyright (c) 2017-2018, Linaro Limited
- * Copyright (c) 2018, 2020-2021, Nokia
+ * Copyright (c) 2018, 2020-2022, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:	BSD-3-Clause
@@ -18,14 +18,17 @@
 extern "C" {
 #endif
 
+#include <odp/api/atomic.h>
+#include <odp/api/byteorder.h>
+#include <odp/api/event.h>
+#include <odp/api/ipsec.h>
+#include <odp/api/spinlock.h>
 #include <odp/api/std_types.h>
+
 #include <odp/api/plat/strong_types.h>
 
-#include <odp/api/byteorder.h>
-#include <odp/api/ipsec.h>
-#include <odp/api/ticketlock.h>
-
 #include <protocols/ip.h>
+#include <stdint.h>
 
 /** @ingroup odp_ipsec
  *  @{

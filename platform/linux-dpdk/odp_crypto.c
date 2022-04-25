@@ -6,21 +6,25 @@
  */
 
 #include <odp_posix_extensions.h>
-#include <odp/api/crypto.h>
-#include <odp_init_internal.h>
-#include <odp/api/spinlock.h>
-#include <odp/api/debug.h>
+
 #include <odp/api/align.h>
-#include <odp/api/shared_memory.h>
-#include <odp_debug_internal.h>
+#include <odp/api/buffer.h>
+#include <odp/api/crypto.h>
+#include <odp/api/debug.h>
 #include <odp/api/hints.h>
-#include <odp/api/random.h>
+#include <odp/api/shared_memory.h>
+#include <odp/api/spinlock.h>
 #include <odp/api/packet.h>
-#include <odp/api/plat/packet_inlines.h>
+#include <odp/api/random.h>
 #include <odp/api/time.h>
+
+#include <odp/api/plat/packet_inlines.h>
 #include <odp/api/plat/time_inlines.h>
-#include <odp_packet_internal.h>
+
+#include <odp_debug_internal.h>
 #include <odp_global_data.h>
+#include <odp_init_internal.h>
+#include <odp_packet_internal.h>
 
 /* Inlined API functions */
 #include <odp/api/plat/event_inlines.h>
@@ -116,9 +120,6 @@ static int cipher_is_aead(odp_cipher_alg_t cipher_alg)
 	switch (cipher_alg) {
 	case ODP_CIPHER_ALG_AES_GCM:
 	case ODP_CIPHER_ALG_AES_CCM:
-#if ODP_DEPRECATED_API
-	case ODP_CIPHER_ALG_AES128_GCM:
-#endif
 		return 1;
 	default:
 		return 0;
@@ -130,9 +131,6 @@ static int auth_is_aead(odp_auth_alg_t auth_alg)
 	switch (auth_alg) {
 	case ODP_AUTH_ALG_AES_GCM:
 	case ODP_AUTH_ALG_AES_CCM:
-#if ODP_DEPRECATED_API
-	case ODP_AUTH_ALG_AES128_GCM:
-#endif
 		return 1;
 	default:
 		return 0;
@@ -146,9 +144,6 @@ static int cipher_aead_alg_odp_to_rte(odp_cipher_alg_t cipher_alg,
 
 	switch (cipher_alg) {
 	case ODP_CIPHER_ALG_AES_GCM:
-#if ODP_DEPRECATED_API
-	case ODP_CIPHER_ALG_AES128_GCM:
-#endif
 		aead_xform->aead.algo = RTE_CRYPTO_AEAD_AES_GCM;
 		break;
 	case ODP_CIPHER_ALG_AES_CCM:
@@ -168,9 +163,6 @@ static int auth_aead_alg_odp_to_rte(odp_auth_alg_t auth_alg,
 
 	switch (auth_alg) {
 	case ODP_AUTH_ALG_AES_GCM:
-#if ODP_DEPRECATED_API
-	case ODP_AUTH_ALG_AES128_GCM:
-#endif
 		aead_xform->aead.algo = RTE_CRYPTO_AEAD_AES_GCM;
 		break;
 	case ODP_AUTH_ALG_AES_CCM:
@@ -200,9 +192,6 @@ static int cipher_alg_odp_to_rte(odp_cipher_alg_t cipher_alg,
 		cipher_xform->cipher.algo = RTE_CRYPTO_CIPHER_3DES_ECB;
 		break;
 	case ODP_CIPHER_ALG_AES_CBC:
-#if ODP_DEPRECATED_API
-	case ODP_CIPHER_ALG_AES128_CBC:
-#endif
 		cipher_xform->cipher.algo = RTE_CRYPTO_CIPHER_AES_CBC;
 		break;
 	case ODP_CIPHER_ALG_AES_CTR:
@@ -232,15 +221,9 @@ static int auth_alg_odp_to_rte(odp_auth_alg_t auth_alg,
 		auth_xform->auth.algo = RTE_CRYPTO_AUTH_NULL;
 		break;
 	case ODP_AUTH_ALG_MD5_HMAC:
-#if ODP_DEPRECATED_API
-	case ODP_AUTH_ALG_MD5_96:
-#endif
 		auth_xform->auth.algo = RTE_CRYPTO_AUTH_MD5_HMAC;
 		break;
 	case ODP_AUTH_ALG_SHA256_HMAC:
-#if ODP_DEPRECATED_API
-	case ODP_AUTH_ALG_SHA256_128:
-#endif
 		auth_xform->auth.algo = RTE_CRYPTO_AUTH_SHA256_HMAC;
 		break;
 	case ODP_AUTH_ALG_SHA1_HMAC:
@@ -538,12 +521,8 @@ static void capability_process(struct rte_cryptodev_info *dev_info,
 				ciphers->bit.trides_ecb = 1;
 				ciphers->bit.des = 1;
 			}
-			if (cap_cipher_algo == RTE_CRYPTO_CIPHER_AES_CBC) {
+			if (cap_cipher_algo == RTE_CRYPTO_CIPHER_AES_CBC)
 				ciphers->bit.aes_cbc = 1;
-#if ODP_DEPRECATED_API
-				ciphers->bit.aes128_cbc = 1;
-#endif
-			}
 			if (cap_cipher_algo == RTE_CRYPTO_CIPHER_AES_CTR)
 				ciphers->bit.aes_ctr = 1;
 			if (cap_cipher_algo == RTE_CRYPTO_CIPHER_AES_ECB)
@@ -556,18 +535,10 @@ static void capability_process(struct rte_cryptodev_info *dev_info,
 			enum rte_crypto_auth_algorithm cap_auth_algo;
 
 			cap_auth_algo = cap->sym.auth.algo;
-			if (cap_auth_algo == RTE_CRYPTO_AUTH_MD5_HMAC) {
+			if (cap_auth_algo == RTE_CRYPTO_AUTH_MD5_HMAC)
 				auths->bit.md5_hmac = 1;
-#if ODP_DEPRECATED_API
-				auths->bit.md5_96 = 1;
-#endif
-			}
-			if (cap_auth_algo == RTE_CRYPTO_AUTH_SHA256_HMAC) {
+			if (cap_auth_algo == RTE_CRYPTO_AUTH_SHA256_HMAC)
 				auths->bit.sha256_hmac = 1;
-#if ODP_DEPRECATED_API
-				auths->bit.sha256_128 = 1;
-#endif
-			}
 			if (cap_auth_algo == RTE_CRYPTO_AUTH_SHA1_HMAC)
 				auths->bit.sha1_hmac = 1;
 			if (cap_auth_algo == RTE_CRYPTO_AUTH_SHA224_HMAC)
@@ -606,10 +577,6 @@ static void capability_process(struct rte_cryptodev_info *dev_info,
 			if (cap_aead_algo == RTE_CRYPTO_AEAD_AES_GCM) {
 				ciphers->bit.aes_gcm = 1;
 				auths->bit.aes_gcm = 1;
-#if ODP_DEPRECATED_API
-				ciphers->bit.aes128_gcm = 1;
-				auths->bit.aes128_gcm = 1;
-#endif
 			}
 			/* AES-CCM algorithm produces errors in Ubuntu Trusty,
 			 * so it is disabled for now
@@ -1424,24 +1391,6 @@ int odp_crypto_session_create(const odp_crypto_session_param_t *param,
 	/* Copy parameters */
 	session->p = *param;
 
-#if ODP_DEPRECATED_API
-	/* Fixed digest tag length with deprecated algo */
-	switch (param->auth_alg) {
-	case ODP_AUTH_ALG_MD5_96:
-		session->p.auth_digest_len = 96 / 8;
-		break;
-	case ODP_AUTH_ALG_SHA256_128:
-		/* Fixed digest tag length with deprecated algo */
-		session->p.auth_digest_len = 128 / 8;
-		break;
-	case ODP_AUTH_ALG_AES128_GCM:
-		session->p.auth_digest_len = 16;
-		break;
-	default:
-		break;
-	}
-#endif
-
 	if (cipher_is_aead(param->cipher_alg)) {
 		if (crypto_fill_aead_xform(&cipher_xform, &session->p) < 0) {
 			*status = ODP_CRYPTO_SES_ERR_CIPHER;
@@ -1910,6 +1859,14 @@ int odp_crypto_int(odp_packet_t pkt_in,
 
 	if (pkt_in != out_pkt) {
 		int ret;
+		int md_copy;
+
+		md_copy = _odp_packet_copy_md_possible(session->p.output_pool,
+						       odp_packet_pool(pkt_in));
+		if (odp_unlikely(md_copy < 0)) {
+			ODP_ERR("Unable to copy packet metadata\n");
+			goto err;
+		}
 
 		ret = odp_packet_copy_from_pkt(out_pkt,
 					       0,
@@ -1919,7 +1876,7 @@ int odp_crypto_int(odp_packet_t pkt_in,
 		if (odp_unlikely(ret < 0))
 			goto err;
 
-		_odp_packet_copy_md_to_packet(pkt_in, out_pkt);
+		_odp_packet_copy_md(packet_hdr(out_pkt), packet_hdr(pkt_in), md_copy);
 		odp_packet_free(pkt_in);
 		pkt_in = ODP_PACKET_INVALID;
 	}

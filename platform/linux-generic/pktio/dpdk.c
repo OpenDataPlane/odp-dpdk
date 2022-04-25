@@ -1,5 +1,5 @@
 /* Copyright (c) 2016-2018, Linaro Limited
- * Copyright (c) 2019-2021, Nokia
+ * Copyright (c) 2019-2022, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -23,6 +23,7 @@
 #include <odp/api/time.h>
 #include <odp/api/plat/time_inlines.h>
 
+#include <odp_align_internal.h>
 #include <odp_packet_io_internal.h>
 #include <odp_classification_internal.h>
 #include <odp_socket_common.h>
@@ -35,6 +36,7 @@
 #include <protocols/udp.h>
 
 #include <rte_config.h>
+#include <rte_common.h>
 #include <rte_mbuf.h>
 #include <rte_malloc.h>
 #if __GNUC__ >= 7
@@ -115,7 +117,7 @@ ODP_STATIC_ASSERT((DPDK_NB_MBUF % DPDK_MEMPOOL_CACHE_SIZE == 0) &&
 /** DPDK runtime configuration options */
 typedef struct {
 	int num_rx_desc;
-	int num_tx_desc;
+	int num_tx_desc_default;
 	uint8_t multicast_en;
 	uint8_t rx_drop_en;
 	uint8_t set_flow_hash;
@@ -147,6 +149,7 @@ typedef struct ODP_ALIGNED_CACHE {
 	uint32_t mtu_max;		/**< maximum supported MTU value */
 	odp_bool_t mtu_set;		/**< DPDK MTU has been modified */
 	uint16_t port_id;		/**< DPDK port identifier */
+	uint16_t num_tx_desc[PKTIO_MAX_QUEUES]; /**< Number of TX descriptors per queue */
 	/** Use system call to get/set vdev promisc mode */
 	uint8_t vdev_sysc_promisc;
 	uint8_t lockless_rx;		/**< no locking for rx */
@@ -211,14 +214,8 @@ static int init_options(pktio_entry_t *pktio_entry,
 	}
 
 	if (!lookup_opt("num_tx_desc", dev_info->driver_name,
-			&opt->num_tx_desc))
+			&opt->num_tx_desc_default))
 		return -1;
-	if (opt->num_tx_desc < dev_info->tx_desc_lim.nb_min ||
-	    opt->num_tx_desc > dev_info->tx_desc_lim.nb_max ||
-	    opt->num_tx_desc % dev_info->tx_desc_lim.nb_align) {
-		ODP_ERR("Invalid number of TX descriptors\n");
-		return -1;
-	}
 
 	if (!lookup_opt("rx_drop_en", dev_info->driver_name, &val))
 		return -1;
@@ -236,7 +233,7 @@ static int init_options(pktio_entry_t *pktio_entry,
 		pkt_priv(pktio_entry)->port_id);
 	ODP_DBG("  multicast_en: %d\n", opt->multicast_en);
 	ODP_DBG("  num_rx_desc: %d\n", opt->num_rx_desc);
-	ODP_DBG("  num_tx_desc: %d\n", opt->num_tx_desc);
+	ODP_DBG("  num_tx_desc: %d\n", opt->num_tx_desc_default);
 	ODP_DBG("  rx_drop_en: %d\n", opt->rx_drop_en);
 
 	return 0;
@@ -641,7 +638,7 @@ static inline int mbuf_to_pkt(pktio_entry_t *pktio_entry,
 		pkt_hdr->input = input;
 
 		if (pktio_cls_enabled(pktio_entry)) {
-			copy_packet_cls_metadata(&parsed_hdr, pkt_hdr);
+			_odp_packet_copy_cls_md(pkt_hdr, &parsed_hdr);
 		} else if (parse_layer != ODP_PROTO_LAYER_NONE) {
 			uint32_t supported_ptypes = pkt_dpdk->supported_ptypes;
 
@@ -933,7 +930,7 @@ static inline int mbuf_to_pkt_zero(pktio_entry_t *pktio_entry,
 		pkt_hdr->input = input;
 
 		if (pktio_cls_enabled(pktio_entry)) {
-			copy_packet_cls_metadata(&parsed_hdr, pkt_hdr);
+			_odp_packet_copy_cls_md(pkt_hdr, &parsed_hdr);
 		} else if (parse_layer != ODP_PROTO_LAYER_NONE) {
 			uint32_t supported_ptypes = pkt_dpdk->supported_ptypes;
 
@@ -959,7 +956,7 @@ static inline int mbuf_to_pkt_zero(pktio_entry_t *pktio_entry,
 static inline int pkt_to_mbuf_zero(pktio_entry_t *pktio_entry,
 				   struct rte_mbuf *mbuf_table[],
 				   const odp_packet_t pkt_table[], uint16_t num,
-				   uint16_t *copy_count, int *tx_ts_idx)
+				   uint16_t *copy_count, uint16_t cpy_idx[], int *tx_ts_idx)
 {
 	pkt_dpdk_t *pkt_dpdk = pkt_priv(pktio_entry);
 	odp_pktout_config_opt_t *pktout_cfg = &pktio_entry->s.config.pktout;
@@ -993,7 +990,7 @@ static inline int pkt_to_mbuf_zero(pktio_entry_t *pktio_entry,
 			if (odp_unlikely(pkt_to_mbuf(pktio_entry, &mbuf,
 						     &pkt, 1, &dummy_idx) != 1))
 				goto fail;
-			(*copy_count)++;
+			cpy_idx[(*copy_count)++] = i;
 		}
 		mbuf_table[i] = mbuf;
 
@@ -1493,8 +1490,10 @@ static int dpdk_input_queues_config(pktio_entry_t *pktio_entry,
 static int dpdk_output_queues_config(pktio_entry_t *pktio_entry,
 				     const odp_pktout_queue_param_t *p)
 {
+	struct rte_eth_dev_info dev_info;
 	pkt_dpdk_t *pkt_dpdk = pkt_priv(pktio_entry);
 	uint8_t lockless;
+	int ret;
 
 	if (p->op_mode == ODP_PKTIO_OP_MT_UNSAFE)
 		lockless = 1;
@@ -1503,6 +1502,32 @@ static int dpdk_output_queues_config(pktio_entry_t *pktio_entry,
 
 	pkt_dpdk->lockless_tx = lockless;
 
+	ret  = rte_eth_dev_info_get(pkt_dpdk->port_id, &dev_info);
+	if (ret) {
+		ODP_ERR("DPDK: rte_eth_dev_info_get() failed: %d\n", ret);
+		return -1;
+	}
+
+	/* Configure TX descriptors */
+	for (uint32_t i = 0; i  < p->num_queues; i++) {
+		uint16_t num_tx_desc = pkt_dpdk->opt.num_tx_desc_default;
+
+		if (p->queue_size[i] != 0) {
+			num_tx_desc = p->queue_size[i];
+			/* Make sure correct alignment is used */
+			if (dev_info.tx_desc_lim.nb_align)
+				num_tx_desc = RTE_ALIGN_MUL_CEIL(num_tx_desc,
+								 dev_info.tx_desc_lim.nb_align);
+		}
+
+		if (num_tx_desc < dev_info.tx_desc_lim.nb_min ||
+		    num_tx_desc > dev_info.tx_desc_lim.nb_max ||
+		    num_tx_desc % dev_info.tx_desc_lim.nb_align) {
+			ODP_ERR("DPDK: invalid number of TX descriptors\n");
+			return -1;
+		}
+		pkt_dpdk->num_tx_desc[i] = num_tx_desc;
+	}
 	return 0;
 }
 
@@ -1532,6 +1557,9 @@ static int dpdk_init_capability(pktio_entry_t *pktio_entry,
 
 	capa->max_output_queues = RTE_MIN(dev_info->max_tx_queues,
 					  PKTIO_MAX_QUEUES);
+	capa->min_output_queue_size = dev_info->tx_desc_lim.nb_min;
+	capa->max_output_queue_size = dev_info->tx_desc_lim.nb_max;
+
 	capa->set_op.op.promisc_mode = 1;
 
 	/* Check if setting default MAC address is supporter */
@@ -1823,7 +1851,7 @@ static int dpdk_setup_eth_tx(pktio_entry_t *pktio_entry,
 
 	for (i = 0; i < pktio_entry->s.num_out_queue; i++) {
 		ret = rte_eth_tx_queue_setup(port_id, i,
-					     pkt_dpdk->opt.num_tx_desc,
+					     pkt_dpdk->num_tx_desc[i],
 					     rte_eth_dev_socket_id(port_id),
 					     &dev_info->default_txconf);
 		if (ret < 0) {
@@ -2065,6 +2093,7 @@ static int dpdk_send(pktio_entry_t *pktio_entry, int index,
 	struct rte_mbuf *tx_mbufs[num];
 	pkt_dpdk_t *pkt_dpdk = pkt_priv(pktio_entry);
 	uint16_t copy_count = 0;
+	uint16_t cpy_idx[num];
 	int tx_pkts;
 	int i;
 	int mbufs;
@@ -2072,7 +2101,7 @@ static int dpdk_send(pktio_entry_t *pktio_entry, int index,
 
 	if (_ODP_DPDK_ZERO_COPY)
 		mbufs = pkt_to_mbuf_zero(pktio_entry, tx_mbufs, pkt_table, num,
-					 &copy_count, &tx_ts_idx);
+					 &copy_count, cpy_idx, &tx_ts_idx);
 	else
 		mbufs = pkt_to_mbuf(pktio_entry, tx_mbufs, pkt_table, num,
 				    &tx_ts_idx);
@@ -2092,19 +2121,15 @@ static int dpdk_send(pktio_entry_t *pktio_entry, int index,
 	if (_ODP_DPDK_ZERO_COPY) {
 		/* Free copied packets */
 		if (odp_unlikely(copy_count)) {
-			uint16_t freed = 0;
+			uint16_t idx;
 
-			for (i = 0; i < mbufs && freed != copy_count; i++) {
-				odp_packet_t pkt = pkt_table[i];
-				odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
+			for (i = 0; i < copy_count; i++) {
+				idx = cpy_idx[i];
 
-				if (pkt_hdr->seg_count > 1) {
-					if (odp_likely(i < tx_pkts))
-						odp_packet_free(pkt);
-					else
-						rte_pktmbuf_free(tx_mbufs[i]);
-					freed++;
-				}
+				if (odp_likely(idx < tx_pkts))
+					odp_packet_free(pkt_table[idx]);
+				else
+					rte_pktmbuf_free(tx_mbufs[idx]);
 			}
 		}
 		if (odp_unlikely(tx_pkts == 0 && _odp_errno != 0))

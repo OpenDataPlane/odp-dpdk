@@ -22,7 +22,9 @@ extern "C" {
 #include <odp/api/plat/strong_types.h>
 #include <odp/api/queue.h>
 #include <odp/api/schedule_types.h>
+#include <odp/api/thread.h>
 #include <odp/api/ticketlock.h>
+
 #include <odp_align_internal.h>
 #include <odp_config_internal.h>
 #include <odp_forward_typedefs_internal.h>

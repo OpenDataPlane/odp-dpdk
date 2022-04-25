@@ -1,4 +1,5 @@
 /* Copyright (c) 2015-2018, Linaro Limited
+ * Copyright (c) 2022, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:	BSD-3-Clause
@@ -24,6 +25,9 @@
  */
 #define POOL_NUM_PKT  64
 
+#define AAD_LEN 8 /* typical AAD length used in IPsec when ESN is not in use */
+
+static uint8_t test_aad[AAD_LEN] = "01234567";
 static uint8_t test_iv[16] = "0123456789abcdef";
 
 static uint8_t test_key16[16] = { 0x01, 0x02, 0x03, 0x04, 0x05,
@@ -76,6 +80,8 @@ static uint8_t test_key64[64] = { 0x01, 0x02, 0x03, 0x04, 0x05,
 typedef struct {
 	const char *name;		      /**< Algorithm name */
 	odp_crypto_session_param_t session;   /**< Prefilled crypto session params */
+	int cipher_in_bit_mode;               /**< Cipher range in bits, probed at run time */
+	int auth_in_bit_mode;                 /**< Auth range in bits, probed at run time */
 } crypto_alg_config_t;
 
 /**
@@ -370,6 +376,7 @@ static crypto_alg_config_t algs_config[] = {
 			.cipher_iv_len = 12,
 			.auth_alg = ODP_AUTH_ALG_AES_GCM,
 			.auth_digest_len = 16,
+			.auth_aad_len = AAD_LEN,
 		},
 	},
 	{
@@ -383,6 +390,7 @@ static crypto_alg_config_t algs_config[] = {
 			.cipher_iv_len = 11,
 			.auth_alg = ODP_AUTH_ALG_AES_CCM,
 			.auth_digest_len = 16,
+			.auth_aad_len = AAD_LEN,
 		},
 	},
 	{
@@ -396,6 +404,7 @@ static crypto_alg_config_t algs_config[] = {
 			.cipher_iv_len = 12,
 			.auth_alg = ODP_AUTH_ALG_CHACHA20_POLY1305,
 			.auth_digest_len = 16,
+			.auth_aad_len = AAD_LEN,
 		},
 	},
 };
@@ -697,12 +706,14 @@ run_measure_one(crypto_args_t *cargs,
 	params.session = *session;
 	params.cipher_iv_ptr = test_iv;
 	params.auth_iv_ptr = test_iv;
+	params.aad_ptr = test_aad;
 
 	params.cipher_range.offset = 0;
-	params.cipher_range.length = payload_length;
-
+	params.cipher_range.length = config->cipher_in_bit_mode ? payload_length * 8
+								: payload_length;
 	params.auth_range.offset = 0;
-	params.auth_range.length = payload_length;
+	params.auth_range.length = config->auth_in_bit_mode ? payload_length * 8
+							    : payload_length;
 	params.hash_result_offset = payload_length;
 
 	fill_time_record(&start);
@@ -828,7 +839,7 @@ run_measure_one(crypto_args_t *cargs,
 	return rc < 0 ? rc : 0;
 }
 
-static int check_cipher_alg(odp_crypto_capability_t *capa,
+static int check_cipher_alg(const odp_crypto_capability_t *capa,
 			    odp_cipher_alg_t alg)
 {
 	switch (alg) {
@@ -871,7 +882,7 @@ static int check_cipher_alg(odp_crypto_capability_t *capa,
 	return -1;
 }
 
-static int check_auth_alg(odp_crypto_capability_t *capa,
+static int check_auth_alg(const odp_crypto_capability_t *capa,
 			  odp_auth_alg_t alg)
 {
 	switch (alg) {
@@ -922,6 +933,81 @@ static int check_auth_alg(odp_crypto_capability_t *capa,
 	return -1;
 }
 
+static int check_cipher_params(const odp_crypto_capability_t *crypto_capa,
+			       const odp_crypto_session_param_t *param,
+			       int *bit_mode)
+{
+	int num, rc;
+
+	if (check_cipher_alg(crypto_capa, param->cipher_alg))
+		return 1;
+
+	num = odp_crypto_cipher_capability(param->cipher_alg, NULL, 0);
+	odp_crypto_cipher_capability_t cipher_capa[num];
+
+	rc = odp_crypto_cipher_capability(param->cipher_alg, cipher_capa, num);
+	if (rc < num)
+		num = rc;
+
+	for (int n = 0; n < num; n++) {
+		odp_crypto_cipher_capability_t *capa = &cipher_capa[n];
+
+		if (capa->key_len != param->cipher_key.length ||
+		    capa->iv_len != param->cipher_iv_len)
+			continue;
+
+		*bit_mode = capa->bit_mode;
+		return 0;
+	}
+	return 1;
+}
+
+static int aad_len_ok(const odp_crypto_auth_capability_t *capa, uint32_t len)
+{
+	if (len < capa->aad_len.min || len > capa->aad_len.max)
+		return 0;
+
+	if (len == capa->aad_len.min)
+		return 1;
+	if (capa->aad_len.inc == 0)
+		return 0;
+
+	return ((len - capa->aad_len.min) % capa->aad_len.inc) == 0;
+}
+
+static int check_auth_params(const odp_crypto_capability_t *crypto_capa,
+			     const odp_crypto_session_param_t *param,
+			     int *bit_mode)
+{
+	int num, rc;
+
+	if (check_auth_alg(crypto_capa, param->auth_alg))
+		return 1;
+
+	num = odp_crypto_auth_capability(param->auth_alg, NULL, 0);
+	odp_crypto_auth_capability_t auth_capa[num];
+
+	rc = odp_crypto_auth_capability(param->auth_alg, auth_capa, num);
+	if (rc < num)
+		num = rc;
+
+	for (int n = 0; n < num; n++) {
+		odp_crypto_auth_capability_t *capa = &auth_capa[n];
+
+		if (capa->digest_len != param->auth_digest_len ||
+		    capa->key_len != param->auth_key.length ||
+		    capa->iv_len != param->auth_iv_len)
+			continue;
+
+		if (!aad_len_ok(capa, param->auth_aad_len))
+			continue;
+
+		*bit_mode = capa->bit_mode;
+		return 0;
+	}
+	return 1;
+}
+
 /**
  * Process one algorithm. Note if paload size is specicified it is
  * only one run. Or iterate over set of predefined payloads.
@@ -935,12 +1021,14 @@ static int run_measure_one_config(test_run_arg_t *arg)
 	odp_crypto_capability_t crypto_capa = arg->crypto_capa;
 	int rc = 0;
 
-	if (check_cipher_alg(&crypto_capa, config->session.cipher_alg)) {
+	if (check_cipher_params(&crypto_capa, &config->session,
+				&config->cipher_in_bit_mode)) {
 		printf("    Cipher algorithm not supported\n");
 		rc = 1;
 	}
 
-	if (check_auth_alg(&crypto_capa, config->session.auth_alg)) {
+	if (check_auth_params(&crypto_capa, &config->session,
+			      &config->auth_in_bit_mode)) {
 		printf("    Auth algorithm not supported\n");
 		rc = 1;
 	}
@@ -1081,7 +1169,7 @@ int main(int argc, char *argv[])
 	if (cargs.schedule) {
 		odp_schedule_config(NULL);
 		qparam.type = ODP_QUEUE_TYPE_SCHED;
-		qparam.sched.prio  = ODP_SCHED_PRIO_DEFAULT;
+		qparam.sched.prio  = odp_schedule_default_prio();
 		qparam.sched.sync  = ODP_SCHED_SYNC_PARALLEL;
 		qparam.sched.group = ODP_SCHED_GROUP_ALL;
 		out_queue = odp_queue_create("crypto-out", &qparam);

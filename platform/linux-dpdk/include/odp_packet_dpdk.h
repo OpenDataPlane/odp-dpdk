@@ -8,8 +8,11 @@
 #ifndef ODP_PACKET_DPDK_H_
 #define ODP_PACKET_DPDK_H_
 
+#include <odp/api/packet.h>
 #include <odp/api/packet_io.h>
+
 #include <odp/api/plat/packet_inlines.h>
+
 #include <odp_packet_internal.h>
 
 #include <stdint.h>
@@ -35,7 +38,7 @@ int _odp_dpdk_packet_parse_common(packet_parser_t *prs,
 
 static inline int _odp_dpdk_packet_parse_layer(odp_packet_hdr_t *pkt_hdr,
 					       struct rte_mbuf *mbuf,
-					       odp_pktio_parser_layer_t layer,
+					       odp_proto_layer_t layer,
 					       uint32_t supported_ptypes,
 					       odp_pktin_config_opt_t pktin_cfg)
 {

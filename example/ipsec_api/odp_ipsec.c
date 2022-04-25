@@ -285,7 +285,7 @@ void ipsec_init_pre(void)
 	 */
 	odp_queue_param_init(&qparam);
 	qparam.type        = ODP_QUEUE_TYPE_SCHED;
-	qparam.sched.prio  = ODP_SCHED_PRIO_HIGHEST;
+	qparam.sched.prio  = odp_schedule_max_prio();
 	qparam.sched.sync  = ODP_SCHED_SYNC_ATOMIC;
 	qparam.sched.group = ODP_SCHED_GROUP_ALL;
 
@@ -296,7 +296,7 @@ void ipsec_init_pre(void)
 	}
 
 	qparam.type        = ODP_QUEUE_TYPE_SCHED;
-	qparam.sched.prio  = ODP_SCHED_PRIO_HIGHEST;
+	qparam.sched.prio  = odp_schedule_max_prio();
 	qparam.sched.sync  = ODP_SCHED_SYNC_ATOMIC;
 	qparam.sched.group = ODP_SCHED_GROUP_ALL;
 
@@ -1099,7 +1099,7 @@ main(int argc, char *argv[])
 
 		do {
 			done = verify_stream_db_outputs();
-			sleep(1);
+			usleep(100000);
 		} while (!done);
 		printf("All received\n");
 		odp_atomic_store_u32(&global->exit_threads, 1);
@@ -1395,4 +1395,11 @@ static void usage(char *progname)
 	       " stream verification instead of single dequeue (default)\n"
 	       "\n", NO_PATH(progname), NO_PATH(progname)
 		);
+}
+
+odp_bool_t sa_config_supported(const sa_db_entry_t *sa_entry, int *sa_flags);
+
+odp_bool_t sa_config_supported(const sa_db_entry_t *sa_entry ODP_UNUSED, int *sa_flags ODP_UNUSED)
+{
+	return true;
 }

@@ -1,5 +1,5 @@
 /* Copyright (c) 2015-2018, Linaro Limited
- * Copyright (c) 2019-2020, Nokia
+ * Copyright (c) 2019-2022, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -11,7 +11,7 @@
 #endif
 
 #include <time.h>
-#include <odp.h>
+#include <odp_api.h>
 #include <odp/helper/odph_api.h>
 #include "odp_cunit_common.h"
 
@@ -34,6 +34,13 @@
 #define THREE_POINT_THREE_MSEC (10 * ODP_TIME_MSEC_IN_NS / 3)
 #define USER_PTR ((void *)0xdead)
 #define TICK_INVALID (~(uint64_t)0)
+
+/* Test case options */
+#define PRIV      1
+#define EXP_RELAX 1
+#define WAIT      0
+#define CANCEL    1
+#define RESTART   1
 
 /* Timer helper structure */
 struct test_timer {
@@ -79,6 +86,9 @@ typedef struct {
 
 	/* Number of timers allocated per thread */
 	uint32_t timers_per_thread;
+
+	/* Periodic timers supported */
+	int periodic;
 
 } global_shared_mem_t;
 
@@ -175,6 +185,10 @@ static int timer_global_init(odp_instance_t *inst)
 			global_mem->clk_supported[i] = 1;
 	}
 
+	/* Check if periodic timers are supported */
+	if (capa.periodic.max_pools > 0)
+		global_mem->periodic = 1;
+
 	return 0;
 }
 
@@ -214,6 +228,22 @@ static int
 check_plain_queue_support(void)
 {
 	if (global_mem->param.queue_type_plain)
+		return ODP_TEST_ACTIVE;
+
+	return ODP_TEST_INACTIVE;
+}
+
+static int check_periodic_sched_support(void)
+{
+	if (global_mem->periodic && global_mem->param.queue_type_sched)
+		return ODP_TEST_ACTIVE;
+
+	return ODP_TEST_INACTIVE;
+}
+
+static int check_periodic_plain_support(void)
+{
+	if (global_mem->periodic && global_mem->param.queue_type_plain)
 		return ODP_TEST_ACTIVE;
 
 	return ODP_TEST_INACTIVE;
@@ -312,6 +342,11 @@ static void timer_test_param_init(void)
 	CU_ASSERT(tp_param.min_tmo == 0);
 	CU_ASSERT(tp_param.priv == 0);
 	CU_ASSERT(tp_param.clk_src == ODP_CLOCK_DEFAULT);
+	CU_ASSERT(tp_param.exp_mode == ODP_TIMER_EXP_AFTER);
+	CU_ASSERT(tp_param.timer_type == ODP_TIMER_TYPE_SINGLE);
+	CU_ASSERT(tp_param.periodic.base_freq_hz.integer == 0);
+	CU_ASSERT(tp_param.periodic.base_freq_hz.numer == 0);
+	CU_ASSERT(tp_param.periodic.base_freq_hz.denom == 0);
 }
 
 static void timer_test_timeout_pool_alloc(void)
@@ -641,6 +676,270 @@ static void timer_pool_max_res(void)
 	CU_ASSERT(odp_pool_destroy(pool) == 0);
 }
 
+static odp_event_t wait_event(odp_queue_type_t queue_type, odp_queue_t queue,
+			      odp_time_t t1, uint64_t wait_ns)
+{
+	odp_time_t t2;
+	odp_event_t ev;
+	odp_queue_t from = ODP_QUEUE_INVALID;
+
+	while (1) {
+		if (queue_type == ODP_QUEUE_TYPE_SCHED)
+			ev = odp_schedule(&from, ODP_SCHED_NO_WAIT);
+		else
+			ev = odp_queue_deq(queue);
+
+		if (ev != ODP_EVENT_INVALID) {
+			if (queue_type == ODP_QUEUE_TYPE_SCHED)
+				CU_ASSERT(from == queue);
+
+			return ev;
+		}
+
+		t2 = odp_time_global();
+		if (odp_time_diff_ns(t2, t1) > wait_ns)
+			break;
+	}
+
+	return ODP_EVENT_INVALID;
+}
+
+static void free_schedule_context(odp_queue_type_t queue_type)
+{
+	if (queue_type != ODP_QUEUE_TYPE_SCHED)
+		return;
+
+	while (1) {
+		odp_event_t ev = odp_schedule(NULL, ODP_SCHED_NO_WAIT);
+
+		CU_ASSERT(ev == ODP_EVENT_INVALID);
+
+		if (ev == ODP_EVENT_INVALID)
+			break;
+
+		odp_event_free(ev);
+	}
+}
+
+static void timer_single_shot(odp_queue_type_t queue_type, odp_timer_tick_type_t tick_type,
+			      int restart, int cancel)
+{
+	odp_timer_capability_t capa;
+	odp_timer_pool_param_t tp_param;
+	odp_queue_param_t queue_param;
+	odp_pool_param_t pool_param;
+	odp_timer_start_t start_param;
+	odp_timer_pool_t tp;
+	odp_timer_t timer;
+	odp_pool_t pool;
+	odp_queue_t queue;
+	odp_timeout_t tmo;
+	odp_event_t ev;
+	odp_time_t t1, t2;
+	uint64_t tick, nsec;
+	int ret;
+	uint64_t tmo_ns = ODP_TIME_SEC_IN_NS;
+	uint64_t res_ns = ODP_TIME_SEC_IN_NS / 10;
+
+	memset(&capa, 0, sizeof(capa));
+	ret = odp_timer_capability(ODP_CLOCK_DEFAULT, &capa);
+	CU_ASSERT_FATAL(ret == 0);
+	CU_ASSERT_FATAL(capa.max_tmo.max_tmo > 0);
+
+	if (capa.max_tmo.max_tmo < tmo_ns) {
+		tmo_ns = capa.max_tmo.max_tmo;
+		res_ns = capa.max_tmo.res_ns;
+	}
+
+	odp_pool_param_init(&pool_param);
+	pool_param.type    = ODP_POOL_TIMEOUT;
+	pool_param.tmo.num = 10;
+	pool = odp_pool_create("timeout_pool", &pool_param);
+	CU_ASSERT_FATAL(pool != ODP_POOL_INVALID);
+
+	odp_queue_param_init(&queue_param);
+	queue_param.type = queue_type;
+
+	if (queue_type == ODP_QUEUE_TYPE_SCHED)
+		queue_param.sched.sync = ODP_SCHED_SYNC_ATOMIC;
+
+	queue = odp_queue_create("timer_queue", &queue_param);
+	CU_ASSERT_FATAL(queue != ODP_QUEUE_INVALID);
+
+	odp_timer_pool_param_init(&tp_param);
+
+	tp_param.res_ns     = res_ns;
+	tp_param.min_tmo    = tmo_ns / 4;
+	tp_param.max_tmo    = tmo_ns;
+	tp_param.num_timers = 1;
+
+	tp = odp_timer_pool_create("test_single", &tp_param);
+	CU_ASSERT_FATAL(tp != ODP_TIMER_POOL_INVALID);
+
+	odp_timer_pool_start();
+
+	timer = odp_timer_alloc(tp, queue, USER_PTR);
+	CU_ASSERT_FATAL(timer != ODP_TIMER_INVALID);
+
+	tmo = odp_timeout_alloc(pool);
+	ev  = odp_timeout_to_event(tmo);
+	CU_ASSERT_FATAL(ev != ODP_EVENT_INVALID);
+
+	nsec = tmo_ns;
+	if (restart)
+		nsec = tmo_ns / 2;
+
+	tick = odp_timer_ns_to_tick(tp, nsec);
+	if (tick_type == ODP_TIMER_TICK_ABS)
+		tick += odp_timer_current_tick(tp);
+
+	start_param.tick_type = tick_type;
+	start_param.tick      = tick;
+	start_param.tmo_ev    = ev;
+
+	ret = odp_timer_start(timer, &start_param);
+	CU_ASSERT_FATAL(ret == ODP_TIMER_SUCCESS);
+
+	if (restart) {
+		tick = odp_timer_ns_to_tick(tp, tmo_ns);
+		if (tick_type == ODP_TIMER_TICK_ABS)
+			tick += odp_timer_current_tick(tp);
+
+		start_param.tick   = tick;
+		start_param.tmo_ev = ODP_EVENT_INVALID;
+
+		ret = odp_timer_restart(timer, &start_param);
+		CU_ASSERT_FATAL(ret == ODP_TIMER_SUCCESS);
+	}
+
+	ev = ODP_EVENT_INVALID;
+
+	if (cancel) {
+		ret = odp_timer_cancel(timer, &ev);
+		CU_ASSERT(ret == 0);
+
+		if (ret == 0)
+			CU_ASSERT(ev != ODP_EVENT_INVALID);
+	} else {
+		uint64_t diff_ns;
+
+		t1 = odp_time_global();
+		ev = wait_event(queue_type, queue, t1, 10 * tmo_ns);
+		t2 = odp_time_global();
+		diff_ns = odp_time_diff_ns(t2, t1);
+
+		CU_ASSERT(ev != ODP_EVENT_INVALID);
+		CU_ASSERT(diff_ns < 2 * tmo_ns);
+		CU_ASSERT((double)diff_ns > 0.5 * tmo_ns);
+	}
+
+	if (ev != ODP_EVENT_INVALID) {
+		CU_ASSERT_FATAL(odp_event_type(ev) == ODP_EVENT_TIMEOUT);
+		tmo = odp_timeout_from_event(ev);
+		CU_ASSERT(odp_timeout_user_ptr(tmo) == USER_PTR);
+		CU_ASSERT(odp_timeout_timer(tmo) == timer);
+
+		if (!cancel) {
+			if (tick_type == ODP_TIMER_TICK_ABS) {
+				/* CU_ASSERT needs these extra brackets */
+				CU_ASSERT(odp_timeout_tick(tmo) == tick);
+			} else {
+				CU_ASSERT(odp_timeout_tick(tmo) > tick);
+			}
+		}
+
+		odp_event_free(ev);
+	}
+
+	free_schedule_context(queue_type);
+
+	CU_ASSERT(odp_timer_free(timer) == ODP_EVENT_INVALID);
+	odp_timer_pool_destroy(tp);
+
+	CU_ASSERT(odp_queue_destroy(queue) == 0);
+	CU_ASSERT(odp_pool_destroy(pool) == 0);
+}
+
+static void timer_plain_rel_wait(void)
+{
+	timer_single_shot(ODP_QUEUE_TYPE_PLAIN, ODP_TIMER_TICK_REL, 0, WAIT);
+}
+
+static void timer_plain_abs_wait(void)
+{
+	timer_single_shot(ODP_QUEUE_TYPE_PLAIN, ODP_TIMER_TICK_ABS, 0, WAIT);
+}
+
+static void timer_plain_rel_cancel(void)
+{
+	timer_single_shot(ODP_QUEUE_TYPE_PLAIN, ODP_TIMER_TICK_REL, 0, CANCEL);
+}
+
+static void timer_plain_abs_cancel(void)
+{
+	timer_single_shot(ODP_QUEUE_TYPE_PLAIN, ODP_TIMER_TICK_ABS, 0, CANCEL);
+}
+
+static void timer_plain_rel_restart_wait(void)
+{
+	timer_single_shot(ODP_QUEUE_TYPE_PLAIN, ODP_TIMER_TICK_REL, RESTART, WAIT);
+}
+
+static void timer_plain_abs_restart_wait(void)
+{
+	timer_single_shot(ODP_QUEUE_TYPE_PLAIN, ODP_TIMER_TICK_ABS, RESTART, WAIT);
+}
+
+static void timer_plain_rel_restart_cancel(void)
+{
+	timer_single_shot(ODP_QUEUE_TYPE_PLAIN, ODP_TIMER_TICK_REL, RESTART, CANCEL);
+}
+
+static void timer_plain_abs_restart_cancel(void)
+{
+	timer_single_shot(ODP_QUEUE_TYPE_PLAIN, ODP_TIMER_TICK_ABS, RESTART, CANCEL);
+}
+
+static void timer_sched_rel_wait(void)
+{
+	timer_single_shot(ODP_QUEUE_TYPE_SCHED, ODP_TIMER_TICK_REL, 0, WAIT);
+}
+
+static void timer_sched_abs_wait(void)
+{
+	timer_single_shot(ODP_QUEUE_TYPE_SCHED, ODP_TIMER_TICK_ABS, 0, WAIT);
+}
+
+static void timer_sched_rel_cancel(void)
+{
+	timer_single_shot(ODP_QUEUE_TYPE_SCHED, ODP_TIMER_TICK_REL, 0, CANCEL);
+}
+
+static void timer_sched_abs_cancel(void)
+{
+	timer_single_shot(ODP_QUEUE_TYPE_SCHED, ODP_TIMER_TICK_ABS, 0, CANCEL);
+}
+
+static void timer_sched_rel_restart_wait(void)
+{
+	timer_single_shot(ODP_QUEUE_TYPE_SCHED, ODP_TIMER_TICK_REL, RESTART, WAIT);
+}
+
+static void timer_sched_abs_restart_wait(void)
+{
+	timer_single_shot(ODP_QUEUE_TYPE_SCHED, ODP_TIMER_TICK_ABS, RESTART, WAIT);
+}
+
+static void timer_sched_rel_restart_cancel(void)
+{
+	timer_single_shot(ODP_QUEUE_TYPE_SCHED, ODP_TIMER_TICK_REL, RESTART, CANCEL);
+}
+
+static void timer_sched_abs_restart_cancel(void)
+{
+	timer_single_shot(ODP_QUEUE_TYPE_SCHED, ODP_TIMER_TICK_ABS, RESTART, CANCEL);
+}
+
 static void timer_pool_tick_info_run(odp_timer_clk_src_t clk_src)
 {
 	odp_timer_capability_t capa;
@@ -677,6 +976,9 @@ static void timer_pool_tick_info_run(odp_timer_clk_src_t clk_src)
 
 	CU_ASSERT(((double)(ticks_per_sec - 1)) <= tick_hz);
 	CU_ASSERT(((double)(ticks_per_sec + 1)) >= tick_hz);
+
+	/* Tick frequency must be the same or higher that resolution */
+	CU_ASSERT(tick_hz >= tp_param.res_hz);
 
 	printf("\nClock source %i\n", clk_src);
 	printf("  Ticks per second:     %" PRIu64 "\n", ticks_per_sec);
@@ -845,7 +1147,7 @@ static void timer_test_event_type(odp_queue_type_t queue_type,
 	num_tmo = 0;
 	t1 = odp_time_local();
 
-	/* Wait for timers. Make sure that scheduler context is not hold when
+	/* Wait for timers. Make sure that scheduler context is not held when
 	 * exiting the loop. */
 	do {
 		if (queue_type == ODP_QUEUE_TYPE_SCHED)
@@ -915,7 +1217,7 @@ static void timer_test_pkt_event_sched(void)
 	timer_test_event_type(ODP_QUEUE_TYPE_SCHED, ODP_EVENT_PACKET);
 }
 
-static void timer_test_queue_type(odp_queue_type_t queue_type, int priv)
+static void timer_test_queue_type(odp_queue_type_t queue_type, int priv, int exp_relax)
 {
 	odp_pool_t pool;
 	const int num = 10;
@@ -927,13 +1229,14 @@ static void timer_test_queue_type(odp_queue_type_t queue_type, int priv)
 	odp_queue_t queue;
 	odp_timer_t tim;
 	int i, ret, num_tmo;
-	uint64_t tick_base, tick;
+	uint64_t tick_base, tick, nsec_base, nsec;
 	uint64_t res_ns, period_ns, period_tick, test_period;
-	uint64_t diff_period, diff_test;
+	uint64_t diff_test;
 	odp_pool_param_t params;
-	odp_time_t t0, t1, t2;
+	odp_time_t t0, t1;
 	odp_timer_t timer[num];
 	uint64_t target_tick[num];
+	uint64_t target_nsec[num];
 	void *user_ptr[num];
 
 	odp_pool_param_init(&params);
@@ -952,6 +1255,9 @@ static void timer_test_queue_type(odp_queue_type_t queue_type, int priv)
 	tparam.num_timers = num + 1;
 	tparam.priv       = priv;
 	tparam.clk_src    = ODP_CLOCK_DEFAULT;
+
+	if (exp_relax)
+		tparam.exp_mode = ODP_TIMER_EXP_RELAXED;
 
 	ODPH_DBG("\nTimer pool parameters:\n");
 	ODPH_DBG("  res_ns  %" PRIu64 "\n", tparam.res_ns);
@@ -985,7 +1291,7 @@ static void timer_test_queue_type(odp_queue_type_t queue_type, int priv)
 	tick_base = odp_timer_current_tick(tp);
 	t0 = odp_time_local();
 	t1 = t0;
-	t2 = t0;
+	nsec_base = odp_time_to_ns(t0);
 
 	for (i = 0; i < num; i++) {
 		tmo = odp_timeout_alloc(pool);
@@ -1001,6 +1307,7 @@ static void timer_test_queue_type(odp_queue_type_t queue_type, int priv)
 		tick = tick_base + ((i + 1) * period_tick);
 		ret = odp_timer_set_abs(tim, tick, &ev);
 		target_tick[i] = tick;
+		target_nsec[i] = nsec_base + ((i + 1) * period_ns);
 
 		ODPH_DBG("abs timer tick %" PRIu64 "\n", tick);
 		if (ret == ODP_TIMER_TOO_NEAR)
@@ -1021,26 +1328,40 @@ static void timer_test_queue_type(odp_queue_type_t queue_type, int priv)
 		else
 			ev = odp_queue_deq(queue);
 
-		t2 = odp_time_local();
-		diff_test = odp_time_diff_ns(t2, t0);
+		t1 = odp_time_local();
+		nsec = odp_time_to_ns(t1);
+		diff_test = nsec - nsec_base;
 
 		if (ev != ODP_EVENT_INVALID) {
-			diff_period = odp_time_diff_ns(t2, t1);
-			t1 = t2;
+			uint64_t target;
+
 			tmo = odp_timeout_from_event(ev);
 			tim = odp_timeout_timer(tmo);
 			tick = odp_timeout_tick(tmo);
+			target = target_nsec[num_tmo];
 
 			CU_ASSERT(timer[num_tmo] == tim);
 			CU_ASSERT(target_tick[num_tmo] == tick);
-			CU_ASSERT(user_ptr[num_tmo] ==
-				  odp_timeout_user_ptr(tmo));
-			CU_ASSERT(diff_period > (period_ns - (5 * res_ns)));
-			CU_ASSERT(diff_period < (period_ns + (5 * res_ns)));
+			CU_ASSERT(user_ptr[num_tmo] == odp_timeout_user_ptr(tmo));
 
-			ODPH_DBG("timeout tick %" PRIu64 ", target tick  "
-				 "%" PRIu64 ", timeout period %" PRIu64 "\n",
-				 tick, target_tick[num_tmo], diff_period);
+			CU_ASSERT(nsec < (target + (5 * res_ns)));
+
+			if (exp_relax) {
+				CU_ASSERT(nsec > (target - (5 * res_ns)));
+			} else {
+				/* Timeout must not arrive before the current time has passed
+				 * the target time (in timer ticks). */
+				CU_ASSERT(target_tick[num_tmo] <= odp_timer_current_tick(tp));
+
+				/* Timeout should not arrive before the target wall clock time.
+				 * However, allow small drift or error between wall clock and
+				 * timer. */
+				CU_ASSERT(nsec > (target - res_ns));
+			}
+
+			ODPH_DBG("timeout tick %" PRIu64 ", nsec %" PRIu64 ", "
+				 "target nsec %" PRIu64 ", diff nsec %" PRIi64 "\n",
+				 tick, nsec, target, (int64_t)(nsec - target));
 
 			odp_timeout_free(tmo);
 			CU_ASSERT(odp_timer_free(tim) == ODP_EVENT_INVALID);
@@ -1078,22 +1399,32 @@ static void timer_test_queue_type(odp_queue_type_t queue_type, int priv)
 
 static void timer_test_plain_queue(void)
 {
-	timer_test_queue_type(ODP_QUEUE_TYPE_PLAIN, 0);
+	timer_test_queue_type(ODP_QUEUE_TYPE_PLAIN, 0, 0);
 }
 
 static void timer_test_sched_queue(void)
 {
-	timer_test_queue_type(ODP_QUEUE_TYPE_SCHED, 0);
+	timer_test_queue_type(ODP_QUEUE_TYPE_SCHED, 0, 0);
 }
 
 static void timer_test_plain_queue_priv(void)
 {
-	timer_test_queue_type(ODP_QUEUE_TYPE_PLAIN, 1);
+	timer_test_queue_type(ODP_QUEUE_TYPE_PLAIN, PRIV, 0);
 }
 
 static void timer_test_sched_queue_priv(void)
 {
-	timer_test_queue_type(ODP_QUEUE_TYPE_SCHED, 1);
+	timer_test_queue_type(ODP_QUEUE_TYPE_SCHED, PRIV, 0);
+}
+
+static void timer_test_plain_queue_exp_relax(void)
+{
+	timer_test_queue_type(ODP_QUEUE_TYPE_PLAIN, 0, EXP_RELAX);
+}
+
+static void timer_test_sched_queue_exp_relax(void)
+{
+	timer_test_queue_type(ODP_QUEUE_TYPE_SCHED, 0, EXP_RELAX);
 }
 
 static void timer_test_cancel(void)
@@ -1469,7 +1800,7 @@ static void handle_tmo(odp_event_t ev, bool stale, uint64_t prev_tick)
 		}
 
 		if (tick > odp_timer_current_tick(global_mem->tp))
-			CU_FAIL("Timeout delivered early");
+			CU_FAIL("Timeout delivered early in ODP_TIMER_EXP_AFTER mode");
 
 		if (tick < prev_tick) {
 			ODPH_DBG("Too late tick: %" PRIu64 " prev_tick "
@@ -1501,7 +1832,7 @@ static int worker_entrypoint(void *arg)
 	uint32_t ncancel;
 	uint32_t ntoolate;
 	uint32_t ms;
-	uint64_t prev_tick, nsec;
+	uint64_t prev_tick, late_margin, nsec;
 	odp_event_t ev;
 	struct timespec ts;
 	uint32_t nstale;
@@ -1516,6 +1847,7 @@ static int worker_entrypoint(void *arg)
 	odp_schedule_group_t group;
 	struct thread_args *thr_args = arg;
 	uint64_t sched_tmo;
+	uint64_t res_ns  = global_mem->param.res_ns;
 
 	odp_queue_param_init(&queue_param);
 	if (thr_args->queue_type == ODP_QUEUE_TYPE_PLAIN) {
@@ -1591,6 +1923,7 @@ static int worker_entrypoint(void *arg)
 	nreset = 0;
 	ncancel = 0;
 	ntoolate = 0;
+	late_margin = odp_timer_ns_to_tick(tp, 2 * res_ns);
 	prev_tick = odp_timer_current_tick(tp);
 
 	for (ms = 0; ms < 7 * RANGE_MS / 10 && allocated > 0; ms++) {
@@ -1598,9 +1931,8 @@ static int worker_entrypoint(void *arg)
 			odp_queue_deq(queue) :
 			odp_schedule(NULL, ODP_SCHED_NO_WAIT))
 				!= ODP_EVENT_INVALID) {
-			/* Subtract one from prev_tick to allow for timeouts
-			 * to be delivered a tick late */
-			handle_tmo(ev, false, prev_tick - 1);
+			/* Allow timeouts to be delivered late_margin ticks late */
+			handle_tmo(ev, false, prev_tick - late_margin);
 			nrcv++;
 		}
 		prev_tick = odp_timer_current_tick(tp);
@@ -1903,6 +2235,252 @@ static void timer_test_sched_all(void)
 	timer_test_all(ODP_QUEUE_TYPE_SCHED);
 }
 
+static void timer_test_periodic(odp_queue_type_t queue_type)
+{
+	odp_timer_capability_t timer_capa;
+	odp_timer_periodic_capability_t periodic_capa;
+	odp_pool_t pool;
+	odp_pool_param_t pool_param;
+	odp_queue_param_t queue_param;
+	odp_timer_pool_param_t timer_param;
+	odp_timer_pool_t timer_pool;
+	odp_timer_periodic_start_t start_param;
+	odp_queue_t queue;
+	odp_timeout_t tmo;
+	odp_event_t ev;
+	odp_timer_t timer;
+	odp_time_t t1, t2;
+	uint64_t tick, cur_tick, period_ns, duration_ns, diff_ns;
+	double freq, freq_out, min_freq, max_freq;
+	int ret;
+	const char *user_ctx = "User context";
+	int num_tmo = 0;
+	int done = 0;
+	const int num = 200;
+	/* Test frequency: 1x 100Hz, or 1x min/max_base_freq */
+	const uint64_t multiplier = 1;
+	odp_fract_u64_t base_freq = {100, 0, 0};
+
+	memset(&timer_capa, 0, sizeof(odp_timer_capability_t));
+	CU_ASSERT_FATAL(odp_timer_capability(ODP_CLOCK_DEFAULT, &timer_capa) == 0);
+
+	CU_ASSERT_FATAL(timer_capa.periodic.max_pools);
+	CU_ASSERT_FATAL(timer_capa.periodic.max_timers);
+	CU_ASSERT_FATAL(timer_capa.periodic.min_base_freq_hz.integer ||
+			timer_capa.periodic.min_base_freq_hz.numer);
+	CU_ASSERT_FATAL(timer_capa.periodic.max_base_freq_hz.integer ||
+			timer_capa.periodic.max_base_freq_hz.numer);
+
+	min_freq = odp_fract_u64_to_dbl(&timer_capa.periodic.min_base_freq_hz);
+	max_freq = odp_fract_u64_to_dbl(&timer_capa.periodic.max_base_freq_hz);
+	CU_ASSERT(min_freq <= max_freq);
+
+	if (odp_fract_u64_to_dbl(&base_freq) < min_freq)
+		base_freq = timer_capa.periodic.min_base_freq_hz;
+	else if (odp_fract_u64_to_dbl(&base_freq) > max_freq)
+		base_freq = timer_capa.periodic.max_base_freq_hz;
+
+	freq = odp_fract_u64_to_dbl(&base_freq);
+
+	/* No resolution requirement */
+	memset(&periodic_capa, 0, sizeof(odp_timer_periodic_capability_t));
+	periodic_capa.base_freq_hz   = base_freq;
+	periodic_capa.max_multiplier = multiplier;
+
+	ret = odp_timer_periodic_capability(ODP_CLOCK_DEFAULT, &periodic_capa);
+	CU_ASSERT(ret == 0 || ret == 1);
+
+	if (ret < 0) {
+		ODPH_ERR("Periodic timer does not support tested frequency\n");
+		return;
+	}
+
+	freq_out = odp_fract_u64_to_dbl(&periodic_capa.base_freq_hz);
+
+	if (ret == 0) {
+		/* Allow 10% difference in outputted base frequency */
+		CU_ASSERT((freq_out > (0.9 * freq)) && (freq_out < (1.1 * freq)));
+	} else {
+		CU_ASSERT(base_freq.integer == periodic_capa.base_freq_hz.integer);
+		CU_ASSERT(base_freq.numer   == periodic_capa.base_freq_hz.numer);
+		CU_ASSERT(base_freq.denom   == periodic_capa.base_freq_hz.denom);
+	}
+
+	CU_ASSERT(periodic_capa.res_ns > 0);
+	CU_ASSERT(periodic_capa.max_multiplier >= multiplier);
+
+	base_freq = periodic_capa.base_freq_hz;
+	freq = odp_fract_u64_to_dbl(&base_freq);
+	period_ns = ODP_TIME_SEC_IN_NS / (freq * multiplier);
+	duration_ns = num * period_ns;
+
+	odp_timer_pool_param_init(&timer_param);
+	timer_param.timer_type = ODP_TIMER_TYPE_PERIODIC;
+	timer_param.res_ns     = 2 * periodic_capa.res_ns;
+	timer_param.num_timers = 1;
+	timer_param.clk_src    = ODP_CLOCK_DEFAULT;
+	timer_param.periodic.base_freq_hz = base_freq;
+	timer_param.periodic.max_multiplier = multiplier;
+
+	ODPH_DBG("\n");
+	ODPH_DBG("Periodic timer pool create params:\n");
+	ODPH_DBG("  Resolution ns:     %" PRIu64 "\n", timer_param.res_ns);
+	ODPH_DBG("  Base freq hz:      %" PRIu64 " + %" PRIu64 "/%" PRIu64 " (%f)\n",
+		 timer_param.periodic.base_freq_hz.integer,
+		 timer_param.periodic.base_freq_hz.numer,
+		 timer_param.periodic.base_freq_hz.denom, freq);
+	ODPH_DBG("  Max multiplier:    %" PRIu64 "\n", timer_param.periodic.max_multiplier);
+	ODPH_DBG("Capabilities:\n");
+	ODPH_DBG("  Max multiplier:    %" PRIu64 " (with %f hz)\n",
+		 periodic_capa.max_multiplier, freq);
+	ODPH_DBG("  Max resolution:    %" PRIu64 " ns (with %f hz)\n", periodic_capa.res_ns, freq);
+	ODPH_DBG("  Min base freq:     %f hz\n", min_freq);
+	ODPH_DBG("  Max base freq:     %f hz\n", max_freq);
+
+	timer_pool = odp_timer_pool_create("periodic_timer", &timer_param);
+	CU_ASSERT_FATAL(timer_pool != ODP_TIMER_POOL_INVALID);
+
+	odp_timer_pool_start();
+
+	odp_pool_param_init(&pool_param);
+	pool_param.type    = ODP_POOL_TIMEOUT;
+	pool_param.tmo.num = 1;
+
+	pool = odp_pool_create("timeout_pool", &pool_param);
+	CU_ASSERT_FATAL(pool != ODP_POOL_INVALID);
+
+	odp_queue_param_init(&queue_param);
+	if (queue_type == ODP_QUEUE_TYPE_SCHED) {
+		queue_param.type       = ODP_QUEUE_TYPE_SCHED;
+		queue_param.sched.sync = ODP_SCHED_SYNC_ATOMIC;
+	}
+
+	queue = odp_queue_create("timeout_queue", &queue_param);
+	CU_ASSERT_FATAL(queue != ODP_QUEUE_INVALID);
+
+	tmo = odp_timeout_alloc(pool);
+	ev  = odp_timeout_to_event(tmo);
+	CU_ASSERT_FATAL(ev != ODP_EVENT_INVALID);
+
+	timer = odp_timer_alloc(timer_pool, queue, user_ctx);
+	CU_ASSERT_FATAL(timer != ODP_TIMER_INVALID);
+
+	memset(&start_param, 0, sizeof(odp_timer_periodic_start_t));
+	cur_tick = odp_timer_current_tick(timer_pool);
+	tick = cur_tick + odp_timer_ns_to_tick(timer_pool, period_ns / 2);
+
+	start_param.first_tick = tick;
+	start_param.freq_multiplier = multiplier;
+	start_param.tmo_ev = ev;
+
+	ODPH_DBG("Periodic timer start:\n");
+	ODPH_DBG("  Current tick:    %" PRIu64 "\n", cur_tick);
+	ODPH_DBG("  First tick:      %" PRIu64 "\n", start_param.first_tick);
+	ODPH_DBG("  Multiplier:      %" PRIu64 "\n", start_param.freq_multiplier);
+	ODPH_DBG("Test duration ns:  %" PRIu64 "\n", duration_ns);
+
+	ret = odp_timer_periodic_start(timer, &start_param);
+
+	if (ret == ODP_TIMER_TOO_NEAR)
+		ODPH_ERR("First tick too near\n");
+	else if (ret == ODP_TIMER_TOO_FAR)
+		ODPH_ERR("First tick too far\n");
+	else if (ret == ODP_TIMER_FAIL)
+		ODPH_ERR("Periodic timer start failed\n");
+
+	CU_ASSERT_FATAL(ret == ODP_TIMER_SUCCESS);
+
+	t1 = odp_time_local();
+
+	/* Wait for timeouts. Make sure that scheduler context is not held when
+	 * exiting the loop. */
+	while (1) {
+		if (queue_type == ODP_QUEUE_TYPE_SCHED)
+			ev = odp_schedule(NULL, ODP_SCHED_NO_WAIT);
+		else
+			ev = odp_queue_deq(queue);
+
+		if (ev == ODP_EVENT_INVALID) {
+			t2 = odp_time_local();
+			diff_ns = odp_time_diff_ns(t2, t1);
+			if (diff_ns > (10 * duration_ns))
+				break;
+
+			if (num_tmo >= num)
+				break;
+
+			continue;
+		}
+
+		CU_ASSERT(odp_event_type(ev) == ODP_EVENT_TIMEOUT);
+
+		if (odp_event_type(ev) != ODP_EVENT_TIMEOUT) {
+			odp_event_free(ev);
+			continue;
+		}
+
+		CU_ASSERT(odp_timer_periodic_ack(timer, ev) == 0);
+		num_tmo++;
+	}
+
+	CU_ASSERT(num_tmo == num);
+	CU_ASSERT(diff_ns < 2 * duration_ns);
+
+	/* Stop periodic timer */
+	ret = odp_timer_periodic_cancel(timer);
+	CU_ASSERT_FATAL(ret == 0);
+
+	t1 = odp_time_local();
+	while (1) {
+		if (queue_type == ODP_QUEUE_TYPE_SCHED)
+			ev = odp_schedule(NULL, ODP_SCHED_NO_WAIT);
+		else
+			ev = odp_queue_deq(queue);
+
+		if (ev == ODP_EVENT_INVALID) {
+			t2 = odp_time_local();
+			diff_ns = odp_time_diff_ns(t2, t1);
+			if (diff_ns > (10 * duration_ns))
+				break;
+
+			if (done)
+				break;
+
+			continue;
+		}
+
+		CU_ASSERT(odp_event_type(ev) == ODP_EVENT_TIMEOUT);
+
+		if (odp_event_type(ev) != ODP_EVENT_TIMEOUT) {
+			odp_event_free(ev);
+			continue;
+		}
+
+		ret = odp_timer_periodic_ack(timer, ev);
+		CU_ASSERT(ret == 1 || ret == 2);
+
+		if (ret == 2) {
+			odp_event_free(ev);
+			done = 1;
+		}
+	}
+
+	CU_ASSERT(odp_timer_free(timer) == ODP_EVENT_INVALID);
+	odp_timer_pool_destroy(timer_pool);
+	CU_ASSERT(odp_queue_destroy(queue) == 0);
+	CU_ASSERT(odp_pool_destroy(pool) == 0);
+}
+
+static void timer_test_periodic_sched(void)
+{
+	timer_test_periodic(ODP_QUEUE_TYPE_SCHED);
+}
+
+static void timer_test_periodic_plain(void)
+{
+	timer_test_periodic(ODP_QUEUE_TYPE_PLAIN);
+}
+
 odp_testinfo_t timer_suite[] = {
 	ODP_TEST_INFO(timer_test_capa),
 	ODP_TEST_INFO(timer_test_param_init),
@@ -1912,6 +2490,22 @@ odp_testinfo_t timer_suite[] = {
 	ODP_TEST_INFO(timer_pool_create_max),
 	ODP_TEST_INFO(timer_pool_max_res),
 	ODP_TEST_INFO(timer_pool_tick_info),
+	ODP_TEST_INFO_CONDITIONAL(timer_plain_rel_wait, check_plain_queue_support),
+	ODP_TEST_INFO_CONDITIONAL(timer_plain_abs_wait, check_plain_queue_support),
+	ODP_TEST_INFO_CONDITIONAL(timer_plain_rel_cancel, check_plain_queue_support),
+	ODP_TEST_INFO_CONDITIONAL(timer_plain_abs_cancel, check_plain_queue_support),
+	ODP_TEST_INFO_CONDITIONAL(timer_plain_rel_restart_wait, check_plain_queue_support),
+	ODP_TEST_INFO_CONDITIONAL(timer_plain_abs_restart_wait, check_plain_queue_support),
+	ODP_TEST_INFO_CONDITIONAL(timer_plain_rel_restart_cancel, check_plain_queue_support),
+	ODP_TEST_INFO_CONDITIONAL(timer_plain_abs_restart_cancel, check_plain_queue_support),
+	ODP_TEST_INFO_CONDITIONAL(timer_sched_rel_wait, check_sched_queue_support),
+	ODP_TEST_INFO_CONDITIONAL(timer_sched_abs_wait, check_sched_queue_support),
+	ODP_TEST_INFO_CONDITIONAL(timer_sched_rel_cancel, check_sched_queue_support),
+	ODP_TEST_INFO_CONDITIONAL(timer_sched_abs_cancel, check_sched_queue_support),
+	ODP_TEST_INFO_CONDITIONAL(timer_sched_rel_restart_wait, check_sched_queue_support),
+	ODP_TEST_INFO_CONDITIONAL(timer_sched_abs_restart_wait, check_sched_queue_support),
+	ODP_TEST_INFO_CONDITIONAL(timer_sched_rel_restart_cancel, check_sched_queue_support),
+	ODP_TEST_INFO_CONDITIONAL(timer_sched_abs_restart_cancel, check_sched_queue_support),
 	ODP_TEST_INFO_CONDITIONAL(timer_test_tmo_event_plain,
 				  check_plain_queue_support),
 	ODP_TEST_INFO_CONDITIONAL(timer_test_tmo_event_sched,
@@ -1949,10 +2543,18 @@ odp_testinfo_t timer_suite[] = {
 				  check_plain_queue_support),
 	ODP_TEST_INFO_CONDITIONAL(timer_test_sched_queue_priv,
 				  check_sched_queue_support),
+	ODP_TEST_INFO_CONDITIONAL(timer_test_plain_queue_exp_relax,
+				  check_plain_queue_support),
+	ODP_TEST_INFO_CONDITIONAL(timer_test_sched_queue_exp_relax,
+				  check_sched_queue_support),
 	ODP_TEST_INFO_CONDITIONAL(timer_test_plain_all,
 				  check_plain_queue_support),
 	ODP_TEST_INFO_CONDITIONAL(timer_test_sched_all,
 				  check_sched_queue_support),
+	ODP_TEST_INFO_CONDITIONAL(timer_test_periodic_sched,
+				  check_periodic_sched_support),
+	ODP_TEST_INFO_CONDITIONAL(timer_test_periodic_plain,
+				  check_periodic_plain_support),
 	ODP_TEST_INFO_NULL,
 };
 
