@@ -448,7 +448,8 @@ static int dpdk_output_queues_config(pktio_entry_t *pktio_entry,
 
 		if (num_tx_desc < dev_info.tx_desc_lim.nb_min ||
 		    num_tx_desc > dev_info.tx_desc_lim.nb_max ||
-		    num_tx_desc % dev_info.tx_desc_lim.nb_align) {
+		    (dev_info.tx_desc_lim.nb_align &&
+		     num_tx_desc % dev_info.tx_desc_lim.nb_align)) {
 			ODP_ERR("DPDK: invalid number of TX descriptors\n");
 			return -1;
 		}
