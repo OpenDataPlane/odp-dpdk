@@ -25,7 +25,6 @@
 #include <rte_eventdev.h>
 #include <rte_event_eth_rx_adapter.h>
 #include <rte_service.h>
-#include <rte_version.h>
 
 #include <inttypes.h>
 #include <string.h>
@@ -97,7 +96,6 @@ static int unlink_port(uint8_t dev_id, uint8_t port_id, uint8_t queue_ids[],
 		return ret;
 	}
 
-#if RTE_VERSION >= RTE_VERSION_NUM(18, 11, 0, 0)
 	do {
 		ret = rte_event_port_unlinks_in_progress(dev_id, port_id);
 		if (ret < 0) {
@@ -107,7 +105,7 @@ static int unlink_port(uint8_t dev_id, uint8_t port_id, uint8_t queue_ids[],
 		}
 		odp_cpu_pause();
 	} while (ret > 0);
-#endif
+
 	if (queue_ids == NULL)
 		_odp_eventdev_gbl->port[port_id].linked = 0;
 
