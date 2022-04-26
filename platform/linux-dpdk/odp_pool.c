@@ -400,6 +400,11 @@ static int check_params(const odp_pool_param_t *params)
 
 	switch (params->type) {
 	case ODP_POOL_BUFFER:
+		if (params->buf.num == 0) {
+			ODP_ERR("buf.num zero\n");
+			return -1;
+		}
+
 		if (params->buf.num > capa.buf.max_num) {
 			ODP_ERR("buf.num too large %u\n", params->buf.num);
 			return -1;
@@ -444,6 +449,11 @@ static int check_params(const odp_pool_param_t *params)
 			return -1;
 		}
 
+		if (params->pkt.num == 0) {
+			ODP_ERR("pkt.num zero\n");
+			return -1;
+		}
+
 		if (params->pkt.num > capa.pkt.max_num) {
 			ODP_ERR("pkt.num too large %u\n", params->pkt.num);
 			return -1;
@@ -452,11 +462,6 @@ static int check_params(const odp_pool_param_t *params)
 		if (params->pkt.max_num > capa.pkt.max_num) {
 			ODP_ERR("pkt.max_num too large %u\n",
 				params->pkt.max_num);
-			return -1;
-		}
-
-		if (params->pkt.num > capa.pkt.max_num) {
-			ODP_ERR("pkt.num too large %u\n", params->pkt.num);
 			return -1;
 		}
 
@@ -492,6 +497,11 @@ static int check_params(const odp_pool_param_t *params)
 		break;
 
 	case ODP_POOL_TIMEOUT:
+		if (params->tmo.num == 0) {
+			ODP_ERR("tmo.num zero\n");
+			return -1;
+		}
+
 		if (params->tmo.num > capa.tmo.max_num) {
 			ODP_ERR("tmo.num too large %u\n", params->tmo.num);
 			return -1;
