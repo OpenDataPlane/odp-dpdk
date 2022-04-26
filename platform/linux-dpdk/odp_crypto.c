@@ -34,7 +34,6 @@
 #include <rte_crypto.h>
 #include <rte_cryptodev.h>
 #include <rte_malloc.h>
-#include <rte_version.h>
 
 #include <string.h>
 #include <math.h>
@@ -334,11 +333,8 @@ int _odp_crypto_init_global(void)
 	}
 
 	for (cdev_id = 0; cdev_id < rte_cryptodev_count(); cdev_id++) {
-#if RTE_VERSION < RTE_VERSION_NUM(18, 5, 0, 0)
-		sess_sz = rte_cryptodev_get_private_session_size(cdev_id);
-#else
 		sess_sz = rte_cryptodev_sym_get_private_session_size(cdev_id);
-#endif
+
 		if (sess_sz > max_sess_sz)
 			max_sess_sz = sess_sz;
 	}
@@ -386,18 +382,12 @@ int _odp_crypto_init_global(void)
 			 * cache size, so we multiply by 2.
 			 */
 			pool_size += 2 * odp_thread_count_max() * SESSION_CACHE_SIZE;
-#if RTE_VERSION < RTE_VERSION_NUM(19, 2, 0, 0)
-			mp = rte_mempool_create(mp_name, pool_size, max_sess_sz,
-						SESSION_CACHE_SIZE, 0, NULL, NULL, NULL,
-						NULL, socket_id, 0);
-#else
 			mp = rte_cryptodev_sym_session_pool_create(mp_name,
 								   pool_size,
 								   max_sess_sz,
 								   SESSION_CACHE_SIZE,
 								   0,
 								   socket_id);
-#endif
 			if (mp == NULL) {
 				ODP_ERR("Cannot create session pool on socket %d\n",
 					socket_id);
@@ -420,17 +410,11 @@ int _odp_crypto_init_global(void)
 
 		for (queue_pair = 0; queue_pair < nb_queue_pairs;
 							queue_pair++) {
-#if RTE_VERSION < RTE_VERSION_NUM(19, 2, 0, 0)
-			rc = rte_cryptodev_queue_pair_setup(cdev_id, queue_pair,
-							    &qp_conf, socket_id,
-							    mp);
-#else
 			qp_conf.mp_session = mp;
 			qp_conf.mp_session_private = mp;
 			rc = rte_cryptodev_queue_pair_setup(cdev_id, queue_pair,
 							    &qp_conf,
 							    socket_id);
-#endif
 			if (rc < 0) {
 				ODP_ERR("Fail to setup queue pair %u on dev %u",
 					queue_pair, cdev_id);

@@ -50,15 +50,6 @@
 #include <rte_ip_frag.h>
 #include <rte_udp.h>
 #include <rte_tcp.h>
-#include <rte_version.h>
-
-#if RTE_VERSION < RTE_VERSION_NUM(19, 8, 0, 0)
-#define rte_ether_addr ether_addr
-#define rte_ipv4_hdr ipv4_hdr
-#define rte_ipv6_hdr ipv6_hdr
-#define rte_tcp_hdr tcp_hdr
-#define rte_udp_hdr udp_hdr
-#endif
 
 /* DPDK poll mode drivers requiring minimum RX burst size DPDK_MIN_RX_BURST */
 #define IXGBE_DRV_NAME "net_ixgbe"
@@ -68,11 +59,7 @@
 #define DPDK_MIN_RX_BURST 4
 
 /* Limits for setting link MTU */
-#if RTE_VERSION >= RTE_VERSION_NUM(19, 11, 0, 0)
 #define DPDK_MTU_MIN (RTE_ETHER_MIN_MTU + _ODP_ETHHDR_LEN)
-#else
-#define DPDK_MTU_MIN (68 + _ODP_ETHHDR_LEN)
-#endif
 #define DPDK_MTU_MAX (9000 + _ODP_ETHHDR_LEN)
 
 /* Number of packet buffers to prefetch in RX */
@@ -617,15 +604,6 @@ static int dpdk_init_capability(pktio_entry_t *pktio_entry,
  * mode change. Use system call for them. */
 static void promisc_mode_check(pkt_dpdk_t *pkt_dpdk)
 {
-#if RTE_VERSION < RTE_VERSION_NUM(19, 11, 0, 0)
-	/* Enable and disable calls do not have return value */
-	rte_eth_promiscuous_enable(pkt_dpdk->port_id);
-
-	if (!rte_eth_promiscuous_get(pkt_dpdk->port_id))
-		pkt_dpdk->flags.vdev_sysc_promisc = 1;
-
-	rte_eth_promiscuous_disable(pkt_dpdk->port_id);
-#else
 	int ret;
 
 	ret = rte_eth_promiscuous_enable(pkt_dpdk->port_id);
@@ -637,7 +615,6 @@ static void promisc_mode_check(pkt_dpdk_t *pkt_dpdk)
 
 	if (ret)
 		pkt_dpdk->flags.vdev_sysc_promisc = 1;
-#endif
 }
 
 static int setup_pkt_dpdk(odp_pktio_t pktio ODP_UNUSED,
