@@ -1471,8 +1471,8 @@ int _odp_packet_sctp_chksum_insert(odp_packet_t pkt)
 	return odp_packet_copy_from_mem(pkt, pkt_hdr->p.l4_offset + 8, 4, &sum);
 }
 
-int packet_l4_chksum(odp_packet_hdr_t *pkt_hdr, odp_proto_chksums_t chksums,
-		     uint64_t l4_part_sum)
+int _odp_packet_l4_chksum(odp_packet_hdr_t *pkt_hdr, odp_proto_chksums_t chksums,
+			  uint64_t l4_part_sum)
 {
 	uint32_t frame_len = odp_packet_len(packet_handle(pkt_hdr));
 
@@ -1592,7 +1592,7 @@ int odp_packet_parse(odp_packet_t pkt, uint32_t offset,
 		/* Assume valid L2 header, no CRC/FCS check in SW */
 		pkt_hdr->p.l2_offset = offset;
 
-		ethtype = parse_eth(&pkt_hdr->p, &data, &offset, packet_len);
+		ethtype = _odp_parse_eth(&pkt_hdr->p, &data, &offset, packet_len);
 	} else if (proto == ODP_PROTO_IPV4) {
 		ethtype = _ODP_ETHTYPE_IPV4;
 	} else if (proto == ODP_PROTO_IPV6) {
@@ -1601,17 +1601,16 @@ int odp_packet_parse(odp_packet_t pkt, uint32_t offset,
 		ethtype = 0; /* Invalid */
 	}
 
-	ret = packet_parse_common_l3_l4(&pkt_hdr->p, data, offset,
-					packet_len, seg_len,
-					layer, ethtype,
-					param->chksums,
-					&l4_part_sum);
+	ret = _odp_packet_parse_common_l3_l4(&pkt_hdr->p, data, offset,
+					     packet_len, seg_len, layer,
+					     ethtype, param->chksums,
+					     &l4_part_sum);
 
 	if (ret)
 		return -1;
 
 	if (layer >= ODP_PROTO_LAYER_L4) {
-		ret = packet_l4_chksum(pkt_hdr, param->chksums, l4_part_sum);
+		ret = _odp_packet_l4_chksum(pkt_hdr, param->chksums, l4_part_sum);
 		if (ret)
 			return -1;
 	}
