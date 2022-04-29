@@ -127,8 +127,8 @@ struct pktio_entry {
 
 	/* Storage for queue handles
 	 * Multi-queue support is pktio driver specific */
-	unsigned num_in_queue;
-	unsigned num_out_queue;
+	uint32_t num_in_queue;
+	uint32_t num_out_queue;
 
 	struct {
 		odp_queue_t        queue;
@@ -210,8 +210,8 @@ typedef struct pktio_if_ops {
 		    int num);
 	int (*recv_tmo)(pktio_entry_t *entry, int index, odp_packet_t packets[],
 			int num, uint64_t wait_usecs);
-	int (*recv_mq_tmo)(pktio_entry_t *entry[], int index[], int num_q,
-			   odp_packet_t packets[], int num, unsigned *from,
+	int (*recv_mq_tmo)(pktio_entry_t *entry[], int index[], uint32_t num_q,
+			   odp_packet_t packets[], int num, uint32_t *from,
 			   uint64_t wait_usecs);
 	int (*fd_set)(pktio_entry_t *entry, int index, fd_set *readfds);
 	int (*send)(pktio_entry_t *entry, int index,
@@ -298,8 +298,8 @@ extern const pktio_if_ops_t * const _odp_pktio_if_ops[];
 /* Dummy function required by odp_pktin_recv_mq_tmo() */
 static inline int
 _odp_sock_recv_mq_tmo_try_int_driven(const struct odp_pktin_queue_t queues[],
-				     unsigned int num_q ODP_UNUSED,
-				     unsigned int *from ODP_UNUSED,
+				     uint32_t num_q ODP_UNUSED,
+				     uint32_t *from ODP_UNUSED,
 				     odp_packet_t packets[] ODP_UNUSED,
 				     int num ODP_UNUSED,
 				     uint64_t usecs ODP_UNUSED,
