@@ -1,5 +1,5 @@
 /* Copyright (c) 2013-2018, Linaro Limited
- * Copyright (c) 2019-2021, Nokia
+ * Copyright (c) 2019-2022, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -29,6 +29,8 @@
 #include <odp_debug_internal.h>
 #include <odp_errno_define.h>
 #include <odp_classification_internal.h>
+
+#include <odp_packet_internal.h>
 #include <odp_packet_io_internal.h>
 #include <odp_libconfig_internal.h>
 #include <odp/api/plat/packet_inlines.h>
@@ -923,36 +925,38 @@ int _odp_input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int nu
 	pkt_dpdk_t * const pkt_dpdk = pkt_priv(pktio_entry);
 	uint16_t i;
 	odp_pktin_config_opt_t pktin_cfg = pktio_entry->s.config.pktin;
-	odp_proto_layer_t parse_layer = pktio_entry->s.config.parser.layer;
 	odp_pktio_t input = pktio_entry->s.handle;
 	odp_time_t ts_val;
 	odp_time_t *ts = NULL;
 	uint16_t num_prefetch = RTE_MIN(num, NUM_RX_PREFETCH);
+	const odp_proto_layer_t layer = pktio_entry->s.parse_layer;
 
 	for (i = 0; i < num_prefetch; i++)
 		prefetch_pkt(pkt_table[i]);
 
-	if (pktio_entry->s.config.pktin.bit.ts_all ||
-	    pktio_entry->s.config.pktin.bit.ts_ptp) {
+	if (pktin_cfg.bit.ts_all || pktin_cfg.bit.ts_ptp) {
 		ts_val = odp_time_global();
 		ts = &ts_val;
 	}
 
 	for (i = 0; i < num; ++i) {
-		odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt_table[i]);
-		struct rte_mbuf *mbuf = pkt_to_mbuf(pkt_table[i]);
+		odp_packet_t pkt = pkt_table[i];
+		odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
+		struct rte_mbuf *mbuf = pkt_to_mbuf(pkt);
 
 		if (odp_likely(i + num_prefetch < num))
 			prefetch_pkt(pkt_table[i + num_prefetch]);
 
 		packet_init(pkt_hdr, input);
 
-		if (!pktio_cls_enabled(pktio_entry) && parse_layer != ODP_PROTO_LAYER_NONE) {
-			uint32_t ptypes = pkt_dpdk->supported_ptypes;
-
-			if (_odp_dpdk_packet_parse_layer(pkt_hdr, mbuf, parse_layer,
-							 ptypes, pktin_cfg)) {
-				odp_packet_free(pkt_table[i]);
+		if (layer != ODP_PROTO_LAYER_NONE) {
+			if (_odp_dpdk_packet_parse_common(&pkt_hdr->p,
+							  rte_pktmbuf_mtod(mbuf, uint8_t *),
+							  rte_pktmbuf_pkt_len(mbuf),
+							  rte_pktmbuf_data_len(mbuf),
+							  mbuf, layer,
+							  pkt_dpdk->supported_ptypes, pktin_cfg)) {
+				odp_packet_free(pkt);
 				continue;
 			}
 		}
@@ -965,47 +969,31 @@ int _odp_input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int nu
 		int failed = 0, success = 0;
 
 		for (i = 0; i < num; i++) {
-			odp_packet_t new_pkt;
 			odp_packet_t pkt = pkt_table[i];
 			odp_pool_t new_pool;
 			uint8_t *data;
-			odp_packet_hdr_t parsed_hdr;
 			odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
-			struct rte_mbuf *mbuf = pkt_to_mbuf(pkt);
-			uint32_t pkt_len = odp_packet_len(pkt);
-			uint32_t ptypes = pkt_dpdk->supported_ptypes;
 
 			data = odp_packet_data(pkt);
-			packet_parse_reset(&parsed_hdr, 1);
-			packet_set_len(&parsed_hdr, pkt_len);
-
-			if (_odp_dpdk_packet_parse_common(&parsed_hdr.p, data, pkt_len, pkt_len,
-							  mbuf, ODP_PROTO_LAYER_ALL, ptypes,
-							  pktin_cfg)) {
-				odp_packet_free(pkt);
-				continue;
-			}
 
 			if (_odp_cls_classify_packet(pktio_entry, data,
-						     &new_pool, &parsed_hdr)) {
+						     &new_pool, pkt_hdr)) {
 				odp_packet_free(pkt);
 				continue;
 			}
 			if (new_pool != odp_packet_pool(pkt)) {
-				new_pkt = odp_packet_copy(pkt, new_pool);
+				odp_packet_t new_pkt = odp_packet_copy(pkt, new_pool);
 
 				odp_packet_free(pkt);
-				if (new_pkt == ODP_PACKET_INVALID) {
+				if (odp_unlikely(new_pkt == ODP_PACKET_INVALID)) {
 					failed++;
 					continue;
 				}
 				pkt_table[i] = new_pkt;
 				pkt = new_pkt;
-				pkt_hdr = packet_hdr(pkt);
 			}
-			packet_set_ts(pkt_hdr, ts);
+
 			pktio_entry->s.stats.in_octets += odp_packet_len(pkt);
-			_odp_packet_copy_cls_md(pkt_hdr, &parsed_hdr);
 			if (success != i)
 				pkt_table[success] = pkt;
 			++success;

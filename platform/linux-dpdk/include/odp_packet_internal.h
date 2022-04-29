@@ -347,7 +347,6 @@ static inline void packet_parse_reset(odp_packet_hdr_t *pkt_hdr, int all)
 {
 	/* Reset parser metadata before new parse */
 	pkt_hdr->p.input_flags.all  = 0;
-	pkt_hdr->p.flags.all.error  = 0;
 	pkt_hdr->p.l2_offset        = ODP_PACKET_OFFSET_INVALID;
 	pkt_hdr->p.l3_offset        = ODP_PACKET_OFFSET_INVALID;
 	pkt_hdr->p.l4_offset        = ODP_PACKET_OFFSET_INVALID;
