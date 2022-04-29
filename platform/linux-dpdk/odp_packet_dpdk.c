@@ -967,8 +967,8 @@ int _odp_input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int nu
 				continue;
 			}
 
-			if (_odp_cls_classify_packet(pktio_entry, data, pkt_len,
-						     pkt_len, &new_pool, &parsed_hdr, 0)) {
+			if (_odp_cls_classify_packet(pktio_entry, data,
+						     &new_pool, &parsed_hdr)) {
 				odp_packet_free(pkt);
 				continue;
 			}
