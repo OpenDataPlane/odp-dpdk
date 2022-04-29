@@ -155,6 +155,7 @@ noinst_HEADERS = \
 		  include/odp_timer_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_timer_wheel_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_traffic_mngr_internal.h \
+		  ${top_srcdir}/platform/linux-generic/include/odp_types_internal.h \
 		  include/odp_event_vector_internal.h \
 		  include/protocols/eth.h \
 		  include/protocols/ip.h \
