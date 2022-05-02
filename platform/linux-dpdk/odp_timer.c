@@ -16,6 +16,9 @@
 #include <odp/api/timer.h>
 
 #include <odp/api/plat/queue_inlines.h>
+#include <odp/api/plat/timer_inlines.h>
+
+#include <odp/api/plat/timer_inline_types.h>
 
 #include <odp_debug_internal.h>
 #include <odp_init_internal.h>
@@ -171,6 +174,18 @@ static timer_global_t *timer_global;
 
 /* Timer thread local data */
 static __thread timer_local_t timer_local;
+
+#include <odp/visibility_begin.h>
+
+/* Fill in timeout header field offsets for inline functions */
+const _odp_timeout_inline_offset_t
+_odp_timeout_inline_offset ODP_ALIGNED_CACHE = {
+	.expiration = offsetof(odp_timeout_hdr_t, expiration),
+	.timer = offsetof(odp_timeout_hdr_t, timer),
+	.user_ptr = offsetof(odp_timeout_hdr_t, user_ptr)
+};
+
+#include <odp/visibility_end.h>
 
 static void timer_cb(struct rte_timer *rte_timer, void *arg ODP_UNUSED)
 {
@@ -1204,16 +1219,6 @@ uint64_t odp_timer_to_u64(odp_timer_t timer_hdl)
 	return (uint64_t)(uintptr_t)timer_hdl;
 }
 
-odp_timeout_t odp_timeout_from_event(odp_event_t ev)
-{
-	return (odp_timeout_t)ev;
-}
-
-odp_event_t odp_timeout_to_event(odp_timeout_t tmo)
-{
-	return (odp_event_t)tmo;
-}
-
 uint64_t odp_timeout_to_u64(odp_timeout_t tmo)
 {
 	return (uint64_t)(uintptr_t)tmo;
@@ -1229,25 +1234,6 @@ int odp_timeout_fresh(odp_timeout_t tmo)
 
 	/* Check if timer has been reused after timeout sent. */
 	return timeout_hdr->expiration == timer->tick;
-}
-
-odp_timer_t odp_timeout_timer(odp_timeout_t tmo)
-{
-	odp_timeout_hdr_t *timeout_hdr = timeout_to_hdr(tmo);
-
-	return timeout_hdr->timer;
-}
-
-uint64_t odp_timeout_tick(odp_timeout_t tmo)
-{
-	return timeout_to_hdr(tmo)->expiration;
-}
-
-void *odp_timeout_user_ptr(odp_timeout_t tmo)
-{
-	odp_timeout_hdr_t *timeout_hdr = timeout_to_hdr(tmo);
-
-	return (void *)(uintptr_t)timeout_hdr->user_ptr;
 }
 
 odp_timeout_t odp_timeout_alloc(odp_pool_t pool_hdl)
