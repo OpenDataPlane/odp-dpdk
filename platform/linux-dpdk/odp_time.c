@@ -1,5 +1,5 @@
 /* Copyright (c) 2013-2018, Linaro Limited
- * Copyright (c) 2021, Nokia
+ * Copyright (c) 2021-2022, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -172,15 +172,6 @@ static inline void time_wait_until(odp_time_t time)
 	do {
 		cur = _odp_time_cur();
 	} while (odp_time_cmp(time, cur) > 0);
-}
-
-uint64_t odp_time_diff_ns(odp_time_t t2, odp_time_t t1)
-{
-	odp_time_t time;
-
-	time.u64 = t2.u64 - t1.u64;
-
-	return odp_time_to_ns(time);
 }
 
 odp_time_t odp_time_local_from_ns(uint64_t ns)
