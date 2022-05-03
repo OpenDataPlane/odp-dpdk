@@ -50,6 +50,15 @@
 #include <rte_ip_frag.h>
 #include <rte_udp.h>
 #include <rte_tcp.h>
+#include <rte_version.h>
+
+#if RTE_VERSION < RTE_VERSION_NUM(21, 11, 0, 0)
+	#define RTE_MBUF_F_TX_IPV4 PKT_TX_IPV4
+	#define RTE_MBUF_F_TX_IPV6 PKT_TX_IPV6
+	#define RTE_MBUF_F_TX_IP_CKSUM PKT_TX_IP_CKSUM
+	#define RTE_MBUF_F_TX_UDP_CKSUM PKT_TX_UDP_CKSUM
+	#define RTE_MBUF_F_TX_TCP_CKSUM PKT_TX_TCP_CKSUM
+#endif
 
 /* DPDK poll mode drivers requiring minimum RX burst size DPDK_MIN_RX_BURST */
 #define IXGBE_DRV_NAME "net_ixgbe"
@@ -293,7 +302,11 @@ static int dpdk_setup_eth_dev(pktio_entry_t *pktio_entry)
 	/* RX packet len same size as pool segment minus headroom and double
 	 * VLAN tag
 	 */
+#if RTE_VERSION < RTE_VERSION_NUM(21, 11, 0, 0)
 	eth_conf.rxmode.max_rx_pkt_len =
+#else
+	eth_conf.rxmode.mtu =
+#endif
 		rte_pktmbuf_data_room_size(pool->rte_mempool) -
 		2 * 4 - RTE_PKTMBUF_HEADROOM;
 
@@ -508,16 +521,18 @@ static int dpdk_init_capability(pktio_entry_t *pktio_entry,
 
 	/* Check if setting MTU is supported */
 	ret = rte_eth_dev_set_mtu(pkt_dpdk->port_id, pkt_dpdk->mtu - _ODP_ETHHDR_LEN);
-	if (ret == 0) {
+	/* From DPDK 21.11 onwards, calling rte_eth_dev_set_mtu() before device is configured with
+	 * rte_eth_dev_configure() will result in failure. The least hacky (unfortunately still
+	 * very hacky) way to continue checking the support is to take into account that the
+	 * function will fail earlier with -ENOTSUP if MTU setting is not supported by device than
+	 * if the device was not yet configured. */
+	if (ret != -ENOTSUP) {
 		capa->set_op.op.maxlen = 1;
 		capa->maxlen.equal = true;
 		capa->maxlen.min_input = DPDK_MTU_MIN;
 		capa->maxlen.max_input = pkt_dpdk->mtu_max;
 		capa->maxlen.min_output = DPDK_MTU_MIN;
 		capa->maxlen.max_output = pkt_dpdk->mtu_max;
-	} else if (ret != -ENOTSUP) {
-		ODP_ERR("Failed to set interface MTU: %d\n", ret);
-		return -1;
 	}
 
 	ptype_cnt = rte_eth_dev_get_supported_ptypes(pkt_dpdk->port_id,
@@ -1128,12 +1143,12 @@ static inline void pkt_set_ol_tx(odp_pktout_config_opt_t *pktout_cfg,
 	mbuf->l2_len = pkt_p->l3_offset - pkt_p->l2_offset;
 
 	if (l3_proto_v4)
-		mbuf->ol_flags = PKT_TX_IPV4;
+		mbuf->ol_flags = RTE_MBUF_F_TX_IPV4;
 	else
-		mbuf->ol_flags = PKT_TX_IPV6;
+		mbuf->ol_flags = RTE_MBUF_F_TX_IPV6;
 
 	if (ipv4_chksum_pkt) {
-		mbuf->ol_flags |=  PKT_TX_IP_CKSUM;
+		mbuf->ol_flags |=  RTE_MBUF_F_TX_IP_CKSUM;
 
 		((struct rte_ipv4_hdr *)l3_hdr)->hdr_checksum = 0;
 		mbuf->l3_len = _ODP_IPV4HDR_IHL(*(uint8_t *)l3_hdr) * 4;
@@ -1147,12 +1162,12 @@ static inline void pkt_set_ol_tx(odp_pktout_config_opt_t *pktout_cfg,
 	l4_hdr = (void *)(mbuf_data + pkt_p->l4_offset);
 
 	if (udp_chksum_pkt) {
-		mbuf->ol_flags |= PKT_TX_UDP_CKSUM;
+		mbuf->ol_flags |= RTE_MBUF_F_TX_UDP_CKSUM;
 
 		((struct rte_udp_hdr *)l4_hdr)->dgram_cksum =
 			phdr_csum(l3_proto_v4, l3_hdr, mbuf->ol_flags);
 	} else if (tcp_chksum_pkt) {
-		mbuf->ol_flags |= PKT_TX_TCP_CKSUM;
+		mbuf->ol_flags |= RTE_MBUF_F_TX_TCP_CKSUM;
 
 		((struct rte_tcp_hdr *)l4_hdr)->cksum =
 			phdr_csum(l3_proto_v4, l3_hdr, mbuf->ol_flags);

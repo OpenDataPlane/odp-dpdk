@@ -30,6 +30,8 @@
 #include <odp_packet_io_internal.h>
 #include <odp_parse_internal.h>
 
+#include <rte_version.h>
+
 #include <protocols/eth.h>
 #include <protocols/ip.h>
 #include <protocols/sctp.h>
@@ -40,6 +42,10 @@
 #include <stdio.h>
 #include <stddef.h>
 #include <inttypes.h>
+
+#if RTE_VERSION < RTE_VERSION_NUM(21, 11, 0, 0)
+	#define RTE_MBUF_F_RX_RSS_HASH PKT_RX_RSS_HASH
+#endif
 
 #include <odp/visibility_begin.h>
 
@@ -65,7 +71,7 @@ const _odp_packet_inline_offset_t _odp_packet_inline ODP_ALIGNED_CACHE = {
 	.user_area        = offsetof(odp_packet_hdr_t, uarea_addr),
 	.rss              = offsetof(odp_packet_hdr_t, event_hdr.mb.hash.rss),
 	.ol_flags         = offsetof(odp_packet_hdr_t, event_hdr.mb.ol_flags),
-	.rss_flag         = PKT_RX_RSS_HASH
+	.rss_flag         = RTE_MBUF_F_RX_RSS_HASH
 };
 
 #include <odp/visibility_end.h>
