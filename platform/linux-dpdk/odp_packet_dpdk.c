@@ -616,6 +616,7 @@ static int dpdk_init_capability(pktio_entry_t *pktio_entry,
 	capa->stats.pktio.counter.out_octets = 1;
 	capa->stats.pktio.counter.out_packets = 1;
 	capa->stats.pktio.counter.out_errors = 1;
+	capa->stats.pktio.counter.out_discards = 1;
 
 	capa->stats.pktin_queue.counter.octets = 1;
 	capa->stats.pktin_queue.counter.packets = 1;
@@ -980,7 +981,7 @@ int _odp_input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int nu
 	}
 
 	if (pktio_cls_enabled(pktio_entry)) {
-		int failed = 0, success = 0;
+		int success = 0;
 
 		for (i = 0; i < num_pkts; i++) {
 			odp_packet_t pkt = pkt_table[i];
@@ -1000,20 +1001,17 @@ int _odp_input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int nu
 
 				odp_packet_free(pkt);
 				if (odp_unlikely(new_pkt == ODP_PACKET_INVALID)) {
-					failed++;
+					odp_atomic_inc_u64(&pktio_entry->s.stats_extra.in_discards);
 					continue;
 				}
 				pkt_table[i] = new_pkt;
 				pkt = new_pkt;
 			}
 
-			pktio_entry->s.stats.in_octets += odp_packet_len(pkt);
 			if (success != i)
 				pkt_table[success] = pkt;
 			++success;
 		}
-		pktio_entry->s.stats.in_errors += failed;
-		pktio_entry->s.stats.in_ucast_pkts += num_pkts - failed;
 		num_pkts = success;
 	}
 
@@ -1050,7 +1048,6 @@ static int recv_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 				odp_packet_free(min_burst[i]);
 		}
 
-		pktio_entry->s.stats.in_discards += nb_rx - num;
 		nb_rx = RTE_MIN(num, nb_rx);
 	}
 
