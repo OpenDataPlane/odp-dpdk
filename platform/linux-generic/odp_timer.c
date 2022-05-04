@@ -13,49 +13,52 @@
  */
 #include <odp_posix_extensions.h>
 
-#include <errno.h>
-#include <stdlib.h>
-#include <time.h>
-#include <signal.h>
-#include <pthread.h>
-#include <unistd.h>
-#include <sys/syscall.h>
-#include <inttypes.h>
-#include <string.h>
-
-#include <odp/api/std.h>
 #include <odp/api/align.h>
-#include <odp_align_internal.h>
 #include <odp/api/atomic.h>
-#include <odp/api/plat/atomic_inlines.h>
-#include <odp_atomic_internal.h>
-#include <odp/api/buffer.h>
 #include <odp/api/cpu.h>
-#include <odp/api/pool.h>
-#include <odp_pool_internal.h>
 #include <odp/api/debug.h>
-#include <odp_debug_internal.h>
 #include <odp/api/event.h>
 #include <odp/api/hints.h>
-#include <odp_init_internal.h>
-#include <odp_errno_define.h>
+#include <odp/api/pool.h>
 #include <odp/api/queue.h>
 #include <odp/api/shared_memory.h>
 #include <odp/api/spinlock.h>
-#include <odp/api/std_types.h>
+#include <odp/api/std.h>
 #include <odp/api/sync.h>
 #include <odp/api/time.h>
-#include <odp/api/plat/time_inlines.h>
 #include <odp/api/timer.h>
-#include <odp_libconfig_internal.h>
-#include <odp_queue_if.h>
-#include <odp_timer_internal.h>
-#include <odp/api/plat/queue_inlines.h>
-#include <odp_global_data.h>
-#include <odp_event_internal.h>
 
 /* Inlined API functions */
+#include <odp/api/plat/atomic_inlines.h>
 #include <odp/api/plat/event_inlines.h>
+#include <odp/api/plat/queue_inlines.h>
+#include <odp/api/plat/time_inlines.h>
+#include <odp/api/plat/timer_inlines.h>
+
+#include <odp/api/plat/timer_inline_types.h>
+
+#include <odp_align_internal.h>
+#include <odp_atomic_internal.h>
+#include <odp_debug_internal.h>
+#include <odp_errno_define.h>
+#include <odp_event_internal.h>
+#include <odp_global_data.h>
+#include <odp_init_internal.h>
+#include <odp_libconfig_internal.h>
+#include <odp_pool_internal.h>
+#include <odp_queue_if.h>
+#include <odp_timer_internal.h>
+#include <odp_types_internal.h>
+
+#include <errno.h>
+#include <inttypes.h>
+#include <pthread.h>
+#include <signal.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/syscall.h>
+#include <time.h>
+#include <unistd.h>
 
 /* One divided by one nanosecond in Hz */
 #define GIGA_HZ 1000000000
@@ -93,6 +96,18 @@
 #define NUM_LOCKS 1024
 #define IDX2LOCK(idx) (&timer_global->locks[(idx) % NUM_LOCKS])
 #endif
+
+#include <odp/visibility_begin.h>
+
+/* Fill in timeout header field offsets for inline functions */
+const _odp_timeout_inline_offset_t
+_odp_timeout_inline_offset ODP_ALIGNED_CACHE = {
+	.expiration = offsetof(odp_timeout_hdr_t, expiration),
+	.timer = offsetof(odp_timeout_hdr_t, timer),
+	.user_ptr = offsetof(odp_timeout_hdr_t, user_ptr)
+};
+
+#include <odp/visibility_end.h>
 
 typedef struct
 #ifdef ODP_ATOMIC_U128
@@ -689,7 +704,7 @@ static bool timer_reset(uint32_t idx, uint64_t abs_tck, odp_event_t *tmo_event,
 			/* Atomic CAS will fail if we experienced torn reads,
 			 * retry update sequence until CAS succeeds */
 		} while (!_odp_atomic_u128_cmp_xchg_mm((_odp_atomic_u128_t *)tb,
-						       (_uint128_t *)&old, (_uint128_t *)&new,
+						       (_odp_u128_t *)&old, (_odp_u128_t *)&new,
 						       _ODP_MEMMODEL_RLS, _ODP_MEMMODEL_RLX));
 #elif __GCC_ATOMIC_LLONG_LOCK_FREE >= 2 && \
 	defined __GCC_HAVE_SYNC_COMPARE_AND_SWAP_8
@@ -760,8 +775,8 @@ static bool timer_reset(uint32_t idx, uint64_t abs_tck, odp_event_t *tmo_event,
 		/* We are releasing the new timeout event to some other
 		 * thread */
 		_odp_atomic_u128_xchg_mm((_odp_atomic_u128_t *)tb,
-					 (_uint128_t *)&new,
-					 (_uint128_t *)&old,
+					 (_odp_u128_t *)&new,
+					 (_odp_u128_t *)&old,
 					 _ODP_MEMMODEL_ACQ_RLS);
 		old_event = old.tmo_event;
 #else
@@ -804,7 +819,7 @@ static odp_event_t timer_set_unused(timer_pool_t *tp, uint32_t idx)
 	new.tmo_event = ODP_EVENT_INVALID;
 
 	_odp_atomic_u128_xchg_mm((_odp_atomic_u128_t *)tb,
-				 (_uint128_t *)&new, (_uint128_t *)&old,
+				 (_odp_u128_t *)&new, (_odp_u128_t *)&old,
 				 _ODP_MEMMODEL_RLX);
 	old_event = old.tmo_event;
 #else
@@ -858,8 +873,8 @@ static odp_event_t timer_cancel(timer_pool_t *tp, uint32_t idx)
 		/* Atomic CAS will fail if we experienced torn reads,
 		 * retry update sequence until CAS succeeds */
 	} while (!_odp_atomic_u128_cmp_xchg_mm((_odp_atomic_u128_t *)tb,
-					       (_uint128_t *)&old,
-					       (_uint128_t *)&new,
+					       (_odp_u128_t *)&old,
+					       (_odp_u128_t *)&new,
 					       _ODP_MEMMODEL_RLS,
 					       _ODP_MEMMODEL_RLX));
 	old_event = old.tmo_event;
@@ -916,7 +931,7 @@ static inline void timer_expire(timer_pool_t *tp, uint32_t idx, uint64_t tick)
 		new.tmo_event = ODP_EVENT_INVALID;
 
 		int succ = _odp_atomic_u128_cmp_xchg_mm((_odp_atomic_u128_t *)tb,
-							(_uint128_t *)&old, (_uint128_t *)&new,
+							(_odp_u128_t *)&old, (_odp_u128_t *)&new,
 							_ODP_MEMMODEL_RLS, _ODP_MEMMODEL_RLX);
 		if (succ)
 			tmo_event = old.tmo_event;
@@ -1468,22 +1483,6 @@ void odp_timer_pool_destroy(odp_timer_pool_t tpid)
 	odp_timer_pool_del(timer_pool_from_hdl(tpid));
 }
 
-uint64_t odp_timer_tick_to_ns(odp_timer_pool_t tpid, uint64_t ticks)
-{
-	(void)tpid;
-
-	/* Timer ticks in API are nsec */
-	return ticks;
-}
-
-uint64_t odp_timer_ns_to_tick(odp_timer_pool_t tpid, uint64_t ns)
-{
-	(void)tpid;
-
-	/* Timer ticks in API are nsec */
-	return ns;
-}
-
 uint64_t odp_timer_current_tick(odp_timer_pool_t tpid)
 {
 	timer_pool_t *tp = timer_pool_from_hdl(tpid);
@@ -1812,19 +1811,6 @@ uint64_t odp_timer_to_u64(odp_timer_t hdl)
 	return _odp_pri(hdl);
 }
 
-odp_timeout_t odp_timeout_from_event(odp_event_t ev)
-{
-	/* This check not mandated by the API specification */
-	if (odp_event_type(ev) != ODP_EVENT_TIMEOUT)
-		ODP_ABORT("Event not a timeout");
-	return (odp_timeout_t)ev;
-}
-
-odp_event_t odp_timeout_to_event(odp_timeout_t tmo)
-{
-	return (odp_event_t)tmo;
-}
-
 uint64_t odp_timeout_to_u64(odp_timeout_t tmo)
 {
 	return _odp_pri(tmo);
@@ -1845,21 +1831,6 @@ int odp_timeout_fresh(odp_timeout_t tmo)
 	/* Return true if the timer still has the same expiration tick
 	 * (ignoring the inactive/expired bit) as the timeout */
 	return hdr->expiration == (exp_tck & ~TMO_INACTIVE);
-}
-
-odp_timer_t odp_timeout_timer(odp_timeout_t tmo)
-{
-	return timeout_hdr(tmo)->timer;
-}
-
-uint64_t odp_timeout_tick(odp_timeout_t tmo)
-{
-	return timeout_hdr(tmo)->expiration;
-}
-
-void *odp_timeout_user_ptr(odp_timeout_t tmo)
-{
-	return (void *)(uintptr_t)timeout_hdr(tmo)->user_ptr;
 }
 
 odp_timeout_t odp_timeout_alloc(odp_pool_t pool_hdl)

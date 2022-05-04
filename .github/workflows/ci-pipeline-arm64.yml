@@ -31,6 +31,9 @@ jobs:
       - uses: actions/checkout@v2
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${{matrix.cc}}"
                -e CONF="${{matrix.conf}}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-native /odp/scripts/ci/build_${ARCH}.sh
+      - name: Failure log
+        if: ${{ failure() }}
+        run: find . -name config.log -exec cat {} \;
 
   Build_OS:
     if: ${{ github.repository == 'OpenDataPlane/odp-dpdk' }}
@@ -39,12 +42,15 @@ jobs:
       fail-fast: false
       matrix:
         cc: [gcc, clang]
-        os: ['ubuntu_16.04', 'ubuntu_18.04']
+        os: ['ubuntu_18.04', 'rocky_linux_8']
     steps:
       - uses: AutoModality/action-clean@v1.1.0
       - uses: actions/checkout@v2
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${{matrix.cc}}"
                -e CONF="${CONF}" $CONTAINER_NAMESPACE/odp-ci-${{matrix.os}}-${ARCH}-native /odp/scripts/ci/build_${ARCH}.sh
+      - name: Failure log
+        if: ${{ failure() }}
+        run: find . -name config.log -exec cat {} \;
 
   Build_gcc-10:
     if: ${{ github.repository == 'OpenDataPlane/odp-dpdk' }}
@@ -60,6 +66,9 @@ jobs:
       - uses: actions/checkout@v2
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}"
                -e CONF="${{matrix.conf}}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-native /odp/scripts/ci/build_${ARCH}.sh
+      - name: Failure log
+        if: ${{ failure() }}
+        run: find . -name config.log -exec cat {} \;
 
   Build_out-of-tree:
     if: ${{ github.repository == 'OpenDataPlane/odp-dpdk' }}
@@ -69,6 +78,9 @@ jobs:
       - uses: actions/checkout@v2
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}"
                -e CONF="${CONF}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-native /odp/scripts/ci/out_of_tree.sh
+      - name: Failure log
+        if: ${{ failure() }}
+        run: find . -name config.log -exec cat {} \;
 
   Run_distcheck:
     if: ${{ github.repository == 'OpenDataPlane/odp-dpdk' }}
@@ -130,11 +142,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ['ubuntu_18.04']
+        os: ['ubuntu_18.04', 'ubuntu_22.04']
     steps:
       - uses: AutoModality/action-clean@v1.1.0
       - uses: actions/checkout@v2
-      - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${{matrix.cc}}" -e ARCH="${ARCH}"
+      - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}" -e ARCH="${ARCH}"
                -e CONF="${CONF}" $CONTAINER_NAMESPACE/odp-ci-${{matrix.os}}-${ARCH}-native /odp/scripts/ci/check.sh
       - name: Failure log
         if: ${{ failure() }}
@@ -174,6 +186,20 @@ jobs:
       - uses: actions/checkout@v2
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}" -e ARCH="${ARCH}"
                -e CONF="${CONF}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-native-dpdk_20.11 /odp/scripts/ci/check.sh
+      - name: Failure log
+        if: ${{ failure() }}
+        run: find . -name "*.trs" | xargs grep -l '^.test-result. FAIL' | while read trs ; do echo FAILURE detected at $trs; cat ${trs%%.trs}.log ; done
+
+  Run_dpdk-21_11:
+    if: ${{ github.repository == 'OpenDataPlane/odp' }}
+    runs-on: [self-hosted, ARM64]
+    env:
+      OS: ubuntu_20.04
+    steps:
+      - uses: AutoModality/action-clean@v1.1.0
+      - uses: actions/checkout@v2
+      - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}" -e ARCH="${ARCH}"
+               -e CONF="${CONF}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-native-dpdk_21.11 /odp/scripts/ci/check.sh
       - name: Failure log
         if: ${{ failure() }}
         run: find . -name "*.trs" | xargs grep -l '^.test-result. FAIL' | while read trs ; do echo FAILURE detected at $trs; cat ${trs%%.trs}.log ; done

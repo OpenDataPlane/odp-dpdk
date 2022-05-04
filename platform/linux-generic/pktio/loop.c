@@ -18,6 +18,7 @@
 #include <odp/api/plat/packet_flag_inlines.h>
 #include <odp/api/plat/queue_inlines.h>
 
+#include <odp_parse_internal.h>
 #include <odp_classification_internal.h>
 #include <odp_debug_internal.h>
 #include <odp_errno_define.h>
@@ -26,6 +27,7 @@
 #include <odp_ipsec_internal.h>
 #include <odp_packet_internal.h>
 #include <odp_packet_io_internal.h>
+#include <odp_macros_internal.h>
 #include <odp_queue_if.h>
 
 #include <protocols/eth.h>
@@ -158,7 +160,11 @@ static int loopback_recv(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 	odp_time_t ts_val;
 	odp_time_t *ts = NULL;
 	int num_rx = 0;
-	int failed = 0;
+	int packets = 0, errors = 0;
+	uint32_t octets = 0;
+	const odp_proto_chksums_t chksums = pktio_entry->s.in_chksums;
+	const odp_proto_layer_t layer = pktio_entry->s.parse_layer;
+	const odp_pktin_config_opt_t opt = pktio_entry->s.config.pktin;
 
 	if (odp_unlikely(num > QUEUE_MULTI_MAX))
 		num = QUEUE_MULTI_MAX;
@@ -168,8 +174,7 @@ static int loopback_recv(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 	queue = pkt_priv(pktio_entry)->loopq;
 	nbr = odp_queue_deq_multi(queue, (odp_event_t *)hdr_tbl, num);
 
-	if (pktio_entry->s.config.pktin.bit.ts_all ||
-	    pktio_entry->s.config.pktin.bit.ts_ptp) {
+	if (opt.bit.ts_all || opt.bit.ts_ptp) {
 		ts_val = odp_time_global();
 		ts = &ts_val;
 	}
@@ -181,61 +186,64 @@ static int loopback_recv(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 		pkt_len = odp_packet_len(pkt);
 		pkt_hdr = packet_hdr(pkt);
 
-		packet_parse_reset(pkt_hdr, 1);
-		if (pktio_cls_enabled(pktio_entry)) {
-			odp_packet_t new_pkt;
-			odp_pool_t new_pool;
+		if (layer) {
 			uint8_t *pkt_addr;
-			uint8_t buf[PACKET_PARSE_SEG_LEN];
+			uint8_t buf[PARSE_BYTES];
 			int ret;
 			uint32_t seg_len = odp_packet_seg_len(pkt);
+			uint64_t l4_part_sum = 0;
 
 			/* Make sure there is enough data for the packet
 			 * parser in the case of a segmented packet. */
-			if (odp_unlikely(seg_len < PACKET_PARSE_SEG_LEN &&
-					 pkt_len > PACKET_PARSE_SEG_LEN)) {
-				odp_packet_copy_to_mem(pkt, 0,
-						       PACKET_PARSE_SEG_LEN,
-						       buf);
-				seg_len = PACKET_PARSE_SEG_LEN;
+			if (odp_unlikely(seg_len < PARSE_BYTES &&
+					 pkt_len > seg_len)) {
+				seg_len = MIN(pkt_len, PARSE_BYTES);
+				odp_packet_copy_to_mem(pkt, 0, seg_len, buf);
 				pkt_addr = buf;
 			} else {
 				pkt_addr = odp_packet_data(pkt);
 			}
 
-			ret = _odp_cls_classify_packet(pktio_entry, pkt_addr,
-						       pkt_len, seg_len,
-						       &new_pool, pkt_hdr, true);
-			if (ret) {
-				failed++;
+			packet_parse_reset(pkt_hdr, 1);
+			ret = _odp_packet_parse_common(&pkt_hdr->p, pkt_addr, pkt_len,
+						       seg_len, layer, chksums,
+						       &l4_part_sum, opt);
+			if (ret)
+				errors++;
+
+			if (ret < 0) {
 				odp_packet_free(pkt);
 				continue;
 			}
 
-			if (new_pool != odp_packet_pool(pkt)) {
-				new_pkt = odp_packet_copy(pkt, new_pool);
+			if (pktio_cls_enabled(pktio_entry)) {
+				odp_packet_t new_pkt;
+				odp_pool_t new_pool;
 
-				odp_packet_free(pkt);
-
-				if (new_pkt == ODP_PACKET_INVALID) {
-					failed++;
+				ret = _odp_cls_classify_packet(pktio_entry, pkt_addr,
+							       &new_pool, pkt_hdr);
+				if (ret) {
+					odp_packet_free(pkt);
 					continue;
 				}
 
-				pkt = new_pkt;
-				pkt_hdr = packet_hdr(new_pkt);
-			}
-		} else {
-			odp_packet_parse_param_t param;
+				if (new_pool != odp_packet_pool(pkt)) {
+					new_pkt = odp_packet_copy(pkt, new_pool);
 
-			/*
-			 * Use odp_packet_parse() which can handle segmented
-			 * packets.
-			 */
-			param.proto = ODP_PROTO_ETH;
-			param.last_layer = pktio_entry->s.config.parser.layer;
-			param.chksums = pktio_entry->s.in_chksums;
-			odp_packet_parse(packet_handle(pkt_hdr), 0, &param);
+					odp_packet_free(pkt);
+
+					if (new_pkt == ODP_PACKET_INVALID) {
+						pktio_entry->s.stats.in_discards++;
+						continue;
+					}
+
+					pkt = new_pkt;
+					pkt_hdr = packet_hdr(new_pkt);
+				}
+			}
+
+			if (layer >= ODP_PROTO_LAYER_L4)
+				_odp_packet_l4_chksum(pkt_hdr, chksums, l4_part_sum);
 		}
 
 		packet_set_ts(pkt_hdr, ts);
@@ -247,12 +255,17 @@ static int loopback_recv(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 		    odp_packet_has_ipsec(pkt))
 			_odp_ipsec_try_inline(&pkt);
 
-		pktio_entry->s.stats.in_octets += pkt_len;
+		if (!pkt_hdr->p.flags.all.error) {
+			octets += pkt_len;
+			packets++;
+		}
+
 		pkts[num_rx++] = pkt;
 	}
 
-	pktio_entry->s.stats.in_errors += failed;
-	pktio_entry->s.stats.in_packets += num_rx - failed;
+	pktio_entry->s.stats.in_octets += octets;
+	pktio_entry->s.stats.in_packets += packets;
+	pktio_entry->s.stats.in_errors += errors;
 
 	odp_ticketlock_unlock(&pktio_entry->s.rxl);
 
@@ -533,6 +546,7 @@ static int loopback_init_capability(pktio_entry_t *pktio_entry)
 	capa->stats.pktio.counter.in_octets = 1;
 	capa->stats.pktio.counter.in_packets = 1;
 	capa->stats.pktio.counter.in_errors = 1;
+	capa->stats.pktio.counter.in_discards = 1;
 	capa->stats.pktio.counter.out_octets = 1;
 	capa->stats.pktio.counter.out_packets = 1;
 	capa->stats.pktin_queue.counter.octets = 1;

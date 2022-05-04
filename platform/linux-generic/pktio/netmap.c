@@ -16,6 +16,7 @@
 #include <odp/api/time.h>
 #include <odp/api/plat/time_inlines.h>
 
+#include <odp_parse_internal.h>
 #include <odp_packet_io_internal.h>
 #include <odp_packet_io_stats.h>
 #include <odp_ethtool_stats.h>
@@ -822,11 +823,14 @@ static inline int netmap_pkt_to_odp(pktio_entry_t *pktio_entry,
 	odp_packet_t pkt;
 	odp_pool_t pool = pkt_priv(pktio_entry)->pool;
 	odp_packet_hdr_t *pkt_hdr;
-	odp_packet_hdr_t parsed_hdr;
 	int i;
 	int num;
 	uint32_t max_len;
 	uint16_t frame_offset = pktio_entry->s.pktin_frame_offset;
+	int num_rx = 0;
+	const odp_proto_chksums_t chksums = pktio_entry->s.in_chksums;
+	const odp_proto_layer_t layer = pktio_entry->s.parse_layer;
+	const odp_pktin_config_opt_t opt = pktio_entry->s.config.pktin;
 
 	/* Allocate maximum sized packets */
 	max_len = pkt_priv(pktio_entry)->mtu;
@@ -837,45 +841,50 @@ static inline int netmap_pkt_to_odp(pktio_entry_t *pktio_entry,
 	for (i = 0; i < num; i++) {
 		netmap_slot_t slot;
 		uint16_t len;
+		const uint8_t *buf;
+		uint64_t l4_part_sum = 0;
 
 		slot = slot_tbl[i];
 		len = slot.len;
+		buf = (const uint8_t *)slot.buf;
 
 		odp_prefetch(slot.buf);
 
-		if (pktio_cls_enabled(pktio_entry)) {
-			if (_odp_cls_classify_packet(pktio_entry,
-						     (const uint8_t *)slot.buf, len,
-						     len, &pool, &parsed_hdr, true))
-				goto fail;
+		pkt = pkt_tbl[num_rx];
+		pkt_hdr = packet_hdr(pkt);
+
+		if (layer) {
+			if (_odp_packet_parse_common(&pkt_hdr->p, buf, len, len,
+						     layer, chksums, &l4_part_sum, opt) < 0)
+				continue;
+
+			if (pktio_cls_enabled(pktio_entry)) {
+				if (_odp_cls_classify_packet(pktio_entry, buf, &pool,
+							     pkt_hdr))
+					continue;
+			}
 		}
 
-		pkt = pkt_tbl[i];
-		pkt_hdr = packet_hdr(pkt);
 		pull_tail(pkt_hdr, max_len - len);
 		if (frame_offset)
 			pull_head(pkt_hdr, frame_offset);
 
 		if (odp_packet_copy_from_mem(pkt, 0, len, slot.buf) != 0)
-			goto fail;
+			break;
 
 		pkt_hdr->input = pktio_entry->s.handle;
 
-		if (pktio_cls_enabled(pktio_entry))
-			_odp_packet_copy_cls_md(pkt_hdr, &parsed_hdr);
-		else
-			_odp_packet_parse_layer(pkt_hdr,
-						pktio_entry->s.config.parser.layer,
-						pktio_entry->s.in_chksums);
+		if (layer >= ODP_PROTO_LAYER_L4)
+			_odp_packet_l4_chksum(pkt_hdr, chksums, l4_part_sum);
 
 		packet_set_ts(pkt_hdr, ts);
+		num_rx++;
 	}
 
-	return i;
+	if (num_rx < num)
+		odp_packet_free_multi(&pkt_tbl[num_rx], num - num_rx);
 
-fail:
-	odp_packet_free_multi(&pkt_tbl[i], num - i);
-	return i;
+	return num_rx;
 }
 
 static inline int netmap_recv_desc(pktio_entry_t *pktio_entry,
@@ -1042,11 +1051,11 @@ static int netmap_recv_tmo(pktio_entry_t *pktio_entry, int index,
 }
 
 static int netmap_recv_mq_tmo(pktio_entry_t *pktio_entry[], int index[],
-			      int num_q, odp_packet_t pkt_table[], int num,
-			      unsigned *from, uint64_t usecs)
+			      uint32_t num_q, odp_packet_t pkt_table[], int num,
+			      uint32_t *from, uint64_t usecs)
 {
 	struct timeval timeout;
-	int i;
+	uint32_t i;
 	int ret;
 	int maxfd = -1, maxfd2;
 	fd_set readfds;

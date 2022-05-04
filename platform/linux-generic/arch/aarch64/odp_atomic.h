@@ -12,6 +12,7 @@
 #error This file should not be included directly, please include odp_cpu.h
 #endif
 
+#include <odp_types_internal.h>
 #include <limits.h>
 
 #ifdef CONFIG_DMBSTR
@@ -36,22 +37,18 @@ do {							\
 #define LL_MO(mo) (HAS_ACQ((mo)) ? __ATOMIC_ACQUIRE : __ATOMIC_RELAXED)
 #define SC_MO(mo) (HAS_RLS((mo)) ? __ATOMIC_RELEASE : __ATOMIC_RELAXED)
 
-/* Prevent warnings about ISO C not supporting __int128 */
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wpedantic"
-
 #ifndef __ARM_FEATURE_QRDMX /* Feature only available in v8.1a and beyond */
 static inline bool
-__lockfree_compare_exchange_16(register __int128 *var, __int128 *exp,
-			       register __int128 neu, bool weak, int mo_success,
+__lockfree_compare_exchange_16(register _odp_u128_t *var, _odp_u128_t *exp,
+			       register _odp_u128_t neu, bool weak, int mo_success,
 			       int mo_failure)
 {
 	(void)weak; /* Always do strong CAS or we can't perform atomic read */
 	/* Ignore memory ordering for failure, memory order for
 	 * success must be stronger or equal. */
 	(void)mo_failure;
-	register __int128 old;
-	register __int128 expected;
+	register _odp_u128_t old;
+	register _odp_u128_t expected;
 	int ll_mo = LL_MO(mo_success);
 	int sc_mo = SC_MO(mo_success);
 
@@ -66,10 +63,10 @@ __lockfree_compare_exchange_16(register __int128 *var, __int128 *exp,
 	return old == expected;
 }
 
-static inline __int128 __lockfree_exchange_16(__int128 *var, __int128 neu,
-					      int mo)
+static inline _odp_u128_t __lockfree_exchange_16(_odp_u128_t *var,
+						 _odp_u128_t neu, int mo)
 {
-	register __int128 old;
+	register _odp_u128_t old;
 	int ll_mo = LL_MO(mo);
 	int sc_mo = SC_MO(mo);
 
@@ -81,10 +78,10 @@ static inline __int128 __lockfree_exchange_16(__int128 *var, __int128 neu,
 	return old;
 }
 
-static inline __int128 __lockfree_fetch_and_16(__int128 *var, __int128 mask,
-					       int mo)
+static inline _odp_u128_t __lockfree_fetch_and_16(_odp_u128_t *var,
+						  _odp_u128_t mask, int mo)
 {
-	register __int128 old;
+	register _odp_u128_t old;
 	int ll_mo = LL_MO(mo);
 	int sc_mo = SC_MO(mo);
 
@@ -96,10 +93,10 @@ static inline __int128 __lockfree_fetch_and_16(__int128 *var, __int128 mask,
 	return old;
 }
 
-static inline __int128 __lockfree_fetch_or_16(__int128 *var, __int128 mask,
-					      int mo)
+static inline _odp_u128_t __lockfree_fetch_or_16(_odp_u128_t *var,
+						 _odp_u128_t mask, int mo)
 {
-	register __int128 old;
+	register _odp_u128_t old;
 	int ll_mo = LL_MO(mo);
 	int sc_mo = SC_MO(mo);
 
@@ -113,8 +110,8 @@ static inline __int128 __lockfree_fetch_or_16(__int128 *var, __int128 mask,
 
 #else
 
-static inline __int128_t cas_u128(__int128_t *ptr, __int128_t old_val,
-				  __int128_t new_val, int mo)
+static inline _odp_u128_t cas_u128(_odp_u128_t *ptr, _odp_u128_t old_val,
+				   _odp_u128_t new_val, int mo)
 {
 	/* CASP instructions require that the first register number is paired */
 	register uint64_t old0 __asm__ ("x0");
@@ -151,18 +148,18 @@ static inline __int128_t cas_u128(__int128_t *ptr, __int128_t old_val,
 		abort();
 	}
 
-	return ((__int128)old0) | (((__int128)old1) << 64);
+	return ((_odp_u128_t)old0) | (((_odp_u128_t)old1) << 64);
 }
 
 static inline bool
-__lockfree_compare_exchange_16(register __int128 *var, __int128 *exp,
-			       register __int128 neu, bool weak, int mo_success,
+__lockfree_compare_exchange_16(register _odp_u128_t *var, _odp_u128_t *exp,
+			       register _odp_u128_t neu, bool weak, int mo_success,
 			       int mo_failure)
 {
 	(void)weak;
 	(void)mo_failure;
-	__int128 old;
-	__int128 expected;
+	_odp_u128_t old;
+	_odp_u128_t expected;
 
 	expected = *exp;
 	old = cas_u128(var, expected, neu, mo_success);
@@ -170,11 +167,11 @@ __lockfree_compare_exchange_16(register __int128 *var, __int128 *exp,
 	return old == expected;
 }
 
-static inline __int128 __lockfree_exchange_16(__int128 *var, __int128 neu,
-					      int mo)
+static inline _odp_u128_t __lockfree_exchange_16(_odp_u128_t *var,
+						 _odp_u128_t neu, int mo)
 {
-	__int128 old;
-	__int128 expected;
+	_odp_u128_t old;
+	_odp_u128_t expected;
 
 	do {
 		expected = *var;
@@ -183,11 +180,11 @@ static inline __int128 __lockfree_exchange_16(__int128 *var, __int128 neu,
 	return old;
 }
 
-static inline __int128 __lockfree_fetch_and_16(__int128 *var, __int128 mask,
-					       int mo)
+static inline _odp_u128_t __lockfree_fetch_and_16(_odp_u128_t *var,
+						  _odp_u128_t mask, int mo)
 {
-	__int128 old;
-	__int128 expected;
+	_odp_u128_t old;
+	_odp_u128_t expected;
 
 	do {
 		expected = *var;
@@ -196,11 +193,11 @@ static inline __int128 __lockfree_fetch_and_16(__int128 *var, __int128 mask,
 	return old;
 }
 
-static inline __int128 __lockfree_fetch_or_16(__int128 *var, __int128 mask,
-					      int mo)
+static inline _odp_u128_t __lockfree_fetch_or_16(_odp_u128_t *var,
+						 _odp_u128_t mask, int mo)
 {
-	__int128 old;
-	__int128 expected;
+	_odp_u128_t old;
+	_odp_u128_t expected;
 
 	do {
 		expected = *var;
@@ -211,9 +208,9 @@ static inline __int128 __lockfree_fetch_or_16(__int128 *var, __int128 mask,
 
 #endif  /* __ARM_FEATURE_QRDMX */
 
-static inline __int128 __lockfree_load_16(__int128 *var, int mo)
+static inline _odp_u128_t __lockfree_load_16(_odp_u128_t *var, int mo)
 {
-	__int128 old = *var; /* Possibly torn read */
+	_odp_u128_t old = *var; /* Possibly torn read */
 
 	/* Do CAS to ensure atomicity
 	 * Either CAS succeeds (writing back the same value)
@@ -223,19 +220,17 @@ static inline __int128 __lockfree_load_16(__int128 *var, int mo)
 	return old;
 }
 
-__extension__ typedef unsigned __int128 _u128_t;
-
-static inline _u128_t lockfree_load_u128(_u128_t *atomic)
+static inline _odp_u128_t lockfree_load_u128(_odp_u128_t *atomic)
 {
-	return __lockfree_load_16((__int128 *)atomic, __ATOMIC_RELAXED);
+	return __lockfree_load_16((_odp_u128_t *)atomic, __ATOMIC_RELAXED);
 }
 
-static inline int lockfree_cas_acq_rel_u128(_u128_t *atomic,
-					    _u128_t old_val,
-					    _u128_t new_val)
+static inline int lockfree_cas_acq_rel_u128(_odp_u128_t *atomic,
+					    _odp_u128_t old_val,
+					    _odp_u128_t new_val)
 {
-	return __lockfree_compare_exchange_16((__int128 *)atomic,
-					      (__int128 *)&old_val,
+	return __lockfree_compare_exchange_16((_odp_u128_t *)atomic,
+					      (_odp_u128_t *)&old_val,
 					      new_val,
 					      0,
 					      __ATOMIC_ACQ_REL,
@@ -249,7 +244,7 @@ static inline int lockfree_check_u128(void)
 
 /** Atomic bit set operations with memory ordering */
 #if defined(__SIZEOF_INT128__) && __SIZEOF_INT128__ == 16
-typedef __int128 bitset_t;
+typedef _odp_u128_t bitset_t;
 #define ATOM_BITSET_SIZE (CHAR_BIT * __SIZEOF_INT128__)
 
 #elif __GCC_ATOMIC_LLONG_LOCK_FREE == 2 && \
@@ -292,10 +287,8 @@ static inline bitset_t bitset_mask(uint32_t bit)
 	if (bit < 64)
 		return 1ULL << bit;
 	else
-		return (unsigned __int128)(1ULL << (bit - 64)) << 64;
+		return (_odp_u128_t)(1ULL << (bit - 64)) << 64;
 }
-
-#pragma GCC diagnostic pop
 
 #else
 #error Unsupported size of bit sets (ATOM_BITSET_SIZE)

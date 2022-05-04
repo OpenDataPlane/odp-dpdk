@@ -281,10 +281,6 @@ int ipsec_check_esp_chacha20_poly1305(void)
 
 int ipsec_check_test_sa_update_seq_num(void)
 {
-	odp_ipsec_capability_t capa;
-
-	odp_ipsec_capability(&capa);
-
 	if (!capa.test.sa_operations.seq_num)
 		return ODP_TEST_INACTIVE;
 
@@ -942,9 +938,8 @@ static void verify_in(const ipsec_test_part *part,
 					  result.orig_ip_len == len);
 			}
 		}
-		ipsec_check_packet(part->out[i].pkt_res,
-				   pkto[i],
-				   false);
+		if (part->out[i].l3_type != ODP_PROTO_L3_TYPE_NONE)
+			ipsec_check_packet(part->out[i].pkt_res, pkto[i], false);
 		if (suite_context.inbound_op_mode == ODP_IPSEC_OP_MODE_INLINE)
 			expected_user_ptr = NULL;
 		CU_ASSERT(odp_packet_user_ptr(pkto[i]) == expected_user_ptr);

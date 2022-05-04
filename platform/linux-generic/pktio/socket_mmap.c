@@ -16,6 +16,7 @@
 #include <odp/api/plat/packet_inlines.h>
 
 #include <odp_socket_common.h>
+#include <odp_parse_internal.h>
 #include <odp_packet_internal.h>
 #include <odp_packet_io_internal.h>
 #include <odp_packet_io_stats.h>
@@ -150,9 +151,11 @@ static inline unsigned pkt_mmap_v2_rx(pktio_entry_t *pktio_entry,
 	odp_pool_t pool = pkt_sock->pool;
 	uint16_t frame_offset = pktio_entry->s.pktin_frame_offset;
 	uint16_t vlan_len = 0;
+	const odp_proto_chksums_t chksums = pktio_entry->s.in_chksums;
+	const odp_proto_layer_t layer = pktio_entry->s.parse_layer;
+	const odp_pktin_config_opt_t opt = pktio_entry->s.config.pktin;
 
-	if (pktio_entry->s.config.pktin.bit.ts_all ||
-	    pktio_entry->s.config.pktin.bit.ts_ptp)
+	if (opt.bit.ts_all || opt.bit.ts_ptp)
 		ts = &ts_val;
 
 	ring  = &pkt_sock->rx_ring;
@@ -163,8 +166,8 @@ static inline unsigned pkt_mmap_v2_rx(pktio_entry_t *pktio_entry,
 		struct tpacket2_hdr *tp_hdr;
 		odp_packet_t pkt;
 		odp_packet_hdr_t *hdr;
-		odp_packet_hdr_t parsed_hdr;
 		int ret;
+		uint64_t l4_part_sum = 0;
 
 		tp_hdr = (void *)next_ptr;
 
@@ -212,18 +215,29 @@ static inline unsigned pkt_mmap_v2_rx(pktio_entry_t *pktio_entry,
 			continue;
 		}
 
-		if (pktio_cls_enabled(pktio_entry)) {
-			if (_odp_cls_classify_packet(pktio_entry, pkt_buf, pkt_len,
-						     pkt_len, &pool, &parsed_hdr,
-						     true)) {
+		hdr = packet_hdr(pkt);
+
+		if (layer) {
+			if (_odp_packet_parse_common(&hdr->p, pkt_buf, pkt_len,
+						     pkt_len, layer, chksums,
+						     &l4_part_sum, opt) < 0) {
 				odp_packet_free(pkt);
 				tp_hdr->tp_status = TP_STATUS_KERNEL;
 				frame_num = next_frame_num;
 				continue;
 			}
+
+			if (pktio_cls_enabled(pktio_entry)) {
+				if (_odp_cls_classify_packet(pktio_entry, pkt_buf,
+							     &pool, hdr)) {
+					odp_packet_free(pkt);
+					tp_hdr->tp_status = TP_STATUS_KERNEL;
+					frame_num = next_frame_num;
+					continue;
+				}
+			}
 		}
 
-		hdr = packet_hdr(pkt);
 		if (frame_offset)
 			pull_head(hdr, frame_offset);
 
@@ -276,12 +290,8 @@ static inline unsigned pkt_mmap_v2_rx(pktio_entry_t *pktio_entry,
 
 		hdr->input = pktio_entry->s.handle;
 
-		if (pktio_cls_enabled(pktio_entry))
-			_odp_packet_copy_cls_md(hdr, &parsed_hdr);
-		else
-			_odp_packet_parse_layer(hdr,
-						pktio_entry->s.config.parser.layer,
-						pktio_entry->s.in_chksums);
+		if (layer >= ODP_PROTO_LAYER_L4)
+			_odp_packet_l4_chksum(hdr, chksums, l4_part_sum);
 
 		packet_set_ts(hdr, ts);
 
@@ -727,11 +737,11 @@ static int sock_mmap_recv_tmo(pktio_entry_t *pktio_entry, int index,
 }
 
 static int sock_mmap_recv_mq_tmo(pktio_entry_t *pktio_entry[], int index[],
-				 int num_q, odp_packet_t pkt_table[], int num,
-				 unsigned *from, uint64_t usecs)
+				 uint32_t num_q, odp_packet_t pkt_table[], int num,
+				 uint32_t *from, uint64_t usecs)
 {
 	struct timeval timeout;
-	int i;
+	uint32_t i;
 	int ret;
 	int maxfd = -1, maxfd2;
 	fd_set readfds;

@@ -3,7 +3,7 @@ AC_PREREQ([2.5])
 # ODP API version
 ##########################################################################
 m4_define([odpapi_generation_version], [1])
-m4_define([odpapi_major_version], [35])
+m4_define([odpapi_major_version], [36])
 m4_define([odpapi_minor_version], [0])
 m4_define([odpapi_point_version], [0])
 m4_define([odpapi_version],
@@ -89,57 +89,6 @@ AC_SUBST([LIBTOOL_DEPS])
 AM_PROG_LIBTOOL
 
 PKG_PROG_PKG_CONFIG
-
-# Checks for library functions.
-dnl breaks cross-compilation and malloc(0) behaviour is not that important
-dnl AC_FUNC_MALLOC
-AC_FUNC_MMAP
-AC_CHECK_FUNCS(m4_normalize([
-	bzero
-	clock_gettime
-	gethostbyname
-	getpagesize
-	gettimeofday
-	malloc
-	memset
-	munmap
-	socket
-	strchr
-	strerror
-	strrchr
-	strstr
-	strtoull
-]))
-
-# Checks for header files.
-AC_HEADER_RESOLV
-AC_CHECK_HEADERS(m4_normalize([
-	arpa/inet.h
-	fcntl.h
-	inttypes.h
-	limits.h
-	netdb.h
-	netinet/in.h
-	stddef.h
-	stdint.h
-	stdlib.h
-	string.h
-	sys/ioctl.h
-	sys/socket.h
-	sys/time.h
-	unistd.h
-]))
-
-# Checks for typedefs, structures, and compiler characteristics.
-AC_HEADER_STDBOOL
-AC_C_INLINE
-AC_TYPE_SIZE_T
-AC_TYPE_SSIZE_T
-AC_TYPE_UINT8_T
-AC_TYPE_UINT16_T
-AC_TYPE_INT32_T
-AC_TYPE_UINT32_T
-AC_TYPE_UINT64_T
 
 ##########################################################################
 # Default warning setup

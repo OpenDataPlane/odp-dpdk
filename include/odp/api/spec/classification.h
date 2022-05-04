@@ -36,9 +36,7 @@ extern "C" {
 
 /**
  * @def ODP_COS_INVALID
- * This value is returned from odp_cls_cos_create() on failure,
- * May also be used as a sink class of service that
- * results in packets being discarded.
+ * This value is returned from odp_cls_cos_create() on failure.
  */
 
 /**
@@ -179,6 +177,30 @@ typedef struct odp_bp_param_t {
 } odp_bp_param_t;
 
 /**
+ * Classifier CoS specific statistics counters
+ *
+ * Counters are incremented per packet classified to the CoS. In a CoS chain,
+ * counters are incremented in every CoS for which counters are enabled.
+ */
+typedef struct odp_cls_cos_stats_t {
+	/** Number of octets in classified packets. In case of Ethernet, packet
+	 * size includes MAC header. */
+	uint64_t octets;
+
+	/** Number of classified packets, including packets dropped due to drop
+	 * action. */
+	uint64_t packets;
+
+	/** Number of discarded packets due to other reasons than packet
+	 * errors or drop action. */
+	uint64_t discards;
+
+	/** Number of packets with errors. */
+	uint64_t errors;
+
+} odp_cls_cos_stats_t;
+
+/**
  * Classifier queue specific statistics counters
  *
  * Counters are incremented per packet destined to the queue per originating
@@ -206,6 +228,34 @@ typedef struct odp_cls_queue_stats_t {
  * Classifier statistics capabilities
  */
 typedef struct odp_cls_stats_capability_t {
+	/** CoS level capabilities */
+	struct {
+		/** Supported counters */
+		union {
+			/** Statistics counters in a bit field structure */
+			struct {
+				/** @see odp_cls_cos_stats_t::octets */
+				uint64_t octets          : 1;
+
+				/** @see odp_cls_cos_stats_t::packets */
+				uint64_t packets         : 1;
+
+				/** @see odp_cls_cos_stats_t::discards */
+				uint64_t discards        : 1;
+
+				/** @see odp_cls_cos_stats_t::errors */
+				uint64_t errors          : 1;
+
+			} counter;
+
+			/** All bits of the bit field structure
+			 *
+			 *  This field can be used to set/clear all flags, or
+			 *  for bitwise operations over the entire structure. */
+			uint64_t all_counters;
+		};
+	} cos;
+
 	/** Queue level capabilities */
 	struct {
 		/** Supported counters */
@@ -247,17 +297,22 @@ typedef struct odp_cls_capability_t {
 	odp_cls_pmr_terms_t supported_terms;
 
 	/** Maximum number of PMR terms */
-	unsigned int max_pmr_terms;
+	uint32_t max_pmr_terms;
 
 	/** Number of PMR terms available for use now */
-	unsigned int available_pmr_terms;
+	uint32_t available_pmr_terms;
 
 	/** Maximum number of CoS supported */
-	unsigned int max_cos;
+	uint32_t max_cos;
+
+	/** Maximum number of CoSes that can have statistics enabled at the same
+	 * time. If this value is zero, then CoS level statistics are not
+	 * supported. */
+	uint32_t max_cos_stats;
 
 	/** Maximun number of queues supported per CoS
 	 * if the value is 1, then hashing is not supported*/
-	unsigned int max_hash_queues;
+	uint32_t max_hash_queues;
 
 	/** Protocol header combination supported for Hashing */
 	odp_pktin_hash_proto_t hash_protocols;
@@ -315,10 +370,48 @@ typedef enum {
 } odp_cos_hdr_flow_fields_t;
 
 /**
+ * Enumeration of actions for CoS.
+ */
+typedef enum {
+	/**
+	 * Enqueue packet
+	 *
+	 * Packets that arrive in the CoS are enqueued to a destination queue.
+	 */
+	ODP_COS_ACTION_ENQUEUE,
+
+	/**
+	 * Drop packet
+	 *
+	 * Packets that arrive in the CoS are dropped. Packets are freed into
+	 * their originating pool.
+	 */
+	ODP_COS_ACTION_DROP,
+} odp_cos_action_t;
+
+/**
  * Class of service parameters
  * Used to communicate class of service creation options
  */
 typedef struct odp_cls_cos_param {
+	/** Action to take. When action is ODP_COS_ACTION_DROP, all the other
+	 * parameters are ignored.
+	 *
+	 * The final match in the CoS chain defines the action for a packet.
+	 * I.e. packet is dropped only when the CoS of the last matching rule
+	 * has drop action. Actions in the previous CoSes in the chain are
+	 * ignored.
+	 *
+	 * Default is ODP_COS_ACTION_ENQUEUE.
+	 */
+	odp_cos_action_t action;
+
+	/** Enable statistics. If true, counters are incremented when packets
+	 * are classified to the CoS. Default is false. @see
+	 * odp_cls_cos_stats().
+	 */
+	odp_bool_t stats_enable;
+
 	/** Number of queues to be linked to this CoS.
 	 * If the number is greater than 1 then hashing is enabled.
 	 * If number is equal to 1 then hashing is disabled.
@@ -391,6 +484,9 @@ int odp_cls_capability(odp_cls_capability_t *capability);
 /**
  * Create a class-of-service
  *
+ * Depending on the action parameter, packets to the CoS are either enqueued to
+ * a destination queue, or dropped.
+ *
  * The use of class-of-service name is optional. Unique names are not required.
  * Use odp_cls_cos_param_init() to initialize parameters into their default
  * values.
@@ -401,10 +497,6 @@ int odp_cls_capability(odp_cls_capability_t *capability);
  *
  * @retval Class-of-service handle
  * @retval ODP_COS_INVALID on failure.
- *
- * @note ODP_QUEUE_INVALID and ODP_POOL_INVALID are valid values for queue
- * and pool associated with a class of service. When either of these values
- * is configured as INVALID packets assigned to the CoS get dropped.
  */
 odp_cos_t odp_cls_cos_create(const char *name,
 			     const odp_cls_cos_param_t *param);
@@ -540,6 +632,25 @@ int odp_cos_with_l3_qos(odp_pktio_t pktio_in,
 			uint8_t qos_table[],
 			odp_cos_t cos_table[],
 			odp_bool_t l3_preference);
+
+/**
+ * Get statistics for a CoS
+ *
+ * The statistics counters are incremented for packets classified to the
+ * given CoS.
+ *
+ * Counters that are not supported are set to zero.
+ *
+ * It's implementation defined if odp_pktio_stats_reset() call affects these
+ * counters.
+ *
+ * @param      cos     CoS handle
+ * @param[out] stats   Statistics structure for output
+ *
+ * @retval  0 on success
+ * @retval <0 on failure
+ */
+int odp_cls_cos_stats(odp_cos_t cos, odp_cls_cos_stats_t *stats);
 
 /**
  * Get statistics for a queue assigned to a CoS

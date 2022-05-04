@@ -129,6 +129,7 @@ typedef struct pmr_term_value {
 Class Of Service
 */
 struct cos_s {
+	odp_cos_action_t action;	/* Action */
 	odp_queue_t queue;		/* Associated Queue */
 	odp_pool_t pool;		/* Associated Buffer pool */
 	odp_pktin_vector_config_t vector;	/* Packet vector config */
@@ -145,10 +146,11 @@ struct cos_s {
 	odp_queue_param_t queue_param;
 	char name[ODP_COS_NAME_LEN];	/* name */
 	uint8_t index;
+	odp_bool_t stats_enable;
 	struct {
 		odp_atomic_u64_t discards;
 		odp_atomic_u64_t packets;
-	} stats[CLS_COS_QUEUE_MAX];
+	} stats, queue_stats[CLS_COS_QUEUE_MAX];
 };
 
 typedef union cos_u {

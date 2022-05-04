@@ -31,11 +31,17 @@
 #include <openssl/hmac.h>
 #include <openssl/cmac.h>
 #include <openssl/evp.h>
+#include <openssl/opensslv.h>
 
 #if (OPENSSL_VERSION_NUMBER >= 0x10100000L) && !defined(OPENSSL_NO_POLY1305)
 #define _ODP_HAVE_CHACHA20_POLY1305 1
 #else
 #define _ODP_HAVE_CHACHA20_POLY1305 0
+#endif
+
+/* Ignore warnings about APIs deprecated in OpenSSL 3.0 */
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #endif
 
 #define MAX_SESSIONS 4000
@@ -2495,6 +2501,7 @@ int odp_crypto_session_destroy(odp_crypto_session_t session)
 /*
  * Shim function around packet operation, can be used by other implementations.
  */
+#if ODP_DEPRECATED_API
 int
 odp_crypto_operation(odp_crypto_op_param_t *param,
 		     odp_bool_t *posted,
@@ -2549,6 +2556,7 @@ odp_crypto_operation(odp_crypto_op_param_t *param,
 
 	return 0;
 }
+#endif
 
 #if OPENSSL_VERSION_NUMBER < 0x10100000L
 static void ODP_UNUSED openssl_thread_id(CRYPTO_THREADID ODP_UNUSED *id)
@@ -2705,6 +2713,7 @@ int _odp_crypto_term_local(void)
 	return 0;
 }
 
+#if ODP_DEPRECATED_API
 odp_crypto_compl_t odp_crypto_compl_from_event(odp_event_t ev)
 {
 	/* This check not mandated by the API specification */
@@ -2741,6 +2750,7 @@ uint64_t odp_crypto_compl_to_u64(odp_crypto_compl_t hdl)
 {
 	return _odp_pri(hdl);
 }
+#endif /* ODP_DEPRECATED_API */
 
 void odp_crypto_session_param_init(odp_crypto_session_param_t *param)
 {

@@ -53,6 +53,10 @@
 /* Max wait time supported to avoid potential overflow */
 #define MAX_WAIT_TIME (UINT64_MAX / 1024)
 
+/* One hour maximum aging timeout, no real limitations imposed by the implementation other than
+ * integer width, so just use some value. */
+#define MAX_TX_AGING_TMO_NS 3600000000000ULL
+
 typedef struct {
 	const void *user_ptr;
 	odp_queue_t queue;
@@ -624,6 +628,8 @@ int odp_pktio_config(odp_pktio_t hdl, const odp_pktio_config_t *config)
 			return -1;
 		}
 
+	entry->s.enabled.tx_aging = config->pktout.bit.aging_ena;
+
 	if (entry->s.ops->config)
 		res = entry->s.ops->config(entry, config);
 
@@ -650,6 +656,9 @@ int odp_pktio_start(odp_pktio_t hdl)
 		ODP_ERR("Already started\n");
 		return -1;
 	}
+	entry->s.parse_layer = pktio_cls_enabled(entry) ?
+				       ODP_PROTO_LAYER_ALL :
+				       entry->s.config.parser.layer;
 	if (entry->s.ops->start)
 		res = entry->s.ops->start(entry);
 	if (!res)
@@ -660,8 +669,8 @@ int odp_pktio_start(odp_pktio_t hdl)
 	mode = entry->s.param.in_mode;
 
 	if (mode == ODP_PKTIN_MODE_SCHED) {
-		unsigned int i;
-		unsigned int num = entry->s.num_in_queue;
+		uint32_t i;
+		uint32_t num = entry->s.num_in_queue;
 		int index[num];
 		odp_queue_t odpq[num];
 
@@ -1180,95 +1189,6 @@ static int pktin_deq_multi(odp_queue_t queue, _odp_event_hdr_t *event_hdr[],
 	}
 
 	return nbr;
-}
-
-int _odp_sched_cb_pktin_poll_one(int pktio_index,
-				 int rx_queue,
-				 odp_event_t evt_tbl[])
-{
-	int num_rx, num_pkts, i;
-	pktio_entry_t *entry = pktio_entry_by_index(pktio_index);
-	odp_packet_t pkt;
-	odp_packet_hdr_t *pkt_hdr;
-	odp_pool_t pool = ODP_POOL_INVALID;
-	odp_packet_t packets[QUEUE_MULTI_MAX];
-	odp_queue_t queue;
-	odp_bool_t vector_enabled = entry->s.in_queue[rx_queue].vector.enable;
-	uint32_t num = QUEUE_MULTI_MAX;
-	cos_t *cos_hdr = NULL;
-
-	if (odp_unlikely(entry->s.state != PKTIO_STATE_STARTED)) {
-		if (entry->s.state < PKTIO_STATE_ACTIVE ||
-		    entry->s.state == PKTIO_STATE_STOP_PENDING)
-			return -1;
-
-		ODP_DBG("interface not started\n");
-		return 0;
-	}
-
-	if (vector_enabled) {
-		/* Make sure all packets will fit into a single packet vector */
-		if (entry->s.in_queue[rx_queue].vector.max_size < num)
-			num = entry->s.in_queue[rx_queue].vector.max_size;
-		pool = entry->s.in_queue[rx_queue].vector.pool;
-	}
-
-	ODP_ASSERT((unsigned int)rx_queue < entry->s.num_in_queue);
-	num_pkts = entry->s.ops->recv(entry, rx_queue, packets, num);
-
-	num_rx = 0;
-	for (i = 0; i < num_pkts; i++) {
-		pkt = packets[i];
-		pkt_hdr = packet_hdr(pkt);
-		if (odp_unlikely(pkt_hdr->p.input_flags.dst_queue)) {
-			odp_event_t event = odp_packet_to_event(pkt);
-			uint16_t cos_idx = pkt_hdr->cos;
-
-			queue = pkt_hdr->dst_queue;
-
-			if (cos_idx != CLS_COS_IDX_NONE) {
-				/* Packets from classifier */
-				cos_hdr = _odp_cos_entry_from_idx(cos_idx);
-
-				if (cos_hdr->s.vector.enable) {
-					packet_vector_enq_cos(queue, &event, 1, cos_hdr);
-					continue;
-				}
-			} else if (vector_enabled) {
-				/* Packets from inline IPsec */
-				packet_vector_enq(queue, &event, 1, pool);
-				continue;
-			}
-
-			if (odp_unlikely(odp_queue_enq(queue, event))) {
-				/* Queue full? */
-				odp_packet_free(pkt);
-				if (cos_idx != CLS_COS_IDX_NONE)
-					_odp_cos_queue_stats_add(cos_hdr, queue, 0, 1);
-				else
-					odp_atomic_inc_u64(&entry->s.stats_extra.in_discards);
-			} else {
-				if (cos_idx != CLS_COS_IDX_NONE)
-					_odp_cos_queue_stats_add(cos_hdr, queue, 1, 0);
-			}
-		} else {
-			evt_tbl[num_rx++] = odp_packet_to_event(pkt);
-		}
-	}
-
-	/* Create packet vector */
-	if (vector_enabled && num_rx > 0) {
-		odp_packet_vector_t pktv = packet_vector_create((odp_packet_t *)evt_tbl,
-								num_rx, pool);
-
-		if (odp_unlikely(pktv == ODP_PACKET_VECTOR_INVALID))
-			return 0;
-
-		evt_tbl[0] = odp_packet_vector_to_event(pktv);
-		return 1;
-	}
-
-	return num_rx;
 }
 
 int _odp_sched_cb_pktin_poll(int pktio_index, int pktin_index,
@@ -1886,6 +1806,9 @@ int odp_pktio_capability(odp_pktio_t pktio, odp_pktio_capability_t *capa)
 		capa->tx_compl.queue_type_sched = 1;
 		capa->tx_compl.queue_type_plain = 1;
 		capa->tx_compl.mode_all = 1;
+
+		capa->config.pktout.bit.aging_ena = 1;
+		capa->max_tx_aging_tmo_ns = MAX_TX_AGING_TMO_NS;
 	}
 
 	/* Packet vector generation is common for all pktio types */
@@ -2246,8 +2169,7 @@ int odp_pktin_queue_config(odp_pktio_t pktio,
 	pktio_entry_t *entry;
 	odp_pktin_mode_t mode;
 	odp_pktio_capability_t capa;
-	unsigned int num_queues;
-	unsigned int i;
+	uint32_t num_queues, i;
 	int rc;
 	odp_queue_t queue;
 	odp_pktin_queue_param_t default_param;
@@ -2410,7 +2332,7 @@ int _odp_pktio_pktout_tm_config(odp_pktio_t pktio_hdl,
 	bool pktio_started = false;
 	odp_pktout_mode_t mode;
 	pktio_entry_t *entry;
-	unsigned int i;
+	uint32_t i;
 	int rc = 0;
 
 	odp_pktout_queue_param_init(&param);
@@ -2480,8 +2402,7 @@ int odp_pktout_queue_config(odp_pktio_t pktio,
 	pktio_entry_t *entry;
 	odp_pktout_mode_t mode;
 	odp_pktio_capability_t capa;
-	unsigned int num_queues;
-	unsigned int i;
+	uint32_t num_queues, i;
 	int rc;
 	odp_pktout_queue_param_t default_param;
 
@@ -2847,18 +2768,17 @@ int odp_pktin_recv_tmo(odp_pktin_queue_t queue, odp_packet_t packets[], int num,
 	}
 }
 
-int odp_pktin_recv_mq_tmo(const odp_pktin_queue_t queues[], unsigned int num_q,
-			  unsigned int *from, odp_packet_t packets[], int num,
-			  uint64_t wait)
+int odp_pktin_recv_mq_tmo(const odp_pktin_queue_t queues[], uint32_t num_q, uint32_t *from,
+			  odp_packet_t packets[], int num, uint64_t wait)
 {
-	unsigned int i;
+	uint32_t i;
 	int ret;
 	odp_time_t t1, t2;
 	struct timespec ts;
 	int started = 0;
 	uint64_t sleep_round = 0;
 	int trial_successful = 0;
-	unsigned int lfrom = 0;
+	uint32_t lfrom = 0;
 
 	for (i = 0; i < num_q; i++) {
 		ret = odp_pktin_recv(queues[i], packets, num);

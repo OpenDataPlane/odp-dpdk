@@ -78,6 +78,7 @@ struct pktio_entry {
 	/* These two locks together lock the whole pktio device */
 	odp_ticketlock_t rxl;		/**< RX ticketlock */
 	odp_ticketlock_t txl;		/**< TX ticketlock */
+	odp_proto_layer_t parse_layer;
 	uint16_t pktin_frame_offset;
 
 	struct {
@@ -93,6 +94,8 @@ struct pktio_entry {
 				uint8_t tx_ts : 1;
 				/* Tx completion events */
 				uint8_t tx_compl : 1;
+				/* Packet aging */
+				uint8_t tx_aging : 1;
 			};
 		};
 	} enabled;
@@ -144,8 +147,8 @@ struct pktio_entry {
 
 	/* Storage for queue handles
 	 * Multi-queue support is pktio driver specific */
-	unsigned num_in_queue;
-	unsigned num_out_queue;
+	uint32_t num_in_queue;
+	uint32_t num_out_queue;
 
 	struct {
 		odp_queue_t        queue;
@@ -227,8 +230,8 @@ typedef struct pktio_if_ops {
 		    int num);
 	int (*recv_tmo)(pktio_entry_t *entry, int index, odp_packet_t packets[],
 			int num, uint64_t wait_usecs);
-	int (*recv_mq_tmo)(pktio_entry_t *entry[], int index[], int num_q,
-			   odp_packet_t packets[], int num, unsigned *from,
+	int (*recv_mq_tmo)(pktio_entry_t *entry[], int index[], uint32_t num_q,
+			   odp_packet_t packets[], int num, uint32_t *from,
 			   uint64_t wait_usecs);
 	int (*fd_set)(pktio_entry_t *entry, int index, fd_set *readfds);
 	int (*send)(pktio_entry_t *entry, int index,
@@ -291,6 +294,11 @@ static inline int _odp_pktio_tx_compl_enabled(const pktio_entry_t *entry)
 	return entry->s.enabled.tx_compl;
 }
 
+static inline int _odp_pktio_tx_aging_enabled(pktio_entry_t *entry)
+{
+	return entry->s.enabled.tx_aging;
+}
+
 static inline void _odp_pktio_tx_ts_set(pktio_entry_t *entry)
 {
 	odp_time_t ts_val = odp_time_global();
@@ -326,7 +334,7 @@ extern const pktio_if_ops_t * const _odp_pktio_if_ops[];
  * @return <0 on failure
  */
 int _odp_sock_recv_mq_tmo_try_int_driven(const struct odp_pktin_queue_t queues[],
-					 unsigned int num_q, unsigned int *from,
+					 uint32_t num_q, uint32_t *from,
 					 odp_packet_t packets[], int num,
 					 uint64_t usecs,
 					 int *trial_successful);
