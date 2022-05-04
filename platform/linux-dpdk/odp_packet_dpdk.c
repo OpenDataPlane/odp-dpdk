@@ -924,6 +924,7 @@ int _odp_input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int nu
 {
 	pkt_dpdk_t * const pkt_dpdk = pkt_priv(pktio_entry);
 	uint16_t i;
+	uint16_t num_pkts = 0;
 	odp_pktin_config_opt_t pktin_cfg = pktio_entry->s.config.pktin;
 	odp_pktio_t input = pktio_entry->s.handle;
 	odp_time_t ts_val;
@@ -959,16 +960,19 @@ int _odp_input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int nu
 				odp_packet_free(pkt);
 				continue;
 			}
+			if (odp_unlikely(num_pkts != i))
+				pkt_table[num_pkts] = pkt;
 		}
 		packet_set_ts(pkt_hdr, ts);
 
 		odp_prefetch(rte_pktmbuf_mtod(mbuf, char *));
+		num_pkts++;
 	}
 
 	if (pktio_cls_enabled(pktio_entry)) {
 		int failed = 0, success = 0;
 
-		for (i = 0; i < num; i++) {
+		for (i = 0; i < num_pkts; i++) {
 			odp_packet_t pkt = pkt_table[i];
 			odp_pool_t new_pool;
 			uint8_t *data;
@@ -999,11 +1003,11 @@ int _odp_input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int nu
 			++success;
 		}
 		pktio_entry->s.stats.in_errors += failed;
-		pktio_entry->s.stats.in_ucast_pkts += num - failed;
-		num = success;
+		pktio_entry->s.stats.in_ucast_pkts += num_pkts - failed;
+		num_pkts = success;
 	}
 
-	return num;
+	return num_pkts;
 }
 
 static int recv_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
