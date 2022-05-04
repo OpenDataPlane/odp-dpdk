@@ -6,42 +6,27 @@
  */
 
 #include <odp_posix_extensions.h>
-#include <stdio.h>
-#include <errno.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <sys/ioctl.h>
-#include <sys/mman.h>
-#include <poll.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <string.h>
-#include <stdlib.h>
-#include <inttypes.h>
 
-#include <linux/ethtool.h>
-#include <linux/sockios.h>
-
-#include <odp_align_internal.h>
-#include <odp/api/cpu.h>
 #include <odp/api/hints.h>
-#include <odp/api/system_info.h>
+#include <odp/api/packet.h>
+#include <odp/api/packet_io.h>
+#include <odp/api/pool.h>
+#include <odp/api/std_types.h>
+#include <odp/api/ticketlock.h>
+#include <odp/api/time.h>
+
+#include <odp/api/plat/packet_inlines.h>
+#include <odp/api/plat/time_inlines.h>
+
+#include <odp_classification_internal.h>
 #include <odp_debug_internal.h>
 #include <odp_errno_define.h>
-#include <odp_classification_internal.h>
-
+#include <odp_eventdev_internal.h>
+#include <odp_libconfig_internal.h>
+#include <odp_packet_dpdk.h>
 #include <odp_packet_internal.h>
 #include <odp_packet_io_internal.h>
-#include <odp_libconfig_internal.h>
-#include <odp/api/plat/packet_inlines.h>
-#include <odp/api/time.h>
-#include <odp/api/plat/time_inlines.h>
-#include <odp_packet_dpdk.h>
-#include <odp_eventdev_internal.h>
 #include <protocols/eth.h>
-
-#include <net/if.h>
-#include <protocols/udp.h>
 
 #include <rte_config.h>
 #if defined(__clang__)
@@ -53,6 +38,23 @@
 #include <rte_udp.h>
 #include <rte_tcp.h>
 #include <rte_version.h>
+
+#include <linux/ethtool.h>
+#include <linux/sockios.h>
+
+#include <errno.h>
+#include <fcntl.h>
+#include <inttypes.h>
+#include <net/if.h>
+#include <poll.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/ioctl.h>
+#include <sys/mman.h>
+#include <unistd.h>
 
 #if RTE_VERSION < RTE_VERSION_NUM(21, 11, 0, 0)
 	#define RTE_MBUF_F_TX_IPV4 PKT_TX_IPV4
