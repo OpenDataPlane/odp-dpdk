@@ -624,7 +624,7 @@ static int setup_pkt_dpdk(odp_pktio_t pktio ODP_UNUSED,
 	uint32_t mtu;
 	struct rte_eth_dev_info dev_info;
 	pkt_dpdk_t * const pkt_dpdk = pkt_priv(pktio_entry);
-	int i;
+	int i, ret;
 	uint16_t port_id;
 
 	if (!rte_eth_dev_get_port_by_name(netdev, &port_id))
@@ -642,7 +642,11 @@ static int setup_pkt_dpdk(odp_pktio_t pktio ODP_UNUSED,
 	}
 
 	memset(&dev_info, 0, sizeof(struct rte_eth_dev_info));
-	rte_eth_dev_info_get(pkt_dpdk->port_id, &dev_info);
+	ret = rte_eth_dev_info_get(pkt_dpdk->port_id, &dev_info);
+	if (ret) {
+		ODP_ERR("Failed to read device info: %d\n", ret);
+		return -1;
+	}
 
 	/* Initialize runtime options */
 	if (init_options(pktio_entry, &dev_info)) {
