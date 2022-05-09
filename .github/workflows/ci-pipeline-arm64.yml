@@ -191,7 +191,7 @@ jobs:
         run: find . -name "*.trs" | xargs grep -l '^.test-result. FAIL' | while read trs ; do echo FAILURE detected at $trs; cat ${trs%%.trs}.log ; done
 
   Run_dpdk-21_11:
-    if: ${{ github.repository == 'OpenDataPlane/odp' }}
+    if: ${{ github.repository == 'OpenDataPlane/odp-dpdk' }}
     runs-on: [self-hosted, ARM64]
     env:
       OS: ubuntu_20.04
