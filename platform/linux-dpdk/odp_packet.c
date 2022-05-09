@@ -1366,7 +1366,7 @@ static int _odp_packet_tcp_udp_chksum_insert(odp_packet_t pkt, uint16_t proto)
 	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
 	uint32_t zero = 0;
 	uint64_t sum;
-	uint16_t l3_ver;
+	uint16_t l3_ver = 0; /* GCC */
 	uint16_t chksum;
 	uint32_t chksum_offset;
 	uint32_t frame_len = odp_packet_len(pkt);
