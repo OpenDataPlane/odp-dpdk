@@ -64,7 +64,7 @@ jobs:
     steps:
       - uses: AutoModality/action-clean@v1.1.0
       - uses: actions/checkout@v2
-      - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}"
+      - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}" -e CXX=g++-10
                -e CONF="${{matrix.conf}}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-native /odp/scripts/ci/build_${ARCH}.sh
       - name: Failure log
         if: ${{ failure() }}
