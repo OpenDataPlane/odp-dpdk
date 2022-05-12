@@ -1208,20 +1208,9 @@ static int send_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 	if (!pkt_dpdk->flags.lockless_tx)
 		odp_ticketlock_unlock(&pkt_dpdk->tx_lock[index]);
 
-	if (pkts == 0) {
-		struct rte_mbuf *mbuf = pkt_to_mbuf(pkt_table[0]);
-
-		if (odp_unlikely(rte_errno != 0))
-			return -1;
-
-		if (odp_unlikely(mbuf->pkt_len > pkt_dpdk->mtu)) {
-			_odp_errno = EMSGSIZE;
-			return -1;
-		}
-	} else if (odp_unlikely(tx_ts_idx && pkts >= tx_ts_idx)) {
+	if (odp_unlikely(tx_ts_idx && pkts >= tx_ts_idx))
 		_odp_pktio_tx_ts_set(pktio_entry);
-	}
-	rte_errno = 0;
+
 	return pkts;
 }
 
