@@ -18,6 +18,7 @@
 extern "C" {
 #endif
 
+#include <odp/api/align.h>
 #include <odp/api/hints.h>
 #include <odp/api/packet_io.h>
 #include <odp/api/spinlock.h>
@@ -53,7 +54,11 @@ ODP_STATIC_ASSERT(PKTIO_LSO_PROFILES < UINT8_MAX, "PKTIO_LSO_PROFILES_ERROR");
 /* Forward declaration */
 struct pktio_if_ops;
 
-#define PKTIO_PRIVATE_SIZE 1536
+#if ODP_CACHE_LINE_SIZE == 128
+#define PKTIO_PRIVATE_SIZE 1408
+#else
+#define PKTIO_PRIVATE_SIZE 1216
+#endif
 
 struct pktio_entry {
 	const struct pktio_if_ops *ops; /**< Implementation specific methods */

@@ -86,39 +86,47 @@ typedef struct {
 	int rx_drop_en;
 } dpdk_opt_t;
 
-/** Packet socket using dpdk mmaped rings for both Rx and Tx */
+/* DPDK pktio specific data */
 typedef struct ODP_ALIGNED_CACHE {
-	/** Supported RTE_PTYPE_XXX flags in a mask */
+	/* --- Fast path data --- */
+
+	/* Supported RTE_PTYPE_XXX flags in a mask */
 	uint32_t supported_ptypes;
-	/** RSS configuration */
-	struct rte_eth_rss_conf rss_conf;
-	char ifname[32];
-	/** DPDK port identifier */
+	/* DPDK port identifier */
 	uint16_t port_id;
-	/** Maximum transmission unit */
-	uint16_t mtu;
-	/** Maximum supported MTU value */
-	uint32_t mtu_max;
-	/** DPDK MTU has been modified */
-	odp_bool_t mtu_set;
 	struct {
-		/** No locking for rx */
+		/* No locking for rx */
 		uint8_t lockless_rx : 1;
-		/** No locking for tx */
+		/* No locking for tx */
 		uint8_t lockless_tx : 1;
-		/** Promiscuous mode defined with system call */
+		/* Promiscuous mode defined with system call */
 		uint8_t vdev_sysc_promisc : 1;
 	} flags;
-	/** Minimum RX burst size */
+	/* Minimum RX burst size */
 	uint8_t min_rx_burst;
-	 /** Number of TX descriptors per queue */
-	uint16_t num_tx_desc[PKTIO_MAX_QUEUES];
-	/** RX queue locks */
-	odp_ticketlock_t rx_lock[PKTIO_MAX_QUEUES] ODP_ALIGNED_CACHE;
-	/** TX queue locks */
-	odp_ticketlock_t tx_lock[PKTIO_MAX_QUEUES] ODP_ALIGNED_CACHE;
-	/** Configuration options */
+
+	/* --- Control path data --- */
+
+	/* Configuration options */
 	dpdk_opt_t opt;
+	/* RSS configuration */
+	struct rte_eth_rss_conf rss_conf;
+	/* Maximum transmission unit */
+	uint16_t mtu;
+	/* Maximum supported MTU value */
+	uint32_t mtu_max;
+	/* DPDK MTU has been modified */
+	odp_bool_t mtu_set;
+	/* Number of TX descriptors per queue */
+	uint16_t num_tx_desc[PKTIO_MAX_QUEUES];
+
+	/* --- Locks for MT safe operations --- */
+
+	/* RX queue locks */
+	odp_ticketlock_t rx_lock[PKTIO_MAX_QUEUES] ODP_ALIGNED_CACHE;
+	/* TX queue locks */
+	odp_ticketlock_t tx_lock[PKTIO_MAX_QUEUES] ODP_ALIGNED_CACHE;
+
 } pkt_dpdk_t;
 
 ODP_STATIC_ASSERT(PKTIO_PRIVATE_SIZE >= sizeof(pkt_dpdk_t),
