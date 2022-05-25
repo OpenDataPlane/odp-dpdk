@@ -1541,6 +1541,7 @@ int _odp_crypto_term_global(void)
 	return rc;
 }
 
+#if ODP_DEPRECATED_API
 odp_crypto_compl_t odp_crypto_compl_from_event(odp_event_t ev)
 {
 	/* This check not mandated by the API specification */
@@ -1575,6 +1576,7 @@ uint64_t odp_crypto_compl_to_u64(odp_crypto_compl_t hdl)
 {
 	return _odp_pri(hdl);
 }
+#endif
 
 void odp_crypto_session_param_init(odp_crypto_session_param_t *param)
 {
@@ -2001,6 +2003,7 @@ err:
 	return -1;
 }
 
+#if ODP_DEPRECATED_API
 int odp_crypto_operation(odp_crypto_op_param_t *param,
 			 odp_bool_t *posted,
 			 odp_crypto_op_result_t *result)
@@ -2054,6 +2057,7 @@ int odp_crypto_operation(odp_crypto_op_param_t *param,
 
 	return 0;
 }
+#endif
 
 int odp_crypto_op(const odp_packet_t pkt_in[],
 		  odp_packet_t pkt_out[],

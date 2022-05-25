@@ -1,45 +1,32 @@
 /* Copyright (c) 2013-2018, Linaro Limited
- * Copyright (c) 2019-2021, Nokia
+ * Copyright (c) 2019-2022, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
  */
 
 #include <odp_posix_extensions.h>
-#include <stdio.h>
-#include <errno.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <sys/ioctl.h>
-#include <sys/mman.h>
-#include <poll.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <string.h>
-#include <stdlib.h>
-#include <inttypes.h>
 
-#include <linux/ethtool.h>
-#include <linux/sockios.h>
-
-#include <odp_align_internal.h>
-#include <odp/api/cpu.h>
 #include <odp/api/hints.h>
-#include <odp/api/system_info.h>
+#include <odp/api/packet.h>
+#include <odp/api/packet_io.h>
+#include <odp/api/pool.h>
+#include <odp/api/std_types.h>
+#include <odp/api/ticketlock.h>
+#include <odp/api/time.h>
+
+#include <odp/api/plat/packet_inlines.h>
+#include <odp/api/plat/time_inlines.h>
+
+#include <odp_classification_internal.h>
 #include <odp_debug_internal.h>
 #include <odp_errno_define.h>
-#include <odp_classification_internal.h>
-#include <odp_packet_io_internal.h>
-#include <odp_libconfig_internal.h>
-#include <odp/api/plat/packet_inlines.h>
-#include <odp/api/time.h>
-#include <odp/api/plat/time_inlines.h>
-#include <odp_packet_dpdk.h>
 #include <odp_eventdev_internal.h>
+#include <odp_libconfig_internal.h>
+#include <odp_packet_dpdk.h>
+#include <odp_packet_internal.h>
+#include <odp_packet_io_internal.h>
 #include <protocols/eth.h>
-
-#include <net/if.h>
-#include <protocols/udp.h>
 
 #include <rte_config.h>
 #if defined(__clang__)
@@ -50,6 +37,32 @@
 #include <rte_ip_frag.h>
 #include <rte_udp.h>
 #include <rte_tcp.h>
+#include <rte_version.h>
+
+#include <linux/ethtool.h>
+#include <linux/sockios.h>
+
+#include <errno.h>
+#include <fcntl.h>
+#include <inttypes.h>
+#include <net/if.h>
+#include <poll.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/ioctl.h>
+#include <sys/mman.h>
+#include <unistd.h>
+
+#if RTE_VERSION < RTE_VERSION_NUM(21, 11, 0, 0)
+	#define RTE_MBUF_F_TX_IPV4 PKT_TX_IPV4
+	#define RTE_MBUF_F_TX_IPV6 PKT_TX_IPV6
+	#define RTE_MBUF_F_TX_IP_CKSUM PKT_TX_IP_CKSUM
+	#define RTE_MBUF_F_TX_UDP_CKSUM PKT_TX_UDP_CKSUM
+	#define RTE_MBUF_F_TX_TCP_CKSUM PKT_TX_TCP_CKSUM
+#endif
 
 /* DPDK poll mode drivers requiring minimum RX burst size DPDK_MIN_RX_BURST */
 #define IXGBE_DRV_NAME "net_ixgbe"
@@ -293,7 +306,11 @@ static int dpdk_setup_eth_dev(pktio_entry_t *pktio_entry)
 	/* RX packet len same size as pool segment minus headroom and double
 	 * VLAN tag
 	 */
+#if RTE_VERSION < RTE_VERSION_NUM(21, 11, 0, 0)
 	eth_conf.rxmode.max_rx_pkt_len =
+#else
+	eth_conf.rxmode.mtu =
+#endif
 		rte_pktmbuf_data_room_size(pool->rte_mempool) -
 		2 * 4 - RTE_PKTMBUF_HEADROOM;
 
@@ -508,16 +525,18 @@ static int dpdk_init_capability(pktio_entry_t *pktio_entry,
 
 	/* Check if setting MTU is supported */
 	ret = rte_eth_dev_set_mtu(pkt_dpdk->port_id, pkt_dpdk->mtu - _ODP_ETHHDR_LEN);
-	if (ret == 0) {
+	/* From DPDK 21.11 onwards, calling rte_eth_dev_set_mtu() before device is configured with
+	 * rte_eth_dev_configure() will result in failure. The least hacky (unfortunately still
+	 * very hacky) way to continue checking the support is to take into account that the
+	 * function will fail earlier with -ENOTSUP if MTU setting is not supported by device than
+	 * if the device was not yet configured. */
+	if (ret != -ENOTSUP) {
 		capa->set_op.op.maxlen = 1;
 		capa->maxlen.equal = true;
 		capa->maxlen.min_input = DPDK_MTU_MIN;
 		capa->maxlen.max_input = pkt_dpdk->mtu_max;
 		capa->maxlen.min_output = DPDK_MTU_MIN;
 		capa->maxlen.max_output = pkt_dpdk->mtu_max;
-	} else if (ret != -ENOTSUP) {
-		ODP_ERR("Failed to set interface MTU: %d\n", ret);
-		return -1;
 	}
 
 	ptype_cnt = rte_eth_dev_get_supported_ptypes(pkt_dpdk->port_id,
@@ -624,7 +643,7 @@ static int setup_pkt_dpdk(odp_pktio_t pktio ODP_UNUSED,
 	uint32_t mtu;
 	struct rte_eth_dev_info dev_info;
 	pkt_dpdk_t * const pkt_dpdk = pkt_priv(pktio_entry);
-	int i;
+	int i, ret;
 	uint16_t port_id;
 
 	if (!rte_eth_dev_get_port_by_name(netdev, &port_id))
@@ -642,7 +661,11 @@ static int setup_pkt_dpdk(odp_pktio_t pktio ODP_UNUSED,
 	}
 
 	memset(&dev_info, 0, sizeof(struct rte_eth_dev_info));
-	rte_eth_dev_info_get(pkt_dpdk->port_id, &dev_info);
+	ret = rte_eth_dev_info_get(pkt_dpdk->port_id, &dev_info);
+	if (ret) {
+		ODP_ERR("Failed to read device info: %d\n", ret);
+		return -1;
+	}
 
 	/* Initialize runtime options */
 	if (init_options(pktio_entry, &dev_info)) {
@@ -903,101 +926,90 @@ int _odp_input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int nu
 {
 	pkt_dpdk_t * const pkt_dpdk = pkt_priv(pktio_entry);
 	uint16_t i;
+	uint16_t num_pkts = 0;
 	odp_pktin_config_opt_t pktin_cfg = pktio_entry->s.config.pktin;
-	odp_proto_layer_t parse_layer = pktio_entry->s.config.parser.layer;
 	odp_pktio_t input = pktio_entry->s.handle;
 	odp_time_t ts_val;
 	odp_time_t *ts = NULL;
 	uint16_t num_prefetch = RTE_MIN(num, NUM_RX_PREFETCH);
+	const odp_proto_layer_t layer = pktio_entry->s.parse_layer;
 
 	for (i = 0; i < num_prefetch; i++)
 		prefetch_pkt(pkt_table[i]);
 
-	if (pktio_entry->s.config.pktin.bit.ts_all ||
-	    pktio_entry->s.config.pktin.bit.ts_ptp) {
+	if (pktin_cfg.bit.ts_all || pktin_cfg.bit.ts_ptp) {
 		ts_val = odp_time_global();
 		ts = &ts_val;
 	}
 
 	for (i = 0; i < num; ++i) {
-		odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt_table[i]);
-		struct rte_mbuf *mbuf = pkt_to_mbuf(pkt_table[i]);
+		odp_packet_t pkt = pkt_table[i];
+		odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
+		struct rte_mbuf *mbuf = pkt_to_mbuf(pkt);
 
 		if (odp_likely(i + num_prefetch < num))
 			prefetch_pkt(pkt_table[i + num_prefetch]);
 
 		packet_init(pkt_hdr, input);
 
-		if (!pktio_cls_enabled(pktio_entry) && parse_layer != ODP_PROTO_LAYER_NONE) {
-			uint32_t ptypes = pkt_dpdk->supported_ptypes;
-
-			if (_odp_dpdk_packet_parse_layer(pkt_hdr, mbuf, parse_layer,
-							 ptypes, pktin_cfg)) {
-				odp_packet_free(pkt_table[i]);
+		if (layer != ODP_PROTO_LAYER_NONE) {
+			if (_odp_dpdk_packet_parse_common(&pkt_hdr->p,
+							  rte_pktmbuf_mtod(mbuf, uint8_t *),
+							  rte_pktmbuf_pkt_len(mbuf),
+							  rte_pktmbuf_data_len(mbuf),
+							  mbuf, layer,
+							  pkt_dpdk->supported_ptypes, pktin_cfg)) {
+				odp_packet_free(pkt);
 				continue;
 			}
+			if (odp_unlikely(num_pkts != i))
+				pkt_table[num_pkts] = pkt;
 		}
 		packet_set_ts(pkt_hdr, ts);
 
 		odp_prefetch(rte_pktmbuf_mtod(mbuf, char *));
+		num_pkts++;
 	}
 
 	if (pktio_cls_enabled(pktio_entry)) {
 		int failed = 0, success = 0;
 
-		for (i = 0; i < num; i++) {
-			odp_packet_t new_pkt;
+		for (i = 0; i < num_pkts; i++) {
 			odp_packet_t pkt = pkt_table[i];
 			odp_pool_t new_pool;
 			uint8_t *data;
-			odp_packet_hdr_t parsed_hdr;
 			odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
-			struct rte_mbuf *mbuf = pkt_to_mbuf(pkt);
-			uint32_t pkt_len = odp_packet_len(pkt);
-			uint32_t ptypes = pkt_dpdk->supported_ptypes;
 
 			data = odp_packet_data(pkt);
-			packet_parse_reset(&parsed_hdr, 1);
-			packet_set_len(&parsed_hdr, pkt_len);
 
-			if (_odp_dpdk_packet_parse_common(&parsed_hdr.p, data, pkt_len, pkt_len,
-							  mbuf, ODP_PROTO_LAYER_ALL, ptypes,
-							  pktin_cfg)) {
-				odp_packet_free(pkt);
-				continue;
-			}
-
-			if (_odp_cls_classify_packet(pktio_entry, data, pkt_len,
-						     pkt_len, &new_pool, &parsed_hdr, 0)) {
-				failed++;
+			if (_odp_cls_classify_packet(pktio_entry, data,
+						     &new_pool, pkt_hdr)) {
 				odp_packet_free(pkt);
 				continue;
 			}
 			if (new_pool != odp_packet_pool(pkt)) {
-				new_pkt = odp_packet_copy(pkt, new_pool);
+				odp_packet_t new_pkt = odp_packet_copy(pkt, new_pool);
 
 				odp_packet_free(pkt);
-				if (new_pkt == ODP_PACKET_INVALID) {
+				if (odp_unlikely(new_pkt == ODP_PACKET_INVALID)) {
 					failed++;
 					continue;
 				}
 				pkt_table[i] = new_pkt;
 				pkt = new_pkt;
-				pkt_hdr = packet_hdr(pkt);
 			}
-			packet_set_ts(pkt_hdr, ts);
+
 			pktio_entry->s.stats.in_octets += odp_packet_len(pkt);
-			_odp_packet_copy_cls_md(pkt_hdr, &parsed_hdr);
 			if (success != i)
 				pkt_table[success] = pkt;
 			++success;
 		}
 		pktio_entry->s.stats.in_errors += failed;
-		pktio_entry->s.stats.in_ucast_pkts += num - failed;
-		num = success;
+		pktio_entry->s.stats.in_ucast_pkts += num_pkts - failed;
+		num_pkts = success;
 	}
 
-	return num;
+	return num_pkts;
 }
 
 static int recv_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
@@ -1125,12 +1137,12 @@ static inline void pkt_set_ol_tx(odp_pktout_config_opt_t *pktout_cfg,
 	mbuf->l2_len = pkt_p->l3_offset - pkt_p->l2_offset;
 
 	if (l3_proto_v4)
-		mbuf->ol_flags = PKT_TX_IPV4;
+		mbuf->ol_flags = RTE_MBUF_F_TX_IPV4;
 	else
-		mbuf->ol_flags = PKT_TX_IPV6;
+		mbuf->ol_flags = RTE_MBUF_F_TX_IPV6;
 
 	if (ipv4_chksum_pkt) {
-		mbuf->ol_flags |=  PKT_TX_IP_CKSUM;
+		mbuf->ol_flags |=  RTE_MBUF_F_TX_IP_CKSUM;
 
 		((struct rte_ipv4_hdr *)l3_hdr)->hdr_checksum = 0;
 		mbuf->l3_len = _ODP_IPV4HDR_IHL(*(uint8_t *)l3_hdr) * 4;
@@ -1144,12 +1156,12 @@ static inline void pkt_set_ol_tx(odp_pktout_config_opt_t *pktout_cfg,
 	l4_hdr = (void *)(mbuf_data + pkt_p->l4_offset);
 
 	if (udp_chksum_pkt) {
-		mbuf->ol_flags |= PKT_TX_UDP_CKSUM;
+		mbuf->ol_flags |= RTE_MBUF_F_TX_UDP_CKSUM;
 
 		((struct rte_udp_hdr *)l4_hdr)->dgram_cksum =
 			phdr_csum(l3_proto_v4, l3_hdr, mbuf->ol_flags);
 	} else if (tcp_chksum_pkt) {
-		mbuf->ol_flags |= PKT_TX_TCP_CKSUM;
+		mbuf->ol_flags |= RTE_MBUF_F_TX_TCP_CKSUM;
 
 		((struct rte_tcp_hdr *)l4_hdr)->cksum =
 			phdr_csum(l3_proto_v4, l3_hdr, mbuf->ol_flags);

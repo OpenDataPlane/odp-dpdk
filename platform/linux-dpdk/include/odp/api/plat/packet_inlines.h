@@ -24,7 +24,7 @@ extern "C" {
 #include <odp/api/time.h>
 
 #include <odp/api/abi/buffer.h>
-#include <odp/api/abi/event.h>
+#include <odp/api/abi/event_types.h>
 #include <odp/api/abi/packet.h>
 #include <odp/api/abi/packet_io.h>
 
@@ -101,6 +101,9 @@ extern "C" {
 	#define odp_packet_seg_data_len __odp_packet_seg_data_len
 	#define odp_packet_ref_static __odp_packet_ref_static
 	#define odp_packet_has_ref __odp_packet_has_ref
+	#define odp_packet_color __odp_packet_color
+	#define odp_packet_drop_eligible __odp_packet_drop_eligible
+	#define odp_packet_shaper_len_adjust __odp_packet_shaper_len_adjust
 #else
 	#undef _ODP_INLINE
 	#define _ODP_INLINE
@@ -481,6 +484,33 @@ _ODP_INLINE odp_packet_t odp_packet_ref_static(odp_packet_t pkt)
 _ODP_INLINE int odp_packet_has_ref(odp_packet_t pkt)
 {
 	return (rte_mbuf_refcnt_read((struct rte_mbuf *)(pkt)) > 1);
+}
+
+_ODP_INLINE odp_packet_color_t odp_packet_color(odp_packet_t pkt)
+{
+	_odp_packet_input_flags_t input_flags;
+
+	input_flags.all = _odp_pkt_get(pkt, uint64_t, input_flags);
+
+	return (odp_packet_color_t)input_flags.color;
+}
+
+_ODP_INLINE odp_bool_t odp_packet_drop_eligible(odp_packet_t pkt)
+{
+	_odp_packet_input_flags_t input_flags;
+
+	input_flags.all = _odp_pkt_get(pkt, uint64_t, input_flags);
+
+	return !input_flags.nodrop;
+}
+
+_ODP_INLINE int8_t odp_packet_shaper_len_adjust(odp_packet_t pkt)
+{
+	_odp_packet_flags_t flags;
+
+	flags.all_flags = _odp_pkt_get(pkt, uint32_t, flags);
+
+	return (int8_t)flags.shaper_len_adj;
 }
 
 #ifdef __cplusplus

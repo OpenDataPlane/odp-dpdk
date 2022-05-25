@@ -38,6 +38,7 @@
 
 #include <odp/api/plat/packet_inlines.h>
 
+#include <odp_parse_internal.h>
 #include <odp_debug_internal.h>
 #include <odp_socket_common.h>
 #include <odp_packet_internal.h>
@@ -286,13 +287,26 @@ static odp_packet_t pack_odp_pkt(pktio_entry_t *pktio_entry, const void *data,
 	odp_packet_hdr_t *pkt_hdr;
 	odp_packet_hdr_t parsed_hdr;
 	int num;
+	uint64_t l4_part_sum = 0;
 	uint16_t frame_offset = pktio_entry->s.pktin_frame_offset;
+	const odp_proto_chksums_t chksums = pktio_entry->s.in_chksums;
+	const odp_proto_layer_t layer = pktio_entry->s.parse_layer;
+	const odp_pktin_config_opt_t opt = pktio_entry->s.config.pktin;
 
-	if (pktio_cls_enabled(pktio_entry)) {
-		if (_odp_cls_classify_packet(pktio_entry, data, len, len,
-					     &pkt_priv(pktio_entry)->pool,
-					     &parsed_hdr, true)) {
+	if (layer) {
+		packet_parse_reset(&parsed_hdr, 1);
+		packet_set_len(&parsed_hdr, len);
+		if (_odp_packet_parse_common(&parsed_hdr.p, data, len, len, layer,
+					     chksums, &l4_part_sum, opt) < 0) {
 			return ODP_PACKET_INVALID;
+		}
+
+		if (pktio_cls_enabled(pktio_entry)) {
+			if (_odp_cls_classify_packet(pktio_entry, data,
+						     &pkt_priv(pktio_entry)->pool,
+						     &parsed_hdr)) {
+				return ODP_PACKET_INVALID;
+			}
 		}
 	}
 
@@ -312,12 +326,12 @@ static odp_packet_t pack_odp_pkt(pktio_entry_t *pktio_entry, const void *data,
 		return ODP_PACKET_INVALID;
 	}
 
-	if (pktio_cls_enabled(pktio_entry))
+	if (layer) {
 		_odp_packet_copy_cls_md(pkt_hdr, &parsed_hdr);
-	else
-		_odp_packet_parse_layer(pkt_hdr,
-					pktio_entry->s.config.parser.layer,
-					pktio_entry->s.in_chksums);
+
+		if (layer >= ODP_PROTO_LAYER_L4)
+			_odp_packet_l4_chksum(pkt_hdr, chksums, l4_part_sum);
+	}
 
 	packet_set_ts(pkt_hdr, ts);
 	pkt_hdr->input = pktio_entry->s.handle;
@@ -335,6 +349,7 @@ static int tap_pktio_recv(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 	uint8_t buf[mtu];
 	odp_time_t ts_val;
 	odp_time_t *ts = NULL;
+	int num_rx = 0;
 
 	odp_ticketlock_lock(&pktio_entry->s.rxl);
 
@@ -355,14 +370,15 @@ static int tap_pktio_recv(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 			break;
 		}
 
-		pkts[i] = pack_odp_pkt(pktio_entry, buf, retval, ts);
-		if (pkts[i] == ODP_PACKET_INVALID)
+		pkts[num_rx] = pack_odp_pkt(pktio_entry, buf, retval, ts);
+		if (pkts[num_rx] == ODP_PACKET_INVALID)
 			break;
+		num_rx++;
 	}
 
 	odp_ticketlock_unlock(&pktio_entry->s.rxl);
 
-	return i;
+	return num_rx;
 }
 
 static int tap_pktio_send_lockless(pktio_entry_t *pktio_entry,

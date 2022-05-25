@@ -48,7 +48,9 @@ odpapiplatinclude_HEADERS = \
 		  include/odp/api/plat/sync_inlines.h \
 		  include/odp/api/plat/thread_inlines.h \
 		  include/odp/api/plat/ticketlock_inlines.h \
-		  include/odp/api/plat/time_inlines.h
+		  include/odp/api/plat/time_inlines.h \
+		  include/odp/api/plat/timer_inlines.h \
+		  include/odp/api/plat/timer_inline_types.h
 
 odpapiabiarchinclude_HEADERS += \
 		  include-abi/odp/api/abi/align.h \
@@ -64,6 +66,7 @@ odpapiabiarchinclude_HEADERS += \
 		  include-abi/odp/api/abi/dma_types.h \
 		  include-abi/odp/api/abi/errno.h \
 		  include-abi/odp/api/abi/event.h \
+		  include-abi/odp/api/abi/event_types.h \
 		  include-abi/odp/api/abi/hash.h \
 		  include-abi/odp/api/abi/init.h \
 		  include-abi/odp/api/abi/ipsec.h \
@@ -94,6 +97,7 @@ odpapiabiarchinclude_HEADERS += \
 		  include-abi/odp/api/abi/thrmask.h \
 		  include-abi/odp/api/abi/ticketlock.h \
 		  include-abi/odp/api/abi/time.h \
+		  include-abi/odp/api/abi/timer.h \
 		  include-abi/odp/api/abi/timer_types.h \
 		  include-abi/odp/api/abi/traffic_mngr.h \
 		  include-abi/odp/api/abi/version.h
@@ -121,9 +125,10 @@ noinst_HEADERS = \
 		  include/odp_packet_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_name_table_internal.h \
 		  include/odp_packet_io_internal.h \
+		  ${top_srcdir}/platform/linux-generic/include/odp_parse_internal.h \
 		  include/odp_errno_define.h \
 		  include/odp_event_internal.h \
-		  include/odp_packet_dpdk.h \
+		  ${top_srcdir}/platform/linux-generic/include/odp_packet_dpdk.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_pcapng.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_pkt_queue_internal.h \
 		  include/odp_pool_internal.h \
@@ -150,6 +155,7 @@ noinst_HEADERS = \
 		  include/odp_timer_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_timer_wheel_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_traffic_mngr_internal.h \
+		  ${top_srcdir}/platform/linux-generic/include/odp_types_internal.h \
 		  include/odp_event_vector_internal.h \
 		  include/protocols/eth.h \
 		  include/protocols/ip.h \
@@ -192,6 +198,7 @@ __LIB__libodp_dpdk_la_SOURCES = \
 			   ../linux-generic/pktio/dpdk_parse.c \
 			   odp_packet_flags.c \
 			   ../linux-generic/odp_packet_io.c \
+			   ../linux-generic/odp_parse.c \
 			   ../linux-generic/pktio/loop.c \
 			   ../linux-generic/pktio/null.c \
 			   ../linux-generic/odp_pkt_queue.c \
@@ -243,7 +250,8 @@ __LIB__libodp_dpdk_la_SOURCES += \
 			   ../linux-generic/odp_sync_api.c \
 			   ../linux-generic/odp_thread_api.c \
 			   ../linux-generic/odp_ticketlock_api.c \
-			   ../linux-generic/odp_time_api.c
+			   ../linux-generic/odp_time_api.c \
+			   ../linux-generic/odp_timer_api.c
 endif
 
 if ARCH_IS_ARM

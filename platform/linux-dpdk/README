@@ -1,5 +1,5 @@
 Copyright (c) 2018-2019, Linaro Limited
-Copyright (c) 2019-2021, Nokia
+Copyright (c) 2019-2022, Nokia
 All rights reserved.
 
 SPDX-License-Identifier:        BSD-3-Clause
@@ -23,27 +23,26 @@ Prerequisites and considerations:
   (4.15.0 kernel).
 - DPDK only works on a selected range of network cards. The list of known and
   supported devices can be found in the DPDK documentation:
-      http://doc.dpdk.org/guides-19.11/nics/index.html
-      http://doc.dpdk.org/guides-20.11/nics/index.html
+      https://doc.dpdk.org/guides/nics/index.html
 
 
 2. Preparing DPDK
 =================================================
 
-Please refer to http://dpdk.org/doc/guides/linux_gsg/build_dpdk.html for more
+Please refer to https://dpdk.org/doc/guides/linux_gsg/build_dpdk.html for more
 details on how to build DPDK. Best effort is done to provide some help on DPDK
 cmds below for Ubuntu, where it has been compiled and tested.
 
 On Ubuntu install pcap development library:
     sudo apt-get install libpcap-dev
 
-Right now odp-dpdk supports DPDK v19.11 (recommended version) and
-v20.11. v18.11 may also work.
+Right now ODP-DPDK supports DPDK v19.11 (recommended version), v20.11, and
+v21.11.
 
 Compile DPDK 19.11
 ------------------
 Fetch the DPDK code:
-    git clone http://dpdk.org/git/dpdk-stable --branch 19.11 --depth 1 ./<dpdk-dir>
+    git clone https://dpdk.org/git/dpdk-stable --branch 19.11 --depth 1 ./<dpdk-dir>
 
 This has to be done only once:
     cd <dpdk-dir>
@@ -72,10 +71,10 @@ STATIC libraries:
 
 This only ensures building DPDK, but traffic is not tested with this build yet.
 
-Compile DPDK 20.11
-------------------
+Compile DPDK from v20.11 onwards
+--------------------------------
 Fetch the DPDK code:
-    git clone http://dpdk.org/git/dpdk-stable --branch 20.11 --depth 1 ./<dpdk-dir>
+    git clone https://dpdk.org/git/dpdk-stable --branch 20.11 --depth 1 ./<dpdk-dir>
 
 Prepare the build directory:
     cd <dpdk-dir>
@@ -291,7 +290,7 @@ what it does.
 ======================================================
 
 Refer to the DPDK crypto documentation for detailed crypto PMD build instructions:
-http://dpdk.org/doc/guides/cryptodevs/index.html
+https://dpdk.org/doc/guides/cryptodevs/index.html
 
 To build odp-dpdk with DPDK virtual crypto devices, we need to build supporting
 Intel Multi-Buffer Crypto for IPsec library prior to DPDK build.

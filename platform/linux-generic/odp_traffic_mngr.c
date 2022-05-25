@@ -55,45 +55,60 @@ _odp_int_name_kind_t PROFILE_TO_HANDLE_KIND[ODP_TM_NUM_PROFILES] = {
 static const pkt_desc_t EMPTY_PKT_DESC = { .word = 0 };
 
 #define MAX_PRIORITIES ODP_TM_MAX_PRIORITIES
-#define NUM_SHAPER_COLORS ODP_NUM_SHAPER_COLORS
 
 /* Shaper BW limits in bits/sec */
 #define TM_MIN_SHAPER_BW  8000ULL
 #define TM_MAX_SHAPER_BW  (100ULL * 1000ULL * 1000ULL * 1000ULL)
 
+/* Possible values for running the shaper algorithm. TM_SHAPER_GREEN means that
+ * the traffic is within the commit specification (rate and burst size),
+ * TM_SHAPER_YELLOW means that the traffic is within the peak specification
+ * (rate and burst size) and TM_SHAPER_RED means that the traffic is exceeding
+ * both its commit and peak specifications.  Note that packets can also have an
+ * assigned packet color of ODP_PACKET_GREEN, ODP_PACKET_YELLOW or
+ * ODP_PACKET_RED, which has a different meaning and purpose than the shaper
+ * colors.
+ */
+typedef enum {
+	TM_SHAPER_GREEN, TM_SHAPER_YELLOW, TM_SHAPER_RED
+} tm_shaper_color_t;
+
+/* Number of enumeration values defined in tm_shaper_color_t type. */
+#define NUM_SHAPER_COLORS  3
+
 static const tm_prop_t basic_prop_tbl[MAX_PRIORITIES][NUM_SHAPER_COLORS] = {
 	[0] = {
-		[ODP_TM_SHAPER_GREEN] = { 0, DECR_BOTH },
-		[ODP_TM_SHAPER_YELLOW] = { 0, DECR_BOTH },
-		[ODP_TM_SHAPER_RED] = { 0, DELAY_PKT } },
+		[TM_SHAPER_GREEN] = { 0, DECR_BOTH },
+		[TM_SHAPER_YELLOW] = { 0, DECR_BOTH },
+		[TM_SHAPER_RED] = { 0, DELAY_PKT } },
 	[1] = {
-		[ODP_TM_SHAPER_GREEN] = { 1, DECR_BOTH },
-		[ODP_TM_SHAPER_YELLOW] = { 1, DECR_BOTH },
-		[ODP_TM_SHAPER_RED] = { 1, DELAY_PKT } },
+		[TM_SHAPER_GREEN] = { 1, DECR_BOTH },
+		[TM_SHAPER_YELLOW] = { 1, DECR_BOTH },
+		[TM_SHAPER_RED] = { 1, DELAY_PKT } },
 	[2] = {
-		[ODP_TM_SHAPER_GREEN] = { 2, DECR_BOTH },
-		[ODP_TM_SHAPER_YELLOW] = { 2, DECR_BOTH },
-		[ODP_TM_SHAPER_RED] = { 2, DELAY_PKT } },
+		[TM_SHAPER_GREEN] = { 2, DECR_BOTH },
+		[TM_SHAPER_YELLOW] = { 2, DECR_BOTH },
+		[TM_SHAPER_RED] = { 2, DELAY_PKT } },
 	[3] = {
-		[ODP_TM_SHAPER_GREEN] = { 3, DECR_BOTH },
-		[ODP_TM_SHAPER_YELLOW] = { 3, DECR_BOTH },
-		[ODP_TM_SHAPER_RED] = { 3, DELAY_PKT } },
+		[TM_SHAPER_GREEN] = { 3, DECR_BOTH },
+		[TM_SHAPER_YELLOW] = { 3, DECR_BOTH },
+		[TM_SHAPER_RED] = { 3, DELAY_PKT } },
 	[4] = {
-		[ODP_TM_SHAPER_GREEN] = { 4, DECR_BOTH },
-		[ODP_TM_SHAPER_YELLOW] = { 4, DECR_BOTH },
-		[ODP_TM_SHAPER_RED] = { 4, DELAY_PKT } },
+		[TM_SHAPER_GREEN] = { 4, DECR_BOTH },
+		[TM_SHAPER_YELLOW] = { 4, DECR_BOTH },
+		[TM_SHAPER_RED] = { 4, DELAY_PKT } },
 	[5] = {
-		[ODP_TM_SHAPER_GREEN] = { 5, DECR_BOTH },
-		[ODP_TM_SHAPER_YELLOW] = { 5, DECR_BOTH },
-		[ODP_TM_SHAPER_RED] = { 5, DELAY_PKT } },
+		[TM_SHAPER_GREEN] = { 5, DECR_BOTH },
+		[TM_SHAPER_YELLOW] = { 5, DECR_BOTH },
+		[TM_SHAPER_RED] = { 5, DELAY_PKT } },
 	[6] = {
-		[ODP_TM_SHAPER_GREEN] = { 6, DECR_BOTH },
-		[ODP_TM_SHAPER_YELLOW] = { 6, DECR_BOTH },
-		[ODP_TM_SHAPER_RED] = { 6, DELAY_PKT } },
+		[TM_SHAPER_GREEN] = { 6, DECR_BOTH },
+		[TM_SHAPER_YELLOW] = { 6, DECR_BOTH },
+		[TM_SHAPER_RED] = { 6, DELAY_PKT } },
 	[7] = {
-		[ODP_TM_SHAPER_GREEN] = { 7, DECR_BOTH },
-		[ODP_TM_SHAPER_YELLOW] = { 7, DECR_BOTH },
-		[ODP_TM_SHAPER_RED] = { 7, DELAY_PKT } }
+		[TM_SHAPER_GREEN] = { 7, DECR_BOTH },
+		[TM_SHAPER_YELLOW] = { 7, DECR_BOTH },
+		[TM_SHAPER_RED] = { 7, DELAY_PKT } }
 };
 
 #define MAX_SHAPER_PROFILES 128
@@ -1076,30 +1091,30 @@ static odp_bool_t run_shaper(tm_system_t     *tm_system,
 			     pkt_desc_t      *pkt_desc,
 			     uint8_t          priority)
 {
-	odp_tm_shaper_color_t shaper_color;
+	tm_shaper_color_t shaper_color;
 	tm_shaper_params_t *shaper_params;
 	odp_bool_t output_change;
 	tm_prop_t propagation;
 
 	shaper_params = shaper_obj->shaper_params;
-	shaper_color  = ODP_TM_SHAPER_GREEN;
+	shaper_color  = TM_SHAPER_GREEN;
 
 	if (shaper_params) {
 		update_shaper_elapsed_time(tm_system, shaper_params,
 					   shaper_obj);
 		if (shaper_params->enabled) {
 			if (0 < shaper_obj->commit_cnt)
-				shaper_color = ODP_TM_SHAPER_GREEN;
+				shaper_color = TM_SHAPER_GREEN;
 			else if (!shaper_params->dual_rate)
-				shaper_color = ODP_TM_SHAPER_RED;
+				shaper_color = TM_SHAPER_RED;
 			else if (shaper_obj->peak_cnt <= 0)
-				shaper_color = ODP_TM_SHAPER_RED;
+				shaper_color = TM_SHAPER_RED;
 			else
-				shaper_color = ODP_TM_SHAPER_YELLOW;
+				shaper_color = TM_SHAPER_YELLOW;
 
-			if (shaper_color == ODP_TM_SHAPER_GREEN)
+			if (shaper_color == TM_SHAPER_GREEN)
 				tm_system->shaper_green_cnt++;
-			else if (shaper_color == ODP_TM_SHAPER_YELLOW)
+			else if (shaper_color == TM_SHAPER_YELLOW)
 				tm_system->shaper_yellow_cnt++;
 			else
 				tm_system->shaper_red_cnt++;
@@ -1994,6 +2009,12 @@ static void tm_queue_cnts_decrement(tm_system_t *tm_system,
 	odp_atomic_sub_u64(&queue_cnts->byte_cnt, frame_len);
 }
 
+static inline void activate_packet_aging(odp_packet_hdr_t *pkt_hdr)
+{
+	if (odp_unlikely(pkt_hdr->p.flags.tx_aging))
+		pkt_hdr->tx_aging_ns = pkt_hdr->tx_aging_ns + odp_time_global_ns();
+}
+
 static int tm_enqueue(tm_system_t *tm_system,
 		      tm_queue_obj_t *tm_queue_obj,
 		      odp_packet_t pkt)
@@ -2028,6 +2049,7 @@ static int tm_enqueue(tm_system_t *tm_system,
 	if (tm_queue_obj->ordered_enqueue)
 		_odp_sched_fn->order_lock();
 
+	activate_packet_aging(packet_hdr(pkt));
 	rc = input_work_queue_append(tm_system, &work_item);
 
 	if (tm_queue_obj->ordered_enqueue)
@@ -2224,6 +2246,11 @@ static void tm_egress_marking(tm_system_t *tm_system, odp_packet_t odp_pkt)
 	}
 }
 
+static inline odp_bool_t is_packet_aged(odp_packet_hdr_t *pkt_hdr)
+{
+	return pkt_hdr->p.flags.tx_aging && pkt_hdr->tx_aging_ns < odp_time_global_ns();
+}
+
 static void tm_send_pkt(tm_system_t *tm_system, uint32_t max_sends)
 {
 	tm_queue_obj_t *tm_queue_obj;
@@ -2250,9 +2277,13 @@ static void tm_send_pkt(tm_system_t *tm_system, uint32_t max_sends)
 
 		tm_system->egress_pkt_desc = EMPTY_PKT_DESC;
 		if (tm_system->egress.egress_kind == ODP_TM_EGRESS_PKT_IO) {
-			ret = odp_pktout_send(tm_system->pktout, &odp_pkt, 1);
+			pktio_entry = get_pktio_entry(tm_system->pktout.pktio);
+			if (odp_unlikely(_odp_pktio_tx_aging_enabled(pktio_entry) &&
+					 is_packet_aged(packet_hdr(odp_pkt))))
+				ret = 0; /* Aged packet handled as a discard */
+			else
+				ret = odp_pktout_send(tm_system->pktout, &odp_pkt, 1);
 			if (odp_unlikely(ret != 1)) {
-				pktio_entry = get_pktio_entry(tm_system->pktout.pktio);
 				if (odp_unlikely(_odp_pktio_tx_compl_enabled(pktio_entry)))
 					_odp_pktio_allocate_and_send_tx_compl_events(pktio_entry,
 										     &odp_pkt, 1);
@@ -2581,7 +2612,11 @@ static int tm_capabilities(odp_tm_capabilities_t capabilities[],
 	cap_ptr->vlan_marking_supported        = true;
 	cap_ptr->ecn_marking_supported         = true;
 	cap_ptr->drop_prec_marking_supported   = true;
-	cap_ptr->tm_queue_threshold            = true;
+
+	cap_ptr->tm_queue_threshold.byte = true;
+	cap_ptr->tm_queue_threshold.packet = true;
+	cap_ptr->tm_queue_threshold.byte_and_packet = true;
+
 	cap_ptr->tm_queue_query_flags          = (ODP_TM_QUERY_PKT_CNT |
 						  ODP_TM_QUERY_BYTE_CNT |
 						  ODP_TM_QUERY_THRESHOLDS);
@@ -2617,7 +2652,10 @@ static int tm_capabilities(odp_tm_capabilities_t capabilities[],
 		per_level_cap->tm_node_dual_slope_supported = true;
 		per_level_cap->fair_queuing_supported       = true;
 		per_level_cap->weights_supported            = true;
-		per_level_cap->tm_node_threshold            = true;
+
+		per_level_cap->tm_node_threshold.byte = true;
+		per_level_cap->tm_node_threshold.packet = true;
+		per_level_cap->tm_node_threshold.byte_and_packet = true;
 	}
 
 	cap_ptr->queue_stats.counter.discards = 1;
@@ -2691,7 +2729,11 @@ static void tm_system_capabilities_set(odp_tm_capabilities_t *cap_ptr,
 	cap_ptr->ecn_marking_supported         = req_ptr->ecn_marking_needed;
 	cap_ptr->drop_prec_marking_supported   =
 					req_ptr->drop_prec_marking_needed;
-	cap_ptr->tm_queue_threshold            = threshold;
+
+	cap_ptr->tm_queue_threshold.byte = threshold;
+	cap_ptr->tm_queue_threshold.packet = threshold;
+	cap_ptr->tm_queue_threshold.byte_and_packet = threshold;
+
 	cap_ptr->tm_queue_query_flags          = (ODP_TM_QUERY_PKT_CNT |
 						  ODP_TM_QUERY_BYTE_CNT |
 						  ODP_TM_QUERY_THRESHOLDS);
@@ -2743,7 +2785,10 @@ static void tm_system_capabilities_set(odp_tm_capabilities_t *cap_ptr,
 		per_level_cap->tm_node_dual_slope_supported = dual_slope;
 		per_level_cap->fair_queuing_supported       = true;
 		per_level_cap->weights_supported            = true;
-		per_level_cap->tm_node_threshold            = threshold;
+
+		per_level_cap->tm_node_threshold.byte = threshold;
+		per_level_cap->tm_node_threshold.packet = threshold;
+		per_level_cap->tm_node_threshold.byte_and_packet = threshold;
 	}
 
 	cap_ptr->queue_stats.counter.discards = 1;

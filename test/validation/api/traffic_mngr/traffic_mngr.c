@@ -120,6 +120,12 @@ typedef enum {
 	SHAPER_PROFILE, SCHED_PROFILE, THRESHOLD_PROFILE, WRED_PROFILE
 } profile_kind_t;
 
+typedef enum {
+	THRESHOLD_BYTE,
+	THRESHOLD_PACKET,
+	THRESHOLD_BYTE_AND_PACKET
+} threshold_type_t;
+
 typedef struct {
 	uint32_t       num_queues;
 	odp_tm_queue_t tm_queues[];
@@ -516,6 +522,7 @@ static int open_pktios(void)
 	uint32_t          iface;
 	char              pool_name[ODP_POOL_NAME_LEN];
 	int               rc, ret;
+	int pkt_aging = 0;
 	int lso = 0;
 
 	odp_pool_param_init(&pool_param);
@@ -620,6 +627,12 @@ static int open_pktios(void)
 
 	odp_pktio_config_init(&pktio_config);
 
+	/* Enable packet aging if supported */
+	if (xmt_pktio_capa.max_tx_aging_tmo_ns) {
+		pkt_aging = 1;
+		pktio_config.pktout.bit.aging_ena = 1;
+	}
+
 	/* Enable LSO if supported */
 	if (xmt_pktio_capa.lso.max_profiles && xmt_pktio_capa.lso.max_profiles_per_pktio) {
 		lso = 1;
@@ -627,7 +640,7 @@ static int open_pktios(void)
 	}
 
 	/* Enable selected features */
-	if (lso) {
+	if (lso || pkt_aging) {
 		if (odp_pktio_config(xmt_pktio, &pktio_config)) {
 			ODPH_ERR("pktio configure failed\n");
 			return -1;
@@ -693,15 +706,16 @@ static int get_unique_id(odp_packet_t odp_pkt,
 		/* For IPv4 pkts use the ident field to store the unique_id. */
 		ident_offset = l3_offset + offsetof(odph_ipv4hdr_t, id);
 
-		odp_packet_copy_to_mem(odp_pkt, ident_offset, 2, &be_ip_ident);
+		CU_ASSERT_FATAL(odp_packet_copy_to_mem(odp_pkt, ident_offset, 2,
+						       &be_ip_ident) == 0);
 		unique_id = odp_be_to_cpu_16(be_ip_ident);
 		is_ipv4   = true;
 	} else if (odp_packet_has_ipv6(odp_pkt)) {
 		/* For IPv6 pkts use the flow field to store the unique_id. */
 		flow_offset = l3_offset + offsetof(odph_ipv6hdr_t, ver_tc_flow);
 
-		odp_packet_copy_to_mem(odp_pkt, flow_offset, 4,
-				       &be_ver_tc_flow);
+		CU_ASSERT_FATAL(odp_packet_copy_to_mem(odp_pkt, flow_offset, 4,
+						       &be_ver_tc_flow) == 0);
 		ver_tc_flow = odp_be_to_cpu_32(be_ver_tc_flow);
 		unique_id   = ver_tc_flow & ODPH_IPV6HDR_FLOW_LABEL_MASK;
 		is_ipv4     = false;
@@ -1818,11 +1832,15 @@ set_reqs_based_on_capas(odp_tm_requirements_t *req)
 		req->tm_queue_dual_slope_needed = true;
 	if (tm_capabilities.vlan_marking_supported)
 		req->vlan_marking_needed = true;
-	if (tm_capabilities.tm_queue_threshold)
+	if (tm_capabilities.tm_queue_threshold.byte ||
+	    tm_capabilities.tm_queue_threshold.packet ||
+	    tm_capabilities.tm_queue_threshold.byte_and_packet)
 		req->tm_queue_threshold_needed = true;
 
 	for (j = 0; j < tm_capabilities.max_levels; j++) {
-		if (tm_capabilities.per_level[j].tm_node_threshold)
+		if (tm_capabilities.per_level[j].tm_node_threshold.byte ||
+		    tm_capabilities.per_level[j].tm_node_threshold.packet ||
+		    tm_capabilities.per_level[j].tm_node_threshold.byte_and_packet)
 			req->per_level[j].tm_node_threshold_needed = true;
 	}
 
@@ -2638,7 +2656,8 @@ static void traffic_mngr_test_sched_profile(void)
 }
 
 static void check_threshold_profile(char    *threshold_name,
-				    uint32_t threshold_idx)
+				    uint32_t threshold_idx,
+				    threshold_type_t threshold)
 {
 	odp_tm_threshold_params_t threshold_params;
 	odp_tm_threshold_t        profile;
@@ -2657,15 +2676,17 @@ static void check_threshold_profile(char    *threshold_name,
 	if (ret)
 		return;
 
-	CU_ASSERT(threshold_params.max_pkts  ==
-				  threshold_idx * MIN_PKT_THRESHOLD);
-	CU_ASSERT(threshold_params.max_bytes ==
-				  threshold_idx * MIN_BYTE_THRESHOLD);
-	CU_ASSERT(threshold_params.enable_max_pkts  == 1);
-	CU_ASSERT(threshold_params.enable_max_bytes == 1);
+	if (threshold == THRESHOLD_PACKET || threshold == THRESHOLD_BYTE_AND_PACKET) {
+		CU_ASSERT(threshold_params.enable_max_pkts  == 1);
+		CU_ASSERT(threshold_params.max_pkts  == threshold_idx * MIN_PKT_THRESHOLD);
+	}
+	if (threshold == THRESHOLD_BYTE || threshold == THRESHOLD_BYTE_AND_PACKET) {
+		CU_ASSERT(threshold_params.enable_max_bytes == 1);
+		CU_ASSERT(threshold_params.max_bytes == threshold_idx * MIN_BYTE_THRESHOLD);
+	}
 }
 
-static void traffic_mngr_test_threshold_profile(void)
+static void traffic_mngr_test_threshold_profile(threshold_type_t threshold)
 {
 	odp_tm_threshold_params_t threshold_params;
 	odp_tm_threshold_t        profile;
@@ -2673,14 +2694,19 @@ static void traffic_mngr_test_threshold_profile(void)
 	char                      threshold_name[TM_NAME_LEN];
 
 	odp_tm_threshold_params_init(&threshold_params);
-	threshold_params.enable_max_pkts  = 1;
-	threshold_params.enable_max_bytes = 1;
+
+	if (threshold == THRESHOLD_PACKET || threshold == THRESHOLD_BYTE_AND_PACKET)
+		threshold_params.enable_max_pkts  = 1;
+	if (threshold == THRESHOLD_BYTE || threshold == THRESHOLD_BYTE_AND_PACKET)
+		threshold_params.enable_max_bytes = 1;
 
 	for (idx = 1; idx <= NUM_THRESH_TEST_PROFILES; idx++) {
 		snprintf(threshold_name, sizeof(threshold_name),
 			 "threshold_profile_%" PRIu32, idx);
-		threshold_params.max_pkts  = idx * MIN_PKT_THRESHOLD;
-		threshold_params.max_bytes = idx * MIN_BYTE_THRESHOLD;
+		if (threshold == THRESHOLD_PACKET || threshold == THRESHOLD_BYTE_AND_PACKET)
+			threshold_params.max_pkts = idx * MIN_PKT_THRESHOLD;
+		if (threshold == THRESHOLD_BYTE || threshold == THRESHOLD_BYTE_AND_PACKET)
+			threshold_params.max_bytes = idx * MIN_BYTE_THRESHOLD;
 
 		profile = odp_tm_threshold_create(threshold_name,
 						  &threshold_params);
@@ -2702,8 +2728,28 @@ static void traffic_mngr_test_threshold_profile(void)
 		threshold_idx = ((3 + 7 * idx) % NUM_THRESH_TEST_PROFILES) + 1;
 		snprintf(threshold_name, sizeof(threshold_name),
 			 "threshold_profile_%" PRIu32, threshold_idx);
-		check_threshold_profile(threshold_name, threshold_idx);
+		check_threshold_profile(threshold_name, threshold_idx, threshold);
 	}
+
+	for (i = 0; i < NUM_THRESH_TEST_PROFILES; i++) {
+		CU_ASSERT(odp_tm_threshold_destroy(threshold_profiles[i]) == 0);
+		num_threshold_profiles--;
+	}
+}
+
+static void traffic_mngr_test_threshold_profile_byte(void)
+{
+	traffic_mngr_test_threshold_profile(THRESHOLD_BYTE);
+}
+
+static void traffic_mngr_test_threshold_profile_packet(void)
+{
+	traffic_mngr_test_threshold_profile(THRESHOLD_PACKET);
+}
+
+static void traffic_mngr_test_threshold_profile_byte_and_packet(void)
+{
+	traffic_mngr_test_threshold_profile(THRESHOLD_BYTE_AND_PACKET);
 }
 
 static void check_wred_profile(char    *wred_name,
@@ -3353,6 +3399,7 @@ static int test_sched_wfq(const char         *sched_base_name,
 		if (FANIN_RATIO <= fanin)
 			fanin = 0;
 	}
+	CU_ASSERT(pkts_sent == pkt_cnt + 4);
 
 	busy_wait(1000000);   /* wait 1 millisecond */
 
@@ -3433,7 +3480,8 @@ static int test_threshold(const char *threshold_name,
 	odp_tm_threshold_params_t threshold_params;
 	odp_tm_queue_t            tm_queue;
 	pkt_info_t                pkt_info;
-	uint32_t                  num_pkts, pkt_len, pkts_sent;
+	uint32_t                  pkt_len, pkts_sent;
+	uint32_t                  num_pkts = 0;
 
 	odp_tm_threshold_params_init(&threshold_params);
 	if (max_pkts != 0) {
@@ -3442,15 +3490,18 @@ static int test_threshold(const char *threshold_name,
 		threshold_params.enable_max_pkts = true;
 		num_pkts = 2 * max_pkts;
 		pkt_len  = 256;
-	} else if (max_bytes != 0) {
+	}
+
+	if (max_bytes != 0) {
 		max_bytes = MIN(max_bytes, MAX_PKTS * MAX_PAYLOAD / 3);
 		threshold_params.max_bytes        = max_bytes;
 		threshold_params.enable_max_bytes = true;
 		num_pkts = 2 * max_bytes / MAX_PAYLOAD;
 		pkt_len  = MAX_PAYLOAD;
-	} else {
-		return -1;
 	}
+
+	if (max_pkts == 0 && max_bytes == 0)
+		return -1;
 
 	/* Pick a tm_queue and set the tm_queue's threshold profile and then
 	 * send in twice the amount of traffic as suggested by the thresholds
@@ -4366,6 +4417,40 @@ static int test_fanin_info(const char *node_name)
 	return walk_tree_backwards(node_desc->node);
 }
 
+static void test_packet_aging(uint64_t tmo_ns, uint32_t pkt_len, odp_bool_t is_dropping)
+{
+	odp_tm_queue_t tm_queue;
+	const char *node_name = "node_1_1_1";
+	const char *shaper_name = "test_shaper";
+	const uint64_t rate = 256 * 1000;
+	pkt_info_t pkt_info;
+	const uint16_t num_pkts = 4;
+	int recv_pkts;
+
+	tm_queue = find_tm_queue(0, node_name, 0);
+	CU_ASSERT_FATAL(tm_queue != ODP_TM_INVALID);
+	init_xmt_pkts(&pkt_info);
+	pkt_info.drop_eligible = false;
+	pkt_info.pkt_class = 1;
+	CU_ASSERT_FATAL(make_pkts(num_pkts, pkt_len, &pkt_info) == 0);
+
+	for (int i = 0; i < num_pkts; i++)
+		odp_packet_aging_tmo_set(xmt_pkts[i], tmo_ns);
+
+	CU_ASSERT_FATAL(set_shaper(node_name, shaper_name, rate, rate) == 0);
+	CU_ASSERT(send_pkts(tm_queue, num_pkts) == num_pkts);
+	recv_pkts = receive_pkts(odp_tm_systems[0], rcv_pktin, num_pkts, MBPS);
+
+	if (is_dropping)
+		CU_ASSERT(recv_pkts < num_pkts)
+	else
+		CU_ASSERT(recv_pkts == num_pkts);
+
+	set_shaper(node_name, NULL, 0, 0);
+	flush_leftover_pkts(odp_tm_systems[0], rcv_pktin);
+	CU_ASSERT(odp_tm_is_idle(odp_tm_systems[0]));
+}
+
 static void traffic_mngr_test_default_values(void)
 {
 	odp_tm_requirements_t req;
@@ -4517,23 +4602,49 @@ static void traffic_mngr_test_scheduler(void)
 				 INCREASING_WEIGHTS) == 0);
 }
 
-static int traffic_mngr_check_thresholds(void)
+static int traffic_mngr_check_thresholds_byte(void)
 {
-	/* Check only for tm queue threshold support as
-	 * we only test queue threshold.
-	 */
-	if (!tm_capabilities.tm_queue_threshold)
+	/* Check only for TM queue threshold support as we only test queue threshold. */
+	if (!tm_capabilities.tm_queue_threshold.byte)
 		return ODP_TEST_INACTIVE;
 
 	return ODP_TEST_ACTIVE;
 }
 
-static void traffic_mngr_test_thresholds(void)
+static int traffic_mngr_check_thresholds_packet(void)
 {
-	CU_ASSERT(test_threshold("thresh_A", "shaper_A", "node_1_2_1", 0,
-				 16, 0)    == 0);
-	CU_ASSERT(test_threshold("thresh_B", "shaper_B", "node_1_2_1", 1,
+	/* Check only for TM queue threshold support as we only test queue threshold. */
+	if (!tm_capabilities.tm_queue_threshold.packet)
+		return ODP_TEST_INACTIVE;
+
+	return ODP_TEST_ACTIVE;
+}
+
+static int traffic_mngr_check_thresholds_byte_and_packet(void)
+{
+	/* Check only for TM queue threshold support as we only test queue threshold. */
+	if (!tm_capabilities.tm_queue_threshold.byte_and_packet)
+		return ODP_TEST_INACTIVE;
+
+	return ODP_TEST_ACTIVE;
+}
+
+static void traffic_mngr_test_thresholds_byte(void)
+{
+	CU_ASSERT(test_threshold("thresh_byte", "shaper_B", "node_1_2_1", 1,
 				 0,  6400) == 0);
+}
+
+static void traffic_mngr_test_thresholds_packet(void)
+{
+	CU_ASSERT(test_threshold("thresh_packet", "shaper_A", "node_1_2_1", 0,
+				 16, 0) == 0);
+}
+
+static void traffic_mngr_test_thresholds_byte_and_packet(void)
+{
+	CU_ASSERT(test_threshold("thresh_byte_and_packet", "shaper_A", "node_1_2_1", 0,
+				 16, 6400) == 0);
 }
 
 static int traffic_mngr_check_queue_stats(void)
@@ -4617,7 +4728,8 @@ static int traffic_mngr_check_wred(void)
 static int traffic_mngr_check_byte_wred(void)
 {
 	/* Check if wred is part of created odp_tm_t capabilities */
-	if (!tm_capabilities.tm_queue_wred_supported)
+	if (!tm_capabilities.tm_queue_wred_supported ||
+	    !tm_capabilities.tm_queue_threshold.byte)
 		return ODP_TEST_INACTIVE;
 
 	if ((tm_shaper_min_rate > 64 * 1000) ||
@@ -4631,7 +4743,8 @@ static int traffic_mngr_check_byte_wred(void)
 static int traffic_mngr_check_pkt_wred(void)
 {
 	/* Check if wred is part of created odp_tm_t capabilities */
-	if (!tm_capabilities.tm_queue_wred_supported)
+	if (!tm_capabilities.tm_queue_wred_supported ||
+	    !tm_capabilities.tm_queue_threshold.packet)
 		return ODP_TEST_INACTIVE;
 
 	if ((tm_shaper_min_rate > 64 * 1000) ||
@@ -4772,6 +4885,23 @@ static void traffic_mngr_test_ecn_drop_prec_marking(void)
 	CU_ASSERT(ip_marking_tests("node_1_4_2", true, true) == 0);
 }
 
+static int traffic_mngr_check_tx_aging(void)
+{
+	return xmt_pktio_capa.max_tx_aging_tmo_ns ? ODP_TEST_ACTIVE : ODP_TEST_INACTIVE;
+}
+
+static void traffic_mngr_test_tx_aging_no_drop(void)
+{
+	/* Set very long aging tmo, packets should not be dropped due to aging */
+	test_packet_aging(60000000000, 128, false);
+}
+
+static void traffic_mngr_test_tx_aging_drop(void)
+{
+	/* Set very short aging tmo, there should be drops due to aging */
+	test_packet_aging(10, MAX_PAYLOAD, true);
+}
+
 static void traffic_mngr_test_fanin_info(void)
 {
 	CU_ASSERT(test_fanin_info("node_1")     == 0);
@@ -4845,16 +4975,24 @@ odp_testinfo_t traffic_mngr_suite[] = {
 	ODP_TEST_INFO(traffic_mngr_test_tm_create),
 	ODP_TEST_INFO(traffic_mngr_test_shaper_profile),
 	ODP_TEST_INFO(traffic_mngr_test_sched_profile),
-	ODP_TEST_INFO_CONDITIONAL(traffic_mngr_test_threshold_profile,
-				  traffic_mngr_check_thresholds),
+	ODP_TEST_INFO_CONDITIONAL(traffic_mngr_test_threshold_profile_byte,
+				  traffic_mngr_check_thresholds_byte),
+	ODP_TEST_INFO_CONDITIONAL(traffic_mngr_test_threshold_profile_packet,
+				  traffic_mngr_check_thresholds_packet),
+	ODP_TEST_INFO_CONDITIONAL(traffic_mngr_test_threshold_profile_byte_and_packet,
+				  traffic_mngr_check_thresholds_byte_and_packet),
 	ODP_TEST_INFO_CONDITIONAL(traffic_mngr_test_wred_profile,
 				  traffic_mngr_check_wred),
 	ODP_TEST_INFO_CONDITIONAL(traffic_mngr_test_shaper,
 				  traffic_mngr_check_shaper),
 	ODP_TEST_INFO_CONDITIONAL(traffic_mngr_test_scheduler,
 				  traffic_mngr_check_scheduler),
-	ODP_TEST_INFO_CONDITIONAL(traffic_mngr_test_thresholds,
-				  traffic_mngr_check_thresholds),
+	ODP_TEST_INFO_CONDITIONAL(traffic_mngr_test_thresholds_byte,
+				  traffic_mngr_check_thresholds_byte),
+	ODP_TEST_INFO_CONDITIONAL(traffic_mngr_test_thresholds_packet,
+				  traffic_mngr_check_thresholds_packet),
+	ODP_TEST_INFO_CONDITIONAL(traffic_mngr_test_thresholds_byte_and_packet,
+				  traffic_mngr_check_thresholds_byte_and_packet),
 	ODP_TEST_INFO_CONDITIONAL(traffic_mngr_test_byte_wred,
 				  traffic_mngr_check_byte_wred),
 	ODP_TEST_INFO_CONDITIONAL(traffic_mngr_test_pkt_wred,
@@ -4871,6 +5009,10 @@ odp_testinfo_t traffic_mngr_suite[] = {
 				  traffic_mngr_check_drop_prec_marking),
 	ODP_TEST_INFO_CONDITIONAL(traffic_mngr_test_ecn_drop_prec_marking,
 				  traffic_mngr_check_ecn_drop_prec_marking),
+	ODP_TEST_INFO_CONDITIONAL(traffic_mngr_test_tx_aging_no_drop,
+				  traffic_mngr_check_tx_aging),
+	ODP_TEST_INFO_CONDITIONAL(traffic_mngr_test_tx_aging_drop,
+				  traffic_mngr_check_tx_aging),
 	ODP_TEST_INFO(traffic_mngr_test_fanin_info),
 	ODP_TEST_INFO_CONDITIONAL(traffic_mngr_test_lso_ipv4, traffic_mngr_check_lso_ipv4),
 	ODP_TEST_INFO(traffic_mngr_test_destroy),

@@ -57,12 +57,14 @@
 #include <rte_string_fns.h>
 #include <rte_version.h>
 
-#if RTE_VERSION < RTE_VERSION_NUM(19, 8, 0, 0)
-	#define rte_ether_addr ether_addr
-	#define rte_ipv4_hdr   ipv4_hdr
-	#define rte_ipv6_hdr   ipv6_hdr
-	#define rte_tcp_hdr    tcp_hdr
-	#define rte_udp_hdr    udp_hdr
+#if RTE_VERSION < RTE_VERSION_NUM(21, 11, 0, 0)
+	#define RTE_MBUF_F_RX_RSS_HASH PKT_RX_RSS_HASH
+	#define RTE_MBUF_F_TX_IPV4 PKT_TX_IPV4
+	#define RTE_MBUF_F_TX_IPV6 PKT_TX_IPV6
+	#define RTE_MBUF_F_TX_IP_CKSUM PKT_TX_IP_CKSUM
+	#define RTE_MBUF_F_TX_UDP_CKSUM PKT_TX_UDP_CKSUM
+	#define RTE_MBUF_F_TX_TCP_CKSUM PKT_TX_TCP_CKSUM
+	#define RTE_MEMPOOL_REGISTER_OPS MEMPOOL_REGISTER_OPS
 #endif
 
 /* NUMA is not supported on all platforms */
@@ -72,17 +74,7 @@
 #define numa_num_configured_nodes() 1
 #endif
 
-#if RTE_VERSION < RTE_VERSION_NUM(17, 5, 0, 0)
-#define rte_log_set_global_level rte_set_log_level
-#endif
-
-/* Release notes v19.11: "Changed the mempool allocation behaviour
- * so that objects no longer cross pages by default" */
-#if RTE_VERSION >= RTE_VERSION_NUM(19, 11, 0, 0)
-#define MEMPOOL_FLAGS MEMPOOL_F_NO_IOVA_CONTIG
-#else
 #define MEMPOOL_FLAGS 0
-#endif
 
 #if _ODP_DPDK_ZERO_COPY
 ODP_STATIC_ASSERT(CONFIG_PACKET_HEADROOM == RTE_PKTMBUF_HEADROOM,
@@ -107,11 +99,7 @@ ODP_STATIC_ASSERT((DPDK_NB_MBUF % DPDK_MEMPOOL_CACHE_SIZE == 0) &&
 #define DPDK_MIN_RX_BURST 4
 
 /* Limits for setting link MTU */
-#if RTE_VERSION >= RTE_VERSION_NUM(19, 11, 0, 0)
 #define DPDK_MTU_MIN (RTE_ETHER_MIN_MTU + _ODP_ETHHDR_LEN)
-#else
-#define DPDK_MTU_MIN (68 + _ODP_ETHHDR_LEN)
-#endif
 #define DPDK_MTU_MAX (9000 + _ODP_ETHHDR_LEN)
 
 /** DPDK runtime configuration options */
@@ -334,12 +322,16 @@ static void pktmbuf_init(struct rte_mempool *mp, void *opaque_arg ODP_UNUSED,
 static struct rte_mempool *mbuf_pool_create(const char *name,
 					    pool_t *pool_entry)
 {
+	odp_shm_info_t shm_info;
 	struct rte_mempool *mp = NULL;
 	struct rte_pktmbuf_pool_private mbp_priv;
 	struct rte_mempool_objsz sz;
 	unsigned int elt_size = pool_entry->dpdk_elt_size;
-	unsigned int num = pool_entry->num;
+	unsigned int num = pool_entry->num, populated = 0;
 	uint32_t total_size;
+	uint64_t page_size, offset = 0, remainder = 0;
+	uint8_t *addr;
+	int ret;
 
 	if (!(pool_entry->mem_from_huge_pages)) {
 		ODP_ERR("DPDK requires memory is allocated from huge pages\n");
@@ -348,11 +340,17 @@ static struct rte_mempool *mbuf_pool_create(const char *name,
 
 	if (pool_entry->seg_len < RTE_MBUF_DEFAULT_BUF_SIZE) {
 		ODP_ERR("Some NICs need at least %dB buffers to not segment "
-			 "standard ethernet frames. Increase pool seg_len.\n",
-			 RTE_MBUF_DEFAULT_BUF_SIZE);
+			"standard ethernet frames. Increase pool seg_len.\n",
+			RTE_MBUF_DEFAULT_BUF_SIZE);
 		goto fail;
 	}
 
+	if (odp_shm_info(pool_entry->shm, &shm_info)) {
+		ODP_ERR("Failed to query SHM info.\n");
+		goto fail;
+	}
+
+	page_size = shm_info.page_size;
 	total_size = rte_mempool_calc_obj_size(elt_size, MEMPOOL_FLAGS, &sz);
 	if (total_size != pool_entry->block_size) {
 		ODP_ERR("DPDK pool block size not matching to ODP pool: "
@@ -361,10 +359,7 @@ static struct rte_mempool *mbuf_pool_create(const char *name,
 		goto fail;
 	}
 
-	/* Skipped buffers have to be taken into account to populate pool
-	 * properly. */
-	mp = rte_mempool_create_empty(name, num + pool_entry->skipped_blocks,
-				      elt_size, cache_size(num),
+	mp = rte_mempool_create_empty(name, num, elt_size, cache_size(num),
 				      sizeof(struct rte_pktmbuf_pool_private),
 				      rte_socket_id(), MEMPOOL_FLAGS);
 	if (mp == NULL) {
@@ -380,16 +375,34 @@ static struct rte_mempool *mbuf_pool_create(const char *name,
 	}
 
 	mbp_priv.mbuf_data_room_size = pool_entry->headroom +
-			pool_entry->seg_len;
+			pool_entry->seg_len + pool_entry->tailroom;
 	mbp_priv.mbuf_priv_size = RTE_ALIGN(sizeof(odp_packet_hdr_t),
 					    RTE_MBUF_PRIV_ALIGN);
 	rte_pktmbuf_pool_init(mp, &mbp_priv);
 
-	num = rte_mempool_populate_iova(mp, (char *)pool_entry->base_addr,
-					RTE_BAD_IOVA, pool_entry->shm_size,
-					NULL, NULL);
-	if (num <= 0) {
-		ODP_ERR("Failed to populate mempool: %d\n", num);
+	/* DPDK expects buffers that would be crossing a hugepage boundary to be aligned to the
+	 * boundary. This isn't the case with ODP pools as boundary-crossing buffers are skipped
+	 * and unused but still part of the pool. Thus, populate the mempool with several virtually
+	 * and physically contiguous chunks as dictated by the skipped buffers. */
+	for (uint64_t i = 0; i < pool_entry->shm_size; i += page_size) {
+		remainder = (page_size - offset) % total_size;
+		addr = pool_entry->base_addr + i + offset;
+		ret = rte_mempool_populate_iova(mp, (char *)addr, rte_mem_virt2iova(addr),
+						page_size - remainder - offset,
+						NULL, NULL);
+
+		if (ret <= 0) {
+			ODP_ERR("Failed to populate mempool: %d\n", ret);
+			goto fail;
+		}
+
+		populated += ret;
+		offset = remainder ? total_size - remainder : 0;
+	}
+
+	if (populated != num) {
+		ODP_ERR("Failed to populate mempool with all requested blocks, populated: %u, "
+			"requested: %u\n", populated, num);
 		goto fail;
 	}
 
@@ -556,7 +569,7 @@ static struct rte_mempool_ops odp_pool_ops = {
 	.get_count = pool_get_count
 };
 
-MEMPOOL_REGISTER_OPS(odp_pool_ops)
+RTE_MEMPOOL_REGISTER_OPS(odp_pool_ops)
 
 static inline int mbuf_to_pkt(pktio_entry_t *pktio_entry,
 			      odp_packet_t pkt_table[],
@@ -574,9 +587,9 @@ static inline int mbuf_to_pkt(pktio_entry_t *pktio_entry,
 	pkt_dpdk_t *pkt_dpdk = pkt_priv(pktio_entry);
 	odp_pool_t pool = pkt_dpdk->pool;
 	odp_pktin_config_opt_t pktin_cfg = pktio_entry->s.config.pktin;
-	odp_proto_layer_t parse_layer = pktio_entry->s.config.parser.layer;
 	odp_pktio_t input = pktio_entry->s.handle;
 	uint16_t frame_offset = pktio_entry->s.pktin_frame_offset;
+	const odp_proto_layer_t layer = pktio_entry->s.parse_layer;
 
 	/* Allocate maximum sized packets */
 	max_len = pkt_dpdk->data_room;
@@ -591,8 +604,6 @@ static inline int mbuf_to_pkt(pktio_entry_t *pktio_entry,
 	}
 
 	for (i = 0; i < num; i++) {
-		odp_packet_hdr_t parsed_hdr;
-
 		mbuf = mbuf_table[i];
 		if (odp_unlikely(mbuf->nb_segs != 1)) {
 			ODP_ERR("Segmented buffers not supported\n");
@@ -603,31 +614,33 @@ static inline int mbuf_to_pkt(pktio_entry_t *pktio_entry,
 		odp_prefetch(data);
 
 		pkt_len = rte_pktmbuf_pkt_len(mbuf);
+		pkt     = pkt_table[i];
+		pkt_hdr = packet_hdr(pkt);
 
-		if (pktio_cls_enabled(pktio_entry)) {
+		if (layer) {
 			uint32_t supported_ptypes = pkt_dpdk->supported_ptypes;
 
-			packet_parse_reset(&parsed_hdr, 1);
-			packet_set_len(&parsed_hdr, pkt_len);
-			if (_odp_dpdk_packet_parse_common(&parsed_hdr.p, data,
-							  pkt_len, pkt_len,
-							  mbuf,
-							  ODP_PROTO_LAYER_ALL,
-							  supported_ptypes,
+			packet_parse_reset(pkt_hdr, 1);
+			if (_odp_dpdk_packet_parse_common(&pkt_hdr->p, data,
+							  pkt_len, pkt_len, mbuf,
+							  layer, supported_ptypes,
 							  pktin_cfg)) {
 				odp_packet_free(pkt_table[i]);
 				rte_pktmbuf_free(mbuf);
 				continue;
 			}
-			if (_odp_cls_classify_packet(pktio_entry,
-						     (const uint8_t *)data,
-						     pkt_len, pkt_len, &pool,
-						     &parsed_hdr, false))
-				goto fail;
+
+			if (pktio_cls_enabled(pktio_entry)) {
+				if (_odp_cls_classify_packet(pktio_entry,
+							     (const uint8_t *)data,
+							     &pool, pkt_hdr)) {
+					odp_packet_free(pkt_table[i]);
+					rte_pktmbuf_free(mbuf);
+					continue;
+				}
+			}
 		}
 
-		pkt     = pkt_table[i];
-		pkt_hdr = packet_hdr(pkt);
 		pull_tail(pkt_hdr, max_len - pkt_len);
 		if (frame_offset)
 			pull_head(pkt_hdr, frame_offset);
@@ -637,22 +650,7 @@ static inline int mbuf_to_pkt(pktio_entry_t *pktio_entry,
 
 		pkt_hdr->input = input;
 
-		if (pktio_cls_enabled(pktio_entry)) {
-			_odp_packet_copy_cls_md(pkt_hdr, &parsed_hdr);
-		} else if (parse_layer != ODP_PROTO_LAYER_NONE) {
-			uint32_t supported_ptypes = pkt_dpdk->supported_ptypes;
-
-			if (_odp_dpdk_packet_parse_layer(pkt_hdr, mbuf,
-							 parse_layer,
-							 supported_ptypes,
-							 pktin_cfg)) {
-				odp_packet_free(pkt);
-				rte_pktmbuf_free(mbuf);
-				continue;
-			}
-		}
-
-		if (mbuf->ol_flags & PKT_RX_RSS_HASH)
+		if (mbuf->ol_flags & RTE_MBUF_F_RX_RSS_HASH)
 			packet_set_flow_hash(pkt_hdr, mbuf->hash.rss);
 
 		packet_set_ts(pkt_hdr, ts);
@@ -753,12 +751,12 @@ static inline void pkt_set_ol_tx(odp_pktout_config_opt_t *pktout_cfg,
 	mbuf->l2_len = pkt_p->l3_offset - pkt_p->l2_offset;
 
 	if (l3_proto_v4)
-		mbuf->ol_flags = PKT_TX_IPV4;
+		mbuf->ol_flags = RTE_MBUF_F_TX_IPV4;
 	else
-		mbuf->ol_flags = PKT_TX_IPV6;
+		mbuf->ol_flags = RTE_MBUF_F_TX_IPV6;
 
 	if (ipv4_chksum_pkt) {
-		mbuf->ol_flags |=  PKT_TX_IP_CKSUM;
+		mbuf->ol_flags |=  RTE_MBUF_F_TX_IP_CKSUM;
 
 		((struct rte_ipv4_hdr *)l3_hdr)->hdr_checksum = 0;
 		mbuf->l3_len = _ODP_IPV4HDR_IHL(*(uint8_t *)l3_hdr) * 4;
@@ -772,12 +770,12 @@ static inline void pkt_set_ol_tx(odp_pktout_config_opt_t *pktout_cfg,
 	l4_hdr = (void *)(mbuf_data + pkt_p->l4_offset);
 
 	if (udp_chksum_pkt) {
-		mbuf->ol_flags |= PKT_TX_UDP_CKSUM;
+		mbuf->ol_flags |= RTE_MBUF_F_TX_UDP_CKSUM;
 
 		((struct rte_udp_hdr *)l4_hdr)->dgram_cksum =
 			phdr_csum(l3_proto_v4, l3_hdr, mbuf->ol_flags);
 	} else if (tcp_chksum_pkt) {
-		mbuf->ol_flags |= PKT_TX_TCP_CKSUM;
+		mbuf->ol_flags |= RTE_MBUF_F_TX_TCP_CKSUM;
 
 		((struct rte_tcp_hdr *)l4_hdr)->cksum =
 			phdr_csum(l3_proto_v4, l3_hdr, mbuf->ol_flags);
@@ -863,9 +861,9 @@ static inline int mbuf_to_pkt_zero(pktio_entry_t *pktio_entry,
 	int i, nb_pkts;
 	odp_pool_t pool;
 	odp_pktin_config_opt_t pktin_cfg;
-	odp_proto_layer_t parse_layer;
 	odp_pktio_t input;
 	pkt_dpdk_t *pkt_dpdk;
+	const odp_proto_layer_t layer = pktio_entry->s.parse_layer;
 
 	prefetch_pkt(mbuf_table[0]);
 
@@ -874,15 +872,12 @@ static inline int mbuf_to_pkt_zero(pktio_entry_t *pktio_entry,
 	pool = pkt_dpdk->pool;
 	set_flow_hash = pkt_dpdk->opt.set_flow_hash;
 	pktin_cfg = pktio_entry->s.config.pktin;
-	parse_layer = pktio_entry->s.config.parser.layer;
 	input = pktio_entry->s.handle;
 
 	if (odp_likely(mbuf_num > 1))
 		prefetch_pkt(mbuf_table[1]);
 
 	for (i = 0; i < mbuf_num; i++) {
-		odp_packet_hdr_t parsed_hdr;
-
 		if (odp_likely((i + 2) < mbuf_num))
 			prefetch_pkt(mbuf_table[i + 2]);
 
@@ -895,30 +890,27 @@ static inline int mbuf_to_pkt_zero(pktio_entry_t *pktio_entry,
 
 		data = rte_pktmbuf_mtod(mbuf, char *);
 		pkt_len = rte_pktmbuf_pkt_len(mbuf);
-
 		pkt_hdr = pkt_hdr_from_mbuf(mbuf);
+		packet_init(pkt_hdr, pkt_len);
 
-		if (pktio_cls_enabled(pktio_entry)) {
+		if (layer) {
 			uint32_t supported_ptypes = pkt_dpdk->supported_ptypes;
 
-			packet_parse_reset(&parsed_hdr, 1);
-			packet_set_len(&parsed_hdr, pkt_len);
-			if (_odp_dpdk_packet_parse_common(&parsed_hdr.p, data,
-							  pkt_len, pkt_len,
-							  mbuf,
-							  ODP_PROTO_LAYER_ALL,
-							  supported_ptypes,
+			if (_odp_dpdk_packet_parse_common(&pkt_hdr->p, data,
+							  pkt_len, pkt_len, mbuf,
+							  layer, supported_ptypes,
 							  pktin_cfg)) {
 				rte_pktmbuf_free(mbuf);
 				continue;
 			}
-			if (_odp_cls_classify_packet(pktio_entry,
-						     (const uint8_t *)data,
-						     pkt_len, pkt_len, &pool,
-						     &parsed_hdr, false)) {
-				ODP_ERR("Unable to classify packet\n");
-				rte_pktmbuf_free(mbuf);
-				continue;
+
+			if (pktio_cls_enabled(pktio_entry)) {
+				if (_odp_cls_classify_packet(pktio_entry,
+							     (const uint8_t *)data,
+							     &pool, pkt_hdr)) {
+					rte_pktmbuf_free(mbuf);
+					continue;
+				}
 			}
 		}
 
@@ -926,23 +918,9 @@ static inline int mbuf_to_pkt_zero(pktio_entry_t *pktio_entry,
 		 * are supported. */
 		pkt_hdr->seg_data = data;
 
-		packet_init(pkt_hdr, pkt_len);
 		pkt_hdr->input = input;
 
-		if (pktio_cls_enabled(pktio_entry)) {
-			_odp_packet_copy_cls_md(pkt_hdr, &parsed_hdr);
-		} else if (parse_layer != ODP_PROTO_LAYER_NONE) {
-			uint32_t supported_ptypes = pkt_dpdk->supported_ptypes;
-
-			if (_odp_dpdk_packet_parse_layer(pkt_hdr, mbuf,
-							 parse_layer,
-							 supported_ptypes,
-							 pktin_cfg)) {
-				rte_pktmbuf_free(mbuf);
-				continue;
-			}
-		}
-		if (set_flow_hash && (mbuf->ol_flags & PKT_RX_RSS_HASH))
+		if (set_flow_hash && (mbuf->ol_flags & RTE_MBUF_F_RX_RSS_HASH))
 			packet_set_flow_hash(pkt_hdr, mbuf->hash.rss);
 
 		packet_set_ts(pkt_hdr, ts);
@@ -1227,11 +1205,6 @@ static int dpdk_close(pktio_entry_t *pktio_entry)
 			rte_pktmbuf_free(pkt_dpdk->rx_cache[i].s.pkt[idx++]);
 	}
 
-#if RTE_VERSION < RTE_VERSION_NUM(17, 8, 0, 0)
-	if (pktio_entry->s.state != PKTIO_STATE_OPENED)
-		rte_eth_dev_close(pkt_dpdk->port_id);
-#endif
-
 	return 0;
 }
 
@@ -1381,18 +1354,6 @@ static void dpdk_mempool_free(struct rte_mempool *mp, void *arg ODP_UNUSED)
 	rte_mempool_free(mp);
 }
 
-/* RTE_ETH_FOREACH_DEV was introduced in v17.8, but causes a build error in
- * v18.2 (only a warning, but our build system treats warnings as errors). */
-#if (RTE_VERSION >= RTE_VERSION_NUM(18, 2, 0, 0)) && \
-	(RTE_VERSION < RTE_VERSION_NUM(18, 5, 0, 0))
-	#define ETH_FOREACH_DEV(p)					\
-		for (p = rte_eth_find_next(0);				\
-		     (unsigned int)p < (unsigned int)RTE_MAX_ETHPORTS;	\
-		     p = rte_eth_find_next(p + 1))
-#elif RTE_VERSION >= RTE_VERSION_NUM(17, 8, 0, 0)
-	#define ETH_FOREACH_DEV(p) RTE_ETH_FOREACH_DEV(p)
-#endif
-
 static int dpdk_pktio_term(void)
 {
 	uint16_t port_id;
@@ -1400,11 +1361,9 @@ static int dpdk_pktio_term(void)
 	if (!odp_global_rw->dpdk_initialized)
 		return 0;
 
-#if RTE_VERSION >= RTE_VERSION_NUM(17, 8, 0, 0)
-	ETH_FOREACH_DEV(port_id) {
+	RTE_ETH_FOREACH_DEV(port_id) {
 		rte_eth_dev_close(port_id);
 	}
-#endif
 
 	if (!_ODP_DPDK_ZERO_COPY)
 		rte_mempool_walk(dpdk_mempool_free, NULL);
@@ -1574,16 +1533,18 @@ static int dpdk_init_capability(pktio_entry_t *pktio_entry,
 
 	/* Check if setting MTU is supported */
 	ret = rte_eth_dev_set_mtu(pkt_dpdk->port_id, pkt_dpdk->mtu - _ODP_ETHHDR_LEN);
-	if (ret == 0) {
+	/* From DPDK 21.11 onwards, calling rte_eth_dev_set_mtu() before device is configured with
+	 * rte_eth_dev_configure() will result in failure. The least hacky (unfortunately still
+	 * very hacky) way to continue checking the support is to take into account that the
+	 * function will fail earlier with -ENOTSUP if MTU setting is not supported by device than
+	 * if the device was not yet configured. */
+	if (ret != -ENOTSUP) {
 		capa->set_op.op.maxlen = 1;
 		capa->maxlen.equal = true;
 		capa->maxlen.min_input = DPDK_MTU_MIN;
 		capa->maxlen.max_input = pkt_dpdk->mtu_max;
 		capa->maxlen.min_output = DPDK_MTU_MIN;
 		capa->maxlen.max_output = pkt_dpdk->mtu_max;
-	} else if (ret != -ENOTSUP) {
-		ODP_ERR("Failed to set interface MTU: %d\n", ret);
-		return -1;
 	}
 
 	ptype_cnt = rte_eth_dev_get_supported_ptypes(pkt_dpdk->port_id,
@@ -1669,15 +1630,6 @@ static int dpdk_init_capability(pktio_entry_t *pktio_entry,
  * mode change. Use system call for them. */
 static void promisc_mode_check(pkt_dpdk_t *pkt_dpdk)
 {
-#if RTE_VERSION < RTE_VERSION_NUM(19, 11, 0, 0)
-	/* Enable and disable calls do not have return value */
-	rte_eth_promiscuous_enable(pkt_dpdk->port_id);
-
-	if (!rte_eth_promiscuous_get(pkt_dpdk->port_id))
-		pkt_dpdk->vdev_sysc_promisc = 1;
-
-	rte_eth_promiscuous_disable(pkt_dpdk->port_id);
-#else
 	int ret;
 
 	ret = rte_eth_promiscuous_enable(pkt_dpdk->port_id);
@@ -1689,7 +1641,6 @@ static void promisc_mode_check(pkt_dpdk_t *pkt_dpdk)
 
 	if (ret)
 		pkt_dpdk->vdev_sysc_promisc = 1;
-#endif
 }
 
 static int dpdk_open(odp_pktio_t id ODP_UNUSED,
@@ -1735,18 +1686,17 @@ static int dpdk_open(odp_pktio_t id ODP_UNUSED,
 
 	pkt_dpdk->pool = pool;
 
-	/* rte_eth_dev_count() was removed in v18.05 */
-#if RTE_VERSION < RTE_VERSION_NUM(18, 5, 0, 0)
-	if (rte_eth_dev_count() == 0) {
-#else
 	if (rte_eth_dev_count_avail() == 0) {
-#endif
 		ODP_ERR("No DPDK ports found\n");
 		return -1;
 	}
 
 	memset(&dev_info, 0, sizeof(struct rte_eth_dev_info));
-	rte_eth_dev_info_get(pkt_dpdk->port_id, &dev_info);
+	ret = rte_eth_dev_info_get(pkt_dpdk->port_id, &dev_info);
+	if (ret) {
+		ODP_ERR("Failed to read device info: %d\n", ret);
+		return -1;
+	}
 
 	/* Initialize runtime options */
 	if (init_options(pktio_entry, &dev_info)) {
@@ -1765,18 +1715,10 @@ static int dpdk_open(odp_pktio_t id ODP_UNUSED,
 
 	promisc_mode_check(pkt_dpdk);
 
-#if RTE_VERSION < RTE_VERSION_NUM(19, 11, 0, 0)
-	ret = 0;
-	if (pkt_dpdk->opt.multicast_en)
-		rte_eth_allmulticast_enable(pkt_dpdk->port_id);
-	else
-		rte_eth_allmulticast_disable(pkt_dpdk->port_id);
-#else
 	if (pkt_dpdk->opt.multicast_en)
 		ret = rte_eth_allmulticast_enable(pkt_dpdk->port_id);
 	else
 		ret = rte_eth_allmulticast_disable(pkt_dpdk->port_id);
-#endif
 
 	/* Not supported by all PMDs, so ignore the return value */
 	if (ret)

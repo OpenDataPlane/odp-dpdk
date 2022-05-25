@@ -40,8 +40,7 @@ fi
 
 CC="${CC:-${TARGET_ARCH}-gcc}"
 ${CC} ${CFLAGS} ${EXTRA_CHECKS} ${OLDPWD}/example/sysinfo/odp_sysinfo.c -o odp_sysinfo_inst_dynamic \
-	`PKG_CONFIG_PATH=/opt/odp/lib/pkgconfig ${PKG_CONFIG} --cflags --libs ${ODP_LIB_NAME}` \
-	`${PKG_CONFIG} --cflags --libs libdpdk`
+	`PKG_CONFIG_PATH=/opt/odp/lib/pkgconfig:${PKG_CONFIG_PATH} ${PKG_CONFIG} --cflags --libs ${ODP_LIB_NAME}`
 
 sysctl vm.nr_hugepages=1000
 mkdir -p /mnt/huge

@@ -15,12 +15,14 @@
 #include <odp/api/ticketlock.h>
 
 #include <odp_socket_common.h>
+#include <odp_parse_internal.h>
 #include <odp_packet_internal.h>
 #include <odp_packet_io_internal.h>
 #include <odp_packet_io_stats.h>
 #include <odp_debug_internal.h>
 #include <odp_errno_define.h>
 #include <odp_classification_internal.h>
+#include <odp_macros_internal.h>
 
 #include <sys/socket.h>
 #include <stdio.h>
@@ -233,6 +235,9 @@ static int sock_mmsg_recv(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 	int i;
 	uint16_t frame_offset = pktio_entry->s.pktin_frame_offset;
 	uint32_t alloc_len = pkt_sock->mtu + frame_offset;
+	const odp_proto_chksums_t chksums = pktio_entry->s.in_chksums;
+	const odp_proto_layer_t layer = pktio_entry->s.parse_layer;
+	const odp_pktin_config_opt_t opt = pktio_entry->s.config.pktin;
 
 	memset(msgvec, 0, sizeof(msgvec));
 
@@ -249,8 +254,7 @@ static int sock_mmsg_recv(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 	recv_msgs = recvmmsg(sockfd, msgvec, nb_pkts, MSG_DONTWAIT, NULL);
 	odp_ticketlock_unlock(&pkt_sock->rx_lock);
 
-	if (pktio_entry->s.config.pktin.bit.ts_all ||
-	    pktio_entry->s.config.pktin.bit.ts_ptp) {
+	if (opt.bit.ts_all || opt.bit.ts_ptp) {
 		ts_val = odp_time_global();
 		ts = &ts_val;
 	}
@@ -262,24 +266,47 @@ static int sock_mmsg_recv(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 		odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
 		uint16_t pkt_len = msgvec[i].msg_len;
 		int ret;
+		uint64_t l4_part_sum = 0;
 
 		if (odp_unlikely(msgvec[i].msg_hdr.msg_flags & MSG_TRUNC)) {
 			odp_packet_free(pkt);
 			ODP_DBG("dropped truncated packet\n");
 			continue;
 		}
-		if (pktio_cls_enabled(pktio_entry)) {
-			uint16_t seg_len =  pkt_len;
 
-			if (msgvec[i].msg_hdr.msg_iov->iov_len < pkt_len)
-				seg_len = msgvec[i].msg_hdr.msg_iov->iov_len;
+		ret = odp_packet_trunc_tail(&pkt, odp_packet_len(pkt) - pkt_len,
+					    NULL, NULL);
+		if (ret < 0) {
+			ODP_ERR("trunc_tail failed");
+			odp_packet_free(pkt);
+			continue;
+		}
 
-			if (_odp_cls_classify_packet(pktio_entry, base, pkt_len,
-						     seg_len, &pool, pkt_hdr,
-						     true)) {
-				ODP_ERR("_odp_cls_classify_packet failed");
+		if (layer) {
+			uint8_t buf[PARSE_BYTES];
+			uint16_t seg_len = msgvec[i].msg_hdr.msg_iov->iov_len;
+
+			/* Make sure there is enough data for the packet
+			* parser in the case of a segmented packet. */
+			if (odp_unlikely(seg_len < PARSE_BYTES && pkt_len > seg_len)) {
+				seg_len = MIN(pkt_len, PARSE_BYTES);
+				odp_packet_copy_to_mem(pkt, 0, seg_len, buf);
+				base = buf;
+			}
+
+			if (_odp_packet_parse_common(&pkt_hdr->p, base, pkt_len,
+						     seg_len, layer, chksums,
+						     &l4_part_sum, opt) < 0) {
 				odp_packet_free(pkt);
 				continue;
+			}
+
+			if (pktio_cls_enabled(pktio_entry)) {
+				if (_odp_cls_classify_packet(pktio_entry, base, &pool,
+							     pkt_hdr)) {
+					odp_packet_free(pkt);
+					continue;
+				}
 			}
 		}
 
@@ -290,20 +317,10 @@ static int sock_mmsg_recv(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 			continue;
 		}
 
-		ret = odp_packet_trunc_tail(&pkt, odp_packet_len(pkt) - pkt_len,
-					    NULL, NULL);
-		if (ret < 0) {
-			ODP_ERR("trunk_tail failed");
-			odp_packet_free(pkt);
-			continue;
-		}
-
 		pkt_hdr->input = pktio_entry->s.handle;
 
-		if (!pktio_cls_enabled(pktio_entry))
-			_odp_packet_parse_layer(pkt_hdr,
-						pktio_entry->s.config.parser.layer,
-						pktio_entry->s.in_chksums);
+		if (layer >= ODP_PROTO_LAYER_L4)
+			_odp_packet_l4_chksum(pkt_hdr, chksums, l4_part_sum);
 
 		packet_set_ts(pkt_hdr, ts);
 
@@ -359,11 +376,11 @@ static int sock_recv_tmo(pktio_entry_t *pktio_entry, int index,
 }
 
 static int sock_recv_mq_tmo(pktio_entry_t *pktio_entry[], int index[],
-			    int num_q, odp_packet_t pkt_table[], int num,
-			    unsigned *from, uint64_t usecs)
+			    uint32_t num_q, odp_packet_t pkt_table[], int num,
+			    uint32_t *from, uint64_t usecs)
 {
 	struct timeval timeout;
-	int i;
+	uint32_t i;
 	int ret;
 	int maxfd = -1, maxfd2;
 	fd_set readfds;

@@ -98,11 +98,6 @@ extern "C" {
  */
 
 /**
- * @def ODP_NUM_SHAPER_COLORS
- * The number of enumeration values defined in the odp_tm_shaper_color_t type.
- */
-
-/**
  * @def ODP_TM_INVALID_PRIORITY
  * Used to indicate an invalid priority value.
  */
@@ -344,9 +339,19 @@ typedef struct {
 	 * the legal range of such weights. */
 	odp_bool_t weights_supported;
 
-	/** tm_node_threshold indicates that the tm_nodes at this
-	 * level support threshold profiles. */
-	odp_bool_t tm_node_threshold;
+	/** TM node threshold profile support */
+	struct {
+		/** Threshold given as bytes */
+		uint8_t byte            : 1;
+
+		/** Threshold given as packets */
+		uint8_t packet          : 1;
+
+		/** Threshold given as bytes and packets simultaneously */
+		uint8_t byte_and_packet : 1;
+
+	} tm_node_threshold;
+
 } odp_tm_level_capabilities_t;
 
 /** The tm_pkt_prio_mode_t enumeration type is used to indicate different
@@ -515,11 +520,18 @@ typedef struct {
 	/** TM queue statistics counter capabilities */
 	odp_tm_queue_stats_capability_t queue_stats;
 
-	/** tm_queue_threshold indicates support for threshold profile on a
-	 * TM queue. When TRUE, users can set/clear/update threshold profile
-	 * on a TM queue. When false none of it is supported.
-	 */
-	odp_bool_t tm_queue_threshold;
+	/** TM queue threshold profile support */
+	struct {
+		/** Threshold given as bytes */
+		uint8_t byte            : 1;
+
+		/** Threshold given as packets */
+		uint8_t packet          : 1;
+
+		/** Threshold given as bytes and packets simultaneously */
+		uint8_t byte_and_packet : 1;
+
+	} tm_queue_threshold;
 
 	/** tm_queue_query_flags indicates supported types of TM queue query.
 	 * Types of TM queue query are same as query_flags that are passed to
@@ -719,7 +731,6 @@ typedef struct {
  *
  * odp_tm_requirements_init() must be called to initialize any
  * odp_tm_requirements_t record before it is first used or assigned to.
- * This is done to allow for vendor specific additions to this record.
  *
  * @param requirements  A pointer to an odp_tm_requirements_t record which
  *                      is to be initialized.
@@ -730,7 +741,6 @@ void odp_tm_requirements_init(odp_tm_requirements_t *requirements);
  *
  * odp_tm_egress_init() must be called to initialize any odp_tm_egress_t
  * record before it is first used or assigned to.
- * This is done to allow for vendor specific additions to this record.
  *
  * @param egress  A pointer to an odp_tm_egress_t record which
  *                is to be initialized.
@@ -940,9 +950,9 @@ int odp_tm_destroy(odp_tm_t tm);
  * The odp_tm_vlan_marking() function allows one to configure the TM egress
  * so as to have it set the one bit VLAN Drop Eligibility Indicator (DEI)
  * field (but only for pkts that already carry a VLAN tag) of a pkt based upon
- * the final pkt (or shaper?) color assigned to the pkt when it reaches the
- * egress node.  When drop_eligible_enabled is false, then the given color has
- * no effect on the VLAN fields.  See IEEE 802.1q for more details.
+ * the final pkt color assigned to the pkt when it reaches the egress node. When
+ * drop_eligible_enabled is false, then the given color has no effect on the
+ * VLAN fields. See IEEE 802.1q for more details.
  *
  * Note that ALL ODP implementations are required to SUCCESSFULLY handle all
  * calls to this function with drop_eligible_enabled == FALSE - i.e. must
@@ -1037,24 +1047,11 @@ int odp_tm_drop_prec_marking(odp_tm_t           tm,
 /* Shaper profile types and functions
  * -------------------------------------------------------- */
 
-/** Possible values of running the shaper algorithm.  ODP_TM_SHAPER_GREEN
- * means that the traffic is within the commit specification (rate and burst
- * size), ODP_TM_SHAPER_YELLOW means that the traffic is within the peak
- * specification (rate and burst size) and ODP_TM_SHAPER_RED means that the
- * traffic is exceeding both its commit and peak specifications.  Note that
- * packets can also have an assigned <b> packet color</b> of ODP_PACKET_GREEN,
- * ODP_PACKET_YELLOW or ODP_PACKET_RED which has a different meaning and
- * purpose than the shaper colors.
- */
-typedef enum {
-	ODP_TM_SHAPER_GREEN, ODP_TM_SHAPER_YELLOW, ODP_TM_SHAPER_RED
-} odp_tm_shaper_color_t;
-
-/** The odp_tm_shaper_params_t record type is used to supply the parameters
- * associated with a shaper profile.  Since it is expected that
- * implementations might augment this record type with platform specific
- * additional fields - it is required that odp_tm_shaper_params_init() be
- * called on variables of this type before any of the fields are filled in.
+/**
+ * TM shaper parameters
+ *
+ * Use odp_tm_shaper_params_init() to initialize parameters into their default
+ * values.
  */
 typedef struct {
 	/** The committed information rate for this shaper profile.  The units
@@ -1123,12 +1120,12 @@ typedef struct {
 	odp_bool_t packet_mode;
 } odp_tm_shaper_params_t;
 
-/** odp_tm_shaper_params_init() must be called to initialize any
- * odp_tm_shaper_params_t record before it is first used or assigned to.
- * The parameters are initialized to their default values.
+/**
+ * Initialize TM shaper parameters
  *
- * @param params  A pointer to an odp_tm_shaper_params_t record which
- *                is to be initialized.
+ * Initialize an odp_tm_shaper_params_t to its default values for all fields.
+ *
+ * @param params  Address of the odp_tm_shaper_params_t to be initialized
  */
 void odp_tm_shaper_params_init(odp_tm_shaper_params_t *params);
 
@@ -1176,8 +1173,8 @@ int odp_tm_shaper_params_read(odp_tm_shaper_t shaper_profile,
 
 /** odp_tm_shaper_params_update() "sets" the current set of values associated
  * with the specified shaper profile object.  In addition, this call has the
- * effect that all tm_input's and tm_nodes that are associated (attached?)
- * with this shaper profile object will be updated with the new values.
+ * effect that all tm_input's and tm_nodes that are associated with this shaper
+ * profile object will be updated with the new values.
  *
  * @param shaper_profile  Specifies the shaper profile object whose
  *                        values are to be set.
@@ -1215,11 +1212,11 @@ typedef enum {
 	ODP_TM_FRAME_BASED_WEIGHTS /**< Ignore the packet length */
 } odp_tm_sched_mode_t;
 
-/** The odp_tm_sched_params_t record type is used to supply the parameters
- * associated with a scheduler profile.  Since it is expected that
- * implementations might augment this record type with platform specific
- * additional fields - it is required that odp_tm_sched_params_init() be
- * called on variables of this type before any of the fields are filled in.
+/**
+ * TM scheduler parameters
+ *
+ * Use odp_tm_sched_params_init() to initialize parameters into their default
+ * values.
  */
 typedef struct {
 	/** sched_modes indicates whether weighted scheduling should be used
@@ -1237,12 +1234,12 @@ typedef struct {
 	uint32_t sched_weights[ODP_TM_MAX_PRIORITIES];
 } odp_tm_sched_params_t;
 
-/** odp_tm_sched_params_init() must be called to initialize any
- * odp_tm_sched_params_t record before it is first used or assigned to.
- * The parameters are initialized to their default values.
+/**
+ * Initialize TM scheduler parameters
  *
- * @param params  A pointer to an odp_tm_sched_params_t record which
- *                is to be initialized.
+ * Initialize an odp_tm_sched_params_t to its default values for all fields.
+ *
+ * @param params  Address of the odp_tm_sched_params_t to be initialized
  */
 void odp_tm_sched_params_init(odp_tm_sched_params_t *params);
 
@@ -1289,8 +1286,8 @@ int odp_tm_sched_params_read(odp_tm_sched_t sched_profile,
 
 /** odp_tm_sched_params_update() "sets" the current set of values associated
  * with the specified scheduler profile object.  In addition, this call has
- * the effect that all tm_nodes that are associated (attached?) with this
- * Scheduler profile object will be updated with the new values.
+ * the effect that all tm_nodes that are associated with this scheduler profile
+ * object will be updated with the new values.
  *
  * @param sched_profile   Specifies the Scheduler profile object whose
  *                        values are to be set.
@@ -1315,11 +1312,11 @@ odp_tm_sched_t odp_tm_sched_lookup(const char *name);
 /* Queue Threshold Profiles - types and functions
  * -------------------------------------------------------- */
 
-/** The odp_tm_threshold_params_t record type is used to supply the parameters
- * associated with a queue thresholds profile.  Since it is expected that
- * implementations might augment this record type with platform specific
- * additional fields - it is required that odp_tm_threshold_params_init() be
- * called on variables of this type before any of the fields are filled in
+/**
+ * TM threshold parameters
+ *
+ * Use odp_tm_threshold_params_init() to initialize parameters into their
+ * default values.
  */
 typedef struct {
 	uint64_t max_pkts; /**<  max pkt cnt for this threshold profile */
@@ -1332,12 +1329,12 @@ typedef struct {
 	odp_bool_t enable_max_bytes;
 } odp_tm_threshold_params_t;
 
-/** odp_tm_threshold_params_init() must be called to initialize any
- * odp_tm_threshold_params_t record before it is first used or assigned to.
- * The parameters are initialized to their default values.
+/**
+ * Initialize TM threshold parameters
  *
- * @param params  A pointer to an odp_tm_threshold_params_t record which
- *                is to be initialized.
+ * Initialize an odp_tm_threshold_params_t to its default values for all fields.
+ *
+ * @param params  Address of the odp_tm_threshold_params_t to be initialized
  */
 void odp_tm_threshold_params_init(odp_tm_threshold_params_t *params);
 
@@ -1387,8 +1384,8 @@ int odp_tm_thresholds_params_read(odp_tm_threshold_t threshold_profile,
 /** odp_tm_thresholds_params_update() "sets" the current set of values
  * associated with the specified queue thresholds profile object.  In addition,
  * this call has the effect that all tm_input's and tm_nodes that are
- * associated (attached?) with this queue thresholds profile object will be
- * updated with the new values.
+ * associated with this queue thresholds profile object will be updated with the
+ * new values.
  *
  * @param threshold_profile  Specifies the queue thresholds profile
  *                           object whose values are to be set.
@@ -1413,11 +1410,11 @@ odp_tm_threshold_t odp_tm_thresholds_lookup(const char *name);
 /* WRED Profiles - types and functions
  * -------------------------------------------------------- */
 
-/** The odp_tm_wred_params_t record type is used to supply the parameters
- * associated with a Random Early Detection profile.  Since it is expected that
- * implementations might augment this record type with platform specific
- * additional fields - it is required that odp_tm_wred_params_init() be called
- * on variables of this type before any of the fields are filled in.
+/**
+ * TM WRED parameters
+ *
+ * Use odp_tm_wred_params_init() to initialize parameters into their default
+ * values.
  */
 typedef struct {
 	/** When min_threshold is set to zero then single-slope WRED is
@@ -1471,12 +1468,12 @@ typedef struct {
 	odp_bool_t use_byte_fullness;
 } odp_tm_wred_params_t;
 
-/** odp_tm_wred_params_init() must be called to initialize any
- * odp_tm_wred_params_t record before it is first used or assigned to.
- * The parameters are initialized to their default values.
+/**
+ * Initialize TM WRED parameters
  *
- * @param params  A pointer to an odp_tm_wred_params_t record which
- *                is to be initialized.
+ * Initialize an odp_tm_wred_params_t to its default values for all fields.
+ *
+ * @param params  Address of the odp_tm_wred_params_t to be initialized
  */
 void odp_tm_wred_params_init(odp_tm_wred_params_t *params);
 
@@ -1524,8 +1521,8 @@ int odp_tm_wred_params_read(odp_tm_wred_t wred_profile,
 
 /** odp_tm_wred_params_update() "sets" the current set of values associated
  * with the specified WRED profile object.  In addition, this call has the
- * effect that all tm_input's and tm_nodes that are associated (attached?)
- * with this WRED profile object will be updated with the new values.
+ * effect that all tm_input's and tm_nodes that are associated with this WRED
+ * profile object will be updated with the new values.
  *
  * @param wred_profile  Specifies the WRED profile object whose
  *                      values are to be set.
@@ -1547,12 +1544,11 @@ int odp_tm_wred_params_update(odp_tm_wred_t wred_profile,
  */
 odp_tm_wred_t odp_tm_wred_lookup(const char *name);
 
-/** The odp_tm_node_params_t record type is used to hold extra parameters when
- * calling the odp_tm_node_create() function.  Many of these fields are
- * optional EXCEPT for max_fanin and level.  Also since it is expected that
- * implementations might augment this record type with platform specific
- * additional fields - it is required that odp_tm_node_params_init() be called
- * on variables of this type before any of the fields are filled in.
+/**
+ * TM node parameters
+ *
+ * Many of these fields are optional EXCEPT for max_fanin and level. Use
+ * odp_tm_node_params_init() to initialize parameters into their default values.
  */
 typedef struct {
 	/** The user_context field is an generic pointer that the user can
@@ -1571,9 +1567,9 @@ typedef struct {
 	odp_tm_shaper_t shaper_profile;
 
 	/** The threshold profile to be used in setting the max queue fullness
-	 * for WRED and/or tail drop?  Can be ODP_TM_INVALID and can also be
-	 * set and changed post-creation via odp_tm_node_threshold_config().
-	 * The default value is ODP_TM_INVALID. */
+	 * for WRED and/or tail drop. Can be ODP_TM_INVALID and can also be set
+	 * and changed post-creation via odp_tm_node_threshold_config(). The
+	 * default value is ODP_TM_INVALID. */
 	odp_tm_threshold_t threshold_profile;
 
 	/** The WRED profile(s) to be associated with this tm_node.  Any or
@@ -1606,12 +1602,12 @@ typedef struct {
 	uint8_t priority;
 } odp_tm_node_params_t;
 
-/** odp_tm_node_params_init() must be called to initialize any
- * odp_tm_node_params_t record before it is first used or assigned to.
- * The parameters are initialized to their default values.
+/**
+ * Initialize TM node parameters
  *
- * @param params  A pointer to an odp_tm_node_params_t record which
- *                is to be initialized.
+ * Initialize an odp_tm_node_params_t to its default values for all fields.
+ *
+ * @param params  Address of the odp_tm_node_params_t to be initialized
  */
 void odp_tm_node_params_init(odp_tm_node_params_t *params);
 
@@ -1627,8 +1623,7 @@ void odp_tm_node_params_init(odp_tm_node_params_t *params);
  * @param name    Optional name that can be used later later to find this
  *                same odp_tm_node_t.  Can be NULL, otherwise must be
  *                unique across all odp_tm_node objects.
- * @param params  A pointer to a record holding (an extensible) set of
- *                properties/attributes of this tm_node.
+ * @param params  TM node parameters.
  *
  * @return        Returns ODP_TM_INVALID upon failure, otherwise returns
  *                a valid odp_tm_node_t handle if successful.
@@ -1739,12 +1734,11 @@ void *odp_tm_node_context(odp_tm_node_t tm_node);
  */
 int odp_tm_node_context_set(odp_tm_node_t tm_node, void *user_context);
 
-/** The odp_tm_queue_params_t record type is used to hold extra parameters
- * when calling the odp_tm_queue_create() function.  Many of these fields are
- * optional EXCEPT for priority.  Also since it is expected that
- * implementations might augment this record type with platform specific
- * additional fields - it is required that odp_tm_queue_params_init() be
- * called on variables of this type before any of the fields are filled in.
+/**
+ * TM queue parameters
+ *
+ * Use odp_tm_queue_params_init() to initialize parameters into their default
+ * values.
  */
 typedef struct {
 	/** The user_context field is an generic pointer that the user can
@@ -1758,9 +1752,13 @@ typedef struct {
 	odp_tm_shaper_t shaper_profile;
 
 	/** The threshold profile to be used in setting the max queue fullness
-	 * for WRED and/or tail drop?  Can be ODP_TM_INVALID and can also be
-	 * set and changed post-creation via odp_tm_queue_threshold_config().
-	 * The default value is ODP_TM_INVALID. */
+	 * for WRED and/or tail drop. Can be ODP_TM_INVALID and can also be set
+	 * and changed post-creation via odp_tm_queue_threshold_config(). The
+	 * default value is ODP_TM_INVALID.
+	 *
+	 * One can specify the maximum queue limits either as a maximum number
+	 * of packets in the queue or as a maximum number of bytes in the queue,
+	 * or if both are specified, then whichever limit is hit first. */
 	odp_tm_threshold_t threshold_profile;
 
 	/** The WRED profile(s) to be associated with this tm_queue.  Any or
@@ -1782,27 +1780,24 @@ typedef struct {
 	odp_bool_t ordered_enqueue;
 } odp_tm_queue_params_t;
 
-/** odp_tm_queue_params_init() must be called to initialize any
- * odp_tm_queue_params_t record before it is first used or assigned to.
- * The parameters are initialized to their default values.
+/**
+ * Initialize TM queue parameters
  *
- * @param params  A pointer to an odp_tm_queue_params_t record which
- *                is to be initialized.
+ * Initialize an odp_tm_queue_params_t to its default values for all fields.
+ *
+ * @param params  Address of the odp_tm_queue_params_t to be initialized
  */
 void odp_tm_queue_params_init(odp_tm_queue_params_t *params);
 
-/** Create an tm_queue object.  One can specify the maximum queue limits
- * either as a maximum number of packets in the queue OR as a maximum number
- * of bytes in the queue, or if both are specified, then whichever limit is
- * hit first.  Note that in the case of specifying the maximum queue memory
- * size as bytes, the system is free to instead convert this byte value into a
- * number of buffers and instead limit the queue memory usage by buffer counts
- * versus strictly using byte counts.
+/**
+ * TM queue create
+ *
+ * Create a TM queue according to the queue parameters. Use
+ * odp_tm_queue_params_init() to initialize parameters into their default values.
  *
  * @param tm      Handle of the TM system into which this odp_tm_queue object is
  *                created.
- * @param params  A pointer to a record holding (an extensible) set of
- *                properties/attributes of this tm_queue.
+ * @param params  TM queue parameters.
  *
  * @return        Returns ODP_TM_INVALID upon failure, otherwise a valid
  *                odp_tm_queue_t handle.
@@ -1965,18 +1960,16 @@ int odp_tm_queue_disconnect(odp_tm_queue_t tm_queue);
 /* Input API
  * -------------------------------------------------------- */
 
-/** The odp_tm_enq() function is used to add packets to a given TM system.
- * Note that the System Metadata associated with the pkt needed by the TM
- * system is (a) a drop_eligible bit, (b) a two bit "pkt_color", (c) a 16-bit
- * pkt_len, and MAYBE? (d) a signed 8-bit shaper_len_adjust.
+/** Send packet to TM system
+ *
+ * Note that the packet metadata utilized by the TM system is (a)
+ * drop_eligible, (b) pkt_color, (c) pkt_len, and (d) shaper_len_adjust.
  *
  * If there is a non-zero shaper_len_adjust, then it is added to the pkt_len
  * after any non-zero shaper_len_adjust that is part of the shaper profile.
  *
  * The pkt_color bits are a result of some earlier Metering/Marking/Policing
- * processing (typically ingress based), and should not be confused with the
- * shaper_color produced from the TM shaper entities within the tm_inputs and
- * tm_nodes.
+ * processing.
  *
  * @param tm_queue  Specifies the tm_queue (and indirectly the TM system).
  * @param pkt       Handle to a packet.
@@ -2023,8 +2016,8 @@ int odp_tm_enq_multi_lso(odp_tm_queue_t tm_queue, const odp_packet_t packets[], 
 			 const odp_packet_lso_opt_t *lso_opt);
 
 /** The odp_tm_enq_with_cnt() function behaves identically to odp_tm_enq(),
- * except that it also returns (an approximation to?) the current tm_queue
- * packet queue count.
+ * except that it also returns the current tm_queue packet queue count (may be
+ * an approximation).
  *
  * @param tm_queue  Specifies the tm_queue (and indirectly the TM system).
  * @param pkt       Handle to a packet.
@@ -2194,7 +2187,7 @@ int odp_tm_queue_info(odp_tm_queue_t tm_queue, odp_tm_queue_info_t *info);
  */
 #define ODP_TM_QUERY_PKT_CNT     0x01   /**<  The total_pkt_cnt value */
 #define ODP_TM_QUERY_BYTE_CNT    0x02   /**<  The total_byte_cnt value */
-#define ODP_TM_QUERY_THRESHOLDS  0x04   /**<  The thresholds??? */
+#define ODP_TM_QUERY_THRESHOLDS  0x04   /**<  The threshold values */
 
 /** The odp_tm_query_info_t record type is used to return the various counts
  * as requested by functions like odp_tm_queue_query() and

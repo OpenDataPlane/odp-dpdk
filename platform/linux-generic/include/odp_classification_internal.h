@@ -67,9 +67,9 @@ static inline void _odp_cos_queue_stats_add(cos_t *cos, odp_queue_t queue,
 	}
 
 	if (packets)
-		odp_atomic_add_u64(&cos->s.stats[queue_idx].packets, packets);
+		odp_atomic_add_u64(&cos->s.queue_stats[queue_idx].packets, packets);
 	if (discards)
-		odp_atomic_add_u64(&cos->s.stats[queue_idx].discards, discards);
+		odp_atomic_add_u64(&cos->s.queue_stats[queue_idx].discards, discards);
 }
 
 /** Classification Internal function **/
@@ -84,8 +84,7 @@ This function calls Classifier module internal functions for a given packet and
 selects destination queue and packet pool based on selected PMR and CoS.
 **/
 int _odp_cls_classify_packet(pktio_entry_t *entry, const uint8_t *base,
-			     uint16_t pkt_len, uint32_t seg_len, odp_pool_t *pool,
-			     odp_packet_hdr_t *pkt_hdr, odp_bool_t parse);
+			     odp_pool_t *pool, odp_packet_hdr_t *pkt_hdr);
 
 /**
 Packet IO classifier init

@@ -47,14 +47,23 @@ extern "C" {
 	#undef vector
 #endif
 
-/** Minimum segment length expected by _odp_packet_parse_common() */
-#define PACKET_PARSE_SEG_LEN 96
-
 ODP_STATIC_ASSERT(sizeof(_odp_packet_input_flags_t) == sizeof(uint64_t),
 		  "INPUT_FLAGS_SIZE_ERROR");
 
 ODP_STATIC_ASSERT(sizeof(_odp_packet_flags_t) == sizeof(uint32_t),
 		  "PACKET_FLAGS_SIZE_ERROR");
+
+/* Maximum number of segments per packet */
+#define PKT_MAX_SEGS 60
+
+ODP_STATIC_ASSERT(PKT_MAX_SEGS < 256, "Maximum of 255 segments supported");
+
+ODP_STATIC_ASSERT(CONFIG_PACKET_SEG_LEN_MIN >= 256, "Segment size must be a minimum of 256 bytes");
+
+ODP_STATIC_ASSERT(CONFIG_PACKET_MAX_SEG_LEN <= UINT16_MAX, "Segment size must fit in uint16_t");
+
+/* We can't enforce tailroom reservation for received packets */
+ODP_STATIC_ASSERT(CONFIG_PACKET_TAILROOM == 0, "Tailroom has to be 0, DPDK doesn't support this");
 
 /**
  * Packet output flags
@@ -98,16 +107,6 @@ typedef struct {
 	uint16_t l4_offset;
 } packet_parser_t;
 
-/* Maximum number of segments per packet */
-#define PKT_MAX_SEGS 60
-
-ODP_STATIC_ASSERT(PKT_MAX_SEGS < 256, "Maximum of 255 segments supported");
-
-ODP_STATIC_ASSERT(CONFIG_PACKET_SEG_LEN_MIN >= 256,
-		  "ODP Segment size must be a minimum of 256 bytes");
-ODP_STATIC_ASSERT(CONFIG_PACKET_MAX_SEG_LEN <= UINT16_MAX,
-		  "ODP Segment size must fit in uint16_t");
-
 /**
  * Internal Packet header
  *
@@ -147,6 +146,10 @@ typedef struct odp_packet_hdr_t {
 
 	/* Max payload size in a LSO segment */
 	uint16_t lso_max_payload;
+
+	/* Packet aging drop timeout before enqueue. Once enqueued holds the maximum age (time of
+	 * request + requested drop timeout). */
+	uint64_t tx_aging_ns;
 
 	/* LSO profile index */
 	uint8_t lso_profile_idx;
@@ -339,17 +342,11 @@ static inline void packet_set_len(odp_packet_hdr_t *pkt_hdr, uint32_t len)
 	rte_pktmbuf_pkt_len(&pkt_hdr->event_hdr.mb) = len;
 }
 
-/* Perform packet parse up to a given protocol layer */
-int _odp_packet_parse_layer(odp_packet_hdr_t *pkt_hdr,
-			    odp_proto_layer_t layer,
-			    odp_proto_chksums_t chksums);
-
 /* Reset parser metadata for a new parse */
 static inline void packet_parse_reset(odp_packet_hdr_t *pkt_hdr, int all)
 {
 	/* Reset parser metadata before new parse */
 	pkt_hdr->p.input_flags.all  = 0;
-	pkt_hdr->p.flags.all.error  = 0;
 	pkt_hdr->p.l2_offset        = ODP_PACKET_OFFSET_INVALID;
 	pkt_hdr->p.l3_offset        = ODP_PACKET_OFFSET_INVALID;
 	pkt_hdr->p.l4_offset        = ODP_PACKET_OFFSET_INVALID;
@@ -388,10 +385,6 @@ static inline void packet_set_ts(odp_packet_hdr_t *pkt_hdr, odp_time_t *ts)
 	}
 }
 
-int _odp_packet_parse_common(packet_parser_t *pkt_hdr, const uint8_t *ptr,
-			     uint32_t pkt_len, uint32_t seg_len, int layer,
-			     odp_proto_chksums_t chksums);
-
 int _odp_packet_set_data(odp_packet_t pkt, uint32_t offset,
 			 uint8_t c, uint32_t len);
 
@@ -403,9 +396,8 @@ int _odp_packet_tcp_chksum_insert(odp_packet_t pkt);
 int _odp_packet_udp_chksum_insert(odp_packet_t pkt);
 int _odp_packet_sctp_chksum_insert(odp_packet_t pkt);
 
-/* We can't enforce tailroom reservation for received packets */
-ODP_STATIC_ASSERT(CONFIG_PACKET_TAILROOM == 0,
-		  "ERROR: Tailroom has to be 0, DPDK doesn't support this");
+int _odp_packet_l4_chksum(odp_packet_hdr_t *pkt_hdr,
+			  odp_proto_chksums_t chksums, uint64_t l4_part_sum);
 
 #ifdef __cplusplus
 }
