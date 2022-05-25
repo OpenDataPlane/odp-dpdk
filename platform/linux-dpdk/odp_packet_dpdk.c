@@ -180,12 +180,6 @@ static int init_options(pktio_entry_t *pktio_entry,
 	if (!lookup_opt("num_rx_desc", dev_info->driver_name,
 			&opt->num_rx_desc))
 		return -1;
-	if (opt->num_rx_desc < dev_info->rx_desc_lim.nb_min ||
-	    opt->num_rx_desc > dev_info->rx_desc_lim.nb_max ||
-	    opt->num_rx_desc % dev_info->rx_desc_lim.nb_align) {
-		ODP_ERR("Invalid number of RX descriptors\n");
-		return -1;
-	}
 
 	if (!lookup_opt("num_tx_desc", dev_info->driver_name,
 			&opt->num_tx_desc_default))
@@ -450,22 +444,18 @@ static int dpdk_output_queues_config(pktio_entry_t *pktio_entry,
 	for (uint32_t i = 0; i  < p->num_queues; i++) {
 		uint16_t num_tx_desc = pkt_dpdk->opt.num_tx_desc_default;
 
-		if (p->queue_size[i] != 0) {
+		if (p->queue_size[i] != 0)
 			num_tx_desc = p->queue_size[i];
-			/* Make sure correct alignment is used */
-			if (dev_info.tx_desc_lim.nb_align)
-				num_tx_desc = RTE_ALIGN_MUL_CEIL(num_tx_desc,
-								 dev_info.tx_desc_lim.nb_align);
-		}
 
-		if (num_tx_desc < dev_info.tx_desc_lim.nb_min ||
-		    num_tx_desc > dev_info.tx_desc_lim.nb_max ||
-		    (dev_info.tx_desc_lim.nb_align &&
-		     num_tx_desc % dev_info.tx_desc_lim.nb_align)) {
-			ODP_ERR("DPDK: invalid number of TX descriptors\n");
+		/* Adjust descriptor count */
+		ret = rte_eth_dev_adjust_nb_rx_tx_desc(pkt_dpdk->port_id, NULL, &num_tx_desc);
+		if (ret && ret != -ENOTSUP) {
+			ODP_ERR("DPDK: rte_eth_dev_adjust_nb_rx_tx_desc() failed: %d\n", ret);
 			return -1;
 		}
 		pkt_dpdk->num_tx_desc[i] = num_tx_desc;
+
+		ODP_DBG("TX queue %" PRIu32 " using %" PRIu16 " descriptors\n", i, num_tx_desc);
 	}
 	return 0;
 }
@@ -778,15 +768,24 @@ static int dpdk_setup_eth_rx(const pktio_entry_t *pktio_entry,
 	uint32_t i;
 	int ret;
 	uint16_t port_id = pkt_dpdk->port_id;
+	uint16_t num_rx_desc = pkt_dpdk->opt.num_rx_desc;
 	pool_t *pool = pool_entry_from_hdl(pktio_entry->s.pool);
 
 	rxconf = dev_info->default_rxconf;
 
 	rxconf.rx_drop_en = pkt_dpdk->opt.rx_drop_en;
 
+	/* Adjust descriptor count */
+	ret = rte_eth_dev_adjust_nb_rx_tx_desc(port_id, &num_rx_desc, NULL);
+	if (ret && ret != -ENOTSUP) {
+		ODP_ERR("DPDK: rte_eth_dev_adjust_nb_rx_tx_desc() failed: %d\n", ret);
+		return -1;
+	}
+
+	ODP_DBG("RX queues using %" PRIu16 " descriptors\n", num_rx_desc);
+
 	for (i = 0; i < pktio_entry->s.num_in_queue; i++) {
-		ret = rte_eth_rx_queue_setup(port_id, i,
-					     pkt_dpdk->opt.num_rx_desc,
+		ret = rte_eth_rx_queue_setup(port_id, i, num_rx_desc,
 					     rte_eth_dev_socket_id(port_id),
 					     &rxconf, pool->rte_mempool);
 		if (ret < 0) {
