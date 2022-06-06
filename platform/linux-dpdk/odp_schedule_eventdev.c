@@ -1117,5 +1117,6 @@ const schedule_api_t _odp_schedule_eventdev_api = {
 	.schedule_order_unlock_lock  = schedule_order_unlock_lock,
 	.schedule_order_lock_start   = schedule_order_lock_start,
 	.schedule_order_lock_wait    = schedule_order_lock_wait,
+	.schedule_order_wait         = order_lock,
 	.schedule_print = schedule_print
 };
