@@ -23,6 +23,7 @@
 #include <odp_debug_internal.h>
 #include <odp_init_internal.h>
 #include <odp_libconfig_internal.h>
+#include <odp_macros_internal.h>
 #include <odp_pool_internal.h>
 #include <odp_queue_if.h>
 #include <odp_ring_u32_internal.h>
@@ -650,9 +651,9 @@ odp_timer_pool_t odp_timer_pool_create(const char *name,
 		nsec_per_scan = res_ns;
 
 	/* Ring size must larger than param->num_timers */
-	if (CHECK_IS_POWER2(num_timers))
+	if (_ODP_CHECK_IS_POWER2(num_timers))
 		num_timers++;
-	num_timers = ROUNDUP_POWER2_U32(num_timers);
+	num_timers = _ODP_ROUNDUP_POWER2_U32(num_timers);
 
 	odp_ticketlock_lock(&timer_global->lock);
 

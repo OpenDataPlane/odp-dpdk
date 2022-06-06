@@ -26,10 +26,10 @@ extern "C" {
 
 #include <odp/api/plat/packet_io_inlines.h>
 
-#include <odp_align_internal.h>
 #include <odp_classification_datamodel.h>
 #include <odp_config_internal.h>
 #include <odp_debug_internal.h>
+#include <odp_macros_internal.h>
 #include <odp_queue_if.h>
 
 #include <inttypes.h>
@@ -159,7 +159,7 @@ struct pktio_entry {
 
 typedef union {
 	struct pktio_entry s;
-	uint8_t pad[ROUNDUP_CACHE_LINE(sizeof(struct pktio_entry))];
+	uint8_t pad[_ODP_ROUNDUP_CACHE_LINE(sizeof(struct pktio_entry))];
 } pktio_entry_t;
 
 typedef struct {

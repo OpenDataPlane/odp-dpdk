@@ -13,9 +13,9 @@
 #include <odp/api/shared_memory.h>
 #include <odp/api/spinlock.h>
 
-#include <odp_align_internal.h>
 #include <odp_config_internal.h>
 #include <odp_debug_internal.h>
+#include <odp_macros_internal.h>
 #include <odp_shm_internal.h>
 
 #include <string.h>
@@ -266,8 +266,8 @@ odp_shm_t odp_shm_reserve(const char *name, uint64_t size, uint64_t align,
 	}
 
 	/* DPDK requires alignment to be power of two */
-	if (!rte_is_power_of_2(align))
-		align = ROUNDUP_POWER2_U32(align);
+	if (!_ODP_CHECK_IS_POWER2(align))
+		align = _ODP_ROUNDUP_POWER2_U32(align);
 
 	odp_spinlock_lock(&shm_tbl->lock);
 

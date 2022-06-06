@@ -11,7 +11,7 @@
 #include <odp_buffer_internal.h>
 #include <odp_packet_internal.h>
 #include <odp_timer_internal.h>
-#include <odp_align_internal.h>
+
 #include <odp/api/shared_memory.h>
 #include <odp/api/align.h>
 #include <odp_init_internal.h>
@@ -19,6 +19,7 @@
 #include <odp/api/hints.h>
 #include <odp/api/debug.h>
 #include <odp_debug_internal.h>
+#include <odp_macros_internal.h>
 #include <odp/api/cpumask.h>
 #include <odp_libconfig_internal.h>
 #include <odp_event_vector_internal.h>
@@ -420,7 +421,7 @@ static int check_params(const odp_pool_param_t *params)
 			return -1;
 		}
 
-		if (!CHECK_IS_POWER2(params->buf.align)) {
+		if (!_ODP_CHECK_IS_POWER2(params->buf.align)) {
 			ODP_ERR("buf.align not power of two %u\n", params->buf.align);
 			return -1;
 		}
@@ -444,7 +445,7 @@ static int check_params(const odp_pool_param_t *params)
 			return -1;
 		}
 
-		if (!CHECK_IS_POWER2(params->pkt.align)) {
+		if (!_ODP_CHECK_IS_POWER2(params->pkt.align)) {
 			ODP_ERR("pkt.align not power of two %u\n", params->pkt.align);
 			return -1;
 		}
@@ -631,7 +632,7 @@ static int reserve_uarea(pool_t *pool, uint32_t uarea_size, uint32_t num_pkt)
 		 pool->pool_idx, pool->name);
 	uarea_name[ODP_SHM_NAME_LEN - 1] = 0;
 
-	pool->uarea_size = ROUNDUP_CACHE_LINE(uarea_size);
+	pool->uarea_size = _ODP_ROUNDUP_CACHE_LINE(uarea_size);
 	pool->uarea_shm_size = num_pkt * (uint64_t)pool->uarea_size;
 
 	shm = odp_shm_reserve(uarea_name, pool->uarea_shm_size, ODP_PAGE_SIZE, 0);
@@ -699,8 +700,7 @@ odp_pool_t _odp_pool_create(const char *name, const odp_pool_param_t *params,
 				buf_align = ODP_CONFIG_BUFFER_ALIGN_MIN;
 
 			if (params->buf.align != 0)
-				blk_size = ROUNDUP_ALIGN(blk_size,
-							 buf_align);
+				blk_size = _ODP_ROUNDUP_ALIGN(blk_size, buf_align);
 
 			hdr_size = sizeof(odp_buffer_hdr_t);
 			CHECK_U16_OVERFLOW(blk_size);
@@ -732,13 +732,12 @@ odp_pool_t _odp_pool_create(const char *name, const odp_pool_param_t *params,
 			if ((max_len + blk_size) / blk_size > params->pkt.num)
 				blk_size = (max_len + params->pkt.num) /
 					params->pkt.num;
-			blk_size = ROUNDUP_ALIGN(headroom + blk_size +
-						 tailroom, min_align);
+			blk_size = _ODP_ROUNDUP_ALIGN(headroom + blk_size + tailroom, min_align);
 
 			/* Segment size minus headroom might be rounded down by the driver (e.g.
 			 * ixgbe) to the nearest multiple of 1024. Round it up here to make sure the
 			 * requested size is still going to fit without segmentation. */
-			blk_size = ROUNDUP_ALIGN(blk_size - headroom, min_seg_len) + headroom;
+			blk_size = _ODP_ROUNDUP_ALIGN(blk_size - headroom, min_seg_len) + headroom;
 
 			/* Round down the block size to 16 bits  */
 			if (blk_size > UINT16_MAX) {
@@ -783,8 +782,7 @@ odp_pool_t _odp_pool_create(const char *name, const odp_pool_param_t *params,
 			return ODP_POOL_INVALID;
 		}
 
-		mb_ctor_arg.seg_buf_offset =
-			(uint16_t)ROUNDUP_CACHE_LINE(hdr_size);
+		mb_ctor_arg.seg_buf_offset = (uint16_t)_ODP_ROUNDUP_CACHE_LINE(hdr_size);
 		mb_ctor_arg.seg_buf_size = mbp_ctor_arg.mbuf_data_room_size;
 		mb_ctor_arg.type = type;
 		mb_ctor_arg.event_type = event_type;
@@ -1140,7 +1138,7 @@ int odp_pool_stats_reset(odp_pool_t pool_hdl ODP_UNUSED)
  * Round up the space we reserve for objhdr up to cache line size. The rte_mbuf
  * that comes after this must be cache line aligned.
  */
-#define SIZEOF_OBJHDR ROUNDUP_CACHE_LINE(sizeof(struct rte_mempool_objhdr))
+#define SIZEOF_OBJHDR _ODP_ROUNDUP_CACHE_LINE(sizeof(struct rte_mempool_objhdr))
 
 int odp_pool_ext_capability(odp_pool_type_t type,
 			    odp_pool_ext_capability_t *capa)

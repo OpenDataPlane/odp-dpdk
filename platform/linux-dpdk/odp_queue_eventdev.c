@@ -15,6 +15,7 @@
 #include <odp_config_internal.h>
 #include <odp_event_internal.h>
 #include <odp_debug_internal.h>
+#include <odp_macros_internal.h>
 #include <odp_libconfig_internal.h>
 #include <odp_queue_if.h>
 #include <odp_schedule_if.h>
@@ -1165,11 +1166,11 @@ static int queue_init(queue_entry_t *queue, const char *name,
 	}
 
 	/* Ring size must larger than queue_size */
-	if (CHECK_IS_POWER2(queue_size))
+	if (_ODP_CHECK_IS_POWER2(queue_size))
 		queue_size++;
 
 	/* Round up if not already a power of two */
-	queue_size = ROUNDUP_POWER2_U32(queue_size);
+	queue_size = _ODP_ROUNDUP_POWER2_U32(queue_size);
 
 	/* Default to error functions */
 	queue->s.enqueue            = error_enqueue;

@@ -20,10 +20,10 @@ extern "C" {
 #include <odp/api/shared_memory.h>
 #include <odp/api/ticketlock.h>
 
-#include <odp_align_internal.h>
 #include <odp_buffer_internal.h>
 #include <odp_config_internal.h>
 #include <odp_forward_typedefs_internal.h>
+#include <odp_macros_internal.h>
 #include <odp_ptr_ring_mpmc_internal.h>
 #include <odp_ptr_ring_st_internal.h>
 #include <odp_ptr_ring_spsc_internal.h>
@@ -70,7 +70,7 @@ struct queue_entry_s {
 
 union queue_entry_u {
 	struct queue_entry_s s;
-	uint8_t pad[ROUNDUP_CACHE_LINE(sizeof(struct queue_entry_s))];
+	uint8_t pad[_ODP_ROUNDUP_CACHE_LINE(sizeof(struct queue_entry_s))];
 };
 
 typedef struct queue_global_t {
