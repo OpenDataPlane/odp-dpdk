@@ -5,42 +5,40 @@
  * SPDX-License-Identifier:     BSD-3-Clause
  */
 
-#include <odp/api/std_types.h>
-#include <odp/api/pool.h>
-#include <odp_pool_internal.h>
-#include <odp_buffer_internal.h>
-#include <odp_packet_internal.h>
-#include <odp_timer_internal.h>
-
-#include <odp/api/shared_memory.h>
 #include <odp/api/align.h>
-#include <odp_init_internal.h>
-#include <odp_config_internal.h>
 #include <odp/api/hints.h>
-#include <odp/api/debug.h>
-#include <odp_debug_internal.h>
-#include <odp_macros_internal.h>
-#include <odp/api/cpumask.h>
-#include <odp_libconfig_internal.h>
-#include <odp_event_vector_internal.h>
-
-#include <string.h>
-#include <stddef.h>
-#include <stdlib.h>
-#include <math.h>
-#include <inttypes.h>
+#include <odp/api/pool.h>
+#include <odp/api/shared_memory.h>
+#include <odp/api/std_types.h>
 
 #include <odp/api/plat/pool_inline_types.h>
 
+#include <odp_buffer_internal.h>
+#include <odp_config_internal.h>
+#include <odp_debug_internal.h>
+#include <odp_event_vector_internal.h>
+#include <odp_init_internal.h>
+#include <odp_libconfig_internal.h>
+#include <odp_macros_internal.h>
+#include <odp_packet_internal.h>
+#include <odp_pool_internal.h>
+#include <odp_timer_internal.h>
+
 #include <rte_config.h>
 #include <rte_errno.h>
+#include <rte_malloc.h>
 #include <rte_mempool.h>
 #include <rte_mbuf_pool_ops.h>
-#include <rte_malloc.h>
 /* ppc64 rte_memcpy.h (included through rte_mempool.h) may define vector */
 #if defined(__PPC64__) && defined(vector)
 	#undef vector
 #endif
+
+#include <inttypes.h>
+#include <math.h>
+#include <stddef.h>
+#include <stdlib.h>
+#include <string.h>
 
 #ifdef POOL_USE_TICKETLOCK
 #include <odp/api/ticketlock.h>
