@@ -18,6 +18,7 @@
 #include <odp_config_internal.h>
 #include <odp_packet_io_internal.h>
 #include <odp_debug_internal.h>
+#include <odp_macros_internal.h>
 #include <odp/api/hints.h>
 #include <odp/api/sync.h>
 #include <odp/api/plat/sync_inlines.h>
@@ -995,11 +996,11 @@ static int queue_init(queue_entry_t *queue, const char *name,
 	}
 
 	/* Ring size must larger than queue_size */
-	if (CHECK_IS_POWER2(queue_size))
+	if (_ODP_CHECK_IS_POWER2(queue_size))
 		queue_size++;
 
 	/* Round up if not already a power of two */
-	queue_size = ROUNDUP_POWER2_U32(queue_size);
+	queue_size = _ODP_ROUNDUP_POWER2_U32(queue_size);
 
 	/* Single-producer / single-consumer plain queue has simple and
 	 * lock-free implementation */

@@ -17,6 +17,7 @@ AM_CPPFLAGS +=  $(NETMAP_CPPFLAGS)
 AM_CFLAGS +=  $(AARCH64CRYPTO_CFLAGS)
 AM_CFLAGS +=  $(DPDK_CFLAGS)
 AM_CFLAGS +=  $(LIBCONFIG_CFLAGS)
+AM_CFLAGS +=  $(LIBXDP_CFLAGS)
 
 DISTCLEANFILES = include/odp_libconfig_config.h
 include/odp_libconfig_config.h: $(top_builddir)/$(rel_default_config_path) $(top_builddir)/config.status
@@ -105,7 +106,6 @@ odpapiabiarchinclude_HEADERS += \
 endif
 
 noinst_HEADERS = \
-		  include/odp_align_internal.h \
 		  include/odp_atomic_internal.h \
 		  include/odp_bitset.h \
 		  include/odp_buffer_internal.h \
@@ -210,6 +210,7 @@ __LIB__libodp_linux_la_SOURCES = \
 			   odp_parse.c \
 			   odp_pkt_queue.c \
 			   odp_pool.c \
+			   odp_pool_mem_src_ops.c \
 			   odp_queue_basic.c \
 			   odp_queue_if.c \
 			   odp_queue_lf.c \
@@ -256,6 +257,7 @@ __LIB__libodp_linux_la_SOURCES = \
 			   pktio/pktio_common.c \
 			   pktio/socket.c \
 			   pktio/socket_mmap.c \
+			   pktio/socket_xdp.c \
 			   pktio/tap.c
 
 if WITH_OPENSSL_CRYPTO
@@ -418,6 +420,7 @@ __LIB__libodp_linux_la_LIBADD += $(LIBCONFIG_LIBS)
 __LIB__libodp_linux_la_LIBADD += $(DPDK_LIBS_LIBODP)
 __LIB__libodp_linux_la_LIBADD += $(PTHREAD_LIBS)
 __LIB__libodp_linux_la_LIBADD += $(TIMER_LIBS)
+__LIB__libodp_linux_la_LIBADD += $(LIBXDP_LIBS)
 
 if ODP_PKTIO_PCAP
 __LIB__libodp_linux_la_LIBADD += $(PCAP_LIBS)

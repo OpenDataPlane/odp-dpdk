@@ -5,6 +5,7 @@
  * SPDX-License-Identifier:     BSD-3-Clause
  */
 
+#include <odp/api/align.h>
 #include <odp/api/buffer.h>
 #include <odp/api/byteorder.h>
 #include <odp/api/hash.h>
@@ -20,7 +21,6 @@
 #include <odp/api/plat/packet_inlines.h>
 #include <odp/api/plat/packet_io_inlines.h>
 
-#include <odp_align_internal.h>
 #include <odp_chksum_internal.h>
 #include <odp_debug_internal.h>
 #include <odp_errno_define.h>
@@ -788,7 +788,7 @@ int odp_packet_align(odp_packet_t *pkt, uint32_t offset, uint32_t len,
 
 	if (seglen >= len) {
 		misalign = align <= 1 ? 0 :
-			ROUNDUP_ALIGN(uaddr, align) - uaddr;
+			_ODP_ROUNDUP_ALIGN(uaddr, align) - uaddr;
 		if (misalign == 0)
 			return 0;
 		shift = align - misalign;
@@ -798,7 +798,7 @@ int odp_packet_align(odp_packet_t *pkt, uint32_t offset, uint32_t len,
 		shift  = len - seglen;
 		uaddr -= shift;
 		misalign = align <= 1 ? 0 :
-			ROUNDUP_ALIGN(uaddr, align) - uaddr;
+			_ODP_ROUNDUP_ALIGN(uaddr, align) - uaddr;
 		if (misalign)
 			shift += align - misalign;
 	}

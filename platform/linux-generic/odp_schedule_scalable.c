@@ -24,13 +24,13 @@
 #include <odp_shm_internal.h>
 #include <odp_ishmpool_internal.h>
 
-#include <odp_align_internal.h>
 #include <odp/api/plat/cpu_inlines.h>
 #include <odp_llqueue.h>
 #include <odp_queue_scalable_internal.h>
 #include <odp_schedule_if.h>
 #include <odp_bitset.h>
 #include <odp_event_internal.h>
+#include <odp_macros_internal.h>
 #include <odp_packet_io_internal.h>
 #include <odp_timer_internal.h>
 
@@ -46,7 +46,7 @@
 
 #define FLAG_PKTIN 0x80
 
-ODP_STATIC_ASSERT(CHECK_IS_POWER2(CONFIG_MAX_SCHED_QUEUES),
+ODP_STATIC_ASSERT(_ODP_CHECK_IS_POWER2(CONFIG_MAX_SCHED_QUEUES),
 		  "Number_of_queues_is_not_power_of_two");
 
 #define SCHED_GROUP_JOIN 0
@@ -2167,6 +2167,7 @@ static int schedule_capability(odp_schedule_capability_t *capa)
 	capa->max_prios = schedule_num_prio();
 	capa->max_queues = CONFIG_MAX_SCHED_QUEUES;
 	capa->max_queue_size = 0;
+	capa->order_wait = ODP_SUPPORT_YES;
 
 	return 0;
 }
@@ -2233,5 +2234,6 @@ const schedule_api_t _odp_schedule_scalable_api = {
 	.schedule_order_unlock_lock	= schedule_order_unlock_lock,
 	.schedule_order_lock_start	= schedule_order_lock_start,
 	.schedule_order_lock_wait	= schedule_order_lock_wait,
+	.schedule_order_wait		= order_lock,
 	.schedule_print			= schedule_print
 };

@@ -25,9 +25,9 @@ extern "C" {
 #include <odp/api/thread.h>
 #include <odp/api/ticketlock.h>
 
-#include <odp_align_internal.h>
 #include <odp_config_internal.h>
 #include <odp_forward_typedefs_internal.h>
+#include <odp_macros_internal.h>
 #include <odp_packet_io_internal.h>
 #include <odp_ptr_ring_mpmc_internal.h>
 #include <odp_queue_if.h>
@@ -88,7 +88,7 @@ struct queue_entry_s {
 
 union queue_entry_u {
 	struct queue_entry_s s;
-	uint8_t pad[ROUNDUP_CACHE_LINE(sizeof(struct queue_entry_s))];
+	uint8_t pad[_ODP_ROUNDUP_CACHE_LINE(sizeof(struct queue_entry_s))];
 };
 
 /* Eventdev global data */

@@ -20,13 +20,15 @@ extern "C" {
 
 #include <odp/api/align.h>
 #include <odp/api/debug.h>
+#include <odp/api/hints.h>
 #include <odp/api/ipsec.h>
 #include <odp/api/packet.h>
-#include <odp/api/plat/packet_inline_types.h>
 #include <odp/api/packet_io.h>
 #include <odp/api/crypto.h>
 #include <odp/api/comp.h>
 #include <odp/api/std.h>
+
+#include <odp/api/plat/packet_inline_types.h>
 
 #include <odp_config_internal.h>
 #include <odp_debug_internal.h>
@@ -34,6 +36,7 @@ extern "C" {
 #include <odp_pool_internal.h>
 
 #include <protocols/eth.h>
+#include <stdint.h>
 #include <string.h>
 
 #include <rte_config.h>
@@ -158,13 +161,11 @@ typedef struct odp_packet_hdr_t {
 	int8_t subtype;
 
 	union {
-		struct {
-			/* Result for crypto packet op */
-			odp_crypto_packet_result_t crypto_op_result;
+		/* Result for crypto packet op */
+		odp_crypto_packet_result_t crypto_op_result;
 
-			/* Context for IPsec */
-			odp_ipsec_packet_result_t ipsec_ctx;
-		};
+		/* Context for IPsec */
+		odp_ipsec_packet_result_t ipsec_ctx;
 
 		/* Result for comp packet op */
 		odp_comp_packet_result_t comp_op_result;
@@ -271,7 +272,10 @@ static inline void _odp_packet_copy_md(odp_packet_hdr_t *dst_hdr,
 				       odp_packet_hdr_t *src_hdr,
 				       odp_bool_t uarea_copy)
 {
+	const int8_t subtype = src_hdr->subtype;
+
 	dst_hdr->input = src_hdr->input;
+	dst_hdr->subtype = subtype;
 	dst_hdr->dst_queue = src_hdr->dst_queue;
 	dst_hdr->cos = src_hdr->cos;
 	dst_hdr->cls_mark = src_hdr->cls_mark;
@@ -320,6 +324,15 @@ static inline void _odp_packet_copy_md(odp_packet_hdr_t *dst_hdr,
 			src_hdr->uarea_addr = dst_hdr->uarea_addr;
 			dst_hdr->uarea_addr = src_uarea;
 		}
+	}
+
+	if (odp_unlikely(subtype != ODP_EVENT_PACKET_BASIC)) {
+		if (subtype == ODP_EVENT_PACKET_IPSEC)
+			dst_hdr->ipsec_ctx = src_hdr->ipsec_ctx;
+		else if (subtype == ODP_EVENT_PACKET_CRYPTO)
+			dst_hdr->crypto_op_result = src_hdr->crypto_op_result;
+		else if (subtype == ODP_EVENT_PACKET_COMP)
+			dst_hdr->comp_op_result = src_hdr->comp_op_result;
 	}
 }
 

@@ -1816,7 +1816,6 @@ int odp_crypto_int(odp_packet_t pkt_in,
 	odp_bool_t allocated = false;
 	odp_packet_t out_pkt = *pkt_out;
 	odp_crypto_packet_result_t *op_result;
-	odp_packet_hdr_t *pkt_hdr;
 	odp_bool_t result_ok = true;
 
 	session = (crypto_session_entry_t *)(intptr_t)param->session;
@@ -1984,9 +1983,6 @@ out:
 	op_result->auth_status.hw_err = ODP_CRYPTO_HW_ERR_NONE;
 	op_result->ok = result_ok;
 
-	pkt_hdr = packet_hdr(out_pkt);
-	pkt_hdr->p.flags.crypto_err = !op_result->ok;
-
 	/* Synchronous, simply return results */
 	*pkt_out = out_pkt;
 
@@ -2032,7 +2028,6 @@ int odp_crypto_operation(odp_crypto_op_param_t *param,
 		 * We cannot fail since odp_crypto_op() has already processed
 		 * the packet. Let's indicate error in the result instead.
 		 */
-		packet_hdr(out_pkt)->p.flags.crypto_err = 1;
 		packet_result.ok = false;
 	}
 
