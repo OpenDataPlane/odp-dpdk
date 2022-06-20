@@ -13,6 +13,8 @@
 #define MAX_NUM_UDP 4
 #define MARK_IP     1
 #define MARK_UDP    2
+#define TEST_IPV4   false
+#define TEST_IPV6   true
 
 static odp_pool_t pkt_pool;
 /** sequence number of IP packets */
@@ -560,7 +562,7 @@ static void classification_test_pmr_term_udp_sport(void)
 	test_pmr(&pmr_param, pkt, NO_MATCH);
 }
 
-static void classification_test_pmr_term_ipproto(void)
+static void classification_test_pmr_term_proto(odp_bool_t ipv6)
 {
 	odp_packet_t pkt;
 	uint8_t val;
@@ -578,16 +580,71 @@ static void classification_test_pmr_term_ipproto(void)
 	pmr_param.val_sz = sizeof(val);
 
 	pkt_info = default_pkt_info;
+	pkt_info.ipv6 = ipv6;
 	pkt_info.l4_type = CLS_PKT_L4_UDP;
 	pkt = create_packet(pkt_info);
 	CU_ASSERT_FATAL(pkt != ODP_PACKET_INVALID);
 
 	test_pmr(&pmr_param, pkt, MATCH);
 
-	pkt = create_packet(default_pkt_info);
+	pkt_info.l4_type = CLS_PKT_L4_TCP;
+	pkt = create_packet(pkt_info);
 	CU_ASSERT_FATAL(pkt != ODP_PACKET_INVALID);
 
 	test_pmr(&pmr_param, pkt, NO_MATCH);
+}
+
+static void classification_test_pmr_term_ipv4_proto(void)
+{
+	classification_test_pmr_term_proto(TEST_IPV4);
+}
+
+static void classification_test_pmr_term_ipv6_proto(void)
+{
+	classification_test_pmr_term_proto(TEST_IPV6);
+}
+
+static void classification_test_pmr_term_dscp(odp_bool_t ipv6)
+{
+	odp_packet_t pkt;
+	uint8_t val;
+	uint8_t mask;
+	odp_pmr_param_t pmr_param;
+	cls_packet_info_t pkt_info;
+
+	val  = DSCP_CLASS4;
+	mask = 0x3f;
+
+	odp_cls_pmr_param_init(&pmr_param);
+	pmr_param.term = ODP_PMR_IP_DSCP;
+	pmr_param.match.value = &val;
+	pmr_param.match.mask = &mask;
+	pmr_param.val_sz = sizeof(val);
+
+	pkt_info = default_pkt_info;
+	pkt_info.ipv6    = ipv6;
+	pkt_info.l4_type = CLS_PKT_L4_UDP;
+	pkt_info.dscp    = DSCP_CLASS4;
+	pkt = create_packet(pkt_info);
+	CU_ASSERT_FATAL(pkt != ODP_PACKET_INVALID);
+
+	test_pmr(&pmr_param, pkt, MATCH);
+
+	pkt_info.dscp = 0;
+	pkt = create_packet(pkt_info);
+	CU_ASSERT_FATAL(pkt != ODP_PACKET_INVALID);
+
+	test_pmr(&pmr_param, pkt, NO_MATCH);
+}
+
+static void classification_test_pmr_term_ipv4_dscp(void)
+{
+	classification_test_pmr_term_dscp(TEST_IPV4);
+}
+
+static void classification_test_pmr_term_ipv6_dscp(void)
+{
+	classification_test_pmr_term_dscp(TEST_IPV6);
 }
 
 static void classification_test_pmr_term_dmac(void)
@@ -792,6 +849,44 @@ static void classification_test_pmr_term_vlan_id_x(void)
 	test_pmr(&pmr_param, pkt, MATCH);
 
 	pkt = create_packet(default_pkt_info);
+	CU_ASSERT_FATAL(pkt != ODP_PACKET_INVALID);
+
+	test_pmr(&pmr_param, pkt, NO_MATCH);
+}
+
+static void classification_test_pmr_term_vlan_pcp_0(void)
+{
+	odp_packet_t pkt;
+	uint8_t val;
+	uint8_t mask;
+	uint16_t tci;
+	odp_pmr_param_t pmr_param;
+	odph_ethhdr_t *eth;
+	odph_vlanhdr_t *vlan_0;
+	cls_packet_info_t pkt_info;
+
+	val  = 5;
+	mask = 0x7;
+	tci  = ((uint16_t)val) << ODPH_VLANHDR_PCP_SHIFT;
+	tci |= 0x123;
+
+	odp_cls_pmr_param_init(&pmr_param);
+	pmr_param.term = ODP_PMR_VLAN_PCP_0;
+	pmr_param.match.value = &val;
+	pmr_param.match.mask = &mask;
+	pmr_param.val_sz = sizeof(val);
+
+	pkt_info = default_pkt_info;
+	pkt_info.vlan = true;
+	pkt = create_packet(pkt_info);
+	CU_ASSERT_FATAL(pkt != ODP_PACKET_INVALID);
+	eth = (odph_ethhdr_t *)odp_packet_l2_ptr(pkt, NULL);
+	vlan_0 = (odph_vlanhdr_t *)(eth + 1);
+	vlan_0->tci = odp_cpu_to_be_16(tci);
+
+	test_pmr(&pmr_param, pkt, MATCH);
+
+	pkt = create_packet(pkt_info);
 	CU_ASSERT_FATAL(pkt != ODP_PACKET_INVALID);
 
 	test_pmr(&pmr_param, pkt, NO_MATCH);
@@ -1803,6 +1898,11 @@ static int check_capa_ip_proto(void)
 	return cls_capa.supported_terms.bit.ip_proto;
 }
 
+static int check_capa_ip_dscp(void)
+{
+	return cls_capa.supported_terms.bit.ip_dscp;
+}
+
 static int check_capa_dmac(void)
 {
 	return cls_capa.supported_terms.bit.dmac;
@@ -1841,6 +1941,11 @@ static int check_capa_vlan_id_0(void)
 static int check_capa_vlan_id_x(void)
 {
 	return cls_capa.supported_terms.bit.vlan_id_x;
+}
+
+static int check_capa_vlan_pcp_0(void)
+{
+	return cls_capa.supported_terms.bit.vlan_pcp_0;
 }
 
 static int check_capa_ethtype_0(void)
@@ -1945,8 +2050,14 @@ odp_testinfo_t classification_suite_pmr[] = {
 				  check_capa_icmp_code),
 	ODP_TEST_INFO_CONDITIONAL(classification_test_pmr_term_icmp_id,
 				  check_capa_icmp_id),
-	ODP_TEST_INFO_CONDITIONAL(classification_test_pmr_term_ipproto,
+	ODP_TEST_INFO_CONDITIONAL(classification_test_pmr_term_ipv4_proto,
 				  check_capa_ip_proto),
+	ODP_TEST_INFO_CONDITIONAL(classification_test_pmr_term_ipv6_proto,
+				  check_capa_ip_proto),
+	ODP_TEST_INFO_CONDITIONAL(classification_test_pmr_term_ipv4_dscp,
+				  check_capa_ip_dscp),
+	ODP_TEST_INFO_CONDITIONAL(classification_test_pmr_term_ipv6_dscp,
+				  check_capa_ip_dscp),
 	ODP_TEST_INFO_CONDITIONAL(classification_test_pmr_term_dmac,
 				  check_capa_dmac),
 	ODP_TEST_INFO_CONDITIONAL(classification_test_pmr_pool_set,
@@ -1967,6 +2078,8 @@ odp_testinfo_t classification_suite_pmr[] = {
 				  check_capa_vlan_id_0),
 	ODP_TEST_INFO_CONDITIONAL(classification_test_pmr_term_vlan_id_x,
 				  check_capa_vlan_id_x),
+	ODP_TEST_INFO_CONDITIONAL(classification_test_pmr_term_vlan_pcp_0,
+				  check_capa_vlan_pcp_0),
 	ODP_TEST_INFO_CONDITIONAL(classification_test_pmr_term_eth_type_0,
 				  check_capa_ethtype_0),
 	ODP_TEST_INFO_CONDITIONAL(classification_test_pmr_term_eth_type_x,

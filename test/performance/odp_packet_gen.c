@@ -30,9 +30,13 @@
 #define RAND_16BIT_WORDS  128
 /* Max retries to generate random data */
 #define MAX_RAND_RETRIES  1000
+/* Maximum pktio index table size */
+#define MAX_PKTIO_INDEXES 1024
 
 /* Minimum number of packets to receive in CI test */
 #define MIN_RX_PACKETS_CI 800
+
+ODP_STATIC_ASSERT(MAX_PKTIOS <= UINT8_MAX, "Interface index must fit into uint8_t\n");
 
 typedef struct test_options_t {
 	uint64_t gap_nsec;
@@ -58,6 +62,7 @@ typedef struct test_options_t {
 	uint16_t udp_dst;
 	uint32_t wait_sec;
 	uint32_t mtu;
+	odp_bool_t promisc_mode;
 
 	struct vlan_hdr {
 		uint16_t tpid;
@@ -125,6 +130,9 @@ typedef struct test_global_t {
 
 	} pktio[MAX_PKTIOS];
 
+	/* Interface lookup table. Table index is pktio_index of the API. */
+	uint8_t if_from_pktio_idx[MAX_PKTIO_INDEXES];
+
 } test_global_t;
 
 static test_global_t *test_global;
@@ -173,6 +181,7 @@ static void print_usage(void)
 	       "  -d, --ipv4_dst            IPv4 destination address. Default: 192.168.0.2\n"
 	       "  -o, --udp_src             UDP source port. Default: 10000\n"
 	       "  -p, --udp_dst             UDP destination port. Default: 20000\n"
+	       "  -P, --promisc_mode        Enable promiscuous mode.\n"
 	       "  -c, --c_mode <counts>     Counter mode for incrementing UDP port numbers.\n"
 	       "                            Specify the number of port numbers used starting from\n"
 	       "                            udp_src/udp_dst. Comma-separated (no spaces) list of\n"
@@ -254,6 +263,7 @@ static int parse_options(int argc, char *argv[], test_global_t *global)
 		{"ipv4_dst",    required_argument, NULL, 'd'},
 		{"udp_src",     required_argument, NULL, 'o'},
 		{"udp_dst",     required_argument, NULL, 'p'},
+		{"promisc_mode", no_argument, NULL, 'P'},
 		{"c_mode",      required_argument, NULL, 'c'},
 		{"mtu",         required_argument, NULL, 'M'},
 		{"quit",        required_argument, NULL, 'q'},
@@ -263,7 +273,7 @@ static int parse_options(int argc, char *argv[], test_global_t *global)
 		{NULL, 0, NULL, 0}
 	};
 
-	static const char *shortopts = "+i:e:r:t:n:l:L:M:b:x:g:v:s:d:o:p:c:q:u:w:h";
+	static const char *shortopts = "+i:e:r:t:n:l:L:M:b:x:g:v:s:d:o:p:c:q:u:w:Ph";
 
 	test_options->num_pktio  = 0;
 	test_options->num_rx     = 1;
@@ -275,6 +285,7 @@ static int parse_options(int argc, char *argv[], test_global_t *global)
 	test_options->bursts     = 1;
 	test_options->gap_nsec   = 1000000;
 	test_options->num_vlan   = 0;
+	test_options->promisc_mode = 0;
 	strncpy(test_options->ipv4_src_s, "192.168.0.1",
 		sizeof(test_options->ipv4_src_s) - 1);
 	strncpy(test_options->ipv4_dst_s, "192.168.0.2",
@@ -384,6 +395,9 @@ static int parse_options(int argc, char *argv[], test_global_t *global)
 				break;
 			}
 			test_options->udp_dst = udp_port;
+			break;
+		case 'P':
+			test_options->promisc_mode = 1;
 			break;
 		case 'r':
 			test_options->num_rx = atoi(optarg);
@@ -621,7 +635,7 @@ static int open_pktios(test_global_t *global)
 	odp_pktout_queue_param_t pktout_param;
 	char *name;
 	uint32_t i, seg_len;
-	int j;
+	int j, pktio_idx;
 	test_options_t *test_options = &global->test_options;
 	uint32_t num_rx = test_options->num_rx;
 	int num_tx = test_options->num_tx;
@@ -649,6 +663,7 @@ static int open_pktios(test_global_t *global)
 		printf("%u bytes\n", test_options->mtu);
 	else
 		printf("interface default\n");
+	printf("  promisc mode:       %s\n", test_options->promisc_mode ? "enabled" : "disabled");
 	printf("  tx burst size       %u\n", test_options->burst_size);
 	printf("  tx bursts           %u\n", test_options->bursts);
 	printf("  tx burst gap        %" PRIu64 " nsec\n",
@@ -729,6 +744,9 @@ static int open_pktios(test_global_t *global)
 
 	global->pool = pool;
 
+	if (odp_pktio_max_index() >= MAX_PKTIO_INDEXES)
+		printf("Warning: max pktio index (%u) is too large\n", odp_pktio_max_index());
+
 	odp_pktio_param_init(&pktio_param);
 	pktio_param.in_mode  = ODP_PKTIN_MODE_SCHED;
 	pktio_param.out_mode = ODP_PKTOUT_MODE_DIRECT;
@@ -749,6 +767,13 @@ static int open_pktios(test_global_t *global)
 		global->pktio[i].pktio = pktio;
 
 		odp_pktio_print(pktio);
+
+		pktio_idx = odp_pktio_index(pktio);
+		if (pktio_idx < 0 || pktio_idx >= MAX_PKTIO_INDEXES) {
+			printf("Error (%s): Bad pktio index: %i\n", name, pktio_idx);
+			return -1;
+		}
+		global->if_from_pktio_idx[pktio_idx] = i;
 
 		if (odp_pktio_capability(pktio, &pktio_capa)) {
 			printf("Error (%s): Pktio capability failed.\n", name);
@@ -813,6 +838,18 @@ static int open_pktios(test_global_t *global)
 		pktio_config.parser.layer = ODP_PROTO_LAYER_ALL;
 
 		odp_pktio_config(pktio, &pktio_config);
+
+		if (test_options->promisc_mode) {
+			if (!pktio_capa.set_op.op.promisc_mode) {
+				ODPH_ERR("Error (%s): promisc mode set not supported\n", name);
+				return -1;
+			}
+
+			if (odp_pktio_promisc_mode_set(pktio, true)) {
+				ODPH_ERR("Error (%s): promisc mode enable failed\n", name);
+				return -1;
+			}
+		}
 
 		odp_pktin_queue_param_init(&pktin_param);
 
@@ -1056,8 +1093,11 @@ static int rx_thread(void *arg)
 			/* All packets from the same queue are from the same pktio interface */
 			int index = odp_packet_input_index(odp_packet_from_event(ev[0]));
 
-			if (index >= 0)
-				global->stat[thr].pktio[index].rx_packets += num;
+			if (index >= 0) {
+				int if_idx = global->if_from_pktio_idx[index];
+
+				global->stat[thr].pktio[if_idx].rx_packets += num;
+			}
 		}
 
 		odp_event_free_multi(ev, num);

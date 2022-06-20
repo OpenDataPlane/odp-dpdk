@@ -18,6 +18,7 @@
 #include <odp/api/random.h>
 #include <odp/api/plat/packet_inlines.h>
 #include <odp/api/plat/thread_inlines.h>
+#include <odp_macros_internal.h>
 #include <odp_packet_internal.h>
 #include <odp/api/plat/queue_inlines.h>
 #include <odp_global_data.h>
@@ -1013,7 +1014,7 @@ static inline int internal_crypt(EVP_CIPHER_CTX *ctx,
 			rc = EVP_update(ctx, in_addr, &out_len, in_addr, len);
 			if (odp_unlikely(rc != 1))
 				goto err;
-			ODP_ASSERT(CHECK_IS_POWER2(block_len));
+			ODP_ASSERT(_ODP_CHECK_IS_POWER2(block_len));
 			buffered = len & (block_len - 1);
 			if (odp_unlikely(out_len + buffered != len))
 				goto err;
@@ -2531,7 +2532,6 @@ odp_crypto_operation(odp_crypto_op_param_t *param,
 		 * We cannot fail since odp_crypto_op() has already processed
 		 * the packet. Let's indicate error in the result instead.
 		 */
-		packet_hdr(out_pkt)->p.flags.crypto_err = 1;
 		packet_result.ok = false;
 	}
 
@@ -2810,7 +2810,6 @@ int crypto_int(odp_packet_t pkt_in,
 	odp_bool_t allocated = false;
 	odp_packet_t out_pkt = *pkt_out;
 	odp_crypto_packet_result_t *op_result;
-	odp_packet_hdr_t *pkt_hdr;
 
 	session = (odp_crypto_generic_session_t *)(intptr_t)param->session;
 
@@ -2872,9 +2871,6 @@ int crypto_int(odp_packet_t pkt_in,
 	op_result->ok =
 		(rc_cipher == ODP_CRYPTO_ALG_ERR_NONE) &&
 		(rc_auth == ODP_CRYPTO_ALG_ERR_NONE);
-
-	pkt_hdr = packet_hdr(out_pkt);
-	pkt_hdr->p.flags.crypto_err = !op_result->ok;
 
 	/* Synchronous, simply return results */
 	*pkt_out = out_pkt;

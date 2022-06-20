@@ -15,9 +15,9 @@
 #include <odp_pool_internal.h>
 #include <odp_init_internal.h>
 #include <odp_packet_internal.h>
-#include <odp_packet_dpdk.h>
 #include <odp_config_internal.h>
 #include <odp_debug_internal.h>
+#include <odp_macros_internal.h>
 #include <odp_ring_ptr_internal.h>
 #include <odp_global_data.h>
 #include <odp_libconfig_internal.h>
@@ -62,6 +62,8 @@ typedef struct pool_local_t {
 	int thr_id;
 
 } pool_local_t;
+
+extern const _odp_pool_mem_src_ops_t * const _odp_pool_mem_src_ops[];
 
 pool_global_t *_odp_pool_glb;
 static __thread pool_local_t local;
@@ -239,7 +241,7 @@ static int read_config_file(pool_global_t *pool_glb)
 	if (val == 0)
 		align = ODP_CACHE_LINE_SIZE;
 
-	if (!CHECK_IS_POWER2(align)) {
+	if (!_ODP_CHECK_IS_POWER2(align)) {
 		ODP_ERR("Not a power of two: %s = %i\n", str, val);
 		return -1;
 	}
@@ -257,7 +259,7 @@ static int read_config_file(pool_global_t *pool_glb)
 	if (val == 0)
 		align = ODP_CACHE_LINE_SIZE;
 
-	if (!CHECK_IS_POWER2(align)) {
+	if (!_ODP_CHECK_IS_POWER2(align)) {
 		ODP_ERR("Not a power of two: %s = %i\n", str, val);
 		return -1;
 	}
@@ -617,7 +619,7 @@ static int reserve_uarea(pool_t *pool, uint32_t uarea_size, uint32_t num_pkt, ui
 	sprintf(uarea_name, "pool_%03i_uarea_%s", pool->pool_idx, pool->name);
 
 	pool->param_uarea_size = uarea_size;
-	pool->uarea_size       = ROUNDUP_CACHE_LINE(uarea_size);
+	pool->uarea_size       = _ODP_ROUNDUP_CACHE_LINE(uarea_size);
 	pool->uarea_shm_size   = num_pkt * (uint64_t)pool->uarea_size;
 
 	shm = odp_shm_reserve(uarea_name, pool->uarea_shm_size, ODP_PAGE_SIZE, shmflags);
@@ -628,6 +630,26 @@ static int reserve_uarea(pool_t *pool, uint32_t uarea_size, uint32_t num_pkt, ui
 	pool->uarea_shm       = shm;
 	pool->uarea_base_addr = odp_shm_addr(shm);
 	return 0;
+}
+
+static void set_mem_src_ops(pool_t *pool)
+{
+	odp_bool_t is_active_found = false;
+
+	pool->mem_src_ops = NULL;
+
+	for (int i = 0; _odp_pool_mem_src_ops[i]; i++) {
+		if (!is_active_found) {
+			if (_odp_pool_mem_src_ops[i]->is_active()) {
+				is_active_found = true;
+				pool->mem_src_ops = _odp_pool_mem_src_ops[i];
+				ODP_DBG("Packet pool as a memory source for: %s\n",
+					pool->mem_src_ops->name);
+			}
+		} else if (_odp_pool_mem_src_ops[i]->is_active()) {
+			_odp_pool_mem_src_ops[i]->force_disable();
+		}
+	}
 }
 
 /* Create pool according to params. Actual type of the pool is type_2, which is recorded for pool
@@ -659,7 +681,7 @@ odp_pool_t _odp_pool_create(const char *name, const odp_pool_param_t *params,
 		uint32_t align_req = params->pkt.align;
 
 		if (align_req &&
-		    (!CHECK_IS_POWER2(align_req) ||
+		    (!_ODP_CHECK_IS_POWER2(align_req) ||
 		     align_req > _odp_pool_glb->config.pkt_base_align)) {
 			ODP_ERR("Bad align requirement\n");
 			return ODP_POOL_INVALID;
@@ -676,7 +698,7 @@ odp_pool_t _odp_pool_create(const char *name, const odp_pool_param_t *params,
 
 	/* Validate requested buffer alignment */
 	if (align > ODP_CONFIG_BUFFER_ALIGN_MAX ||
-	    align != ROUNDDOWN_POWER2(align, align)) {
+	    align != _ODP_ROUNDDOWN_POWER2(align, align)) {
 		ODP_ERR("Bad align requirement\n");
 		return ODP_POOL_INVALID;
 	}
@@ -773,26 +795,29 @@ odp_pool_t _odp_pool_create(const char *name, const odp_pool_param_t *params,
 	pool->type_2 = type_2;
 	pool->params = *params;
 	pool->block_offset = 0;
+	set_mem_src_ops(pool);
 
 	if (type == ODP_POOL_PACKET) {
-		uint32_t dpdk_obj_size;
+		uint32_t adj_size;
 
-		hdr_size = ROUNDUP_CACHE_LINE(sizeof(odp_packet_hdr_t));
+		hdr_size = _ODP_ROUNDUP_CACHE_LINE(sizeof(odp_packet_hdr_t));
 		block_size = hdr_size + align + headroom + seg_len + tailroom;
-		/* Calculate extra space required for storing DPDK objects and
-		 * mbuf headers. NOP if no DPDK pktio used or zero-copy mode is
-		 * disabled. */
-		dpdk_obj_size = _odp_dpdk_pool_obj_size(pool, block_size);
-		if (!dpdk_obj_size) {
-			ODP_ERR("Calculating DPDK mempool obj size failed\n");
-			return ODP_POOL_INVALID;
+		adj_size = block_size;
+
+		if (pool->mem_src_ops && pool->mem_src_ops->adjust_size) {
+			pool->mem_src_ops->adjust_size(pool->mem_src_data,  &adj_size,
+						       &pool->block_offset, &shmflags);
+
+			if (!adj_size) {
+				ODP_ERR("Calculating adjusted block size failed\n");
+				return ODP_POOL_INVALID;
+			}
 		}
-		if (dpdk_obj_size != block_size) {
-			shmflags |= ODP_SHM_HP;
-			block_size = dpdk_obj_size;
-		} else {
-			block_size = ROUNDUP_CACHE_LINE(block_size);
-		}
+
+		if (adj_size != block_size)
+			block_size = adj_size;
+		else
+			block_size = _ODP_ROUNDUP_CACHE_LINE(block_size);
 	} else {
 		/* Header size is rounded up to cache line size, so the
 		 * following data can be cache line aligned without extra
@@ -801,13 +826,13 @@ odp_pool_t _odp_pool_create(const char *name, const odp_pool_param_t *params,
 				align - ODP_CACHE_LINE_SIZE : 0;
 
 		if (type == ODP_POOL_BUFFER)
-			hdr_size = ROUNDUP_CACHE_LINE(sizeof(odp_buffer_hdr_t));
+			hdr_size = _ODP_ROUNDUP_CACHE_LINE(sizeof(odp_buffer_hdr_t));
 		else if (type == ODP_POOL_TIMEOUT)
-			hdr_size = ROUNDUP_CACHE_LINE(sizeof(odp_timeout_hdr_t));
+			hdr_size = _ODP_ROUNDUP_CACHE_LINE(sizeof(odp_timeout_hdr_t));
 		else
-			hdr_size = ROUNDUP_CACHE_LINE(sizeof(odp_event_vector_hdr_t));
+			hdr_size = _ODP_ROUNDUP_CACHE_LINE(sizeof(odp_event_vector_hdr_t));
 
-		block_size = ROUNDUP_CACHE_LINE(hdr_size + align_pad + seg_len);
+		block_size = _ODP_ROUNDUP_CACHE_LINE(hdr_size + align_pad + seg_len);
 	}
 
 	/* Allocate extra memory for skipping packet buffers which cross huge
@@ -823,7 +848,7 @@ odp_pool_t _odp_pool_create(const char *name, const odp_pool_param_t *params,
 	if (num + 1 <= RING_SIZE_MIN)
 		ring_size = RING_SIZE_MIN;
 	else
-		ring_size = ROUNDUP_POWER2_U32(num + 1);
+		ring_size = _ODP_ROUNDUP_POWER2_U32(num + 1);
 
 	pool->ring_mask      = ring_size - 1;
 	pool->num            = num;
@@ -835,8 +860,6 @@ odp_pool_t _odp_pool_create(const char *name, const odp_pool_param_t *params,
 	pool->tailroom       = tailroom;
 	pool->block_size     = block_size;
 	pool->shm_size       = (num + num_extra) * (uint64_t)block_size;
-	pool->ext_desc       = NULL;
-	pool->ext_destroy    = NULL;
 
 	set_pool_cache_size(pool, cache_size);
 
@@ -863,10 +886,16 @@ odp_pool_t _odp_pool_create(const char *name, const odp_pool_param_t *params,
 	ring_ptr_init(&pool->ring->hdr);
 	init_buffers(pool);
 
-	/* Create zero-copy DPDK memory pool. NOP if zero-copy is disabled. */
-	if (type == ODP_POOL_PACKET && _odp_dpdk_pool_create(pool)) {
-		ODP_ERR("Creating DPDK packet pool failed\n");
+	if (type == ODP_POOL_PACKET && pool->mem_src_ops && pool->mem_src_ops->bind &&
+	    pool->mem_src_ops->bind(pool->mem_src_data, pool)) {
+		ODP_ERR("Binding pool as memory source failed\n");
 		goto error;
+	}
+
+	/* Total ops utilizes alloc_ops and free_ops counters */
+	if (pool->params.stats.bit.total_ops) {
+		pool->params.stats.bit.alloc_ops = 1;
+		pool->params.stats.bit.free_ops = 1;
 	}
 
 	/* Reset pool stats */
@@ -1074,12 +1103,8 @@ int odp_pool_destroy(odp_pool_t pool_hdl)
 		return -1;
 	}
 
-	/* Destroy external DPDK mempool */
-	if (pool->ext_destroy) {
-		pool->ext_destroy(pool->ext_desc);
-		pool->ext_destroy = NULL;
-		pool->ext_desc = NULL;
-	}
+	if (pool->type == ODP_POOL_PACKET && pool->mem_src_ops && pool->mem_src_ops->unbind)
+		pool->mem_src_ops->unbind(pool->mem_src_data);
 
 	/* Make sure local caches are empty */
 	for (i = 0; i < ODP_THREAD_COUNT_MAX; i++)
@@ -1369,7 +1394,7 @@ int odp_pool_capability(odp_pool_capability_t *capa)
 	supported_stats.bit.alloc_ops = CONFIG_POOL_STATISTICS;
 	supported_stats.bit.alloc_fails = CONFIG_POOL_STATISTICS;
 	supported_stats.bit.free_ops = CONFIG_POOL_STATISTICS;
-	supported_stats.bit.total_ops = 0;
+	supported_stats.bit.total_ops = CONFIG_POOL_STATISTICS;
 	supported_stats.bit.cache_available = 1;
 	supported_stats.bit.cache_alloc_ops = CONFIG_POOL_STATISTICS;
 	supported_stats.bit.cache_free_ops = CONFIG_POOL_STATISTICS;
@@ -1452,6 +1477,8 @@ void odp_pool_print(odp_pool_t pool_hdl)
 	ODP_PRINT("  uarea base addr %p\n", (void *)pool->uarea_base_addr);
 	ODP_PRINT("  cache size      %u\n", pool->cache_size);
 	ODP_PRINT("  burst size      %u\n", pool->burst_size);
+	ODP_PRINT("  mem src         %s\n",
+		  pool->mem_src_ops ? pool->mem_src_ops->name : "(none)");
 	ODP_PRINT("\n");
 }
 
@@ -1573,6 +1600,9 @@ int odp_pool_stats(odp_pool_t pool_hdl, odp_pool_stats_t *stats)
 
 	if (pool->params.stats.bit.free_ops)
 		stats->free_ops = odp_atomic_load_u64(&pool->stats.free_ops);
+
+	if (pool->params.stats.bit.total_ops)
+		stats->total_ops = stats->alloc_ops + stats->free_ops;
 
 	if (pool->params.stats.bit.cache_available)
 		stats->cache_available = cache_total_available(pool);
@@ -1798,7 +1828,7 @@ odp_pool_t odp_pool_ext_create(const char *name, const odp_pool_ext_param_t *par
 	if (num_buf + 1 <= RING_SIZE_MIN)
 		ring_size = RING_SIZE_MIN;
 	else
-		ring_size = ROUNDUP_POWER2_U32(num_buf + 1);
+		ring_size = _ODP_ROUNDUP_POWER2_U32(num_buf + 1);
 
 	pool->ring_mask      = ring_size - 1;
 	pool->type           = param->type;

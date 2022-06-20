@@ -26,10 +26,10 @@ extern "C" {
 #include <odp/api/plat/packet_io_inlines.h>
 
 #include <odp/autoheader_internal.h>
-#include <odp_align_internal.h>
 #include <odp_classification_datamodel.h>
 #include <odp_config_internal.h>
 #include <odp_debug_internal.h>
+#include <odp_macros_internal.h>
 #include <odp_packet_io_stats_common.h>
 #include <odp_queue_if.h>
 
@@ -70,7 +70,7 @@ struct pktio_if_ops;
 #elif defined(_ODP_PKTIO_DPDK)
 #define PKTIO_PRIVATE_SIZE 5632
 #else
-#define PKTIO_PRIVATE_SIZE 384
+#define PKTIO_PRIVATE_SIZE 512
 #endif
 
 struct pktio_entry {
@@ -173,7 +173,7 @@ struct pktio_entry {
 
 typedef union {
 	struct pktio_entry s;
-	uint8_t pad[ROUNDUP_CACHE_LINE(sizeof(struct pktio_entry))];
+	uint8_t pad[_ODP_ROUNDUP_CACHE_LINE(sizeof(struct pktio_entry))];
 } pktio_entry_t;
 
 typedef struct {
@@ -308,6 +308,7 @@ static inline void _odp_pktio_tx_ts_set(pktio_entry_t *entry)
 
 extern const pktio_if_ops_t _odp_netmap_pktio_ops;
 extern const pktio_if_ops_t _odp_dpdk_pktio_ops;
+extern const pktio_if_ops_t _odp_sock_xdp_pktio_ops;
 extern const pktio_if_ops_t _odp_sock_mmsg_pktio_ops;
 extern const pktio_if_ops_t _odp_sock_mmap_pktio_ops;
 extern const pktio_if_ops_t _odp_loopback_pktio_ops;

@@ -169,8 +169,10 @@ int odp_cls_capability(odp_cls_capability_t *capability)
 	capability->supported_terms.bit.ethtype_x = 1;
 	capability->supported_terms.bit.vlan_id_0 = 1;
 	capability->supported_terms.bit.vlan_id_x = 1;
+	capability->supported_terms.bit.vlan_pcp_0 = 1;
 	capability->supported_terms.bit.dmac = 1;
 	capability->supported_terms.bit.ip_proto = 1;
+	capability->supported_terms.bit.ip_dscp = 1;
 	capability->supported_terms.bit.udp_dport = 1;
 	capability->supported_terms.bit.udp_sport = 1;
 	capability->supported_terms.bit.tcp_dport = 1;
@@ -595,11 +597,8 @@ int odp_cos_with_l2_priority(odp_pktio_t pktio_in,
 	return 0;
 }
 
-int odp_cos_with_l3_qos(odp_pktio_t pktio_in,
-			uint32_t num_qos,
-			uint8_t qos_table[],
-			odp_cos_t cos_table[],
-			odp_bool_t l3_preference)
+int ODP_DEPRECATE(odp_cos_with_l3_qos)(odp_pktio_t pktio_in, uint32_t num_qos, uint8_t qos_table[],
+				       odp_cos_t cos_table[], odp_bool_t l3_preference)
 {
 	pmr_l3_cos_t *l3_cos;
 	uint32_t i;
@@ -644,7 +643,11 @@ static int pmr_create_term(pmr_term_value_t *value,
 	value->range_term = param->range_term;
 
 	switch (term) {
+	case ODP_PMR_VLAN_PCP_0:
+		/* Fall through */
 	case ODP_PMR_IPPROTO:
+		/* Fall through */
+	case ODP_PMR_IP_DSCP:
 		size = 1;
 		break;
 
@@ -856,18 +859,45 @@ static inline int verify_pmr_packet_len(odp_packet_hdr_t *pkt_hdr,
 	return 0;
 }
 
-static inline int verify_pmr_ip_proto(const uint8_t *pkt_addr,
-				      odp_packet_hdr_t *pkt_hdr,
-				      pmr_term_value_t *term_value)
+static inline int verify_pmr_ipv4_proto(const _odp_ipv4hdr_t *ipv4, pmr_term_value_t *term_value)
 {
-	const _odp_ipv4hdr_t *ip;
 	uint8_t proto;
 
-	if (!pkt_hdr->p.input_flags.ipv4)
-		return 0;
-	ip = (const _odp_ipv4hdr_t *)(pkt_addr + pkt_hdr->p.l3_offset);
-	proto = ip->proto;
+	proto = ipv4->proto;
 	if (term_value->match.value == (proto & term_value->match.mask))
+		return 1;
+
+	return 0;
+}
+
+static inline int verify_pmr_ipv6_next_hdr(const _odp_ipv6hdr_t *ipv6, pmr_term_value_t *term_value)
+{
+	uint8_t next_hdr;
+
+	next_hdr = ipv6->next_hdr;
+	if (term_value->match.value == (next_hdr & term_value->match.mask))
+		return 1;
+
+	return 0;
+}
+
+static inline int verify_pmr_ipv4_dscp(const _odp_ipv4hdr_t *ipv4, pmr_term_value_t *term_value)
+{
+	uint8_t dscp;
+
+	dscp = _ODP_IPV4HDR_DSCP(ipv4->tos);
+	if (term_value->match.value == (dscp & term_value->match.mask))
+		return 1;
+
+	return 0;
+}
+
+static inline int verify_pmr_ipv6_dscp(const _odp_ipv6hdr_t *ipv6, pmr_term_value_t *term_value)
+{
+	uint8_t dscp;
+
+	dscp = _ODP_IPV6HDR_DSCP(odp_be_to_cpu_32(ipv6->ver_tc_flow));
+	if (term_value->match.value == (dscp & term_value->match.mask))
 		return 1;
 
 	return 0;
@@ -1095,6 +1125,28 @@ static inline int verify_pmr_vlan_id_x(const uint8_t *pkt_addr,
 	return 0;
 }
 
+static inline int verify_pmr_vlan_pcp_0(const uint8_t *pkt_addr, odp_packet_hdr_t *pkt_hdr,
+					pmr_term_value_t *term_value)
+{
+	const _odp_ethhdr_t *eth;
+	const _odp_vlanhdr_t *vlan;
+	uint16_t tci;
+	uint8_t pcp;
+
+	if (!packet_hdr_has_eth(pkt_hdr) || !pkt_hdr->p.input_flags.vlan)
+		return 0;
+
+	eth = (const _odp_ethhdr_t *)(pkt_addr + pkt_hdr->p.l2_offset);
+	vlan = (const _odp_vlanhdr_t *)(eth + 1);
+	tci = odp_be_to_cpu_16(vlan->tci);
+	pcp = tci >> _ODP_VLANHDR_PCP_SHIFT;
+
+	if (term_value->match.value == (pcp & term_value->match.mask))
+		return 1;
+
+	return 0;
+}
+
 static inline int verify_pmr_ipsec_spi(const uint8_t *pkt_addr,
 				       odp_packet_hdr_t *pkt_hdr,
 				       pmr_term_value_t *term_value)
@@ -1241,6 +1293,8 @@ static int verify_pmr(pmr_t *pmr, const uint8_t *pkt_addr,
 	int num_pmr;
 	int i;
 	pmr_term_value_t *term_value;
+	const _odp_ipv4hdr_t *ipv4 = NULL;
+	const _odp_ipv6hdr_t *ipv6 = NULL;
 
 	/* Locking is not required as PMR rules for in-flight packets
 	delivery during a PMR change is indeterminate*/
@@ -1248,6 +1302,11 @@ static int verify_pmr(pmr_t *pmr, const uint8_t *pkt_addr,
 	if (!pmr->s.valid)
 		return 0;
 	num_pmr = pmr->s.num_pmr;
+
+	if (pkt_hdr->p.input_flags.ipv4)
+		ipv4 = (const _odp_ipv4hdr_t *)(pkt_addr + pkt_hdr->p.l3_offset);
+	if (pkt_hdr->p.input_flags.ipv6)
+		ipv6 = (const _odp_ipv6hdr_t *)(pkt_addr + pkt_hdr->p.l3_offset);
 
 	/* Iterate through list of PMR Term values in a pmr_t */
 	for (i = 0; i < num_pmr; i++) {
@@ -1277,15 +1336,36 @@ static int verify_pmr(pmr_t *pmr, const uint8_t *pkt_addr,
 						  term_value))
 				pmr_failure = 1;
 			break;
+		case ODP_PMR_VLAN_PCP_0:
+			if (!verify_pmr_vlan_pcp_0(pkt_addr, pkt_hdr, term_value))
+				pmr_failure = 1;
+			break;
 		case ODP_PMR_DMAC:
 			if (!verify_pmr_dmac(pkt_addr, pkt_hdr,
 					     term_value))
 				pmr_failure = 1;
 			break;
 		case ODP_PMR_IPPROTO:
-			if (!verify_pmr_ip_proto(pkt_addr, pkt_hdr,
-						 term_value))
+			if (ipv4) {
+				if (!verify_pmr_ipv4_proto(ipv4, term_value))
+					pmr_failure = 1;
+			} else if (ipv6) {
+				if (!verify_pmr_ipv6_next_hdr(ipv6, term_value))
+					pmr_failure = 1;
+			} else {
 				pmr_failure = 1;
+			}
+			break;
+		case ODP_PMR_IP_DSCP:
+			if (ipv4) {
+				if (!verify_pmr_ipv4_dscp(ipv4, term_value))
+					pmr_failure = 1;
+			} else if (ipv6) {
+				if (!verify_pmr_ipv6_dscp(ipv6, term_value))
+					pmr_failure = 1;
+			} else {
+				pmr_failure = 1;
+			}
 			break;
 		case ODP_PMR_UDP_DPORT:
 			if (!verify_pmr_udp_dport(pkt_addr, pkt_hdr,
@@ -1381,11 +1461,17 @@ static const char *format_pmr_name(odp_cls_pmr_term_t pmr_term)
 	case ODP_PMR_VLAN_ID_X:
 		name = "PMR_VLAN_ID_X";
 		break;
+	case ODP_PMR_VLAN_PCP_0:
+		name = "PMR_VLAN_PCP_0";
+		break;
 	case ODP_PMR_DMAC:
 		name = "PMR_DMAC";
 		break;
 	case ODP_PMR_IPPROTO:
 		name = "PMR_IPPROTO";
+		break;
+	case ODP_PMR_IP_DSCP:
+		name = "PMR_IP_DSCP";
 		break;
 	case ODP_PMR_UDP_DPORT:
 		name = "PMR_UDP_DPORT";

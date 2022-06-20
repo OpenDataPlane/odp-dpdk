@@ -21,19 +21,21 @@ extern "C" {
 #include <odp/api/align.h>
 #include <odp/api/atomic.h>
 #include <odp/api/debug.h>
+#include <odp/api/hints.h>
 #include <odp/api/packet.h>
-#include <odp/api/plat/packet_inline_types.h>
 #include <odp/api/packet_io.h>
 #include <odp/api/crypto.h>
 #include <odp/api/comp.h>
 #include <odp/api/std.h>
-#include <odp/api/abi/packet.h>
+
+#include <odp/api/plat/packet_inline_types.h>
 
 #include <odp_debug_internal.h>
 #include <odp_event_internal.h>
 #include <odp_ipsec_internal.h>
 #include <odp_pool_internal.h>
 #include <odp_queue_if.h>
+#include <odp_config_internal.h>
 
 #include <stdint.h>
 #include <string.h>
@@ -43,12 +45,6 @@ ODP_STATIC_ASSERT(sizeof(_odp_packet_input_flags_t) == sizeof(uint64_t),
 
 ODP_STATIC_ASSERT(sizeof(_odp_packet_flags_t) == sizeof(uint32_t),
 		  "PACKET_FLAGS_SIZE_ERROR");
-
-/* Packet extra data length */
-#define PKT_EXTRA_LEN 128
-
-/* Packet extra data types */
-#define PKT_EXTRA_TYPE_DPDK 1
 
 /* Maximum number of segments per packet */
 #define PKT_MAX_SEGS 255
@@ -150,14 +146,15 @@ typedef struct ODP_ALIGNED_CACHE odp_packet_hdr_t {
 	/* LSO profile index */
 	uint8_t lso_profile_idx;
 
-	union {
-		struct {
-			/* Result for crypto packet op */
-			odp_crypto_packet_result_t crypto_op_result;
+	/* Pktio where packet is used as a memory source */
+	uint8_t ms_pktio_idx;
 
-			/* Context for IPsec */
-			odp_ipsec_packet_result_t ipsec_ctx;
-		};
+	union {
+		/* Result for crypto packet op */
+		odp_crypto_packet_result_t crypto_op_result;
+
+		/* Context for IPsec */
+		odp_ipsec_packet_result_t ipsec_ctx;
 
 		/* Result for comp packet op */
 		odp_comp_packet_result_t comp_op_result;
@@ -171,6 +168,8 @@ typedef struct ODP_ALIGNED_CACHE odp_packet_hdr_t {
 /* Packet header size is critical for performance. Ensure that it does not accidentally
  * grow over 256 bytes. */
 ODP_STATIC_ASSERT(sizeof(odp_packet_hdr_t) <= 256, "PACKET_HDR_SIZE_ERROR");
+
+ODP_STATIC_ASSERT(ODP_CONFIG_PKTIO_ENTRIES < UINT8_MAX, "MS_PKTIO_IDX_SIZE_ERROR");
 
 /**
  * Return the packet header
@@ -298,6 +297,8 @@ static inline void _odp_packet_copy_md(odp_packet_hdr_t *dst_hdr,
 				       odp_packet_hdr_t *src_hdr,
 				       odp_bool_t uarea_copy)
 {
+	int8_t subtype = src_hdr->subtype;
+
 	/* Lengths and segmentation data are not copied:
 	 *   .frame_len
 	 *   .headroom
@@ -308,6 +309,7 @@ static inline void _odp_packet_copy_md(odp_packet_hdr_t *dst_hdr,
 	 *   .seg_count
 	 */
 	dst_hdr->input = src_hdr->input;
+	dst_hdr->subtype = subtype;
 	dst_hdr->dst_queue = src_hdr->dst_queue;
 	dst_hdr->cos = src_hdr->cos;
 	dst_hdr->cls_mark = src_hdr->cls_mark;
@@ -350,6 +352,15 @@ static inline void _odp_packet_copy_md(odp_packet_hdr_t *dst_hdr,
 			src_hdr->uarea_addr = dst_hdr->uarea_addr;
 			dst_hdr->uarea_addr = src_uarea;
 		}
+	}
+
+	if (odp_unlikely(subtype != ODP_EVENT_PACKET_BASIC)) {
+		if (subtype == ODP_EVENT_PACKET_IPSEC)
+			dst_hdr->ipsec_ctx = src_hdr->ipsec_ctx;
+		else if (subtype == ODP_EVENT_PACKET_CRYPTO)
+			dst_hdr->crypto_op_result = src_hdr->crypto_op_result;
+		else if (subtype == ODP_EVENT_PACKET_COMP)
+			dst_hdr->comp_op_result = src_hdr->comp_op_result;
 	}
 }
 

@@ -36,6 +36,9 @@
 /* Maximum number of pktio queues per interface */
 #define MAX_QUEUES             32
 
+/* Maximum number of schedule groups */
+#define MAX_GROUPS             32
+
 /* Maximum number of pktio interfaces */
 #define MAX_PKTIOS             8
 
@@ -47,6 +50,9 @@
 
 /* Default vector timeout */
 #define DEFAULT_VEC_TMO        ODP_TIME_MSEC_IN_NS
+
+/* Maximum thread info string length */
+#define EXTRA_STR_LEN          32
 
 /* Packet input mode */
 typedef enum pktin_mode_t {
@@ -97,6 +103,7 @@ typedef struct {
 	int chksum;             /* Checksum offload */
 	int sched_mode;         /* Scheduler mode */
 	int num_groups;         /* Number of scheduling groups */
+	int group_mode;         /* How threads join groups */
 	int burst_rx;           /* Receive burst size */
 	int pool_per_if;        /* Create pool per interface */
 	uint32_t num_pkt;       /* Number of packets per pool */
@@ -110,6 +117,9 @@ typedef struct {
 	int promisc_mode;       /* Promiscuous mode enabled */
 	int flow_aware;         /* Flow aware scheduling enabled */
 	int mtu;                /* Interface MTU */
+	int num_prio;
+	odp_schedule_prio_t prio[MAX_PKTIOS]; /* Priority of input queues of an interface */
+
 } appl_args_t;
 
 /* Statistics */
@@ -144,11 +154,12 @@ typedef struct thread_args_t {
 	} pktio[MAX_PKTIOS];
 
 	/* Groups to join */
-	odp_schedule_group_t group[MAX_PKTIOS];
+	odp_schedule_group_t group[MAX_GROUPS];
 
 	int thr_idx;
 	int num_pktio;
-	int num_groups;
+	int num_grp_join;
+
 } thread_args_t;
 
 /*
@@ -191,6 +202,13 @@ typedef struct {
 	uint8_t dst_port_from_idx[MAX_PKTIO_INDEXES];
 	/* Break workers loop if set to 1 */
 	odp_atomic_u32_t exit_threads;
+
+	uint32_t pkt_len;
+	uint32_t num_pkt;
+	uint32_t seg_len;
+	uint32_t vector_num;
+	uint32_t vector_max_size;
+	char cpumaskstr[ODP_CPUMASK_STR_SIZE];
 
 } args_t;
 
@@ -399,6 +417,7 @@ static int run_worker_sched_mode_vector(void *arg)
 	int i;
 	int pktio, num_pktio;
 	uint16_t max_burst;
+	odp_thrmask_t mask;
 	odp_pktout_queue_t pktout[MAX_PKTIOS];
 	odp_queue_t tx_queue[MAX_PKTIOS];
 	thread_args_t *thr_args = arg;
@@ -409,19 +428,14 @@ static int run_worker_sched_mode_vector(void *arg)
 	thr = odp_thread_id();
 	max_burst = gbl_args->appl.burst_rx;
 
-	if (gbl_args->appl.num_groups > 0) {
-		odp_thrmask_t mask;
+	odp_thrmask_zero(&mask);
+	odp_thrmask_set(&mask, thr);
 
-		odp_thrmask_zero(&mask);
-		odp_thrmask_set(&mask, thr);
-
-		/* Join non-default groups */
-		for (i = 0; i < thr_args->num_groups; i++) {
-			if (odp_schedule_group_join(thr_args->group[i],
-						    &mask)) {
-				ODPH_ERR("Join failed\n");
-				return -1;
-			}
+	/* Join non-default groups */
+	for (i = 0; i < thr_args->num_grp_join; i++) {
+		if (odp_schedule_group_join(thr_args->group[i], &mask)) {
+			ODPH_ERR("Join failed: %i\n", i);
+			return -1;
 		}
 	}
 
@@ -548,8 +562,10 @@ static int run_worker_sched_mode(void *arg)
 	int i;
 	int pktio, num_pktio;
 	uint16_t max_burst;
+	odp_thrmask_t mask;
 	odp_pktout_queue_t pktout[MAX_PKTIOS];
 	odp_queue_t tx_queue[MAX_PKTIOS];
+	char extra_str[EXTRA_STR_LEN];
 	thread_args_t *thr_args = arg;
 	stats_t *stats = &thr_args->stats;
 	int use_event_queue = gbl_args->appl.out_mode;
@@ -558,21 +574,30 @@ static int run_worker_sched_mode(void *arg)
 	thr = odp_thread_id();
 	max_burst = gbl_args->appl.burst_rx;
 
-	if (gbl_args->appl.num_groups > 0) {
-		odp_thrmask_t mask;
+	memset(extra_str, 0, EXTRA_STR_LEN);
+	odp_thrmask_zero(&mask);
+	odp_thrmask_set(&mask, thr);
 
-		odp_thrmask_zero(&mask);
-		odp_thrmask_set(&mask, thr);
+	/* Join non-default groups */
+	for (i = 0; i < thr_args->num_grp_join; i++) {
+		if (odp_schedule_group_join(thr_args->group[i], &mask)) {
+			ODPH_ERR("Join failed: %i\n", i);
+			return -1;
+		}
 
-		/* Join non-default groups */
-		for (i = 0; i < thr_args->num_groups; i++) {
-			if (odp_schedule_group_join(thr_args->group[i],
-						    &mask)) {
-				ODPH_ERR("Join failed\n");
-				return -1;
-			}
+		if (gbl_args->appl.verbose) {
+			uint64_t tmp = (uint64_t)(uintptr_t)thr_args->group[i];
+
+			printf("[%02i] Joined group 0x%" PRIx64 "\n", thr, tmp);
 		}
 	}
+
+	if (thr_args->num_grp_join)
+		snprintf(extra_str, EXTRA_STR_LEN, ", joined %i groups", thr_args->num_grp_join);
+	else if (gbl_args->appl.num_groups == 0)
+		snprintf(extra_str, EXTRA_STR_LEN, ", GROUP_ALL");
+	else if (gbl_args->appl.num_groups)
+		snprintf(extra_str, EXTRA_STR_LEN, ", GROUP_WORKER");
 
 	num_pktio = thr_args->num_pktio;
 
@@ -586,10 +611,10 @@ static int run_worker_sched_mode(void *arg)
 		pktout[pktio]   = thr_args->pktio[pktio].pktout;
 	}
 
-	printf("[%02i] PKTIN_SCHED_%s, %s\n", thr,
+	printf("[%02i] PKTIN_SCHED_%s, %s%s\n", thr,
 	       (in_mode == SCHED_PARALLEL) ? "PARALLEL" :
 	       ((in_mode == SCHED_ATOMIC) ? "ATOMIC" : "ORDERED"),
-	       (use_event_queue) ? "PKTOUT_QUEUE" : "PKTOUT_DIRECT");
+	       (use_event_queue) ? "PKTOUT_QUEUE" : "PKTOUT_DIRECT", extra_str);
 
 	odp_barrier_wait(&gbl_args->init_barrier);
 
@@ -851,7 +876,7 @@ static int set_pktin_vector_params(odp_pktin_queue_param_t *pktin_param, odp_poo
 				pktio_capa.vector.max_size : pktio_capa.vector.min_size;
 			printf("\nWarning: Modified vector size to %u\n\n", vec_size);
 		} else {
-			ODPH_ERR("Error: Invalid pktio vector size %u, valid range [%u, %u]\n",
+			ODPH_ERR("Invalid pktio vector size %u, valid range [%u, %u]\n",
 				 vec_size, pktio_capa.vector.min_size, pktio_capa.vector.max_size);
 			return -1;
 		}
@@ -870,7 +895,7 @@ static int set_pktin_vector_params(odp_pktin_queue_param_t *pktin_param, odp_poo
 				pktio_capa.vector.max_tmo_ns : pktio_capa.vector.min_tmo_ns;
 			printf("\nWarning: Modified vector timeout to %" PRIu64 "\n\n", vec_tmo_ns);
 		} else {
-			ODPH_ERR("Error: Invalid vector timeout %" PRIu64 ", valid range [%" PRIu64
+			ODPH_ERR("Invalid vector timeout %" PRIu64 ", valid range [%" PRIu64
 				 ", %" PRIu64 "]\n", vec_tmo_ns,
 				 pktio_capa.vector.min_tmo_ns, pktio_capa.vector.max_tmo_ns);
 			return -1;
@@ -917,12 +942,12 @@ static int create_pktio(const char *dev, int idx, int num_rx, int num_tx, odp_po
 
 	pktio = odp_pktio_open(dev, pool, &pktio_param);
 	if (pktio == ODP_PKTIO_INVALID) {
-		ODPH_ERR("Error: failed to open %s\n", dev);
+		ODPH_ERR("Pktio open failed: %s\n", dev);
 		return -1;
 	}
 
 	if (odp_pktio_info(pktio, &info)) {
-		ODPH_ERR("Error: pktio info failed %s\n", dev);
+		ODPH_ERR("Pktio info failed: %s\n", dev);
 		return -1;
 	}
 
@@ -933,7 +958,7 @@ static int create_pktio(const char *dev, int idx, int num_rx, int num_tx, odp_po
 		odp_pktio_print(pktio);
 
 	if (odp_pktio_capability(pktio, &pktio_capa)) {
-		ODPH_ERR("Error: pktio capability query failed %s\n", dev);
+		ODPH_ERR("Pktio capability query failed: %s\n", dev);
 		return -1;
 	}
 
@@ -957,14 +982,13 @@ static int create_pktio(const char *dev, int idx, int num_rx, int num_tx, odp_po
 
 	if (gbl_args->appl.promisc_mode) {
 		if (!pktio_capa.set_op.op.promisc_mode) {
-			ODPH_ERR("Error: promisc mode set not supported %s\n",
-				 dev);
+			ODPH_ERR("Promisc mode set not supported: %s\n", dev);
 			return -1;
 		}
 
 		/* Enable promisc mode */
 		if (odp_pktio_promisc_mode_set(pktio, true)) {
-			ODPH_ERR("Error: promisc mode enable failed %s\n", dev);
+			ODPH_ERR("Promisc mode enable failed: %s\n", dev);
 			return -1;
 		}
 	}
@@ -974,14 +998,14 @@ static int create_pktio(const char *dev, int idx, int num_rx, int num_tx, odp_po
 		uint32_t maxlen_output = pktio_capa.maxlen.max_output ? gbl_args->appl.mtu : 0;
 
 		if (!pktio_capa.set_op.op.maxlen) {
-			ODPH_ERR("Error: modifying interface MTU not supported %s\n", dev);
+			ODPH_ERR("Modifying interface MTU not supported: %s\n", dev);
 			return -1;
 		}
 
 		if (maxlen_input &&
 		    (maxlen_input < pktio_capa.maxlen.min_input ||
 		     maxlen_input > pktio_capa.maxlen.max_input)) {
-			ODPH_ERR("Error: unsupported MTU value %" PRIu32 " for %s "
+			ODPH_ERR("Unsupported MTU value %" PRIu32 " for %s "
 				 "(min %" PRIu32 ", max %" PRIu32 ")\n", maxlen_input, dev,
 				 pktio_capa.maxlen.min_input, pktio_capa.maxlen.max_input);
 			return -1;
@@ -989,14 +1013,14 @@ static int create_pktio(const char *dev, int idx, int num_rx, int num_tx, odp_po
 		if (maxlen_output &&
 		    (maxlen_output < pktio_capa.maxlen.min_output ||
 		     maxlen_output > pktio_capa.maxlen.max_output)) {
-			ODPH_ERR("Error: unsupported MTU value %" PRIu32 " for %s "
+			ODPH_ERR("Unsupported MTU value %" PRIu32 " for %s "
 				 "(min %" PRIu32 ", max %" PRIu32 ")\n", maxlen_output, dev,
 				 pktio_capa.maxlen.min_output, pktio_capa.maxlen.max_output);
 			return -1;
 		}
 
 		if (odp_pktio_maxlen_set(pktio, maxlen_input, maxlen_output)) {
-			ODPH_ERR("Error: setting MTU failed %s\n", dev);
+			ODPH_ERR("Setting MTU failed: %s\n", dev);
 			return -1;
 		}
 	}
@@ -1010,6 +1034,15 @@ static int create_pktio(const char *dev, int idx, int num_rx, int num_tx, odp_po
 	mode_tx = ODP_PKTIO_OP_MT_UNSAFE;
 
 	if (gbl_args->appl.sched_mode) {
+		odp_schedule_prio_t prio;
+
+		if (gbl_args->appl.num_prio) {
+			prio = gbl_args->appl.prio[idx];
+		} else {
+			prio = odp_schedule_default_prio();
+			gbl_args->appl.prio[idx] = prio;
+		}
+
 		if (gbl_args->appl.in_mode == SCHED_ATOMIC)
 			sync_mode = ODP_SCHED_SYNC_ATOMIC;
 		else if (gbl_args->appl.in_mode == SCHED_ORDERED)
@@ -1017,7 +1050,7 @@ static int create_pktio(const char *dev, int idx, int num_rx, int num_tx, odp_po
 		else
 			sync_mode = ODP_SCHED_SYNC_PARALLEL;
 
-		pktin_param.queue_param.sched.prio  = odp_schedule_default_prio();
+		pktin_param.queue_param.sched.prio  = prio;
 		pktin_param.queue_param.sched.sync  = sync_mode;
 		pktin_param.queue_param.sched.group = group;
 	}
@@ -1046,7 +1079,7 @@ static int create_pktio(const char *dev, int idx, int num_rx, int num_tx, odp_po
 
 	if (gbl_args->appl.vector_mode) {
 		if (!pktio_capa.vector.supported) {
-			ODPH_ERR("Error: packet vector input not supported %s\n", dev);
+			ODPH_ERR("Packet vector input not supported: %s\n", dev);
 			return -1;
 		}
 		if (set_pktin_vector_params(&pktin_param, vec_pool, pktio_capa))
@@ -1054,43 +1087,35 @@ static int create_pktio(const char *dev, int idx, int num_rx, int num_tx, odp_po
 	}
 
 	if (odp_pktin_queue_config(pktio, &pktin_param)) {
-		ODPH_ERR("Error: input queue config failed %s\n", dev);
+		ODPH_ERR("Input queue config failed: %s\n", dev);
 		return -1;
 	}
 
 	if (odp_pktout_queue_config(pktio, &pktout_param)) {
-		ODPH_ERR("Error: output queue config failed %s\n", dev);
+		ODPH_ERR("Output queue config failed: %s\n", dev);
 		return -1;
 	}
 
 	if (gbl_args->appl.in_mode == DIRECT_RECV) {
-		if (odp_pktin_queue(pktio, gbl_args->pktios[idx].pktin,
-				    num_rx) != num_rx) {
-			ODPH_ERR("Error: pktin queue query failed %s\n", dev);
+		if (odp_pktin_queue(pktio, gbl_args->pktios[idx].pktin, num_rx) != num_rx) {
+			ODPH_ERR("Pktin queue query failed: %s\n", dev);
 			return -1;
 		}
 	} else {
-		if (odp_pktin_event_queue(pktio,
-					  gbl_args->pktios[idx].rx_q,
-					  num_rx) != num_rx) {
-			ODPH_ERR("Error: pktin event queue query failed %s\n",
-				 dev);
+		if (odp_pktin_event_queue(pktio, gbl_args->pktios[idx].rx_q, num_rx) != num_rx) {
+			ODPH_ERR("Pktin event queue query failed: %s\n", dev);
 			return -1;
 		}
 	}
 
 	if (gbl_args->appl.out_mode == PKTOUT_DIRECT) {
-		if (odp_pktout_queue(pktio,
-				     gbl_args->pktios[idx].pktout,
-				     num_tx) != num_tx) {
-			ODPH_ERR("Error: pktout queue query failed %s\n", dev);
+		if (odp_pktout_queue(pktio, gbl_args->pktios[idx].pktout, num_tx) != num_tx) {
+			ODPH_ERR("Pktout queue query failed: %s\n", dev);
 			return -1;
 		}
 	} else {
-		if (odp_pktout_event_queue(pktio,
-					   gbl_args->pktios[idx].tx_q,
-					   num_tx) != num_tx) {
-			ODPH_ERR("Error: event queue query failed %s\n", dev);
+		if (odp_pktout_event_queue(pktio, gbl_args->pktios[idx].tx_q, num_tx) != num_tx) {
+			ODPH_ERR("Event queue query failed: %s\n", dev);
 			return -1;
 		}
 	}
@@ -1435,11 +1460,25 @@ static void usage(char *progname)
 	       "  -e, --error_check <arg> 0: Don't check packet errors (default)\n"
 	       "                          1: Check packet errors\n"
 	       "  -k, --chksum <arg>      0: Don't use checksum offload (default)\n"
-	       "                          1: Use checksum offload\n"
-	       "  -g, --groups <num>      Number of groups to use: 0 ... num\n"
-	       "                          -1:  SCHED_GROUP_WORKER\n"
-	       "                          0:   SCHED_GROUP_ALL (default)\n"
-	       "                          num: must not exceed number of interfaces or workers\n"
+	       "                          1: Use checksum offload\n",
+	       NO_PATH(progname), NO_PATH(progname), MAX_PKTIOS);
+
+	printf("  -g, --groups <num>      Number of new groups to create (1 ... num). Interfaces\n"
+	       "                          are placed into the groups in round robin.\n"
+	       "                           0: Use SCHED_GROUP_ALL (default)\n"
+	       "                          -1: Use SCHED_GROUP_WORKER\n"
+	       "  -G, --group_mode <arg>  Select how threads join new groups (when -g > 0)\n"
+	       "                          0: All threads join all created groups (default)\n"
+	       "                          1: All threads join first N created groups.\n"
+	       "                             N is number of interfaces (== active groups).\n"
+	       "                          2: Each thread joins a part of the first N groups\n"
+	       "                             (in round robin).\n"
+	       "  -I, --prio <prio list>  Schedule priority of packet input queues.\n"
+	       "                          Comma separated list of priorities (no spaces). A value\n"
+	       "                          per interface. All queues of an interface have the same\n"
+	       "                          priority. Values must be between odp_schedule_min_prio\n"
+	       "                          and odp_schedule_max_prio. odp_schedule_default_prio is\n"
+	       "                          used by default.\n"
 	       "  -b, --burst_rx <num>    0:   Use max burst size (default)\n"
 	       "                          num: Max number of packets per receive call\n"
 	       "  -p, --packet_copy       0: Don't copy packet (default)\n"
@@ -1464,9 +1503,7 @@ static void usage(char *progname)
 	       "  -f, --flow_aware        Enable flow aware scheduling.\n"
 	       "  -v, --verbose           Verbose output.\n"
 	       "  -h, --help              Display help and exit.\n\n"
-	       "\n", NO_PATH(progname), NO_PATH(progname), MAX_PKTIOS, DEFAULT_VEC_SIZE,
-		DEFAULT_VEC_TMO, POOL_PKT_LEN
-	    );
+	       "\n", DEFAULT_VEC_SIZE, DEFAULT_VEC_TMO, POOL_PKT_LEN);
 }
 
 /*
@@ -1481,8 +1518,8 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 	int opt;
 	int long_index;
 	char *token;
-	char *addr_str;
-	size_t len;
+	char *tmp_str;
+	size_t str_len, len;
 	int i;
 	static const struct option longopts[] = {
 		{"count", required_argument, NULL, 'c'},
@@ -1497,6 +1534,8 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 		{"error_check", required_argument, NULL, 'e'},
 		{"chksum", required_argument, NULL, 'k'},
 		{"groups", required_argument, NULL, 'g'},
+		{"group_mode", required_argument, NULL, 'G'},
+		{"prio", required_argument, NULL, 'I'},
 		{"burst_rx", required_argument, NULL, 'b'},
 		{"packet_copy", required_argument, NULL, 'p'},
 		{"pool_per_if", required_argument, NULL, 'y'},
@@ -1515,7 +1554,7 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 		{NULL, 0, NULL, 0}
 	};
 
-	static const char *shortopts = "+c:t:a:i:m:o:r:d:s:e:k:g:b:p:y:n:l:L:w:x:z:M:uPfvh";
+	static const char *shortopts = "+c:t:a:i:m:o:r:d:s:e:k:g:G:I:b:p:y:n:l:L:w:x:z:M:uPfvh";
 
 	appl_args->time = 0; /* loop forever if time to run is 0 */
 	appl_args->accuracy = 1; /* get and print pps stats second */
@@ -1523,6 +1562,7 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 	appl_args->dst_change = 1; /* change eth dst address by default */
 	appl_args->src_change = 1; /* change eth src address by default */
 	appl_args->num_groups = 0; /* use default group */
+	appl_args->group_mode = 0;
 	appl_args->error_check = 0; /* don't check packet errors by default */
 	appl_args->packet_copy = 0;
 	appl_args->burst_rx = 0;
@@ -1539,6 +1579,7 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 	appl_args->vec_size = 0;
 	appl_args->vec_tmo_ns = 0;
 	appl_args->flow_aware = 0;
+	appl_args->num_prio = 0;
 
 	while (1) {
 		opt = getopt_long(argc, argv, shortopts, longopts, &long_index);
@@ -1556,60 +1597,58 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 		case 'a':
 			appl_args->accuracy = atoi(optarg);
 			break;
-			/* parse packet-io interface names */
 		case 'r':
 			len = strlen(optarg);
 			if (len == 0) {
-				usage(argv[0]);
+				ODPH_ERR("Bad dest address string\n");
 				exit(EXIT_FAILURE);
 			}
-			len += 1;	/* add room for '\0' */
 
-			addr_str = malloc(len);
-			if (addr_str == NULL) {
-				usage(argv[0]);
+			str_len = len + 1;
+
+			tmp_str = malloc(str_len);
+			if (tmp_str == NULL) {
+				ODPH_ERR("Dest address malloc() failed\n");
 				exit(EXIT_FAILURE);
 			}
 
 			/* store the mac addresses names */
-			strcpy(addr_str, optarg);
-			for (token = strtok(addr_str, ","), i = 0;
+			memcpy(tmp_str, optarg, str_len);
+			for (token = strtok(tmp_str, ","), i = 0;
 			     token != NULL; token = strtok(NULL, ","), i++) {
 				if (i >= MAX_PKTIOS) {
-					printf("too many MAC addresses\n");
-					usage(argv[0]);
+					ODPH_ERR("Too many MAC addresses\n");
 					exit(EXIT_FAILURE);
 				}
-				if (odph_eth_addr_parse(&appl_args->addrs[i],
-							token) != 0) {
-					printf("invalid MAC address\n");
-					usage(argv[0]);
+				if (odph_eth_addr_parse(&appl_args->addrs[i], token) != 0) {
+					ODPH_ERR("Invalid MAC address\n");
 					exit(EXIT_FAILURE);
 				}
 			}
 			appl_args->addr_count = i;
 			if (appl_args->addr_count < 1) {
-				usage(argv[0]);
+				ODPH_ERR("Bad dest address count\n");
 				exit(EXIT_FAILURE);
 			}
-			free(addr_str);
+			free(tmp_str);
 			break;
 		case 'i':
 			len = strlen(optarg);
 			if (len == 0) {
-				usage(argv[0]);
+				ODPH_ERR("Bad pktio interface string\n");
 				exit(EXIT_FAILURE);
 			}
-			len += 1;	/* add room for '\0' */
 
-			appl_args->if_str = malloc(len);
+			str_len = len + 1;
+
+			appl_args->if_str = malloc(str_len);
 			if (appl_args->if_str == NULL) {
-				usage(argv[0]);
+				ODPH_ERR("Pktio interface malloc() failed\n");
 				exit(EXIT_FAILURE);
 			}
 
 			/* count the number of tokens separated by ',' */
-			strcpy(appl_args->if_str, optarg);
+			memcpy(appl_args->if_str, optarg, str_len);
 			for (token = strtok(appl_args->if_str, ","), i = 0;
 			     token != NULL;
 			     token = strtok(NULL, ","), i++)
@@ -1617,18 +1656,16 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 
 			appl_args->if_count = i;
 
-			if (appl_args->if_count < 1 ||
-			    appl_args->if_count > MAX_PKTIOS) {
-				usage(argv[0]);
+			if (appl_args->if_count < 1 || appl_args->if_count > MAX_PKTIOS) {
+				ODPH_ERR("Bad pktio interface count: %i\n", appl_args->if_count);
 				exit(EXIT_FAILURE);
 			}
 
 			/* allocate storage for the if names */
-			appl_args->if_names =
-			    calloc(appl_args->if_count, sizeof(char *));
+			appl_args->if_names = calloc(appl_args->if_count, sizeof(char *));
 
 			/* store the if names (reset names string) */
-			strcpy(appl_args->if_str, optarg);
+			memcpy(appl_args->if_str, optarg, str_len);
 			for (token = strtok(appl_args->if_str, ","), i = 0;
 			     token != NULL; token = strtok(NULL, ","), i++) {
 				appl_args->if_names[i] = token;
@@ -1666,6 +1703,44 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 			break;
 		case 'g':
 			appl_args->num_groups = atoi(optarg);
+			break;
+		case 'G':
+			appl_args->group_mode = atoi(optarg);
+			break;
+		case 'I':
+			len = strlen(optarg);
+			if (len == 0) {
+				ODPH_ERR("Bad priority list\n");
+				exit(EXIT_FAILURE);
+			}
+
+			str_len = len + 1;
+
+			tmp_str = malloc(str_len);
+			if (tmp_str == NULL) {
+				ODPH_ERR("Priority list malloc() failed\n");
+				exit(EXIT_FAILURE);
+			}
+
+			memcpy(tmp_str, optarg, str_len);
+			token = strtok(tmp_str, ",");
+
+			for (i = 0; token != NULL; token = strtok(NULL, ","), i++) {
+				if (i >= MAX_PKTIOS) {
+					ODPH_ERR("Too many priorities\n");
+					exit(EXIT_FAILURE);
+				}
+
+				appl_args->prio[i] = atoi(token);
+				appl_args->num_prio++;
+			}
+
+			if (appl_args->num_prio == 0) {
+				ODPH_ERR("Bad priority list\n");
+				exit(EXIT_FAILURE);
+			}
+
+			free(tmp_str);
 			break;
 		case 'b':
 			appl_args->burst_rx = atoi(optarg);
@@ -1719,20 +1794,23 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 	}
 
 	if (appl_args->if_count == 0) {
-		usage(argv[0]);
+		ODPH_ERR("No pktio interfaces\n");
 		exit(EXIT_FAILURE);
 	}
-	if (appl_args->addr_count != 0 &&
-	    appl_args->addr_count != appl_args->if_count) {
-		printf("Number of destination addresses differs from number"
-		       " of interfaces\n");
-		usage(argv[0]);
+
+	if (appl_args->num_prio && appl_args->num_prio != appl_args->if_count) {
+		ODPH_ERR("Different number of priorities and pktio interfaces\n");
+		exit(EXIT_FAILURE);
+	}
+
+	if (appl_args->addr_count != 0 && appl_args->addr_count != appl_args->if_count) {
+		ODPH_ERR("Number of dest addresses differs from number of interfaces\n");
 		exit(EXIT_FAILURE);
 	}
 
 	if (appl_args->burst_rx > MAX_PKT_BURST) {
-		printf("Error: Burst size (%i) too large. Maximum is %i.\n",
-		       appl_args->burst_rx, MAX_PKT_BURST);
+		ODPH_ERR("Burst size (%i) too large. Maximum is %i.\n",
+			 appl_args->burst_rx, MAX_PKT_BURST);
 		exit(EXIT_FAILURE);
 	}
 
@@ -1750,11 +1828,10 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 /*
  * Print system and application info
  */
-static void print_info(appl_args_t *appl_args)
+static void print_info(void)
 {
 	int i;
-
-	odp_sys_info_print();
+	appl_args_t *appl_args = &gbl_args->appl;
 
 	printf("\n"
 	       "odp_l2fwd options\n"
@@ -1801,6 +1878,28 @@ static void print_info(appl_args_t *appl_args)
 		       appl_args->chksum ? "chksum " : "",
 		       appl_args->packet_copy ? "packet_copy" : "");
 	}
+
+	printf("Num worker threads: %i\n", appl_args->num_workers);
+	printf("CPU mask:           %s\n", gbl_args->cpumaskstr);
+
+	if (appl_args->num_groups > 0)
+		printf("num groups:         %i\n", appl_args->num_groups);
+	else if (appl_args->num_groups == 0)
+		printf("group:              ODP_SCHED_GROUP_ALL\n");
+	else
+		printf("group:              ODP_SCHED_GROUP_WORKER\n");
+
+	printf("Packets per pool:   %u\n", gbl_args->num_pkt);
+	printf("Packet length:      %u\n", gbl_args->pkt_len);
+	printf("Segment length:     %u\n", gbl_args->seg_len);
+	printf("Vectors per pool:   %u\n", gbl_args->vector_num);
+	printf("Vector size:        %u\n", gbl_args->vector_max_size);
+	printf("Priority per IF:   ");
+
+	for (i = 0; i < appl_args->if_count; i++)
+		printf(" %i", appl_args->prio[i]);
+
+	printf("\n\n");
 }
 
 static void gbl_args_init(args_t *args)
@@ -1851,7 +1950,7 @@ static int set_vector_pool_params(odp_pool_param_t *params, odp_pool_capability_
 			vec_size = pool_capa.vector.max_size;
 			printf("\nWarning: Vector size reduced to %u\n\n", vec_size);
 		} else {
-			ODPH_ERR("Error: Vector size too big %u. Maximum is %u.\n",
+			ODPH_ERR("Vector size too big %u. Maximum is %u.\n",
 				 vec_size, pool_capa.vector.max_size);
 			return -1;
 		}
@@ -1871,7 +1970,7 @@ static int set_vector_pool_params(odp_pool_param_t *params, odp_pool_capability_
 			num_vec = pool_capa.vector.max_num;
 			printf("\nWarning: number of vectors reduced to %u\n\n", num_vec);
 		} else {
-			ODPH_ERR("Error: Too many vectors (%u) per pool. Maximum is %u.\n",
+			ODPH_ERR("Too many vectors (%u) per pool. Maximum is %u.\n",
 				 num_vec, pool_capa.vector.max_num);
 			return -1;
 		}
@@ -1896,7 +1995,6 @@ int main(int argc, char *argv[])
 	int num_workers, num_thr;
 	odp_shm_t shm;
 	odp_cpumask_t cpumask;
-	char cpumaskstr[ODP_CPUMASK_STR_SIZE];
 	odph_ethaddr_t new_addr;
 	odp_pool_param_t params;
 	int ret;
@@ -1904,8 +2002,8 @@ int main(int argc, char *argv[])
 	int if_count, num_pools, num_vec_pools;
 	int (*thr_run_func)(void *);
 	odp_instance_t instance;
-	int num_groups;
-	odp_schedule_group_t group[MAX_PKTIOS];
+	int num_groups, max_groups;
+	odp_schedule_group_t group[MAX_GROUPS];
 	odp_pool_t pool_tbl[MAX_PKTIOS], vec_pool_tbl[MAX_PKTIOS];
 	odp_pool_t pool, vec_pool;
 	odp_init_t init;
@@ -1917,7 +2015,7 @@ int main(int argc, char *argv[])
 	/* Let helper collect its own arguments (e.g. --odph_proc) */
 	argc = odph_parse_options(argc, argv);
 	if (odph_options(&helper_options)) {
-		ODPH_ERR("Error: reading ODP helper options failed.\n");
+		ODPH_ERR("Reading ODP helper options failed.\n");
 		exit(EXIT_FAILURE);
 	}
 
@@ -1939,13 +2037,13 @@ int main(int argc, char *argv[])
 
 	/* Init ODP before calling anything else */
 	if (odp_init_global(&instance, &init, NULL)) {
-		ODPH_ERR("Error: ODP global init failed.\n");
+		ODPH_ERR("ODP global init failed.\n");
 		exit(EXIT_FAILURE);
 	}
 
 	/* Init this thread */
 	if (odp_init_local(instance, ODP_THREAD_CONTROL)) {
-		ODPH_ERR("Error: ODP local init failed.\n");
+		ODPH_ERR("ODP local init failed.\n");
 		exit(EXIT_FAILURE);
 	}
 
@@ -1954,14 +2052,14 @@ int main(int argc, char *argv[])
 			      ODP_CACHE_LINE_SIZE, 0);
 
 	if (shm == ODP_SHM_INVALID) {
-		ODPH_ERR("Error: shared mem reserve failed.\n");
+		ODPH_ERR("Shared mem reserve failed.\n");
 		exit(EXIT_FAILURE);
 	}
 
 	gbl_args = odp_shm_addr(shm);
 
 	if (gbl_args == NULL) {
-		ODPH_ERR("Error: shared mem alloc failed.\n");
+		ODPH_ERR("Shared mem addr failed.\n");
 		exit(EXIT_FAILURE);
 	}
 	gbl_args_init(gbl_args);
@@ -1969,11 +2067,10 @@ int main(int argc, char *argv[])
 	/* Parse and store the application arguments */
 	parse_args(argc, argv, &gbl_args->appl);
 
+	odp_sys_info_print();
+
 	if (sched_mode(gbl_args->appl.in_mode))
 		gbl_args->appl.sched_mode = 1;
-
-	/* Print both system and application information */
-	print_info(&gbl_args->appl);
 
 	num_workers = MAX_WORKERS;
 	if (gbl_args->appl.cpu_count && gbl_args->appl.cpu_count < MAX_WORKERS)
@@ -1981,7 +2078,7 @@ int main(int argc, char *argv[])
 
 	/* Get default worker cpumask */
 	num_workers = odp_cpumask_default_worker(&cpumask, num_workers);
-	(void)odp_cpumask_to_str(&cpumask, cpumaskstr, sizeof(cpumaskstr));
+	(void)odp_cpumask_to_str(&cpumask, gbl_args->cpumaskstr, sizeof(gbl_args->cpumaskstr));
 
 	gbl_args->appl.num_workers = num_workers;
 
@@ -1990,37 +2087,17 @@ int main(int argc, char *argv[])
 
 	if_count = gbl_args->appl.if_count;
 
-	num_groups = gbl_args->appl.num_groups;
-
-	printf("Num worker threads: %i\n", num_workers);
-	printf("First CPU:          %i\n", odp_cpumask_first(&cpumask));
-	printf("CPU mask:           %s\n", cpumaskstr);
-
-	if (num_groups > 0)
-		printf("num groups:         %i\n", num_groups);
-	else if (num_groups == 0)
-		printf("group:              ODP_SCHED_GROUP_ALL\n");
-	else
-		printf("group:              ODP_SCHED_GROUP_WORKER\n");
-
-
-	if (num_groups > if_count || num_groups > num_workers) {
-		ODPH_ERR("Too many groups. Number of groups may not exceed "
-			 "number of interfaces or workers.\n");
-		exit(EXIT_FAILURE);
-	}
-
 	num_pools = 1;
 	if (gbl_args->appl.pool_per_if)
 		num_pools = if_count;
 
 	if (odp_pool_capability(&pool_capa)) {
-		ODPH_ERR("Error: pool capability failed\n");
+		ODPH_ERR("Pool capability failed\n");
 		return -1;
 	}
 
 	if (num_pools > (int)pool_capa.pkt.max_pools) {
-		ODPH_ERR("Error: Too many pools %i\n", num_pools);
+		ODPH_ERR("Too many pools %i\n", num_pools);
 		return -1;
 	}
 
@@ -2063,16 +2140,15 @@ int main(int argc, char *argv[])
 			printf("\nWarning: number of packets reduced to %u\n\n",
 			       num_pkt);
 		} else {
-			ODPH_ERR("Error: Too many packets %u. Maximum is %u.\n",
+			ODPH_ERR("Too many packets %u. Maximum is %u.\n",
 				 num_pkt, pool_capa.pkt.max_num);
 			return -1;
 		}
 	}
 
-	printf("Packets per pool:   %u\n", num_pkt);
-	printf("Packet length:      %u\n", pkt_len);
-	printf("Segment length:     %u\n", seg_len);
-	printf("\n\n");
+	gbl_args->num_pkt = num_pkt;
+	gbl_args->pkt_len = pkt_len;
+	gbl_args->seg_len = seg_len;
 
 	/* Create packet pool */
 	odp_pool_param_init(&params);
@@ -2085,7 +2161,7 @@ int main(int argc, char *argv[])
 		pool_tbl[i] = odp_pool_create("packet pool", &params);
 
 		if (pool_tbl[i] == ODP_POOL_INVALID) {
-			ODPH_ERR("Error: pool create failed %i\n", i);
+			ODPH_ERR("Pool create failed %i\n", i);
 			exit(EXIT_FAILURE);
 		}
 
@@ -2097,13 +2173,13 @@ int main(int argc, char *argv[])
 	num_vec_pools = 0;
 	if (gbl_args->appl.vector_mode) {
 		if (!sched_mode(gbl_args->appl.in_mode)) {
-			ODPH_ERR("Error: vector mode only supports scheduler pktin modes (1-3)\n");
+			ODPH_ERR("Vector mode only supports scheduler pktin modes (1-3)\n");
 			return -1;
 		}
 
 		num_vec_pools = gbl_args->appl.pool_per_if ? if_count : 1;
 		if (num_vec_pools > (int)pool_capa.vector.max_pools) {
-			ODPH_ERR("Error: Too many vector pools %i\n", num_vec_pools);
+			ODPH_ERR("Too many vector pools %i\n", num_vec_pools);
 			return -1;
 		}
 
@@ -2111,15 +2187,14 @@ int main(int argc, char *argv[])
 		if (set_vector_pool_params(&params, pool_capa))
 			return -1;
 
-		printf("Vectors per pool:   %u\n", params.vector.num);
-		printf("Vector size:        %u\n", params.vector.max_size);
-		printf("\n\n");
+		gbl_args->vector_num = params.vector.num;
+		gbl_args->vector_max_size = params.vector.max_size;
 
 		for (i = 0; i < num_vec_pools; i++) {
 			vec_pool_tbl[i] = odp_pool_create("vector pool", &params);
 
 			if (vec_pool_tbl[i] == ODP_POOL_INVALID) {
-				ODPH_ERR("Error: vector pool create failed %i\n", i);
+				ODPH_ERR("Vector pool create failed %i\n", i);
 				exit(EXIT_FAILURE);
 			}
 
@@ -2137,7 +2212,7 @@ int main(int argc, char *argv[])
 	odp_schedule_config_init(&sched_config);
 
 	if (odp_schedule_capability(&sched_capa)) {
-		ODPH_ERR("Error: schedule capability failed\n");
+		ODPH_ERR("Schedule capability failed\n");
 		exit(EXIT_FAILURE);
 	}
 
@@ -2145,9 +2220,20 @@ int main(int argc, char *argv[])
 		if (sched_capa.max_flow_id) {
 			sched_config.max_flow_id = sched_capa.max_flow_id;
 		} else {
-			ODPH_ERR("Error: flow aware mode not supported\n");
+			ODPH_ERR("Flow aware mode not supported\n");
 			exit(EXIT_FAILURE);
 		}
+	}
+
+	num_groups = gbl_args->appl.num_groups;
+	/* Predefined groups are enabled by default */
+	max_groups = sched_capa.max_groups - 3;
+	if (max_groups > MAX_GROUPS)
+		max_groups = MAX_GROUPS;
+
+	if (num_groups > max_groups) {
+		ODPH_ERR("Too many groups. Maximum is %i.\n", max_groups);
+		exit(EXIT_FAILURE);
 	}
 
 	odp_schedule_config(&sched_config);
@@ -2196,7 +2282,7 @@ int main(int argc, char *argv[])
 		if (odp_pktio_mac_addr(gbl_args->pktios[i].pktio,
 				       gbl_args->port_eth_addr[i].addr,
 				       ODPH_ETHADDR_LEN) != ODPH_ETHADDR_LEN) {
-			ODPH_ERR("Error: interface ethernet address unknown\n");
+			ODPH_ERR("Interface ethernet address unknown\n");
 			exit(EXIT_FAILURE);
 		}
 
@@ -2216,6 +2302,9 @@ int main(int argc, char *argv[])
 	}
 
 	gbl_args->pktios[i].pktio = ODP_PKTIO_INVALID;
+
+	/* Print application information */
+	print_info();
 
 	bind_queues();
 
@@ -2245,14 +2334,47 @@ int main(int argc, char *argv[])
 	thr_common.sync     = 1;
 
 	for (i = 0; i < num_workers; ++i) {
+		int j;
+		int num_join;
+		int mode = gbl_args->appl.group_mode;
+
 		odph_thread_param_init(&thr_param[i]);
 		thr_param[i].start    = thr_run_func;
 		thr_param[i].arg      = &gbl_args->thread_args[i];
 		thr_param[i].thr_type = ODP_THREAD_WORKER;
 
-		/* Round robin threads to groups */
-		gbl_args->thread_args[i].num_groups = 1;
-		gbl_args->thread_args[i].group[0] = group[i % num_groups];
+		gbl_args->thread_args[i].num_grp_join = 0;
+
+		/* Fill in list of groups to join */
+		if (gbl_args->appl.num_groups > 0) {
+			num_join = if_count < num_groups ? if_count : num_groups;
+
+			if (mode == 0 || mode == 1) {
+				/* All threads join all groups */
+				if (mode == 0)
+					num_join = num_groups;
+
+				gbl_args->thread_args[i].num_grp_join = num_join;
+
+				for (j = 0; j < num_join; j++)
+					gbl_args->thread_args[i].group[j] = group[j];
+			} else {
+				/* Thread joins first groups in round robin */
+				if (num_workers >= num_join) {
+					gbl_args->thread_args[i].num_grp_join = 1;
+					gbl_args->thread_args[i].group[0] = group[i % num_join];
+				} else {
+					int cnt = 0;
+
+					for (j = 0; i + j < num_join; j += num_workers) {
+						gbl_args->thread_args[i].group[cnt] = group[i + j];
+						cnt++;
+					}
+
+					gbl_args->thread_args[i].num_grp_join = cnt;
+				}
+			}
+		}
 
 		stats[i] = &gbl_args->thread_args[i].stats;
 	}
@@ -2261,7 +2383,7 @@ int main(int argc, char *argv[])
 				     thr_param, num_workers);
 
 	if (num_thr != num_workers) {
-		ODPH_ERR("Error: worker create failed %i\n", num_thr);
+		ODPH_ERR("Worker create failed: %i\n", num_thr);
 		exit(EXIT_FAILURE);
 	}
 
@@ -2275,8 +2397,7 @@ int main(int argc, char *argv[])
 		pktio = gbl_args->pktios[i].pktio;
 		ret   = odp_pktio_start(pktio);
 		if (ret) {
-			ODPH_ERR("Error: unable to start %s\n",
-				 gbl_args->appl.if_names[i]);
+			ODPH_ERR("Pktio start failed: %s\n", gbl_args->appl.if_names[i]);
 			exit(EXIT_FAILURE);
 		}
 	}
@@ -2286,8 +2407,7 @@ int main(int argc, char *argv[])
 
 	for (i = 0; i < if_count; ++i) {
 		if (odp_pktio_stop(gbl_args->pktios[i].pktio)) {
-			ODPH_ERR("Error: unable to stop %s\n",
-				 gbl_args->appl.if_names[i]);
+			ODPH_ERR("Pktio stop failed: %s\n", gbl_args->appl.if_names[i]);
 			exit(EXIT_FAILURE);
 		}
 	}
@@ -2299,14 +2419,13 @@ int main(int argc, char *argv[])
 	/* Master thread waits for other threads to exit */
 	num_thr = odph_thread_join(gbl_args->thread_tbl, num_workers);
 	if (num_thr != num_workers) {
-		ODPH_ERR("Error: worker join failed %i\n", num_thr);
+		ODPH_ERR("Worker join failed: %i\n", num_thr);
 			 exit(EXIT_FAILURE);
 	}
 
 	for (i = 0; i < if_count; ++i) {
 		if (odp_pktio_close(gbl_args->pktios[i].pktio)) {
-			ODPH_ERR("Error: unable to close %s\n",
-				 gbl_args->appl.if_names[i]);
+			ODPH_ERR("Pktio close failed: %s\n", gbl_args->appl.if_names[i]);
 			exit(EXIT_FAILURE);
 		}
 	}
@@ -2318,30 +2437,30 @@ int main(int argc, char *argv[])
 
 	for (i = 0; i < num_pools; i++) {
 		if (odp_pool_destroy(pool_tbl[i])) {
-			ODPH_ERR("Error: pool destroy failed %i\n", i);
+			ODPH_ERR("Pool destroy failed: %i\n", i);
 			exit(EXIT_FAILURE);
 		}
 	}
 
 	for (i = 0; i < num_vec_pools; i++) {
 		if (odp_pool_destroy(vec_pool_tbl[i])) {
-			ODPH_ERR("Error: vector pool destroy failed %i\n", i);
+			ODPH_ERR("Vector pool destroy failed: %i\n", i);
 			exit(EXIT_FAILURE);
 		}
 	}
 
 	if (odp_shm_free(shm)) {
-		ODPH_ERR("Error: shm free\n");
+		ODPH_ERR("Shm free failed\n");
 		exit(EXIT_FAILURE);
 	}
 
 	if (odp_term_local()) {
-		ODPH_ERR("Error: term local\n");
+		ODPH_ERR("Term local failed\n");
 		exit(EXIT_FAILURE);
 	}
 
 	if (odp_term_global(instance)) {
-		ODPH_ERR("Error: term global\n");
+		ODPH_ERR("Term global failed\n");
 		exit(EXIT_FAILURE);
 	}
 
