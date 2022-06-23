@@ -1454,7 +1454,7 @@ static void stats_convert(struct rte_eth_stats *rte_stats,
 	stats->in_ucast_pkts = 0;
 	stats->in_mcast_pkts = 0;
 	stats->in_bcast_pkts = 0;
-	stats->in_discards = rte_stats->imissed;
+	stats->in_discards = rte_stats->imissed + rte_stats->rx_nombuf;
 	stats->in_errors = rte_stats->ierrors;
 	stats->out_octets = rte_stats->obytes;
 	stats->out_packets = rte_stats->opackets;
