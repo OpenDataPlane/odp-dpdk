@@ -939,6 +939,7 @@ int _odp_input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int nu
 	odp_pktio_t input = pktio_entry->s.handle;
 	odp_time_t ts_val;
 	odp_time_t *ts = NULL;
+	const uint32_t supported_ptypes = pkt_dpdk->supported_ptypes;
 	uint16_t num_prefetch = RTE_MIN(num, NUM_RX_PREFETCH);
 	const odp_proto_layer_t layer = pktio_entry->s.parse_layer;
 
@@ -966,7 +967,7 @@ int _odp_input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int nu
 							  rte_pktmbuf_pkt_len(mbuf),
 							  rte_pktmbuf_data_len(mbuf),
 							  mbuf, layer,
-							  pkt_dpdk->supported_ptypes, pktin_cfg)) {
+							  supported_ptypes, pktin_cfg)) {
 				odp_packet_free(pkt);
 				continue;
 			}
