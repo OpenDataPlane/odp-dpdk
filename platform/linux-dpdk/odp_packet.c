@@ -1477,13 +1477,14 @@ int _odp_packet_sctp_chksum_insert(odp_packet_t pkt)
 	return odp_packet_copy_from_mem(pkt, pkt_hdr->p.l4_offset + 8, 4, &sum);
 }
 
-int _odp_packet_l4_chksum(odp_packet_hdr_t *pkt_hdr, odp_proto_chksums_t chksums,
-			  uint64_t l4_part_sum)
+int _odp_packet_l4_chksum(odp_packet_hdr_t *pkt_hdr,
+			  odp_pktin_config_opt_t opt, uint64_t l4_part_sum)
+
 {
 	uint32_t frame_len = odp_packet_len(packet_handle(pkt_hdr));
 
 	/* UDP chksum == 0 case is covered in parse_udp() */
-	if (chksums.chksum.udp &&
+	if (opt.bit.udp_chksum &&
 	    pkt_hdr->p.input_flags.udp &&
 	    !pkt_hdr->p.input_flags.ipfrag &&
 	    !pkt_hdr->p.input_flags.udp_chksum_zero) {
@@ -1502,7 +1503,7 @@ int _odp_packet_l4_chksum(odp_packet_hdr_t *pkt_hdr, odp_proto_chksums_t chksums
 		}
 	}
 
-	if (chksums.chksum.tcp &&
+	if (opt.bit.tcp_chksum &&
 	    pkt_hdr->p.input_flags.tcp &&
 	    !pkt_hdr->p.input_flags.ipfrag) {
 		uint16_t sum = ~packet_sum(pkt_hdr,
@@ -1520,7 +1521,7 @@ int _odp_packet_l4_chksum(odp_packet_hdr_t *pkt_hdr, odp_proto_chksums_t chksums
 		}
 	}
 
-	if (chksums.chksum.sctp &&
+	if (opt.bit.sctp_chksum &&
 	    pkt_hdr->p.input_flags.sctp &&
 	    !pkt_hdr->p.input_flags.ipfrag) {
 		uint32_t seg_len = 0;
@@ -1609,17 +1610,20 @@ int odp_packet_parse(odp_packet_t pkt, uint32_t offset,
 	}
 
 	opt.all_bits = 0;
+	opt.bit.ipv4_chksum = param->chksums.chksum.ipv4;
+	opt.bit.udp_chksum = param->chksums.chksum.udp;
+	opt.bit.tcp_chksum = param->chksums.chksum.tcp;
+	opt.bit.sctp_chksum = param->chksums.chksum.sctp;
 
 	ret = _odp_packet_parse_common_l3_l4(&pkt_hdr->p, data, offset,
 					     packet_len, seg_len, layer,
-					     ethtype, param->chksums,
-					     &l4_part_sum, opt);
+					     ethtype, &l4_part_sum, opt);
 
 	if (ret)
 		return -1;
 
 	if (layer >= ODP_PROTO_LAYER_L4) {
-		ret = _odp_packet_l4_chksum(pkt_hdr, param->chksums, l4_part_sum);
+		ret = _odp_packet_l4_chksum(pkt_hdr, opt, l4_part_sum);
 		if (ret)
 			return -1;
 	}
