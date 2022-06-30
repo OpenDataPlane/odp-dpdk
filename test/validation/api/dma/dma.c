@@ -1,4 +1,4 @@
-/* Copyright (c) 2021, Nokia
+/* Copyright (c) 2021-2022, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier: BSD-3-Clause
@@ -199,31 +199,41 @@ static void test_dma_capability(void)
 	}
 }
 
-static void test_dma_param(void)
+static void test_dma_param(uint8_t fill)
 {
 	odp_dma_param_t dma_param;
 	odp_dma_transfer_param_t trs_param;
 	odp_dma_compl_param_t compl_param;
 	odp_dma_pool_param_t dma_pool_param;
 
+	memset(&dma_param, fill, sizeof(dma_param));
 	odp_dma_param_init(&dma_param);
 	CU_ASSERT(dma_param.direction == ODP_DMA_MAIN_TO_MAIN);
 	CU_ASSERT(dma_param.type == ODP_DMA_TYPE_COPY);
 	CU_ASSERT(dma_param.mt_mode == ODP_DMA_MT_SAFE);
 	CU_ASSERT(dma_param.order == ODP_DMA_ORDER_NONE);
 
+	memset(&trs_param, fill, sizeof(trs_param));
 	odp_dma_transfer_param_init(&trs_param);
 	CU_ASSERT(trs_param.src_format == ODP_DMA_FORMAT_ADDR);
 	CU_ASSERT(trs_param.dst_format == ODP_DMA_FORMAT_ADDR);
 	CU_ASSERT(trs_param.num_src == 1);
 	CU_ASSERT(trs_param.num_dst == 1);
 
+	memset(&compl_param, fill, sizeof(compl_param));
 	odp_dma_compl_param_init(&compl_param);
 	CU_ASSERT(compl_param.user_ptr == NULL);
 
+	memset(&dma_pool_param, fill, sizeof(dma_pool_param));
 	odp_dma_pool_param_init(&dma_pool_param);
 	CU_ASSERT(dma_pool_param.cache_size <= global.dma_capa.pool.max_cache_size);
 	CU_ASSERT(dma_pool_param.cache_size >= global.dma_capa.pool.min_cache_size);
+}
+
+static void test_dma_param_init(void)
+{
+	test_dma_param(0);
+	test_dma_param(0xff);
 }
 
 static void test_dma_debug(void)
@@ -282,6 +292,30 @@ static void test_dma_compl_pool(void)
 	odp_dma_compl_print(compl);
 
 	odp_dma_compl_free(compl);
+}
+
+static void test_dma_compl_pool_same_name(void)
+{
+	odp_dma_pool_param_t dma_pool_param;
+	odp_pool_t pool, pool_a, pool_b;
+	const char *name = COMPL_POOL_NAME;
+
+	pool_a = global.compl_pool;
+
+	pool = odp_pool_lookup(name);
+	CU_ASSERT(pool == pool_a);
+
+	odp_dma_pool_param_init(&dma_pool_param);
+	dma_pool_param.num = NUM_COMPL;
+
+	/* Second pool with the same name */
+	pool_b = odp_dma_pool_create(name, &dma_pool_param);
+	CU_ASSERT_FATAL(pool_b != ODP_POOL_INVALID);
+
+	pool = odp_pool_lookup(name);
+	CU_ASSERT(pool == pool_a || pool == pool_b);
+
+	CU_ASSERT_FATAL(odp_pool_destroy(pool_b) == 0);
 }
 
 static void init_source(uint8_t *src, uint32_t len)
@@ -1139,9 +1173,10 @@ static void test_dma_multi_pkt_to_pkt_event(void)
 
 odp_testinfo_t dma_suite[] = {
 	ODP_TEST_INFO(test_dma_capability),
-	ODP_TEST_INFO_CONDITIONAL(test_dma_param, check_sync),
+	ODP_TEST_INFO_CONDITIONAL(test_dma_param_init, check_sync),
 	ODP_TEST_INFO_CONDITIONAL(test_dma_debug, check_sync),
 	ODP_TEST_INFO_CONDITIONAL(test_dma_compl_pool, check_event),
+	ODP_TEST_INFO_CONDITIONAL(test_dma_compl_pool_same_name, check_event),
 	ODP_TEST_INFO_CONDITIONAL(test_dma_addr_to_addr_sync, check_sync),
 	ODP_TEST_INFO_CONDITIONAL(test_dma_addr_to_addr_sync_mtrs, check_sync),
 	ODP_TEST_INFO_CONDITIONAL(test_dma_addr_to_addr_sync_mseg, check_sync),

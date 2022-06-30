@@ -612,12 +612,6 @@ int odp_pktio_config(odp_pktio_t hdl, const odp_pktio_config_t *config)
 
 	entry->s.config = *config;
 
-	entry->s.in_chksums.all_chksum = 0;
-	entry->s.in_chksums.chksum.ipv4 = config->pktin.bit.ipv4_chksum;
-	entry->s.in_chksums.chksum.tcp = config->pktin.bit.tcp_chksum;
-	entry->s.in_chksums.chksum.udp = config->pktin.bit.udp_chksum;
-	entry->s.in_chksums.chksum.sctp = config->pktin.bit.sctp_chksum;
-
 	entry->s.enabled.tx_ts = config->pktout.bit.ts_ena;
 	entry->s.enabled.tx_compl = config->pktout.bit.tx_compl_ena;
 
@@ -3102,8 +3096,8 @@ int odp_packet_lso_request(odp_packet_t pkt, const odp_packet_lso_opt_t *lso_opt
 		return -1;
 	}
 
-	if (odp_unlikely((payload_offset + lso_opt->max_payload_len) > packet_len(pkt_hdr))) {
-		ODP_ERR("LSO options larger than packet data length\n");
+	if (odp_unlikely(payload_offset > packet_len(pkt_hdr))) {
+		ODP_ERR("LSO payload offset larger than packet data length\n");
 		return -1;
 	}
 
@@ -3212,9 +3206,17 @@ int _odp_lso_num_packets(odp_packet_t packet, const odp_packet_lso_opt_t *lso_op
 		return -1;
 	}
 
-	if (odp_unlikely((hdr_len + payload_len) > pkt_len)) {
-		ODP_ERR("LSO options larger than packet data length\n");
+	if (odp_unlikely(hdr_len > pkt_len)) {
+		ODP_ERR("LSO payload offset larger than packet data length\n");
 		return -1;
+	}
+
+	if (odp_unlikely(hdr_len + payload_len > odp_packet_len(packet))) {
+		/* Packet does not need segmentation */
+		*len_out       = payload_len;
+		*left_over_out = 0;
+
+		return 1;
 	}
 
 	if (lso_prof->param.lso_proto == ODP_LSO_PROTO_IPV4) {
@@ -3363,6 +3365,14 @@ static int pktout_send_lso(odp_pktout_queue_t queue, odp_packet_t packet,
 	num_pkt = _odp_lso_num_packets(packet, lso_opt, &payload_len, &left_over_len);
 	if (odp_unlikely(num_pkt <= 0))
 		return -1;
+
+	if (odp_unlikely(num_pkt == 1)) {
+		/* Segmentation not needed */
+		if (odp_pktout_send(queue, &packet, 1) != 1)
+			return -1;
+
+		return 0;
+	}
 
 	/* Create packets */
 	odp_packet_t pkt_out[num_pkt];

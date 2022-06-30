@@ -26,35 +26,19 @@
 #include <odp/api/plat/packet_vector_inlines.h>
 #include <odp/api/plat/timer_inlines.h>
 
-odp_event_subtype_t odp_event_subtype(odp_event_t event)
-{
-	if (_odp_event_type(event) != ODP_EVENT_PACKET)
-		return ODP_EVENT_NO_SUBTYPE;
+#include <odp/api/plat/event_inline_types.h>
 
-	return odp_packet_subtype(odp_packet_from_event(event));
-}
+#include <odp/visibility_begin.h>
 
-odp_event_type_t odp_event_types(odp_event_t event,
-				 odp_event_subtype_t *subtype)
-{
-	odp_event_type_t event_type = _odp_event_type(event);
+/* Fill in event header field offsets for inline functions */
+const _odp_event_inline_offset_t
+_odp_event_inline_offset ODP_ALIGNED_CACHE = {
+	.event_type = offsetof(_odp_event_hdr_t, event_type),
+	.base_data  = offsetof(_odp_event_hdr_t, base_data),
+	.flow_id    = offsetof(_odp_event_hdr_t, flow_id)
+};
 
-	*subtype = event_type == ODP_EVENT_PACKET ?
-			odp_packet_subtype(odp_packet_from_event(event)) :
-			ODP_EVENT_NO_SUBTYPE;
-
-	return event_type;
-}
-
-uint32_t odp_event_flow_id(odp_event_t event)
-{
-	return event_flow_id(event);
-}
-
-void odp_event_flow_id_set(odp_event_t event, uint32_t flow_id)
-{
-	event_flow_id_set(event, flow_id);
-}
+#include <odp/visibility_end.h>
 
 void odp_event_free(odp_event_t event)
 {

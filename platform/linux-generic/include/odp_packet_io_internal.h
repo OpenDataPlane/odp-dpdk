@@ -65,12 +65,16 @@ struct pktio_if_ops;
 
 #if defined(_ODP_PKTIO_NETMAP)
 #define PKTIO_PRIVATE_SIZE 74752
+#elif defined(_ODP_PKTIO_XDP) && ODP_CACHE_LINE_SIZE == 128
+#define PKTIO_PRIVATE_SIZE 33792
+#elif defined(_ODP_PKTIO_XDP)
+#define PKTIO_PRIVATE_SIZE 29696
 #elif defined(_ODP_PKTIO_DPDK) && ODP_CACHE_LINE_SIZE == 128
 #define PKTIO_PRIVATE_SIZE 10240
 #elif defined(_ODP_PKTIO_DPDK)
 #define PKTIO_PRIVATE_SIZE 5632
 #else
-#define PKTIO_PRIVATE_SIZE 512
+#define PKTIO_PRIVATE_SIZE 384
 #endif
 
 struct pktio_entry {
@@ -124,14 +128,13 @@ struct pktio_entry {
 	classifier_t cls;		/**< classifier linked with this pktio*/
 	/* Driver level statistics counters */
 	odp_pktio_stats_t stats;
-	/* Statistics counters used outside drivers */
+	/* Statistics counters used also outside drivers */
 	struct {
 		odp_atomic_u64_t in_discards;
 		odp_atomic_u64_t out_discards;
 	} stats_extra;
 	/* Latest Tx timestamp */
 	odp_atomic_u64_t tx_ts;
-	odp_proto_chksums_t in_chksums; /**< Checksums validation settings */
 	pktio_stats_type_t stats_type;
 	char name[PKTIO_NAME_LEN];	/**< name of pktio provided to
 					     internal pktio_open() calls */
@@ -356,6 +359,27 @@ int _odp_lso_create_packets(odp_packet_t packet, const odp_packet_lso_opt_t *lso
 
 void _odp_pktio_allocate_and_send_tx_compl_events(const pktio_entry_t *entry,
 						  const odp_packet_t packets[], int num);
+
+static inline int _odp_pktio_packet_to_pool(odp_packet_t *pkt,
+					    odp_packet_hdr_t **pkt_hdr,
+					    odp_pool_t new_pool)
+{
+	odp_packet_t new_pkt;
+
+	if (odp_likely(new_pool == odp_packet_pool(*pkt)))
+		return 0;
+
+	new_pkt = odp_packet_copy(*pkt, new_pool);
+
+	if (odp_unlikely(new_pkt == ODP_PACKET_INVALID))
+		return 1;
+
+	odp_packet_free(*pkt);
+	*pkt = new_pkt;
+	*pkt_hdr = packet_hdr(new_pkt);
+
+	return 0;
+}
 
 #ifdef __cplusplus
 }

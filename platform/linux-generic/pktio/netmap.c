@@ -828,7 +828,6 @@ static inline int netmap_pkt_to_odp(pktio_entry_t *pktio_entry,
 	uint32_t max_len;
 	uint16_t frame_offset = pktio_entry->s.pktin_frame_offset;
 	int num_rx = 0;
-	const odp_proto_chksums_t chksums = pktio_entry->s.in_chksums;
 	const odp_proto_layer_t layer = pktio_entry->s.parse_layer;
 	const odp_pktin_config_opt_t opt = pktio_entry->s.config.pktin;
 
@@ -842,7 +841,6 @@ static inline int netmap_pkt_to_odp(pktio_entry_t *pktio_entry,
 		netmap_slot_t slot;
 		uint16_t len;
 		const uint8_t *buf;
-		uint64_t l4_part_sum = 0;
 
 		slot = slot_tbl[i];
 		len = slot.len;
@@ -850,39 +848,50 @@ static inline int netmap_pkt_to_odp(pktio_entry_t *pktio_entry,
 
 		odp_prefetch(slot.buf);
 
-		pkt = pkt_tbl[num_rx];
+		pkt = pkt_tbl[i];
 		pkt_hdr = packet_hdr(pkt);
-
-		if (layer) {
-			if (_odp_packet_parse_common(&pkt_hdr->p, buf, len, len,
-						     layer, chksums, &l4_part_sum, opt) < 0)
-				continue;
-
-			if (pktio_cls_enabled(pktio_entry)) {
-				if (_odp_cls_classify_packet(pktio_entry, buf, &pool,
-							     pkt_hdr))
-					continue;
-			}
-		}
 
 		pull_tail(pkt_hdr, max_len - len);
 		if (frame_offset)
 			pull_head(pkt_hdr, frame_offset);
 
-		if (odp_packet_copy_from_mem(pkt, 0, len, slot.buf) != 0)
-			break;
+		if (odp_packet_copy_from_mem(pkt, 0, len, slot.buf) != 0) {
+			odp_packet_free(pkt);
+			continue;
+		}
+
+		if (layer) {
+			if (_odp_packet_parse_common(pkt_hdr, buf, len, len,
+						     layer, opt) < 0) {
+				odp_packet_free(pkt);
+				continue;
+			}
+
+			if (pktio_cls_enabled(pktio_entry)) {
+				odp_pool_t new_pool;
+
+				if (_odp_cls_classify_packet(pktio_entry, buf, &new_pool,
+							     pkt_hdr)) {
+					odp_packet_free(pkt);
+					continue;
+				}
+
+				if (odp_unlikely(_odp_pktio_packet_to_pool(
+					    &pkt, &pkt_hdr, new_pool))) {
+					odp_packet_free(pkt);
+					odp_atomic_inc_u64(
+						&pktio_entry->s.stats_extra
+							 .in_discards);
+					continue;
+				}
+			}
+		}
 
 		pkt_hdr->input = pktio_entry->s.handle;
-
-		if (layer >= ODP_PROTO_LAYER_L4)
-			_odp_packet_l4_chksum(pkt_hdr, chksums, l4_part_sum);
-
 		packet_set_ts(pkt_hdr, ts);
-		num_rx++;
-	}
 
-	if (num_rx < num)
-		odp_packet_free_multi(&pkt_tbl[num_rx], num - num_rx);
+		pkt_tbl[num_rx++] = pkt;
+	}
 
 	return num_rx;
 }
