@@ -1,5 +1,5 @@
 /* Copyright (c) 2013-2018, Linaro Limited
- * Copyright (c) 2021, Nokia
+ * Copyright (c) 2021-2022, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -80,20 +80,6 @@ static inline struct rte_mbuf *_odp_buf_to_mbuf(odp_buffer_t buf)
 static inline odp_buffer_hdr_t *_odp_buf_hdr(odp_buffer_t buf)
 {
 	return (odp_buffer_hdr_t *)(uintptr_t)buf;
-}
-
-static inline uint32_t event_flow_id(odp_event_t ev)
-{
-	odp_buffer_hdr_t *buf_hdr = (odp_buffer_hdr_t *)(uintptr_t)ev;
-
-	return buf_hdr->event_hdr.flow_id;
-}
-
-static inline void event_flow_id_set(odp_event_t ev, uint32_t flow_id)
-{
-	odp_buffer_hdr_t *buf_hdr = (odp_buffer_hdr_t *)(uintptr_t)ev;
-
-	buf_hdr->event_hdr.flow_id = flow_id;
 }
 
 #ifdef __cplusplus

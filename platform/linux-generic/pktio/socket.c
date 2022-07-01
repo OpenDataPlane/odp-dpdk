@@ -235,7 +235,6 @@ static int sock_mmsg_recv(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 	int i;
 	uint16_t frame_offset = pktio_entry->s.pktin_frame_offset;
 	uint32_t alloc_len = pkt_sock->mtu + frame_offset;
-	const odp_proto_chksums_t chksums = pktio_entry->s.in_chksums;
 	const odp_proto_layer_t layer = pktio_entry->s.parse_layer;
 	const odp_pktin_config_opt_t opt = pktio_entry->s.config.pktin;
 
@@ -266,7 +265,6 @@ static int sock_mmsg_recv(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 		odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
 		uint16_t pkt_len = msgvec[i].msg_len;
 		int ret;
-		uint64_t l4_part_sum = 0;
 
 		if (odp_unlikely(msgvec[i].msg_hdr.msg_flags & MSG_TRUNC)) {
 			odp_packet_free(pkt);
@@ -294,17 +292,27 @@ static int sock_mmsg_recv(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 				base = buf;
 			}
 
-			if (_odp_packet_parse_common(&pkt_hdr->p, base, pkt_len,
-						     seg_len, layer, chksums,
-						     &l4_part_sum, opt) < 0) {
+			if (_odp_packet_parse_common(pkt_hdr, base, pkt_len,
+						     seg_len, layer, opt) < 0) {
 				odp_packet_free(pkt);
 				continue;
 			}
 
 			if (pktio_cls_enabled(pktio_entry)) {
-				if (_odp_cls_classify_packet(pktio_entry, base, &pool,
+				odp_pool_t new_pool;
+
+				if (_odp_cls_classify_packet(pktio_entry, base, &new_pool,
 							     pkt_hdr)) {
 					odp_packet_free(pkt);
+					continue;
+				}
+
+				if (odp_unlikely(_odp_pktio_packet_to_pool(
+					    &pkt, &pkt_hdr, new_pool))) {
+					odp_packet_free(pkt);
+					odp_atomic_inc_u64(
+						&pktio_entry->s.stats_extra
+							 .in_discards);
 					continue;
 				}
 			}
@@ -318,10 +326,6 @@ static int sock_mmsg_recv(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 		}
 
 		pkt_hdr->input = pktio_entry->s.handle;
-
-		if (layer >= ODP_PROTO_LAYER_L4)
-			_odp_packet_l4_chksum(pkt_hdr, chksums, l4_part_sum);
-
 		packet_set_ts(pkt_hdr, ts);
 
 		pkt_table[nb_rx++] = pkt;

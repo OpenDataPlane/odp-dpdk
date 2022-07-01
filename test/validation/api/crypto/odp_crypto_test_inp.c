@@ -28,11 +28,11 @@ struct suite_context_s {
 
 static struct suite_context_s suite_context;
 
-static void test_default_values(void)
+static void test_defaults(uint8_t fill)
 {
 	odp_crypto_session_param_t param;
 
-	memset(&param, 0x55, sizeof(param));
+	memset(&param, fill, sizeof(param));
 	odp_crypto_session_param_init(&param);
 
 	CU_ASSERT_EQUAL(param.op, ODP_CRYPTO_OP_ENCODE);
@@ -53,6 +53,12 @@ static void test_default_values(void)
 	CU_ASSERT_EQUAL(param.auth_iv.data, NULL);
 	CU_ASSERT_EQUAL(param.auth_iv.length, 0);
 #endif
+}
+
+static void test_default_values(void)
+{
+	test_defaults(0);
+	test_defaults(0xff);
 }
 
 static int packet_cmp_mem_bits(odp_packet_t pkt, uint32_t offset,
@@ -689,7 +695,8 @@ static odp_crypto_session_t session_create(odp_crypto_op_t op,
 	 * In some cases an individual algorithm cannot be used alone,
 	 * i.e. with the null cipher/auth algorithm.
 	 */
-	if (rc == ODP_CRYPTO_SES_ERR_ALG_COMBO) {
+	if (rc < 0 &&
+	    status == ODP_CRYPTO_SES_ERR_ALG_COMBO) {
 		printf("\n    Unsupported algorithm combination: %s, %s\n",
 		       cipher_alg_name(cipher_alg),
 		       auth_alg_name(auth_alg));
@@ -1177,11 +1184,11 @@ static void test_capability(void)
  * operation with hash_result_offset outside the auth_range and by
  * copying the hash in the ciphertext packet.
  */
-static void create_hash_test_reference(odp_auth_alg_t auth,
-				       const odp_crypto_auth_capability_t *capa,
-				       crypto_test_reference_t *ref,
-				       uint32_t digest_offset,
-				       uint8_t digest_fill_byte)
+static int create_hash_test_reference(odp_auth_alg_t auth,
+				      const odp_crypto_auth_capability_t *capa,
+				      crypto_test_reference_t *ref,
+				      uint32_t digest_offset,
+				      uint8_t digest_fill)
 {
 	odp_crypto_session_t session;
 	int rc;
@@ -1209,7 +1216,7 @@ static void create_hash_test_reference(odp_auth_alg_t auth,
 	fill_with_pattern(ref->auth_iv, ref->auth_iv_length);
 	fill_with_pattern(ref->plaintext, auth_bytes);
 
-	memset(ref->plaintext + digest_offset, digest_fill_byte, ref->digest_length);
+	memset(ref->plaintext + digest_offset, digest_fill, ref->digest_length);
 
 	pkt = odp_packet_alloc(suite_context.pool, auth_bytes + ref->digest_length);
 	CU_ASSERT_FATAL(pkt != ODP_PACKET_INVALID);
@@ -1219,12 +1226,12 @@ static void create_hash_test_reference(odp_auth_alg_t auth,
 
 	session = session_create(ODP_CRYPTO_OP_ENCODE, ODP_CIPHER_ALG_NULL,
 				 auth, ref, PACKET_IV, HASH_NO_OVERLAP);
+	if (session == ODP_CRYPTO_SESSION_INVALID)
+		return -1;
 
-	if (crypto_op(pkt, &ok, session,
-		      ref->cipher_iv, ref->auth_iv,
-		      &cipher_range, &auth_range,
-		      ref->aad, enc_digest_offset))
-		return;
+	rc = crypto_op(pkt, &ok, session, ref->cipher_iv, ref->auth_iv,
+		       &cipher_range, &auth_range, ref->aad, enc_digest_offset);
+	CU_ASSERT(rc == 0);
 	CU_ASSERT(ok);
 
 	rc = odp_crypto_session_destroy(session);
@@ -1245,6 +1252,8 @@ static void create_hash_test_reference(odp_auth_alg_t auth,
 	CU_ASSERT(rc == 0);
 
 	odp_packet_free(pkt);
+
+	return 0;
 }
 
 static void test_auth_hash_in_auth_range(odp_auth_alg_t auth,
@@ -1257,7 +1266,8 @@ static void test_auth_hash_in_auth_range(odp_auth_alg_t auth,
 	 * Create test packets with auth hash in the authenticated range and
 	 * zeroes in the hash location in the plaintext packet.
 	 */
-	create_hash_test_reference(auth, capa, &ref, digest_offset, 0);
+	if (create_hash_test_reference(auth, capa, &ref, digest_offset, 0))
+		return;
 
 	/*
 	 * Decode the ciphertext packet.
@@ -1279,7 +1289,8 @@ static void test_auth_hash_in_auth_range(odp_auth_alg_t auth,
 	 * Create test packets with auth hash in the authenticated range and
 	 * ones in the hash location in the plaintext packet.
 	 */
-	create_hash_test_reference(auth, capa, &ref, digest_offset, 1);
+	if (create_hash_test_reference(auth, capa, &ref, digest_offset, 1))
+		return;
 
 	/*
 	 * Encode the plaintext packet.

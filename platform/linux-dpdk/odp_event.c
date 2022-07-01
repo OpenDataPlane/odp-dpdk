@@ -34,7 +34,7 @@
 const _odp_event_inline_offset_t
 _odp_event_inline_offset ODP_ALIGNED_CACHE = {
 	.event_type = offsetof(_odp_event_hdr_t, event_type),
-	.base_data  = offsetof(_odp_event_hdr_t, base_data),
+	.base_data  = offsetof(_odp_event_hdr_t, mb.buf_addr),
 	.flow_id    = offsetof(_odp_event_hdr_t, flow_id)
 };
 

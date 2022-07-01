@@ -152,7 +152,6 @@ static inline unsigned pkt_mmap_v2_rx(pktio_entry_t *pktio_entry,
 	odp_pool_t pool = pkt_sock->pool;
 	uint16_t frame_offset = pktio_entry->s.pktin_frame_offset;
 	uint16_t vlan_len = 0;
-	const odp_proto_chksums_t chksums = pktio_entry->s.in_chksums;
 	const odp_proto_layer_t layer = pktio_entry->s.parse_layer;
 	const odp_pktin_config_opt_t opt = pktio_entry->s.config.pktin;
 
@@ -168,7 +167,6 @@ static inline unsigned pkt_mmap_v2_rx(pktio_entry_t *pktio_entry,
 		odp_packet_t pkt;
 		odp_packet_hdr_t *hdr;
 		int ret;
-		uint64_t l4_part_sum = 0;
 
 		tp_hdr = (void *)next_ptr;
 
@@ -217,27 +215,6 @@ static inline unsigned pkt_mmap_v2_rx(pktio_entry_t *pktio_entry,
 		}
 
 		hdr = packet_hdr(pkt);
-
-		if (layer) {
-			if (_odp_packet_parse_common(&hdr->p, pkt_buf, pkt_len,
-						     pkt_len, layer, chksums,
-						     &l4_part_sum, opt) < 0) {
-				odp_packet_free(pkt);
-				tp_hdr->tp_status = TP_STATUS_KERNEL;
-				frame_num = next_frame_num;
-				continue;
-			}
-
-			if (pktio_cls_enabled(pktio_entry)) {
-				if (_odp_cls_classify_packet(pktio_entry, pkt_buf,
-							     &pool, hdr)) {
-					odp_packet_free(pkt);
-					tp_hdr->tp_status = TP_STATUS_KERNEL;
-					frame_num = next_frame_num;
-					continue;
-				}
-			}
-		}
 
 		if (frame_offset)
 			pull_head(hdr, frame_offset);
@@ -289,11 +266,40 @@ static inline unsigned pkt_mmap_v2_rx(pktio_entry_t *pktio_entry,
 			*tci  = odp_cpu_to_be_16(tp_hdr->tp_vlan_tci);
 		}
 
+		if (layer) {
+			if (_odp_packet_parse_common(hdr, pkt_buf, pkt_len,
+						     pkt_len, layer, opt) < 0) {
+				odp_packet_free(pkt);
+				tp_hdr->tp_status = TP_STATUS_KERNEL;
+				frame_num = next_frame_num;
+				continue;
+			}
+
+			if (pktio_cls_enabled(pktio_entry)) {
+				odp_pool_t new_pool;
+
+				if (_odp_cls_classify_packet(pktio_entry, pkt_buf,
+							     &new_pool, hdr)) {
+					odp_packet_free(pkt);
+					tp_hdr->tp_status = TP_STATUS_KERNEL;
+					frame_num = next_frame_num;
+					continue;
+				}
+
+				if (odp_unlikely(_odp_pktio_packet_to_pool(
+					    &pkt, &hdr, new_pool))) {
+					odp_packet_free(pkt);
+					tp_hdr->tp_status = TP_STATUS_KERNEL;
+					frame_num = next_frame_num;
+					odp_atomic_inc_u64(
+						&pktio_entry->s.stats_extra
+							 .in_discards);
+					continue;
+				}
+			}
+		}
+
 		hdr->input = pktio_entry->s.handle;
-
-		if (layer >= ODP_PROTO_LAYER_L4)
-			_odp_packet_l4_chksum(hdr, chksums, l4_part_sum);
-
 		packet_set_ts(hdr, ts);
 
 		tp_hdr->tp_status = TP_STATUS_KERNEL;

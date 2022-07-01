@@ -930,7 +930,7 @@ static inline void prefetch_pkt(odp_packet_t pkt)
 	odp_prefetch(&pkt_hdr->p);
 }
 
-int _odp_input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int num)
+static inline int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int num)
 {
 	pkt_dpdk_t * const pkt_dpdk = pkt_priv(pktio_entry);
 	uint16_t i;
@@ -939,6 +939,7 @@ int _odp_input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int nu
 	odp_pktio_t input = pktio_entry->s.handle;
 	odp_time_t ts_val;
 	odp_time_t *ts = NULL;
+	const uint32_t supported_ptypes = pkt_dpdk->supported_ptypes;
 	uint16_t num_prefetch = RTE_MIN(num, NUM_RX_PREFETCH);
 	const odp_proto_layer_t layer = pktio_entry->s.parse_layer;
 
@@ -966,7 +967,7 @@ int _odp_input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int nu
 							  rte_pktmbuf_pkt_len(mbuf),
 							  rte_pktmbuf_data_len(mbuf),
 							  mbuf, layer,
-							  pkt_dpdk->supported_ptypes, pktin_cfg)) {
+							  supported_ptypes, pktin_cfg)) {
 				odp_packet_free(pkt);
 				continue;
 			}
@@ -1017,18 +1018,24 @@ int _odp_input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int nu
 	return num_pkts;
 }
 
+int _odp_input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int num)
+{
+	return input_pkts(pktio_entry, pkt_table, num);
+}
+
 static int recv_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 			 odp_packet_t pkt_table[], int num)
 {
 	pkt_dpdk_t * const pkt_dpdk = pkt_priv(pktio_entry);
 	uint16_t nb_rx;
-	uint8_t min = pkt_dpdk->min_rx_burst;
+	const uint16_t port_id = pkt_dpdk->port_id;
+	const uint8_t min = pkt_dpdk->min_rx_burst;
 
 	if (!pkt_dpdk->flags.lockless_rx)
 		odp_ticketlock_lock(&pkt_dpdk->rx_lock[index]);
 
 	if (odp_likely(num >= min)) {
-		nb_rx = rte_eth_rx_burst(pkt_dpdk->port_id, (uint16_t)index,
+		nb_rx = rte_eth_rx_burst(port_id, (uint16_t)index,
 					 (struct rte_mbuf **)pkt_table,
 					 (uint16_t)num);
 	} else {
@@ -1037,7 +1044,7 @@ static int recv_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 
 		ODP_DBG("PMD requires >%d buffers burst.  Current %d, dropped "
 			"%d\n", min, num, min - num);
-		nb_rx = rte_eth_rx_burst(pkt_dpdk->port_id, (uint16_t)index,
+		nb_rx = rte_eth_rx_burst(port_id, (uint16_t)index,
 					 (struct rte_mbuf **)min_burst, min);
 
 		for (i = 0; i < nb_rx; i++) {
@@ -1054,10 +1061,10 @@ static int recv_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 		odp_ticketlock_unlock(&pkt_dpdk->rx_lock[index]);
 
 	/* Packets may also me received through eventdev, so don't add any
-	 * processing here. Instead, perform all processing in _odp_input_pkts()
+	 * processing here. Instead, perform all processing in input_pkts()
 	 * which is also called by eventdev. */
 	if (nb_rx)
-		return _odp_input_pkts(pktio_entry, pkt_table, nb_rx);
+		return input_pkts(pktio_entry, pkt_table, nb_rx);
 	return 0;
 }
 

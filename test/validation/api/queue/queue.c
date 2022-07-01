@@ -1,5 +1,5 @@
 /* Copyright (c) 2014-2018, Linaro Limited
- * Copyright (c) 2021, Nokia
+ * Copyright (c) 2021-2022, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -132,6 +132,32 @@ static void queue_test_capa(void)
 	CU_ASSERT(capa.max_queues >= capa.plain.max_num);
 	CU_ASSERT(capa.max_queues >= capa.plain.lockfree.max_num);
 	CU_ASSERT(capa.max_queues >= capa.plain.waitfree.max_num);
+}
+
+static void test_defaults(uint8_t fill)
+{
+	odp_queue_param_t param;
+
+	memset(&param, fill, sizeof(param));
+	odp_queue_param_init(&param);
+	CU_ASSERT(param.type == ODP_QUEUE_TYPE_PLAIN);
+	CU_ASSERT(param.enq_mode == ODP_QUEUE_OP_MT);
+	CU_ASSERT(param.deq_mode == ODP_QUEUE_OP_MT);
+	CU_ASSERT(param.sched.prio == odp_schedule_default_prio());
+	CU_ASSERT(param.sched.sync == ODP_SCHED_SYNC_PARALLEL);
+	CU_ASSERT(param.sched.group == ODP_SCHED_GROUP_ALL);
+	CU_ASSERT(param.sched.lock_count == 0);
+	CU_ASSERT(param.order == ODP_QUEUE_ORDER_KEEP);
+	CU_ASSERT(param.nonblocking == ODP_BLOCKING);
+	CU_ASSERT(param.context == NULL);
+	CU_ASSERT(param.context_len == 0);
+	CU_ASSERT(param.size == 0);
+}
+
+static void queue_test_param_init(void)
+{
+	test_defaults(0);
+	test_defaults(0xff);
 }
 
 static void queue_test_max_plain(void)
@@ -607,20 +633,7 @@ static void queue_test_param(void)
 	odp_queue_param_t qparams;
 	odp_buffer_t enbuf;
 
-	/* Defaults */
 	odp_queue_param_init(&qparams);
-	CU_ASSERT(qparams.type == ODP_QUEUE_TYPE_PLAIN);
-	CU_ASSERT(qparams.enq_mode == ODP_QUEUE_OP_MT);
-	CU_ASSERT(qparams.deq_mode == ODP_QUEUE_OP_MT);
-	CU_ASSERT(qparams.sched.prio == odp_schedule_default_prio());
-	CU_ASSERT(qparams.sched.sync == ODP_SCHED_SYNC_PARALLEL);
-	CU_ASSERT(qparams.sched.group == ODP_SCHED_GROUP_ALL);
-	CU_ASSERT(qparams.sched.lock_count == 0);
-	CU_ASSERT(qparams.order == ODP_QUEUE_ORDER_KEEP);
-	CU_ASSERT(qparams.nonblocking == ODP_BLOCKING);
-	CU_ASSERT(qparams.context == NULL);
-	CU_ASSERT(qparams.context_len == 0);
-	CU_ASSERT(qparams.size == 0);
 
 	/* Schedule type queue */
 	qparams.type       = ODP_QUEUE_TYPE_SCHED;
@@ -714,6 +727,44 @@ static void queue_test_param(void)
 	CU_ASSERT(odp_queue_destroy(queue) == 0);
 }
 
+static void queue_test_same_name(int sched)
+{
+	odp_queue_t queue, queue_a, queue_b;
+	odp_queue_param_t param;
+	const char *name = "same_name";
+
+	odp_queue_param_init(&param);
+
+	if (sched)
+		param.type = ODP_QUEUE_TYPE_SCHED;
+
+	queue_a = odp_queue_create(name, &param);
+	CU_ASSERT_FATAL(queue_a != ODP_QUEUE_INVALID);
+
+	queue = odp_queue_lookup(name);
+	CU_ASSERT(queue == queue_a);
+
+	/* Second queue with the same name */
+	queue_b = odp_queue_create(name, &param);
+	CU_ASSERT_FATAL(queue_b != ODP_QUEUE_INVALID);
+
+	queue = odp_queue_lookup(name);
+	CU_ASSERT(queue == queue_a || queue == queue_b);
+
+	CU_ASSERT_FATAL(odp_queue_destroy(queue_a) == 0);
+	CU_ASSERT_FATAL(odp_queue_destroy(queue_b) == 0);
+}
+
+static void queue_test_same_name_plain(void)
+{
+	queue_test_same_name(0);
+}
+
+static void queue_test_same_name_sched(void)
+{
+	queue_test_same_name(1);
+}
+
 static void queue_test_info(void)
 {
 	odp_queue_t q_plain, q_order;
@@ -756,6 +807,10 @@ static void queue_test_info(void)
 	CU_ASSERT(strcmp(nq_plain, info.name) == 0);
 	CU_ASSERT(info.param.type == ODP_QUEUE_TYPE_PLAIN);
 	CU_ASSERT(info.param.type == odp_queue_type(q_plain));
+	CU_ASSERT(info.param.enq_mode == ODP_QUEUE_OP_MT);
+	CU_ASSERT(info.param.deq_mode == ODP_QUEUE_OP_MT);
+	CU_ASSERT(info.param.order == ODP_QUEUE_ORDER_KEEP);
+	CU_ASSERT(info.param.nonblocking == ODP_BLOCKING);
 	ctx = info.param.context; /* 'char' context ptr */
 	CU_ASSERT(ctx == q_plain_ctx);
 	CU_ASSERT(info.param.context == odp_queue_context(q_plain));
@@ -766,6 +821,10 @@ static void queue_test_info(void)
 	CU_ASSERT(strcmp(nq_order, info.name) == 0);
 	CU_ASSERT(info.param.type == ODP_QUEUE_TYPE_SCHED);
 	CU_ASSERT(info.param.type == odp_queue_type(q_order));
+	CU_ASSERT(info.param.enq_mode == ODP_QUEUE_OP_MT);
+	CU_ASSERT(info.param.deq_mode == ODP_QUEUE_OP_DISABLED);
+	CU_ASSERT(info.param.order == ODP_QUEUE_ORDER_KEEP);
+	CU_ASSERT(info.param.nonblocking == ODP_BLOCKING);
 	ctx = info.param.context; /* 'char' context ptr */
 	CU_ASSERT(ctx == q_order_ctx);
 	CU_ASSERT(info.param.context == odp_queue_context(q_order));
@@ -985,6 +1044,7 @@ static void queue_test_mt_plain_nonblock_lf(void)
 
 odp_testinfo_t queue_suite[] = {
 	ODP_TEST_INFO(queue_test_capa),
+	ODP_TEST_INFO(queue_test_param_init),
 	ODP_TEST_INFO(queue_test_mode),
 	ODP_TEST_INFO(queue_test_max_plain),
 	ODP_TEST_INFO(queue_test_burst),
@@ -1004,6 +1064,8 @@ odp_testinfo_t queue_suite[] = {
 	ODP_TEST_INFO(queue_test_pair_lf_mpsc),
 	ODP_TEST_INFO(queue_test_pair_lf_spsc),
 	ODP_TEST_INFO(queue_test_param),
+	ODP_TEST_INFO(queue_test_same_name_plain),
+	ODP_TEST_INFO(queue_test_same_name_sched),
 	ODP_TEST_INFO(queue_test_info),
 	ODP_TEST_INFO(queue_test_mt_plain_block),
 	ODP_TEST_INFO(queue_test_mt_plain_nonblock_lf),

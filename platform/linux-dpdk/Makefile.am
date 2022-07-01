@@ -28,11 +28,11 @@ if !ODP_ABI_COMPAT
 odpapiplatincludedir= $(includedir)/odp/api/plat
 odpapiplatinclude_HEADERS = \
 		  include/odp/api/plat/atomic_inlines.h \
-		  include/odp/api/plat/buffer_inline_types.h \
 		  include/odp/api/plat/buffer_inlines.h \
 		  include/odp/api/plat/byteorder_inlines.h \
 		  include/odp/api/plat/cpu_inlines.h \
 		  include/odp/api/plat/event_inlines.h \
+		  include/odp/api/plat/event_inline_types.h \
 		  include/odp/api/plat/event_vector_inline_types.h \
 		  include/odp/api/plat/hash_inlines.h \
 		  include/odp/api/plat/packet_flag_inlines.h \
@@ -43,6 +43,8 @@ odpapiplatinclude_HEADERS = \
 		  include/odp/api/plat/pool_inline_types.h \
 		  include/odp/api/plat/queue_inlines.h \
 		  include/odp/api/plat/queue_inline_types.h \
+		  include/odp/api/plat/spinlock_inlines.h \
+		  include/odp/api/plat/spinlock_recursive_inlines.h \
 		  include/odp/api/plat/std_inlines.h \
 		  include/odp/api/plat/strong_types.h \
 		  include/odp/api/plat/sync_inlines.h \
@@ -182,7 +184,7 @@ __LIB__libodp_dpdk_la_SOURCES = \
 			   ../linux-generic/odp_dma.c \
 			   odp_crypto.c \
 			   odp_errno.c \
-			   ../linux-generic/odp_event.c \
+			   odp_event.c \
 			   ../linux-generic/odp_hash_crc_gen.c \
 			   odp_init.c \
 			   ../linux-generic/odp_impl.c \
@@ -218,8 +220,6 @@ __LIB__libodp_dpdk_la_SOURCES = \
 			   ../linux-generic/odp_schedule_sp.c \
 			   odp_shared_memory.c \
 			   ../linux-generic/odp_sorted_list.c \
-			   ../linux-generic/odp_spinlock.c \
-			   ../linux-generic/odp_spinlock_recursive.c \
 			   ../linux-generic/odp_stash.c \
 			   ../linux-generic/odp_std.c \
 			   odp_system_info.c \
@@ -245,6 +245,8 @@ __LIB__libodp_dpdk_la_SOURCES += \
 			   ../linux-generic/odp_packet_flags_api.c \
 			   ../linux-generic/odp_packet_io_api.c \
 			   ../linux-generic/odp_queue_api.c \
+			   ../linux-generic/odp_spinlock_api.c \
+			   ../linux-generic/odp_spinlock_recursive_api.c \
 			   odp_std_api.c \
 			   ../linux-generic/odp_sync_api.c \
 			   ../linux-generic/odp_thread_api.c \

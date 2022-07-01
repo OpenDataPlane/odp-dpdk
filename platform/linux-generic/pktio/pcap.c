@@ -241,7 +241,6 @@ static int pcapif_recv_pkt(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 {
 	int i;
 	struct pcap_pkthdr *hdr;
-	odp_pool_t new_pool;
 	const u_char *data;
 	odp_packet_t pkt;
 	odp_packet_hdr_t *pkt_hdr;
@@ -252,7 +251,6 @@ static int pcapif_recv_pkt(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 	int packets = 0, errors = 0;
 	uint32_t octets = 0;
 	uint16_t frame_offset = pktio_entry->s.pktin_frame_offset;
-	const odp_proto_chksums_t chksums = pktio_entry->s.in_chksums;
 	const odp_proto_layer_t layer = pktio_entry->s.parse_layer;
 	const odp_pktin_config_opt_t opt = pktio_entry->s.config.pktin;
 
@@ -297,11 +295,8 @@ static int pcapif_recv_pkt(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 		}
 
 		if (layer) {
-			uint64_t l4_part_sum = 0;
-
-			ret = _odp_packet_parse_common(&pkt_hdr->p, data, pkt_len,
-						       pkt_len, layer, chksums,
-						       &l4_part_sum, opt);
+			ret = _odp_packet_parse_common(pkt_hdr, data, pkt_len,
+						       pkt_len, layer, opt);
 			if (ret)
 				errors++;
 
@@ -311,7 +306,7 @@ static int pcapif_recv_pkt(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 			}
 
 			if (pktio_cls_enabled(pktio_entry)) {
-				odp_packet_t new_pkt;
+				odp_pool_t new_pool;
 
 				ret = _odp_cls_classify_packet(pktio_entry, data,
 							       &new_pool, pkt_hdr);
@@ -319,23 +314,16 @@ static int pcapif_recv_pkt(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 					odp_packet_free(pkt);
 					continue;
 				}
-				if (new_pool != pcap->pool) {
-					new_pkt = odp_packet_copy(pkt, new_pool);
 
+				if (odp_unlikely(_odp_pktio_packet_to_pool(
+					    &pkt, &pkt_hdr, new_pool))) {
 					odp_packet_free(pkt);
-
-					if (odp_unlikely(new_pkt == ODP_PACKET_INVALID)) {
-						pktio_entry->s.stats.in_discards++;
-						continue;
-					}
-
-					pkt = new_pkt;
-					pkt_hdr = packet_hdr(new_pkt);
+					odp_atomic_inc_u64(
+						&pktio_entry->s.stats_extra
+							 .in_discards);
+					continue;
 				}
 			}
-
-			if (layer >= ODP_PROTO_LAYER_L4)
-				_odp_packet_l4_chksum(pkt_hdr, chksums, l4_part_sum);
 		}
 
 		packet_set_ts(pkt_hdr, ts);
