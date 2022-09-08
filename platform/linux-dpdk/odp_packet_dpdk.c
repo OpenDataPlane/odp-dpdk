@@ -912,14 +912,22 @@ static inline int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[
 		packet_init(pkt_hdr, input);
 
 		if (layer != ODP_PROTO_LAYER_NONE) {
-			if (_odp_dpdk_packet_parse_common(pkt_hdr,
-							  rte_pktmbuf_mtod(mbuf, uint8_t *),
-							  rte_pktmbuf_pkt_len(mbuf),
-							  rte_pktmbuf_data_len(mbuf),
-							  mbuf, layer, pktin_cfg)) {
-				odp_packet_free(pkt);
-				continue;
+			int ret;
+
+			ret = _odp_dpdk_packet_parse_common(pkt_hdr,
+							    rte_pktmbuf_mtod(mbuf, uint8_t *),
+							    rte_pktmbuf_pkt_len(mbuf),
+							    rte_pktmbuf_data_len(mbuf),
+							    mbuf, layer, pktin_cfg);
+			if (odp_unlikely(ret)) {
+				odp_atomic_inc_u64(&pktio_entry->s.stats_extra.in_errors);
+
+				if (ret < 0) {
+					odp_packet_free(pkt);
+					continue;
+				}
 			}
+
 			if (odp_unlikely(num_pkts != i))
 				pkt_table[num_pkts] = pkt;
 		}
