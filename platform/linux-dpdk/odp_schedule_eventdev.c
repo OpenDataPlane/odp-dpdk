@@ -138,8 +138,8 @@ static int resume_scheduling(uint8_t dev_id, uint8_t port_id)
 			if (!queue)
 				continue;
 
-			queue_ids[nb_links] = queue->s.index;
-			priorities[nb_links] = queue->s.eventdev.prio;
+			queue_ids[nb_links] = queue->index;
+			priorities[nb_links] = queue->eventdev.prio;
 			nb_links++;
 		}
 	}
@@ -178,8 +178,8 @@ static int link_group(int group, const odp_thrmask_t *mask, odp_bool_t unlink)
 		if (queue == NULL)
 			continue;
 
-		queue_ids[nb_links] = queue->s.index;
-		priorities[nb_links] = queue->s.eventdev.prio;
+		queue_ids[nb_links] = queue->index;
+		priorities[nb_links] = queue->eventdev.prio;
 		nb_links++;
 	}
 
@@ -255,10 +255,10 @@ static int rx_adapter_add_queues(uint8_t rx_adapter_id, uint8_t port_id,
 		int32_t rx_queue_id = pktin_idx[i];
 
 		memset(&ev, 0, sizeof(struct rte_event));
-		ev.queue_id = queue->s.index;
+		ev.queue_id = queue->index;
 		ev.flow_id = 0;
-		ev.priority = queue->s.eventdev.prio;
-		ev.sched_type = event_schedule_type(queue->s.param.sched.sync);
+		ev.priority = queue->eventdev.prio;
+		ev.sched_type = event_schedule_type(queue->param.sched.sync);
 
 		memset(&qconf, 0,
 		       sizeof(struct rte_event_eth_rx_adapter_queue_conf));
@@ -368,8 +368,8 @@ static int schedule_create_queue(uint32_t qi,
 	queue_entry_t *queue = qentry_from_index(qi);
 	odp_thrmask_t mask;
 	uint8_t dev_id = _odp_eventdev_gbl->dev_id;
-	uint8_t queue_id = queue->s.index;
-	uint8_t priority = queue->s.eventdev.prio;
+	uint8_t queue_id = queue->index;
+	uint8_t priority = queue->eventdev.prio;
 	int thr;
 
 	if (sched_param->group < 0 || sched_param->group >= NUM_SCHED_GRPS) {
@@ -396,9 +396,9 @@ static void schedule_destroy_queue(uint32_t qi)
 {
 	queue_entry_t *queue = qentry_from_index(qi);
 	odp_thrmask_t mask;
-	odp_schedule_group_t group = queue->s.param.sched.group;
+	odp_schedule_group_t group = queue->param.sched.group;
 	uint8_t dev_id = _odp_eventdev_gbl->dev_id;
-	uint8_t queue_id = queue->s.index;
+	uint8_t queue_id = queue->index;
 	int thr;
 
 	odp_ticketlock_lock(&_odp_eventdev_gbl->grp_lock);

@@ -58,7 +58,7 @@ ODP_STATIC_ASSERT(sizeof(((struct rte_event *)0)->queue_id) == sizeof(uint8_t),
 ODP_STATIC_ASSERT(CONFIG_MAX_QUEUES >= RTE_EVENT_MAX_QUEUES_PER_DEV,
 		  "unable to map all eventdev queues");
 
-struct queue_entry_s {
+struct ODP_ALIGNED_CACHE queue_entry_s {
 	/* The first cache line is read only */
 	queue_enq_fn_t       enqueue ODP_ALIGNED_CACHE;
 	queue_deq_fn_t       dequeue;
@@ -84,11 +84,6 @@ struct queue_entry_s {
 	odp_pktin_queue_t pktin;
 	odp_pktout_queue_t pktout;
 	char              name[ODP_QUEUE_NAME_LEN];
-};
-
-union queue_entry_u {
-	struct queue_entry_s s;
-	uint8_t pad[_ODP_ROUNDUP_CACHE_LINE(sizeof(struct queue_entry_s))];
 };
 
 /* Eventdev global data */
