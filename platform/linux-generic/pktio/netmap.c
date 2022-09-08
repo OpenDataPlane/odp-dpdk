@@ -61,7 +61,7 @@ typedef struct {
 } netmap_opt_t;
 
 /** Ring for mapping pktin/pktout queues to netmap descriptors */
-struct netmap_ring_t {
+typedef struct ODP_ALIGNED_CACHE {
 	unsigned int first; /**< Index of first netmap descriptor */
 	unsigned int last;  /**< Index of last netmap descriptor */
 	unsigned int num;   /**< Number of netmap descriptors */
@@ -69,11 +69,6 @@ struct netmap_ring_t {
 	struct nm_desc *desc[NM_MAX_DESC];
 	unsigned int cur;	/**< Index of current netmap descriptor */
 	odp_ticketlock_t lock;  /**< Queue lock */
-};
-
-typedef union ODP_ALIGNED_CACHE {
-	struct netmap_ring_t s;
-	uint8_t pad[_ODP_ROUNDUP_CACHE_LINE(sizeof(struct netmap_ring_t))];
 } netmap_ring_t;
 
 /** Netmap ring slot */
@@ -111,7 +106,7 @@ ODP_STATIC_ASSERT(PKTIO_PRIVATE_SIZE >= sizeof(pkt_netmap_t),
 
 static inline pkt_netmap_t *pkt_priv(pktio_entry_t *pktio_entry)
 {
-	return (pkt_netmap_t *)(uintptr_t)(pktio_entry->s.pkt_priv);
+	return (pkt_netmap_t *)(uintptr_t)(pktio_entry->pkt_priv);
 }
 
 static int disable_pktio; /** !0 this pktio disabled, 0 enabled */
@@ -238,14 +233,14 @@ done:
  * @param num_rings      Number of matching netmap rings
  */
 static inline void map_netmap_rings(netmap_ring_t *rings,
-				    unsigned num_queues, unsigned num_rings)
+				    unsigned int num_queues, unsigned int num_rings)
 {
-	struct netmap_ring_t *desc_ring;
-	unsigned rings_per_queue;
-	unsigned remainder;
-	unsigned mapped_rings;
-	unsigned i;
-	unsigned desc_id = 0;
+	netmap_ring_t *desc_ring;
+	unsigned int rings_per_queue;
+	unsigned int remainder;
+	unsigned int mapped_rings;
+	unsigned int i;
+	unsigned int desc_id = 0;
 
 	rings_per_queue = num_rings / num_queues;
 	remainder = num_rings % num_queues;
@@ -254,7 +249,7 @@ static inline void map_netmap_rings(netmap_ring_t *rings,
 		ODP_DBG("WARNING: Netmap rings mapped unevenly to queues\n");
 
 	for (i = 0; i < num_queues; i++) {
-		desc_ring = &rings[i].s;
+		desc_ring = &rings[i];
 		if (i < remainder)
 			mapped_rings = rings_per_queue + 1;
 		else
@@ -273,8 +268,8 @@ static int netmap_input_queues_config(pktio_entry_t *pktio_entry,
 				      const odp_pktin_queue_param_t *p)
 {
 	pkt_netmap_t *pkt_nm = pkt_priv(pktio_entry);
-	odp_pktin_mode_t mode = pktio_entry->s.param.in_mode;
-	unsigned num_queues = p->num_queues;
+	odp_pktin_mode_t mode = pktio_entry->param.in_mode;
+	unsigned int num_queues = p->num_queues;
 	odp_bool_t lockless;
 
 	/* Scheduler synchronizes input queue polls. Only single thread
@@ -322,15 +317,15 @@ static inline void netmap_close_descriptors(pktio_entry_t *pktio_entry)
 
 	for (i = 0; i < PKTIO_MAX_QUEUES; i++) {
 		for (j = 0; j < NM_MAX_DESC; j++) {
-			if (pkt_nm->rx_desc_ring[i].s.desc[j] != NULL) {
-				nm_close(pkt_nm->rx_desc_ring[i].s.desc[j]);
-				pkt_nm->rx_desc_ring[i].s.desc[j] = NULL;
+			if (pkt_nm->rx_desc_ring[i].desc[j] != NULL) {
+				nm_close(pkt_nm->rx_desc_ring[i].desc[j]);
+				pkt_nm->rx_desc_ring[i].desc[j] = NULL;
 			}
 		}
 		for (j = 0; j < NM_MAX_DESC; j++) {
-			if (pkt_nm->tx_desc_ring[i].s.desc[j] != NULL) {
-				nm_close(pkt_nm->tx_desc_ring[i].s.desc[j]);
-				pkt_nm->tx_desc_ring[i].s.desc[j] = NULL;
+			if (pkt_nm->tx_desc_ring[i].desc[j] != NULL) {
+				nm_close(pkt_nm->tx_desc_ring[i].desc[j]);
+				pkt_nm->tx_desc_ring[i].desc[j] = NULL;
 			}
 		}
 	}
@@ -424,7 +419,7 @@ static inline int netmap_wait_for_link(pktio_entry_t *pktio_entry)
 static void netmap_init_capability(pktio_entry_t *pktio_entry)
 {
 	pkt_netmap_t *pkt_nm = pkt_priv(pktio_entry);
-	odp_pktio_capability_t *capa = &pktio_entry->s.capa;
+	odp_pktio_capability_t *capa = &pktio_entry->capa;
 
 	memset(capa, 0, sizeof(odp_pktio_capability_t));
 
@@ -585,23 +580,23 @@ static int netmap_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t *pktio_entry,
 	nm_close(desc);
 
 	for (i = 0; i < PKTIO_MAX_QUEUES; i++) {
-		odp_ticketlock_init(&pkt_nm->rx_desc_ring[i].s.lock);
-		odp_ticketlock_init(&pkt_nm->tx_desc_ring[i].s.lock);
+		odp_ticketlock_init(&pkt_nm->rx_desc_ring[i].lock);
+		odp_ticketlock_init(&pkt_nm->tx_desc_ring[i].lock);
 	}
 
 	if (pkt_nm->is_virtual) {
-		static unsigned mac;
+		static unsigned int mac;
 		uint32_t tid = syscall(SYS_gettid);
 
 		if ((int)tid == -1)
 			ODP_DBG("Unable to fetch thread ID. VALE port MAC "
 				"addresses may not be unique.\n");
 
-		pktio_entry->s.capa.max_input_queues = 1;
-		pktio_entry->s.capa.set_op.op.maxlen = 0;
-		pktio_entry->s.capa.set_op.op.promisc_mode = 0;
+		pktio_entry->capa.max_input_queues = 1;
+		pktio_entry->capa.set_op.op.maxlen = 0;
+		pktio_entry->capa.set_op.op.promisc_mode = 0;
 		pkt_nm->mtu = nm_buf_size;
-		pktio_entry->s.stats_type = STATS_UNSUPPORTED;
+		pktio_entry->stats_type = STATS_UNSUPPORTED;
 		/* Set MAC address for virtual interface */
 		pkt_nm->if_mac[0] = 0x2;
 		pkt_nm->if_mac[1] = (tid >> 24) & 0xff;
@@ -617,7 +612,7 @@ static int netmap_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t *pktio_entry,
 	if (_odp_rss_conf_get_supported_fd(pkt_nm->sockfd, netdev,
 					   &hash_proto) == 0) {
 		ODP_DBG("RSS not supported\n");
-		pktio_entry->s.capa.max_input_queues = 1;
+		pktio_entry->capa.max_input_queues = 1;
 	}
 
 	err = netmap_do_ioctl(pktio_entry, SIOCGIFFLAGS, 0);
@@ -635,10 +630,10 @@ static int netmap_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t *pktio_entry,
 	if (err) {
 		ODP_DBG("netmap pktio %s does not support statistics counters\n",
 			pkt_nm->if_name);
-		pktio_entry->s.stats_type = STATS_UNSUPPORTED;
+		pktio_entry->stats_type = STATS_UNSUPPORTED;
 	} else {
-		pktio_entry->s.stats_type = STATS_ETHTOOL;
-		_odp_sock_stats_capa(pktio_entry, &pktio_entry->s.capa);
+		pktio_entry->stats_type = STATS_ETHTOOL;
+		_odp_sock_stats_capa(pktio_entry, &pktio_entry->capa);
 	}
 
 	(void)netmap_stats_reset(pktio_entry);
@@ -655,55 +650,55 @@ static int netmap_start(pktio_entry_t *pktio_entry)
 	pkt_netmap_t *pkt_nm = pkt_priv(pktio_entry);
 	netmap_ring_t *desc_ring;
 	struct nm_desc *desc_ptr;
-	unsigned i;
-	unsigned j;
-	unsigned num_rx_desc = 0;
+	unsigned int i;
+	unsigned int j;
+	unsigned int num_rx_desc = 0;
 	uint64_t flags;
-	odp_pktin_mode_t in_mode = pktio_entry->s.param.in_mode;
-	odp_pktout_mode_t out_mode = pktio_entry->s.param.out_mode;
+	odp_pktin_mode_t in_mode = pktio_entry->param.in_mode;
+	odp_pktout_mode_t out_mode = pktio_entry->param.out_mode;
 
 	/* If no pktin/pktout queues have been configured. Configure one
 	 * for each direction. */
-	if (!pktio_entry->s.num_in_queue &&
+	if (!pktio_entry->num_in_queue &&
 	    in_mode != ODP_PKTIN_MODE_DISABLED) {
 		odp_pktin_queue_param_t param;
 
 		odp_pktin_queue_param_init(&param);
 		param.num_queues = 1;
-		if (odp_pktin_queue_config(pktio_entry->s.handle, &param))
+		if (odp_pktin_queue_config(pktio_entry->handle, &param))
 			return -1;
 	}
-	if (!pktio_entry->s.num_out_queue &&
+	if (!pktio_entry->num_out_queue &&
 	    out_mode == ODP_PKTOUT_MODE_DIRECT) {
 		odp_pktout_queue_param_t param;
 
 		odp_pktout_queue_param_init(&param);
 		param.num_queues = 1;
-		if (odp_pktout_queue_config(pktio_entry->s.handle, &param))
+		if (odp_pktout_queue_config(pktio_entry->handle, &param))
 			return -1;
 	}
 
-	if (pkt_nm->num_rx_desc_rings == pktio_entry->s.num_in_queue &&
-	    pkt_nm->num_tx_desc_rings == pktio_entry->s.num_out_queue)
+	if (pkt_nm->num_rx_desc_rings == pktio_entry->num_in_queue &&
+	    pkt_nm->num_tx_desc_rings == pktio_entry->num_out_queue)
 		return (netmap_wait_for_link(pktio_entry) == 1) ? 0 : -1;
 
 	netmap_close_descriptors(pktio_entry);
 
 	/* Map pktin/pktout queues to netmap rings */
-	if (pktio_entry->s.num_in_queue) {
+	if (pktio_entry->num_in_queue) {
 		/* In single queue case only one netmap descriptor is
 		 * required. */
-		num_rx_desc = (pktio_entry->s.num_in_queue == 1) ? 1 :
+		num_rx_desc = (pktio_entry->num_in_queue == 1) ? 1 :
 				pkt_nm->num_rx_rings;
 
 		map_netmap_rings(pkt_nm->rx_desc_ring,
-				 pktio_entry->s.num_in_queue, num_rx_desc);
+				 pktio_entry->num_in_queue, num_rx_desc);
 	}
-	if (pktio_entry->s.num_out_queue)
+	if (pktio_entry->num_out_queue)
 		/* Enough to map only one netmap tx ring per pktout queue */
 		map_netmap_rings(pkt_nm->tx_desc_ring,
-				 pktio_entry->s.num_out_queue,
-				 pktio_entry->s.num_out_queue);
+				 pktio_entry->num_out_queue,
+				 pktio_entry->num_out_queue);
 
 	/* Use nm_open() to parse netmap flags from interface name */
 	desc_ptr = nm_open(pkt_nm->nm_name, NULL, 0, NULL);
@@ -738,9 +733,9 @@ static int netmap_start(pktio_entry_t *pktio_entry)
 	flags = NM_OPEN_IFNAME | NETMAP_NO_TX_POLL;
 	if (pkt_priv(pktio_entry)->is_virtual)
 		flags |= NM_OPEN_RING_CFG;
-	desc_ring[0].s.desc[0] = nm_open(pkt_nm->nm_name, NULL, flags,
-					 &base_desc);
-	if (desc_ring[0].s.desc[0] == NULL) {
+	desc_ring[0].desc[0] = nm_open(pkt_nm->nm_name, NULL, flags,
+				       &base_desc);
+	if (desc_ring[0].desc[0] == NULL) {
 		ODP_ERR("nm_start(%s) failed\n", pkt_nm->nm_name);
 		goto error;
 	}
@@ -748,8 +743,8 @@ static int netmap_start(pktio_entry_t *pktio_entry)
 	flags = NM_OPEN_IFNAME | NETMAP_NO_TX_POLL | NM_OPEN_NO_MMAP;
 	if (pkt_priv(pktio_entry)->is_virtual)
 		flags |= NM_OPEN_RING_CFG;
-	for (i = 0; i < pktio_entry->s.num_in_queue; i++) {
-		for (j = desc_ring[i].s.first; j <= desc_ring[i].s.last; j++) {
+	for (i = 0; i < pktio_entry->num_in_queue; i++) {
+		for (j = desc_ring[i].first; j <= desc_ring[i].last; j++) {
 			if (i == 0 && j == 0) { /* First already opened */
 				if (num_rx_desc > 1)
 					continue;
@@ -757,9 +752,9 @@ static int netmap_start(pktio_entry_t *pktio_entry)
 					break;
 			}
 			base_desc.req.nr_ringid = j;
-			desc_ring[i].s.desc[j] = nm_open(pkt_nm->nm_name, NULL,
-							 flags, &base_desc);
-			if (desc_ring[i].s.desc[j] == NULL) {
+			desc_ring[i].desc[j] = nm_open(pkt_nm->nm_name, NULL,
+						       flags, &base_desc);
+			if (desc_ring[i].desc[j] == NULL) {
 				ODP_ERR("nm_start(%s) failed\n",
 					pkt_nm->nm_name);
 				goto error;
@@ -777,20 +772,20 @@ static int netmap_start(pktio_entry_t *pktio_entry)
 		base_desc.req.nr_flags |= NR_REG_ONE_NIC;
 	}
 
-	for (i = 0; i < pktio_entry->s.num_out_queue; i++) {
-		for (j = desc_ring[i].s.first; j <= desc_ring[i].s.last; j++) {
+	for (i = 0; i < pktio_entry->num_out_queue; i++) {
+		for (j = desc_ring[i].first; j <= desc_ring[i].last; j++) {
 			base_desc.req.nr_ringid = j;
-			desc_ring[i].s.desc[j] = nm_open(pkt_nm->nm_name, NULL,
-							 flags, &base_desc);
-			if (desc_ring[i].s.desc[j] == NULL) {
+			desc_ring[i].desc[j] = nm_open(pkt_nm->nm_name, NULL,
+						       flags, &base_desc);
+			if (desc_ring[i].desc[j] == NULL) {
 				ODP_ERR("nm_start(%s) failed\n",
 					pkt_nm->nm_name);
 				goto error;
 			}
 		}
 	}
-	pkt_nm->num_rx_desc_rings = pktio_entry->s.num_in_queue;
-	pkt_nm->num_tx_desc_rings = pktio_entry->s.num_out_queue;
+	pkt_nm->num_rx_desc_rings = pktio_entry->num_in_queue;
+	pkt_nm->num_tx_desc_rings = pktio_entry->num_out_queue;
 	/* Wait for the link to come up */
 	return (netmap_wait_for_link(pktio_entry) == 1) ? 0 : -1;
 
@@ -826,10 +821,10 @@ static inline int netmap_pkt_to_odp(pktio_entry_t *pktio_entry,
 	int i;
 	int num;
 	uint32_t max_len;
-	uint16_t frame_offset = pktio_entry->s.pktin_frame_offset;
+	uint16_t frame_offset = pktio_entry->pktin_frame_offset;
 	int num_rx = 0;
-	const odp_proto_layer_t layer = pktio_entry->s.parse_layer;
-	const odp_pktin_config_opt_t opt = pktio_entry->s.config.pktin;
+	const odp_proto_layer_t layer = pktio_entry->parse_layer;
+	const odp_pktin_config_opt_t opt = pktio_entry->config.pktin;
 
 	/* Allocate maximum sized packets */
 	max_len = pkt_priv(pktio_entry)->mtu;
@@ -861,8 +856,14 @@ static inline int netmap_pkt_to_odp(pktio_entry_t *pktio_entry,
 		}
 
 		if (layer) {
-			if (_odp_packet_parse_common(pkt_hdr, buf, len, len,
-						     layer, opt) < 0) {
+			int ret;
+
+			ret = _odp_packet_parse_common(pkt_hdr, buf, len, len,
+						       layer, opt);
+			if (ret)
+				odp_atomic_inc_u64(&pktio_entry->stats_extra.in_errors);
+
+			if (ret < 0) {
 				odp_packet_free(pkt);
 				continue;
 			}
@@ -870,8 +871,12 @@ static inline int netmap_pkt_to_odp(pktio_entry_t *pktio_entry,
 			if (pktio_cls_enabled(pktio_entry)) {
 				odp_pool_t new_pool;
 
-				if (_odp_cls_classify_packet(pktio_entry, buf, &new_pool,
-							     pkt_hdr)) {
+				ret = _odp_cls_classify_packet(pktio_entry, buf,
+							       &new_pool, pkt_hdr);
+				if (ret < 0)
+					odp_atomic_inc_u64(&pktio_entry->stats_extra.in_discards);
+
+				if (ret) {
 					odp_packet_free(pkt);
 					continue;
 				}
@@ -879,15 +884,13 @@ static inline int netmap_pkt_to_odp(pktio_entry_t *pktio_entry,
 				if (odp_unlikely(_odp_pktio_packet_to_pool(
 					    &pkt, &pkt_hdr, new_pool))) {
 					odp_packet_free(pkt);
-					odp_atomic_inc_u64(
-						&pktio_entry->s.stats_extra
-							 .in_discards);
+					odp_atomic_inc_u64(&pktio_entry->stats_extra.in_discards);
 					continue;
 				}
 			}
 		}
 
-		pkt_hdr->input = pktio_entry->s.handle;
+		pkt_hdr->input = pktio_entry->handle;
 		packet_set_ts(pkt_hdr, ts);
 
 		pkt_tbl[num_rx++] = pkt;
@@ -912,8 +915,8 @@ static inline int netmap_recv_desc(pktio_entry_t *pktio_entry,
 	int num_rx = 0;
 	int num_rings = desc->last_rx_ring - desc->first_rx_ring + 1;
 
-	if (pktio_entry->s.config.pktin.bit.ts_all ||
-	    pktio_entry->s.config.pktin.bit.ts_ptp)
+	if (pktio_entry->config.pktin.bit.ts_all ||
+	    pktio_entry->config.pktin.bit.ts_ptp)
 		ts = &ts_val;
 
 	for (i = 0; i < num_rings && num_rx != num; i++) {
@@ -954,33 +957,33 @@ static int netmap_fd_set(pktio_entry_t *pktio_entry, int index, fd_set *readfds)
 {
 	struct nm_desc *desc;
 	pkt_netmap_t *pkt_nm = pkt_priv(pktio_entry);
-	unsigned first_desc_id = pkt_nm->rx_desc_ring[index].s.first;
-	unsigned last_desc_id = pkt_nm->rx_desc_ring[index].s.last;
-	unsigned desc_id;
-	int num_desc = pkt_nm->rx_desc_ring[index].s.num;
+	unsigned int first_desc_id = pkt_nm->rx_desc_ring[index].first;
+	unsigned int last_desc_id = pkt_nm->rx_desc_ring[index].last;
+	unsigned int desc_id;
+	int num_desc = pkt_nm->rx_desc_ring[index].num;
 	int i;
 	int max_fd = 0;
 
 	if (!pkt_nm->lockless_rx)
-		odp_ticketlock_lock(&pkt_nm->rx_desc_ring[index].s.lock);
+		odp_ticketlock_lock(&pkt_nm->rx_desc_ring[index].lock);
 
-	desc_id = pkt_nm->rx_desc_ring[index].s.cur;
+	desc_id = pkt_nm->rx_desc_ring[index].cur;
 
 	for (i = 0; i < num_desc; i++) {
 		if (desc_id > last_desc_id)
 			desc_id = first_desc_id;
 
-		desc = pkt_nm->rx_desc_ring[index].s.desc[desc_id];
+		desc = pkt_nm->rx_desc_ring[index].desc[desc_id];
 
 		FD_SET(desc->fd, readfds);
 		if (desc->fd > max_fd)
 			max_fd = desc->fd;
 		desc_id++;
 	}
-	pkt_nm->rx_desc_ring[index].s.cur = desc_id;
+	pkt_nm->rx_desc_ring[index].cur = desc_id;
 
 	if (!pkt_nm->lockless_rx)
-		odp_ticketlock_unlock(&pkt_nm->rx_desc_ring[index].s.lock);
+		odp_ticketlock_unlock(&pkt_nm->rx_desc_ring[index].lock);
 
 	return max_fd;
 }
@@ -990,10 +993,10 @@ static int netmap_recv(pktio_entry_t *pktio_entry, int index,
 {
 	struct nm_desc *desc;
 	pkt_netmap_t *pkt_nm = pkt_priv(pktio_entry);
-	unsigned first_desc_id = pkt_nm->rx_desc_ring[index].s.first;
-	unsigned last_desc_id = pkt_nm->rx_desc_ring[index].s.last;
-	unsigned desc_id;
-	int num_desc = pkt_nm->rx_desc_ring[index].s.num;
+	unsigned int first_desc_id = pkt_nm->rx_desc_ring[index].first;
+	unsigned int last_desc_id = pkt_nm->rx_desc_ring[index].last;
+	unsigned int desc_id;
+	int num_desc = pkt_nm->rx_desc_ring[index].num;
 	int i;
 	int num_rx = 0;
 	int max_fd = 0;
@@ -1002,15 +1005,15 @@ static int netmap_recv(pktio_entry_t *pktio_entry, int index,
 	FD_ZERO(&empty_rings);
 
 	if (!pkt_nm->lockless_rx)
-		odp_ticketlock_lock(&pkt_nm->rx_desc_ring[index].s.lock);
+		odp_ticketlock_lock(&pkt_nm->rx_desc_ring[index].lock);
 
-	desc_id = pkt_nm->rx_desc_ring[index].s.cur;
+	desc_id = pkt_nm->rx_desc_ring[index].cur;
 
 	for (i = 0; i < num_desc && num_rx != num; i++) {
 		if (desc_id > last_desc_id)
 			desc_id = first_desc_id;
 
-		desc = pkt_nm->rx_desc_ring[index].s.desc[desc_id];
+		desc = pkt_nm->rx_desc_ring[index].desc[desc_id];
 
 		num_rx += netmap_recv_desc(pktio_entry, desc,
 					   &pkt_table[num_rx], num - num_rx);
@@ -1022,7 +1025,7 @@ static int netmap_recv(pktio_entry_t *pktio_entry, int index,
 		}
 		desc_id++;
 	}
-	pkt_nm->rx_desc_ring[index].s.cur = desc_id;
+	pkt_nm->rx_desc_ring[index].cur = desc_id;
 
 	if (num_rx != num) {
 		struct timeval tout = {.tv_sec = 0, .tv_usec = 0};
@@ -1031,7 +1034,7 @@ static int netmap_recv(pktio_entry_t *pktio_entry, int index,
 			ODP_ERR("RX: select error\n");
 	}
 	if (!pkt_nm->lockless_rx)
-		odp_ticketlock_unlock(&pkt_nm->rx_desc_ring[index].s.lock);
+		odp_ticketlock_unlock(&pkt_nm->rx_desc_ring[index].lock);
 
 	return num_rx;
 }
@@ -1120,16 +1123,16 @@ static int netmap_send(pktio_entry_t *pktio_entry, int index,
 	uint8_t tx_ts_enabled = _odp_pktio_tx_ts_enabled(pktio_entry);
 	odp_packet_t pkt;
 	uint32_t pkt_len;
-	unsigned slot_id;
+	unsigned int slot_id;
 	char *buf;
 
 	/* Only one netmap tx ring per pktout queue */
-	desc_id = pkt_nm->tx_desc_ring[index].s.cur;
-	desc = pkt_nm->tx_desc_ring[index].s.desc[desc_id];
+	desc_id = pkt_nm->tx_desc_ring[index].cur;
+	desc = pkt_nm->tx_desc_ring[index].desc[desc_id];
 	ring = NETMAP_TXRING(desc->nifp, desc->cur_tx_ring);
 
 	if (!pkt_nm->lockless_tx)
-		odp_ticketlock_lock(&pkt_nm->tx_desc_ring[index].s.lock);
+		odp_ticketlock_lock(&pkt_nm->tx_desc_ring[index].lock);
 
 	polld.fd = desc->fd;
 	polld.events = POLLOUT;
@@ -1174,7 +1177,7 @@ static int netmap_send(pktio_entry_t *pktio_entry, int index,
 	poll(&polld, 1, 0);
 
 	if (!pkt_nm->lockless_tx)
-		odp_ticketlock_unlock(&pkt_nm->tx_desc_ring[index].s.lock);
+		odp_ticketlock_unlock(&pkt_nm->tx_desc_ring[index].lock);
 
 	if (odp_unlikely(nb_tx == 0)) {
 		if (_odp_errno != 0)
@@ -1206,7 +1209,7 @@ static int netmap_mtu_set(pktio_entry_t *pktio_entry, uint32_t maxlen_input,
 	pkt_netmap_t *pkt_nm = pkt_priv(pktio_entry);
 	int ret;
 
-	ret = _odp_mtu_set_fd(pkt_nm->sockfd, pktio_entry->s.name, maxlen_input);
+	ret = _odp_mtu_set_fd(pkt_nm->sockfd, pktio_entry->name, maxlen_input);
 	if (ret)
 		return ret;
 
@@ -1239,18 +1242,13 @@ static int netmap_promisc_mode_get(pktio_entry_t *pktio_entry)
 static int netmap_capability(pktio_entry_t *pktio_entry,
 			     odp_pktio_capability_t *capa)
 {
-	*capa = pktio_entry->s.capa;
+	*capa = pktio_entry->capa;
 	return 0;
 }
 
 static int netmap_stats(pktio_entry_t *pktio_entry,
 			odp_pktio_stats_t *stats)
 {
-	if (pktio_entry->s.stats_type == STATS_UNSUPPORTED) {
-		memset(stats, 0, sizeof(*stats));
-		return 0;
-	}
-
 	return _odp_sock_stats_fd(pktio_entry,
 				  stats,
 				  pkt_priv(pktio_entry)->sockfd);
@@ -1258,12 +1256,6 @@ static int netmap_stats(pktio_entry_t *pktio_entry,
 
 static int netmap_stats_reset(pktio_entry_t *pktio_entry)
 {
-	if (pktio_entry->s.stats_type == STATS_UNSUPPORTED) {
-		memset(&pktio_entry->s.stats, 0,
-		       sizeof(odp_pktio_stats_t));
-		return 0;
-	}
-
 	return _odp_sock_stats_reset_fd(pktio_entry,
 					pkt_priv(pktio_entry)->sockfd);
 }

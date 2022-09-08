@@ -72,23 +72,11 @@ static __thread pool_local_t local;
 
 /* Fill in pool header field offsets for inline functions */
 const _odp_pool_inline_offset_t _odp_pool_inline ODP_ALIGNED_CACHE = {
-	.pool_hdl          = offsetof(pool_t, pool_hdl),
+	.index             = offsetof(pool_t, pool_idx),
 	.uarea_size        = offsetof(pool_t, param_uarea_size)
 };
 
 #include <odp/visibility_end.h>
-
-static inline odp_pool_t pool_index_to_handle(uint32_t pool_idx)
-{
-	return _odp_cast_scalar(odp_pool_t, pool_idx + 1);
-}
-
-static inline pool_t *pool_from_buf(odp_buffer_t buf)
-{
-	odp_buffer_hdr_t *buf_hdr = _odp_buf_hdr(buf);
-
-	return buf_hdr->event_hdr.pool_ptr;
-}
 
 static inline void cache_init(pool_cache_t *cache)
 {
@@ -142,15 +130,41 @@ static void cache_flush(pool_cache_t *cache, pool_t *pool)
 		ring_ptr_enq(ring, mask, event_hdr);
 }
 
-static inline uint64_t cache_total_available(pool_t *pool)
+static inline int cache_available(pool_t *pool, odp_pool_stats_t *stats)
 {
 	uint64_t cached = 0;
-	int i;
+	const uint16_t first = stats->thread.first;
+	const uint16_t last = stats->thread.last;
+	const odp_bool_t per_thread = pool->params.stats.bit.thread_cache_available;
+	uint16_t out_idx = 0;
 
-	for (i = 0; i < ODP_THREAD_COUNT_MAX; i++)
-		cached += pool->local_cache[i].cache_num;
+	if (per_thread) {
+		if (first > last || last >= odp_thread_count_max()) {
+			ODP_ERR("Bad thread ids: first=%" PRIu16 " last=%" PRIu16 "\n",
+				first, last);
+			return -1;
+		}
 
-	return cached;
+		if (last - first + 1 > ODP_POOL_MAX_THREAD_STATS) {
+			ODP_ERR("Too many thread ids: max=%d\n", ODP_POOL_MAX_THREAD_STATS);
+			return -1;
+		}
+	}
+
+	for (int i = 0; i < ODP_THREAD_COUNT_MAX; i++) {
+		/* TODO: thread specific counters should be atomics */
+		uint32_t cur = pool->local_cache[i].cache_num;
+
+		if (per_thread && i >= first && i <= last)
+			stats->thread.cache_available[out_idx++] = cur;
+
+		cached += cur;
+	}
+
+	if (pool->params.stats.bit.cache_available)
+		stats->cache_available = cached;
+
+	return 0;
 }
 
 static int read_config_file(pool_global_t *pool_glb)
@@ -297,10 +311,9 @@ int _odp_pool_init_global(void)
 	}
 
 	for (i = 0; i < ODP_CONFIG_POOLS; i++) {
-		pool_t *pool = pool_entry(i);
+		pool_t *pool = _odp_pool_entry_from_idx(i);
 
 		LOCK_INIT(&pool->lock);
-		pool->pool_hdl = pool_index_to_handle(i);
 		pool->pool_idx = i;
 	}
 
@@ -327,7 +340,7 @@ int _odp_pool_term_global(void)
 		return 0;
 
 	for (i = 0; i < ODP_CONFIG_POOLS; i++) {
-		pool = pool_entry(i);
+		pool = _odp_pool_entry_from_idx(i);
 
 		LOCK(&pool->lock);
 		if (pool->reserved) {
@@ -355,7 +368,7 @@ int _odp_pool_init_local(void)
 	memset(&local, 0, sizeof(pool_local_t));
 
 	for (i = 0; i < ODP_CONFIG_POOLS; i++) {
-		pool           = pool_entry(i);
+		pool           = _odp_pool_entry_from_idx(i);
 		local.cache[i] = &pool->local_cache[thr_id];
 		cache_init(local.cache[i]);
 	}
@@ -369,7 +382,7 @@ int _odp_pool_term_local(void)
 	int i;
 
 	for (i = 0; i < ODP_CONFIG_POOLS; i++) {
-		pool_t *pool = pool_entry(i);
+		pool_t *pool = _odp_pool_entry_from_idx(i);
 
 		cache_flush(local.cache[i], pool);
 	}
@@ -386,7 +399,7 @@ static pool_t *reserve_pool(uint32_t shmflags, uint8_t pool_ext, uint32_t num)
 	char ring_name[ODP_POOL_NAME_LEN];
 
 	for (i = 0; i < ODP_CONFIG_POOLS; i++) {
-		pool = pool_entry(i);
+		pool = _odp_pool_entry_from_idx(i);
 
 		LOCK(&pool->lock);
 		if (pool->reserved == 0) {
@@ -437,7 +450,7 @@ static void init_event_hdr(pool_t *pool, _odp_event_hdr_t *event_hdr, uint32_t e
 	event_hdr->index.event  = event_index;
 	event_hdr->type         = type;
 	event_hdr->event_type   = type;
-	event_hdr->pool_ptr     = pool;
+	event_hdr->pool         = _odp_pool_handle(pool);
 
 	/* Store base values for fast init */
 	if (type == ODP_POOL_BUFFER || type == ODP_POOL_PACKET) {
@@ -905,7 +918,7 @@ odp_pool_t _odp_pool_create(const char *name, const odp_pool_param_t *params,
 	odp_atomic_init_u64(&pool->stats.cache_alloc_ops, 0);
 	odp_atomic_init_u64(&pool->stats.cache_free_ops, 0);
 
-	return pool->pool_hdl;
+	return _odp_pool_handle(pool);
 
 error:
 	if (pool->shm != ODP_SHM_INVALID)
@@ -1089,7 +1102,7 @@ odp_pool_t odp_pool_create(const char *name, const odp_pool_param_t *params)
 
 int odp_pool_destroy(odp_pool_t pool_hdl)
 {
-	pool_t *pool = pool_entry_from_hdl(pool_hdl);
+	pool_t *pool = _odp_pool_entry(pool_hdl);
 	int i;
 
 	if (pool == NULL)
@@ -1130,13 +1143,13 @@ odp_pool_t odp_pool_lookup(const char *name)
 	pool_t *pool;
 
 	for (i = 0; i < ODP_CONFIG_POOLS; i++) {
-		pool = pool_entry(i);
+		pool = _odp_pool_entry_from_idx(i);
 
 		LOCK(&pool->lock);
 		if (strcmp(name, pool->name) == 0) {
 			/* found it */
 			UNLOCK(&pool->lock);
-			return pool->pool_hdl;
+			return _odp_pool_handle(pool);
 		}
 		UNLOCK(&pool->lock);
 	}
@@ -1146,7 +1159,7 @@ odp_pool_t odp_pool_lookup(const char *name)
 
 int odp_pool_info(odp_pool_t pool_hdl, odp_pool_info_t *info)
 {
-	pool_t *pool = pool_entry_from_hdl(pool_hdl);
+	pool_t *pool = _odp_pool_entry(pool_hdl);
 
 	if (pool == NULL || info == NULL)
 		return -1;
@@ -1302,12 +1315,12 @@ void _odp_event_free_multi(_odp_event_hdr_t *event_hdr[], int num_total)
 	while (1) {
 		num  = 1;
 		i    = 1;
-		pool = event_hdr[first]->pool_ptr;
+		pool = _odp_pool_entry(event_hdr[first]->pool);
 
 		/* 'num' buffers are from the same pool */
 		if (num_total > 1) {
 			for (i = first; i < num_total; i++)
-				if (pool != event_hdr[i]->pool_ptr)
+				if (pool != _odp_pool_entry(event_hdr[i]->pool))
 					break;
 
 			num = i - first;
@@ -1330,7 +1343,7 @@ odp_buffer_t odp_buffer_alloc(odp_pool_t pool_hdl)
 
 	ODP_ASSERT(ODP_POOL_INVALID != pool_hdl);
 
-	pool = pool_entry_from_hdl(pool_hdl);
+	pool = _odp_pool_entry(pool_hdl);
 
 	ODP_ASSERT(pool->type == ODP_POOL_BUFFER);
 
@@ -1361,7 +1374,7 @@ int odp_buffer_alloc_multi(odp_pool_t pool_hdl, odp_buffer_t buf[], int num)
 
 	ODP_ASSERT(ODP_POOL_INVALID != pool_hdl);
 
-	pool = pool_entry_from_hdl(pool_hdl);
+	pool = _odp_pool_entry(pool_hdl);
 
 	ODP_ASSERT(pool->type == ODP_POOL_BUFFER);
 
@@ -1398,6 +1411,7 @@ int odp_pool_capability(odp_pool_capability_t *capa)
 	supported_stats.bit.cache_available = 1;
 	supported_stats.bit.cache_alloc_ops = CONFIG_POOL_STATISTICS;
 	supported_stats.bit.cache_free_ops = CONFIG_POOL_STATISTICS;
+	supported_stats.bit.thread_cache_available = 1;
 
 	/* Buffer pools */
 	capa->buf.max_pools = max_pools;
@@ -1445,12 +1459,12 @@ void odp_pool_print(odp_pool_t pool_hdl)
 {
 	pool_t *pool;
 
-	pool = pool_entry_from_hdl(pool_hdl);
+	pool = _odp_pool_entry(pool_hdl);
 
 	ODP_PRINT("\nPool info\n");
 	ODP_PRINT("---------\n");
 	ODP_PRINT("  pool            %" PRIu64 "\n",
-		  odp_pool_to_u64(pool->pool_hdl));
+		  odp_pool_to_u64(_odp_pool_handle(pool)));
 	ODP_PRINT("  name            %s\n", pool->name);
 	ODP_PRINT("  pool type       %s\n",
 		  pool->type == ODP_POOL_BUFFER ? "buffer" :
@@ -1497,7 +1511,7 @@ void odp_pool_print_all(void)
 	ODP_PRINT(" idx %-*s type   free    tot  cache  buf_len  ext\n", col_width, "name");
 
 	for (i = 0; i < ODP_CONFIG_POOLS; i++) {
-		pool_t *pool = pool_entry(i);
+		pool_t *pool = _odp_pool_entry_from_idx(i);
 
 		LOCK(&pool->lock);
 
@@ -1532,13 +1546,6 @@ void odp_pool_print_all(void)
 	ODP_PRINT("\n");
 }
 
-odp_pool_t odp_buffer_pool(odp_buffer_t buf)
-{
-	pool_t *pool = pool_from_buf(buf);
-
-	return pool->pool_hdl;
-}
-
 void odp_pool_param_init(odp_pool_param_t *params)
 {
 	uint32_t default_cache_size = _odp_pool_glb->config.local_cache_size;
@@ -1561,20 +1568,10 @@ unsigned int odp_pool_max_index(void)
 	return ODP_CONFIG_POOLS - 1;
 }
 
-int odp_pool_index(odp_pool_t pool_hdl)
-{
-	pool_t *pool;
-
-	ODP_ASSERT(pool_hdl != ODP_POOL_INVALID);
-
-	pool = pool_entry_from_hdl(pool_hdl);
-
-	return pool->pool_idx;
-}
-
 int odp_pool_stats(odp_pool_t pool_hdl, odp_pool_stats_t *stats)
 {
 	pool_t *pool;
+	uint16_t first, last;
 
 	if (odp_unlikely(pool_hdl == ODP_POOL_INVALID)) {
 		ODP_ERR("Invalid pool handle\n");
@@ -1585,9 +1582,15 @@ int odp_pool_stats(odp_pool_t pool_hdl, odp_pool_stats_t *stats)
 		return -1;
 	}
 
-	pool = pool_entry_from_hdl(pool_hdl);
+	pool = _odp_pool_entry(pool_hdl);
+	first = stats->thread.first;
+	last = stats->thread.last;
 
 	memset(stats, 0, sizeof(odp_pool_stats_t));
+
+	/* Restore input parameters */
+	stats->thread.first = first;
+	stats->thread.last = last;
 
 	if (pool->params.stats.bit.available)
 		stats->available = ring_ptr_len(&pool->ring->hdr);
@@ -1604,8 +1607,11 @@ int odp_pool_stats(odp_pool_t pool_hdl, odp_pool_stats_t *stats)
 	if (pool->params.stats.bit.total_ops)
 		stats->total_ops = stats->alloc_ops + stats->free_ops;
 
-	if (pool->params.stats.bit.cache_available)
-		stats->cache_available = cache_total_available(pool);
+	if (pool->params.stats.bit.cache_available ||
+	    pool->params.stats.bit.thread_cache_available) {
+		if (cache_available(pool, stats))
+			return -1;
+	}
 
 	if (pool->params.stats.bit.cache_alloc_ops)
 		stats->cache_alloc_ops = odp_atomic_load_u64(&pool->stats.cache_alloc_ops);
@@ -1625,7 +1631,7 @@ int odp_pool_stats_reset(odp_pool_t pool_hdl)
 		return -1;
 	}
 
-	pool = pool_entry_from_hdl(pool_hdl);
+	pool = _odp_pool_entry(pool_hdl);
 
 	odp_atomic_store_u64(&pool->stats.alloc_ops, 0);
 	odp_atomic_store_u64(&pool->stats.alloc_fails, 0);
@@ -1642,7 +1648,7 @@ static pool_t *find_pool(_odp_event_hdr_t *event_hdr)
 	uint8_t *ptr = (uint8_t *)event_hdr;
 
 	for (i = 0; i < ODP_CONFIG_POOLS; i++) {
-		pool_t *pool = pool_entry(i);
+		pool_t *pool = _odp_pool_entry_from_idx(i);
 
 		if (pool->reserved == 0)
 			continue;
@@ -1667,7 +1673,7 @@ int _odp_event_is_valid(odp_event_t event)
 	if (pool == NULL)
 		return 0;
 
-	if (pool != event_hdr->pool_ptr)
+	if (pool != _odp_pool_entry(event_hdr->pool))
 		return 0;
 
 	if (event_hdr->index.event >= (pool->num + pool->skipped_blocks))
@@ -1841,7 +1847,7 @@ odp_pool_t odp_pool_ext_create(const char *name, const odp_pool_ext_param_t *par
 
 	ring_ptr_init(&pool->ring->hdr);
 
-	return pool->pool_hdl;
+	return _odp_pool_handle(pool);
 
 error:
 	if (pool->ring_shm != ODP_SHM_INVALID)
@@ -1871,7 +1877,7 @@ int odp_pool_ext_populate(odp_pool_t pool_hdl, void *buf[], uint32_t buf_size, u
 		return -1;
 	}
 
-	pool = pool_entry_from_hdl(pool_hdl);
+	pool = _odp_pool_entry(pool_hdl);
 
 	if (pool->type != ODP_POOL_PACKET || pool->pool_ext == 0) {
 		ODP_ERR("Bad pool type\n");

@@ -52,14 +52,15 @@ jobs:
         if: ${{ failure() }}
         run: find . -name config.log -exec cat {} \;
 
-  Build_gcc-10:
+  Build_gcc:
     if: ${{ github.repository == 'OpenDataPlane/odp-dpdk' }}
     runs-on: [self-hosted, ARM64]
     env:
-      CC: gcc-10
+      OS: ubuntu_22.04
     strategy:
       fail-fast: false
       matrix:
+        cc: [gcc-10, gcc-11, gcc-12]
         conf: ['', '--enable-lto']
     steps:
       - uses: AutoModality/action-clean@v1.1.0

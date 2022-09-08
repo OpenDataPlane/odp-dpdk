@@ -42,6 +42,7 @@ odpapiplatinclude_HEADERS = \
 		  include/odp/api/plat/packet_inlines.h \
 		  include/odp/api/plat/packet_vector_inlines.h \
 		  include/odp/api/plat/packet_io_inlines.h \
+		  include/odp/api/plat/pool_inlines.h \
 		  include/odp/api/plat/pool_inline_types.h \
 		  include/odp/api/plat/queue_inlines.h \
 		  include/odp/api/plat/queue_inline_types.h \
@@ -94,6 +95,7 @@ odpapiabiarchinclude_HEADERS += \
 		  include-abi/odp/api/abi/spinlock.h \
 		  include-abi/odp/api/abi/spinlock_recursive.h \
 		  include-abi/odp/api/abi/stash.h \
+		  include-abi/odp/api/abi/stash_types.h \
 		  include-abi/odp/api/abi/std.h \
 		  include-abi/odp/api/abi/std_types.h \
 		  include-abi/odp/api/abi/sync.h \
@@ -246,7 +248,6 @@ __LIB__libodp_linux_la_SOURCES = \
 			   pktio/stats/sysfs_stats.c \
 			   pktio/stats/packet_io_stats.c \
 			   pktio/dpdk.c \
-			   pktio/dpdk_parse.c \
 			   pktio/socket_common.c \
 			   pktio/ethtool_rss.c \
 			   pktio/io_ops.c \
@@ -283,6 +284,7 @@ __LIB__libodp_linux_la_SOURCES += \
 			   odp_packet_api.c \
 			   odp_packet_flags_api.c \
 			   odp_packet_io_api.c \
+			   odp_pool_api.c \
 			   odp_queue_api.c \
 			   odp_spinlock_api.c \
 			   odp_spinlock_recursive_api.c \

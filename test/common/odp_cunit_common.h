@@ -20,8 +20,6 @@
 #include <CUnit/Basic.h>
 #include <odp_api.h>
 
-#define MAX_WORKERS 32 /**< Maximum number of work threads */
-
 typedef int (*cunit_test_check_active)(void);
 
 typedef struct {
@@ -67,14 +65,6 @@ typedef struct {
 	uint32_t bar;
 } test_shared_data_t;
 
-/**
- * Thread argument
- */
-typedef struct {
-	int testcase; /**< specifies which set of API's to exercise */
-	int numthrds; /**< no of pthreads to create */
-} pthrd_arg;
-
 /* parse parameters that affect the behaviour of odp_cunit_common */
 int odp_cunit_parse_options(int argc, char *argv[]);
 /* register suites to be run via odp_cunit_run() */
@@ -84,9 +74,16 @@ int odp_cunit_update(odp_suiteinfo_t testsuites[]);
 /* the function, called by module main(), to run the testsuites: */
 int odp_cunit_run(void);
 
-/** create thread for start_routine function (which returns 0 on success) */
-int odp_cunit_thread_create(int func_ptr(void *), pthrd_arg *arg);
-int odp_cunit_thread_exit(pthrd_arg *);
+/* Create threads for a validation test
+ *
+ * Thread arguments table (arg[]) can be set to NULL, when there are no arguments.
+ * When 'priv' is 0, the same argument pointer (arg[0]) is passed to all threads. Otherwise,
+ * a pointer is passed (from arg[]) to each thread. Returns 0 on success.
+ */
+int odp_cunit_thread_create(int num, int func_ptr(void *arg), void *const arg[], int priv);
+
+/* Wait for previously created threads to exit */
+int odp_cunit_thread_join(int num);
 
 /**
  * Global tests initialization/termination.
@@ -111,6 +108,9 @@ int odp_cunit_set_inactive(void);
 /* Check from CI_SKIP environment variable if the test case should be skipped by CI */
 int odp_cunit_ci_skip(const char *test_name);
 
+void odp_cu_assert(CU_BOOL value, unsigned int line,
+		   const char *condition, const char *file, CU_BOOL fatal);
+
 /*
  * Wrapper for CU_assertImplementation for the fatal asserts to show the
  * compiler and static analyzers that the function does not return if the
@@ -120,7 +120,7 @@ int odp_cunit_ci_skip(const char *test_name);
 static inline void odp_cu_assert_fatal(CU_BOOL value, unsigned int line,
 				       const char *condition, const char *file)
 {
-	CU_assertImplementation(value, line, condition, file, "", CU_TRUE);
+	odp_cu_assert(value, line, condition, file, CU_TRUE);
 
 	if (!value) {
 		/* not reached */
@@ -135,13 +135,27 @@ static inline void odp_cu_assert_fatal(CU_BOOL value, unsigned int line,
  * compatibility with CU and existing code that assumes this kind of macros.
  */
 
+#undef CU_ASSERT
+#define CU_ASSERT(value) \
+	{ odp_cu_assert((value), __LINE__, #value, __FILE__, CU_FALSE); }
+
 #undef CU_ASSERT_FATAL
 #define CU_ASSERT_FATAL(value) \
 	{ odp_cu_assert_fatal((value), __LINE__, #value, __FILE__); }
 
+#undef CU_FAIL
+#define CU_FAIL(msg) \
+	{ odp_cu_assert(CU_FALSE, __LINE__, ("CU_FAIL(" #msg ")"), __FILE__, CU_FALSE); }
+
 #undef CU_FAIL_FATAL
 #define CU_FAIL_FATAL(msg) \
 	{ odp_cu_assert_fatal(CU_FALSE, __LINE__, ("CU_FAIL_FATAL(" #msg ")"), __FILE__); }
+
+#undef CU_ASSERT_EQUAL
+#define CU_ASSERT_EQUAL(actual, expected) \
+	{ odp_cu_assert(((actual) == (expected)), __LINE__, \
+			("CU_ASSERT_EQUAL(" #actual "," #expected ")"), \
+			__FILE__, CU_FALSE); }
 
 #undef CU_ASSERT_EQUAL_FATAL
 #define CU_ASSERT_EQUAL_FATAL(actual, expected) \
@@ -149,16 +163,32 @@ static inline void odp_cu_assert_fatal(CU_BOOL value, unsigned int line,
 			      ("CU_ASSERT_EQUAL_FATAL(" #actual "," #expected ")"), \
 			      __FILE__); }
 
+#undef CU_ASSERT_NOT_EQUAL
+#define CU_ASSERT_NOT_EQUAL(actual, expected) \
+	{ odp_cu_assert(((actual) != (expected)), __LINE__, \
+			("CU_ASSERT_NOT_EQUAL(" #actual "," #expected ")"), \
+			__FILE__, CU_FALSE); }
+
 #undef CU_ASSERT_NOT_EQUAL_FATAL
 #define CU_ASSERT_NOT_EQUAL_FATAL(actual, expected) \
 	{ odp_cu_assert_fatal(((actual) != (expected)), __LINE__, \
 			      ("CU_ASSERT_NOT_EQUAL_FATAL(" #actual "," #expected ")"), \
 			      __FILE__); }
 
+#undef CU_ASSERT_PTR_NULL
+#define CU_ASSERT_PTR_NULL(value) \
+	{ odp_cu_assert((NULL == (const void *)(value)), __LINE__, \
+			("CU_ASSERT_PTR_NULL(" #value ")"), __FILE__, CU_FALSE); }
+
 #undef CU_ASSERT_PTR_NULL_FATAL
 #define CU_ASSERT_PTR_NULL_FATAL(value) \
 	{ odp_cu_assert_fatal((NULL == (const void *)(value)), __LINE__, \
 			      ("CU_ASSERT_PTR_NULL_FATAL(" #value ")"), __FILE__); }
+
+#undef CU_ASSERT_PTR_NOT_NULL
+#define CU_ASSERT_PTR_NOT_NULL(value) \
+	{ odp_cu_assert((NULL != (const void *)(value)), __LINE__, \
+			("CU_ASSERT_PTR_NOT_NULL_FATAL(" #value ")"), __FILE__, CU_FALSE); }
 
 #undef CU_ASSERT_PTR_NOT_NULL_FATAL
 #define CU_ASSERT_PTR_NOT_NULL_FATAL(value) \

@@ -48,7 +48,6 @@
 
 typedef struct {
 	odp_queue_t loopq;		/**< loopback queue for "loop" device */
-	odp_bool_t promisc;		/**< promiscuous mode state */
 	uint16_t mtu;			/**< link MTU */
 	uint8_t idx;			/**< index of "loop" device */
 } pkt_loop_t;
@@ -58,7 +57,7 @@ ODP_STATIC_ASSERT(PKTIO_PRIVATE_SIZE >= sizeof(pkt_loop_t),
 
 static inline pkt_loop_t *pkt_priv(pktio_entry_t *pktio_entry)
 {
-	return (pkt_loop_t *)(uintptr_t)(pktio_entry->s.pkt_priv);
+	return (pkt_loop_t *)(uintptr_t)(pktio_entry->pkt_priv);
 }
 
 /* MAC address for the "loop" interface */
@@ -128,7 +127,7 @@ static int loopback_pktout_queue_config(pktio_entry_t *pktio_entry,
 	queue_param.size = param->queue_size[0];
 
 	snprintf(queue_name, sizeof(queue_name), "_odp_pktio_loopq-%" PRIu64 "",
-		 odp_pktio_to_u64(pktio_entry->s.handle));
+		 odp_pktio_to_u64(pktio_entry->handle));
 
 	pkt_loop->loopq = odp_queue_create(queue_name, &queue_param);
 	if (pkt_loop->loopq == ODP_QUEUE_INVALID) {
@@ -160,15 +159,15 @@ static int loopback_recv(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 	odp_time_t ts_val;
 	odp_time_t *ts = NULL;
 	int num_rx = 0;
-	int packets = 0, errors = 0;
+	int packets = 0;
 	uint32_t octets = 0;
-	const odp_proto_layer_t layer = pktio_entry->s.parse_layer;
-	const odp_pktin_config_opt_t opt = pktio_entry->s.config.pktin;
+	const odp_proto_layer_t layer = pktio_entry->parse_layer;
+	const odp_pktin_config_opt_t opt = pktio_entry->config.pktin;
 
 	if (odp_unlikely(num > QUEUE_MULTI_MAX))
 		num = QUEUE_MULTI_MAX;
 
-	odp_ticketlock_lock(&pktio_entry->s.rxl);
+	odp_ticketlock_lock(&pktio_entry->rxl);
 
 	queue = pkt_priv(pktio_entry)->loopq;
 	nbr = odp_queue_deq_multi(queue, (odp_event_t *)hdr_tbl, num);
@@ -206,7 +205,7 @@ static int loopback_recv(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 			ret = _odp_packet_parse_common(pkt_hdr, pkt_addr, pkt_len,
 						       seg_len, layer, opt);
 			if (ret)
-				errors++;
+				odp_atomic_inc_u64(&pktio_entry->stats_extra.in_errors);
 
 			if (ret < 0) {
 				odp_packet_free(pkt);
@@ -218,6 +217,9 @@ static int loopback_recv(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 
 				ret = _odp_cls_classify_packet(pktio_entry, pkt_addr,
 							       &new_pool, pkt_hdr);
+				if (ret < 0)
+					odp_atomic_inc_u64(&pktio_entry->stats_extra.in_discards);
+
 				if (ret) {
 					odp_packet_free(pkt);
 					continue;
@@ -226,19 +228,17 @@ static int loopback_recv(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 				if (odp_unlikely(_odp_pktio_packet_to_pool(
 					    &pkt, &pkt_hdr, new_pool))) {
 					odp_packet_free(pkt);
-					odp_atomic_inc_u64(
-						&pktio_entry->s.stats_extra
-							 .in_discards);
+					odp_atomic_inc_u64(&pktio_entry->stats_extra.in_discards);
 					continue;
 				}
 			}
 		}
 
 		packet_set_ts(pkt_hdr, ts);
-		pkt_hdr->input = pktio_entry->s.handle;
+		pkt_hdr->input = pktio_entry->handle;
 
 		/* Try IPsec inline processing */
-		if (pktio_entry->s.config.inbound_ipsec &&
+		if (pktio_entry->config.inbound_ipsec &&
 		    !pkt_hdr->p.flags.ip_err &&
 		    odp_packet_has_ipsec(pkt))
 			_odp_ipsec_try_inline(&pkt);
@@ -251,11 +251,10 @@ static int loopback_recv(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 		pkts[num_rx++] = pkt;
 	}
 
-	pktio_entry->s.stats.in_octets += octets;
-	pktio_entry->s.stats.in_packets += packets;
-	pktio_entry->s.stats.in_errors += errors;
+	pktio_entry->stats.in_octets += octets;
+	pktio_entry->stats.in_packets += packets;
 
-	odp_ticketlock_unlock(&pktio_entry->s.rxl);
+	odp_ticketlock_unlock(&pktio_entry->rxl);
 
 	return num_rx;
 }
@@ -361,9 +360,9 @@ static int loopback_send(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 	uint8_t tx_ts_enabled = _odp_pktio_tx_ts_enabled(pktio_entry);
 	uint32_t bytes = 0;
 	uint32_t out_octets_tbl[num];
-	odp_pktout_config_opt_t *pktout_cfg = &pktio_entry->s.config.pktout;
+	odp_pktout_config_opt_t *pktout_cfg = &pktio_entry->config.pktout;
 	odp_pktout_config_opt_t *pktout_capa =
-		&pktio_entry->s.capa.config.pktout;
+		&pktio_entry->capa.config.pktout;
 
 	if (odp_unlikely(num > QUEUE_MULTI_MAX))
 		num = QUEUE_MULTI_MAX;
@@ -397,7 +396,7 @@ static int loopback_send(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 		loopback_fix_checksums(pkt_tbl[i], pktout_cfg, pktout_capa);
 	}
 
-	odp_ticketlock_lock(&pktio_entry->s.txl);
+	odp_ticketlock_lock(&pktio_entry->txl);
 
 	queue = pkt_priv(pktio_entry)->loopq;
 	ret = odp_queue_enq_multi(queue, (odp_event_t *)hdr_tbl, nb_tx);
@@ -406,14 +405,14 @@ static int loopback_send(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 		if (odp_unlikely(tx_ts_idx) && ret >= tx_ts_idx)
 			_odp_pktio_tx_ts_set(pktio_entry);
 
-		pktio_entry->s.stats.out_packets += ret;
-		pktio_entry->s.stats.out_octets += out_octets_tbl[ret - 1];
+		pktio_entry->stats.out_packets += ret;
+		pktio_entry->stats.out_octets += out_octets_tbl[ret - 1];
 	} else {
 		ODP_DBG("queue enqueue failed %i\n", ret);
 		ret = -1;
 	}
 
-	odp_ticketlock_unlock(&pktio_entry->s.txl);
+	odp_ticketlock_unlock(&pktio_entry->txl);
 
 	return ret;
 }
@@ -435,8 +434,7 @@ static int loopback_mtu_set(pktio_entry_t *pktio_entry, uint32_t maxlen_input,
 	return 0;
 }
 
-static int loopback_mac_addr_get(pktio_entry_t *pktio_entry ODP_UNUSED,
-				 void *mac_addr)
+static int loopback_mac_addr_get(pktio_entry_t *pktio_entry, void *mac_addr)
 {
 	memcpy(mac_addr, pktio_loop_mac, ETH_ALEN);
 	((uint8_t *)mac_addr)[ETH_ALEN - 1] += pkt_priv(pktio_entry)->idx;
@@ -466,7 +464,7 @@ static int loopback_link_info(pktio_entry_t *pktio_entry ODP_UNUSED, odp_pktio_l
 
 static int loopback_init_capability(pktio_entry_t *pktio_entry)
 {
-	odp_pktio_capability_t *capa = &pktio_entry->s.capa;
+	odp_pktio_capability_t *capa = &pktio_entry->capa;
 	odp_queue_capability_t queue_capa;
 
 	if (odp_queue_capability(&queue_capa)) {
@@ -478,7 +476,7 @@ static int loopback_init_capability(pktio_entry_t *pktio_entry)
 
 	capa->max_input_queues  = 1;
 	capa->max_output_queues = 1;
-	capa->set_op.op.promisc_mode = 1;
+	capa->set_op.op.promisc_mode = 0;
 	capa->set_op.op.maxlen = 1;
 
 	capa->maxlen.equal = true;
@@ -534,35 +532,27 @@ static int loopback_init_capability(pktio_entry_t *pktio_entry)
 	return 0;
 }
 
-static int loopback_capability(pktio_entry_t *pktio_entry ODP_UNUSED,
-			       odp_pktio_capability_t *capa)
+static int loopback_capability(pktio_entry_t *pktio_entry, odp_pktio_capability_t *capa)
 {
-	*capa = pktio_entry->s.capa;
+	*capa = pktio_entry->capa;
 	return 0;
 }
 
-static int loopback_promisc_mode_set(pktio_entry_t *pktio_entry,
-				     odp_bool_t enable)
+static int loopback_promisc_mode_get(pktio_entry_t *pktio_entry ODP_UNUSED)
 {
-	pkt_priv(pktio_entry)->promisc = enable;
-	return 0;
-}
-
-static int loopback_promisc_mode_get(pktio_entry_t *pktio_entry)
-{
-	return pkt_priv(pktio_entry)->promisc ? 1 : 0;
+	return 1;
 }
 
 static int loopback_stats(pktio_entry_t *pktio_entry,
 			  odp_pktio_stats_t *stats)
 {
-	memcpy(stats, &pktio_entry->s.stats, sizeof(odp_pktio_stats_t));
+	memcpy(stats, &pktio_entry->stats, sizeof(odp_pktio_stats_t));
 	return 0;
 }
 
-static int loopback_stats_reset(pktio_entry_t *pktio_entry ODP_UNUSED)
+static int loopback_stats_reset(pktio_entry_t *pktio_entry)
 {
-	memset(&pktio_entry->s.stats, 0, sizeof(odp_pktio_stats_t));
+	memset(&pktio_entry->stats, 0, sizeof(odp_pktio_stats_t));
 	return 0;
 }
 
@@ -571,9 +561,9 @@ static int loopback_pktin_stats(pktio_entry_t *pktio_entry,
 				odp_pktin_queue_stats_t *pktin_stats)
 {
 	memset(pktin_stats, 0, sizeof(odp_pktin_queue_stats_t));
-	pktin_stats->octets = pktio_entry->s.stats.in_octets;
-	pktin_stats->packets = pktio_entry->s.stats.in_packets;
-	pktin_stats->errors = pktio_entry->s.stats.in_errors;
+	pktin_stats->octets = pktio_entry->stats.in_octets;
+	pktin_stats->packets = pktio_entry->stats.in_packets;
+	pktin_stats->errors = pktio_entry->stats.in_errors;
 	return 0;
 }
 
@@ -582,8 +572,8 @@ static int loopback_pktout_stats(pktio_entry_t *pktio_entry,
 				 odp_pktout_queue_stats_t *pktout_stats)
 {
 	memset(pktout_stats, 0, sizeof(odp_pktout_queue_stats_t));
-	pktout_stats->octets = pktio_entry->s.stats.out_octets;
-	pktout_stats->packets = pktio_entry->s.stats.out_packets;
+	pktout_stats->octets = pktio_entry->stats.out_octets;
+	pktout_stats->packets = pktio_entry->stats.out_packets;
 	return 0;
 }
 
@@ -611,7 +601,7 @@ const pktio_if_ops_t _odp_loopback_pktio_ops = {
 	.send = loopback_send,
 	.maxlen_get = loopback_mtu_get,
 	.maxlen_set = loopback_mtu_set,
-	.promisc_mode_set = loopback_promisc_mode_set,
+	.promisc_mode_set = NULL,
 	.promisc_mode_get = loopback_promisc_mode_get,
 	.mac_get = loopback_mac_addr_get,
 	.mac_set = NULL,

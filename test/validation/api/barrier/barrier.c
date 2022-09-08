@@ -1,4 +1,5 @@
 /* Copyright (c) 2014-2018, Linaro Limited
+ * Copyright (c) 2022, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:	 BSD-3-Clause
@@ -12,6 +13,7 @@
 #include <unistd.h>
 
 #define VERBOSE			0
+#define MAX_WORKERS		32
 #define MAX_ITERATIONS		1000
 #define BARRIER_ITERATIONS	64
 
@@ -296,38 +298,10 @@ static void barrier_test_memory_barrier(void)
 	temp_result = a + b + c + d;
 }
 
-static void barrier_test_no_barrier_functional(void)
-{
-	pthrd_arg arg;
-
-	arg.numthrds = global_mem->g_num_threads;
-	barrier_test_init();
-	odp_cunit_thread_create(no_barrier_functional_test, &arg);
-	odp_cunit_thread_exit(&arg);
-}
-
-static void barrier_test_barrier_functional(void)
-{
-	pthrd_arg arg;
-
-	arg.numthrds = global_mem->g_num_threads;
-	barrier_test_init();
-	odp_cunit_thread_create(barrier_functional_test, &arg);
-	odp_cunit_thread_exit(&arg);
-}
-
-odp_testinfo_t barrier_suite_barrier[] = {
-	ODP_TEST_INFO(barrier_test_memory_barrier),
-	ODP_TEST_INFO(barrier_test_no_barrier_functional),
-	ODP_TEST_INFO(barrier_test_barrier_functional),
-	ODP_TEST_INFO_NULL
-};
-
 static int barrier_init(odp_instance_t *inst)
 {
 	uint32_t workers_count, max_threads;
 	int ret = 0;
-	odp_cpumask_t mask;
 	odp_init_t init_param;
 	odph_helper_options_t helper_options;
 
@@ -362,7 +336,7 @@ static int barrier_init(odp_instance_t *inst)
 	global_mem->g_iterations = MAX_ITERATIONS;
 	global_mem->g_verbose = VERBOSE;
 
-	workers_count = odp_cpumask_default_worker(&mask, 0);
+	workers_count = odp_cpumask_default_worker(NULL, 0);
 
 	max_threads = (workers_count >= MAX_WORKERS) ?
 			MAX_WORKERS : workers_count;
@@ -403,6 +377,53 @@ static int barrier_term(odp_instance_t inst)
 
 	return 0;
 }
+
+static void barrier_single_thread(void)
+{
+	odp_barrier_t barrier;
+
+	odp_barrier_init(&barrier, 1);
+
+	printf(" Calling wait...");
+
+	odp_barrier_wait(&barrier);
+
+	printf(" 1");
+
+	odp_barrier_wait(&barrier);
+
+	printf(" 2");
+
+	odp_barrier_wait(&barrier);
+
+	printf(" 3. ");
+}
+
+static void barrier_test_no_barrier_functional(void)
+{
+	int num = global_mem->g_num_threads;
+
+	barrier_test_init();
+	odp_cunit_thread_create(num, no_barrier_functional_test, NULL, 0);
+	odp_cunit_thread_join(num);
+}
+
+static void barrier_test_barrier_functional(void)
+{
+	int num = global_mem->g_num_threads;
+
+	barrier_test_init();
+	odp_cunit_thread_create(num, barrier_functional_test, NULL, 0);
+	odp_cunit_thread_join(num);
+}
+
+odp_testinfo_t barrier_suite_barrier[] = {
+	ODP_TEST_INFO(barrier_test_memory_barrier),
+	ODP_TEST_INFO(barrier_single_thread),
+	ODP_TEST_INFO(barrier_test_no_barrier_functional),
+	ODP_TEST_INFO(barrier_test_barrier_functional),
+	ODP_TEST_INFO_NULL
+};
 
 odp_suiteinfo_t barrier_suites[] = {
 	{"barrier", NULL, NULL,

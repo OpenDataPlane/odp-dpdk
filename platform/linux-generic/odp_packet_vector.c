@@ -23,7 +23,7 @@
 /* Packet vector header field offsets for inline functions */
 const _odp_event_vector_inline_offset_t _odp_event_vector_inline ODP_ALIGNED_CACHE = {
 	.packet    = offsetof(odp_event_vector_hdr_t, packet),
-	.pool      = offsetof(odp_event_vector_hdr_t, event_hdr.pool_ptr),
+	.pool      = offsetof(odp_event_vector_hdr_t, event_hdr.pool),
 	.size      = offsetof(odp_event_vector_hdr_t, size)
 };
 
@@ -41,7 +41,7 @@ odp_packet_vector_t odp_packet_vector_alloc(odp_pool_t pool_hdl)
 
 	ODP_ASSERT(pool_hdl != ODP_POOL_INVALID);
 
-	pool = pool_entry_from_hdl(pool_hdl);
+	pool = _odp_pool_entry(pool_hdl);
 
 	ODP_ASSERT(pool->type == ODP_POOL_VECTOR);
 
@@ -82,7 +82,7 @@ int odp_packet_vector_valid(odp_packet_vector_t pktv)
 		return 0;
 
 	pktv_hdr = _odp_packet_vector_hdr(pktv);
-	pool = pktv_hdr->event_hdr.pool_ptr;
+	pool = _odp_pool_entry(pktv_hdr->event_hdr.pool);
 
 	if (odp_unlikely(pktv_hdr->size > pool->params.vector.max_size))
 		return 0;

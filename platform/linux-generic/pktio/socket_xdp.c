@@ -15,14 +15,15 @@
 #include <odp/api/ticketlock.h>
 #include <odp/api/packet_io_stats.h>
 
+#include <odp_classification_internal.h>
 #include <odp_debug_internal.h>
+#include <odp_libconfig_internal.h>
 #include <odp_macros_internal.h>
 #include <odp_packet_io_internal.h>
 #include <odp_packet_internal.h>
 #include <odp_parse_internal.h>
-#include <odp_classification_internal.h>
+#include <odp_pool_internal.h>
 #include <odp_socket_common.h>
-#include <odp_libconfig_internal.h>
 
 #include <string.h>
 #include <errno.h>
@@ -133,7 +134,7 @@ static int sock_xdp_init_global(void)
 
 static inline xdp_sock_info_t *pkt_priv(pktio_entry_t *pktio_entry)
 {
-	return (xdp_sock_info_t *)(uintptr_t)(pktio_entry->s.pkt_priv);
+	return (xdp_sock_info_t *)(uintptr_t)(pktio_entry->pkt_priv);
 }
 
 static void parse_options(xdp_umem_info_t *umem_info)
@@ -245,7 +246,7 @@ static int sock_xdp_open(odp_pktio_t pktio, pktio_entry_t *pktio_entry, const ch
 
 	priv = pkt_priv(pktio_entry);
 	memset(priv, 0, sizeof(xdp_sock_info_t));
-	pool = pool_entry_from_hdl(pool_hdl);
+	pool = _odp_pool_entry(pool_hdl);
 	priv->umem_info = (xdp_umem_info_t *)pool->mem_src_data;
 	ret = umem_create(priv->umem_info, pool);
 
@@ -279,9 +280,9 @@ static int sock_xdp_open(odp_pktio_t pktio, pktio_entry_t *pktio_entry, const ch
 		odp_ticketlock_init(&priv->qs[i].tx_lock);
 	}
 
-	priv->bind_q = get_bind_queue_index(pktio_entry->s.name);
+	priv->bind_q = get_bind_queue_index(pktio_entry->name);
 
-	ODP_DBG("Socket xdp interface (%s):\n", pktio_entry->s.name);
+	ODP_DBG("Socket xdp interface (%s):\n", pktio_entry->name);
 	ODP_DBG("  num_rx_desc: %d\n", priv->umem_info->num_rx_desc);
 	ODP_DBG("  num_tx_desc: %d\n", priv->umem_info->num_tx_desc);
 	ODP_DBG("  starting bind queue: %u\n", priv->bind_q);
@@ -499,11 +500,11 @@ static uint32_t process_received(pktio_entry_t *pktio_entry, xdp_sock_t *sock, p
 	struct xsk_ring_cons *rx = &sock->rx;
 	uint8_t *base_addr = pool->base_addr;
 	pkt_data_t pkt_data;
-	const odp_proto_layer_t layer = pktio_entry->s.parse_layer;
+	const odp_proto_layer_t layer = pktio_entry->parse_layer;
 	int ret;
-	const odp_pktin_config_opt_t opt = pktio_entry->s.config.pktin;
+	const odp_pktin_config_opt_t opt = pktio_entry->config.pktin;
 	uint64_t errors = 0U, octets = 0U;
-	odp_pktio_t pktio_hdl = pktio_entry->s.handle;
+	odp_pktio_t pktio_hdl = pktio_entry->handle;
 	uint32_t num_rx = 0U;
 
 	for (int i = 0; i < num; ++i) {
@@ -569,7 +570,7 @@ static odp_bool_t reserve_fill_queue_elements(xdp_sock_info_t *sock_info, xdp_so
 	odp_packet_hdr_t *pkt_hdr;
 
 	pool = sock_info->umem_info->pool;
-	count = odp_packet_alloc_multi(pool->pool_hdl, sock_info->mtu, packets, num);
+	count = odp_packet_alloc_multi(_odp_pool_handle(pool), sock_info->mtu, packets, num);
 
 	if (count <= 0) {
 		++sock->i_stats[RX_PKT_ALLOC_ERR];
@@ -674,8 +675,8 @@ static inline void populate_tx_desc(odp_packet_hdr_t *pkt_hdr, pool_t *pool,
 	uint64_t pkt_off;
 
 	frame_off = pkt_hdr->event_hdr.index.event * pool->block_size;
-	pkt_off = (uint64_t)(uintptr_t)pkt_hdr->event_hdr.base_data
-		  - (uint64_t)(uintptr_t)pool->base_addr - frame_off;
+	pkt_off = (uint64_t)(uintptr_t)pkt_hdr->seg_data - (uint64_t)(uintptr_t)pool->base_addr
+		  - frame_off;
 	pkt_off <<= XSK_UNALIGNED_BUF_OFFSET_SHIFT;
 	tx_desc->addr = frame_off | pkt_off;
 	tx_desc->len = len;
@@ -724,7 +725,7 @@ static int sock_xdp_send(pktio_entry_t *pktio_entry, int index, const odp_packet
 		odp_ticketlock_lock(&sock->tx_lock);
 
 	pool = priv->umem_info->pool;
-	pool_hdl = pool->pool_hdl;
+	pool_hdl = _odp_pool_handle(pool);
 	pktio_idx = priv->pktio_idx;
 	tx = &sock->tx;
 	base_addr = priv->umem_info->pool->base_addr;
@@ -735,7 +736,7 @@ static int sock_xdp_send(pktio_entry_t *pktio_entry, int index, const odp_packet
 		pkt_hdr = packet_hdr(packets[i]);
 		seg_cnt = pkt_hdr->seg_count;
 
-		if (pkt_hdr->event_hdr.pool_ptr != pool) {
+		if (_odp_pool_entry(pkt_hdr->event_hdr.pool) != pool) {
 			pkt = odp_packet_copy(packets[i], pool_hdl);
 
 			if (odp_unlikely(pkt == ODP_PACKET_INVALID)) {
@@ -790,7 +791,7 @@ static int sock_xdp_mtu_set(pktio_entry_t *pktio_entry, uint32_t maxlen_input,
 	xdp_sock_info_t *priv = pkt_priv(pktio_entry);
 	int ret;
 
-	ret = _odp_mtu_set_fd(priv->helper_sock, pktio_entry->s.name, maxlen_input);
+	ret = _odp_mtu_set_fd(priv->helper_sock, pktio_entry->name, maxlen_input);
 	if (ret)
 		return ret;
 
@@ -802,31 +803,31 @@ static int sock_xdp_mtu_set(pktio_entry_t *pktio_entry, uint32_t maxlen_input,
 static int sock_xdp_promisc_mode_set(pktio_entry_t *pktio_entry,  int enable)
 {
 	return _odp_promisc_mode_set_fd(pkt_priv(pktio_entry)->helper_sock,
-					pktio_entry->s.name, enable);
+					pktio_entry->name, enable);
 }
 
 static int sock_xdp_promisc_mode_get(pktio_entry_t *pktio_entry)
 {
 	return _odp_promisc_mode_get_fd(pkt_priv(pktio_entry)->helper_sock,
-					pktio_entry->s.name);
+					pktio_entry->name);
 }
 
 static int sock_xdp_mac_addr_get(pktio_entry_t *pktio_entry ODP_UNUSED, void *mac_addr)
 {
 	return _odp_mac_addr_get_fd(pkt_priv(pktio_entry)->helper_sock,
-				    pktio_entry->s.name, mac_addr) ? -1 : ETH_ALEN;
+				    pktio_entry->name, mac_addr) ? -1 : ETH_ALEN;
 }
 
 static int sock_xdp_link_status(pktio_entry_t *pktio_entry)
 {
 	return _odp_link_status_fd(pkt_priv(pktio_entry)->helper_sock,
-				   pktio_entry->s.name);
+				   pktio_entry->name);
 }
 
 static int sock_xdp_link_info(pktio_entry_t *pktio_entry, odp_pktio_link_info_t *info)
 {
 	return _odp_link_info_fd(pkt_priv(pktio_entry)->helper_sock,
-				 pktio_entry->s.name, info);
+				 pktio_entry->name, info);
 }
 
 static int set_queue_capability(int fd, const char *devname, odp_pktio_capability_t *capa)
@@ -864,7 +865,7 @@ static int sock_xdp_capability(pktio_entry_t *pktio_entry, odp_pktio_capability_
 
 	memset(capa, 0, sizeof(odp_pktio_capability_t));
 
-	if (set_queue_capability(priv->helper_sock, pktio_entry->s.name, capa))
+	if (set_queue_capability(priv->helper_sock, pktio_entry->name, capa))
 		return -1;
 
 	capa->set_op.op.promisc_mode = 1U;
@@ -902,7 +903,7 @@ static int sock_xdp_input_queues_config(pktio_entry_t *pktio_entry,
 {
 	xdp_sock_info_t *priv = pkt_priv(pktio_entry);
 
-	priv->lockless_rx = pktio_entry->s.param.in_mode == ODP_PKTIN_MODE_SCHED ||
+	priv->lockless_rx = pktio_entry->param.in_mode == ODP_PKTIN_MODE_SCHED ||
 			    param->op_mode == ODP_PKTIO_OP_MT_UNSAFE;
 
 	return 0;
@@ -922,7 +923,7 @@ static int sock_xdp_output_queues_config(pktio_entry_t *pktio_entry,
 {
 	xdp_sock_info_t *priv = pkt_priv(pktio_entry);
 	struct xsk_socket_config config;
-	const char *devname = pktio_entry->s.name;
+	const char *devname = pktio_entry->name;
 	uint32_t bind_q, i;
 	struct xsk_umem *umem;
 	xdp_sock_t *sock;
@@ -933,7 +934,7 @@ static int sock_xdp_output_queues_config(pktio_entry_t *pktio_entry,
 	bind_q = priv->bind_q;
 	umem = priv->umem_info->umem;
 
-	for (i = 0U; i < param->num_queues; ++i) {
+	for (i = 0U; i < param->num_queues;) {
 		sock = &priv->qs[i];
 		ret = xsk_socket__create_shared(&sock->xsk, devname, bind_q, umem, &sock->rx,
 						&sock->tx, &sock->fill_q, &sock->compl_q, &config);
@@ -942,6 +943,8 @@ static int sock_xdp_output_queues_config(pktio_entry_t *pktio_entry,
 			ODP_ERR("Error creating xdp socket for bind queue %u: %d\n", bind_q, ret);
 			goto err;
 		}
+
+		++i;
 
 		if (!reserve_fill_queue_elements(priv, sock, config.rx_size)) {
 			ODP_ERR("Unable to reserve fill queue descriptors for queue: %u.\n",

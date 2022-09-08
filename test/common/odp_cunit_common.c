@@ -1,14 +1,17 @@
 /* Copyright (c) 2014-2018, Linaro Limited
- * Copyright (c) 2019, Nokia
+ * Copyright (c) 2019-2022, Nokia
  * Copyright (c) 2021, Marvell
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
  */
 
+#define _GNU_SOURCE
+
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/mman.h>
 #include <odp_api.h>
 #include "odp_cunit_common.h"
 #include <odp/helper/odph_api.h>
@@ -28,9 +31,11 @@
 
 /* Globals */
 static int allow_skip_result;
-static odph_thread_t thread_tbl[MAX_WORKERS];
+static odph_thread_t thread_tbl[ODP_THREAD_COUNT_MAX];
+static int threads_running;
 static odp_instance_t instance;
 static char *progname;
+static int (*thread_func)(void *);
 
 /*
  * global init/term functions which may be registered
@@ -45,47 +50,205 @@ static struct {
 
 static odp_suiteinfo_t *global_testsuites;
 
-/** create test thread */
-int odp_cunit_thread_create(int func_ptr(void *), pthrd_arg *arg)
+#define MAX_STR_LEN 256
+#define MAX_FAILURES 10
+
+/* Recorded assertion failure for later CUnit call in the initial thread */
+typedef struct assertion_failure_t {
+	char cond[MAX_STR_LEN];
+	char file[MAX_STR_LEN];
+	unsigned int line;
+	int fatal;
+} assertion_failure_t;
+
+typedef struct thr_global_t {
+	assertion_failure_t failure[MAX_FAILURES];
+	unsigned long num_failures;
+} thr_global_t;
+
+static thr_global_t *thr_global;
+
+static __thread int initial_thread = 1; /* Are we the initial thread? */
+static __thread jmp_buf longjmp_env;
+
+void odp_cu_assert(CU_BOOL value, unsigned int line,
+		   const char *condition, const char *file, CU_BOOL fatal)
 {
+	unsigned long idx;
+
+	if (initial_thread) {
+		CU_assertImplementation(value, line, condition, file, "", fatal);
+		return;
+	}
+
+	/* Assertion ok, just return */
+	if (value)
+		return;
+
+	/*
+	 * Non-initial thread/process cannot call CUnit assert because:
+	 *
+	 * - CU_assertImplementation() is not thread-safe
+	 * - In process mode an assertion failure would be lost because it
+	 *   would not be recorded in the memory of the initial process.
+	 * - Fatal asserts in CUnit perform longjmp which cannot be done in
+	 *   an other thread or process that did the setjmp.
+	 *
+	 * --> Record the assertion failure in shared memory so that it can be
+	 *     processed later in the context of the initial thread/process.
+	 * --> In fatal assert, longjmp within the current thread.
+	 */
+
+	idx = __atomic_fetch_add(&thr_global->num_failures, 1, __ATOMIC_RELAXED);
+
+	if (idx < MAX_FAILURES) {
+		assertion_failure_t *a = &thr_global->failure[idx];
+
+		strncpy(a->cond, condition, sizeof(a->cond));
+		strncpy(a->file, file, sizeof(a->file));
+		a->cond[sizeof(a->cond) - 1] = 0;
+		a->file[sizeof(a->file) - 1] = 0;
+		a->line = line;
+		a->fatal = fatal;
+	}
+
+	if (fatal)
+		longjmp(longjmp_env, 1);
+}
+
+static void handle_postponed_asserts(void)
+{
+	unsigned long num = thr_global->num_failures;
+
+	if (num > MAX_FAILURES)
+		num = MAX_FAILURES;
+
+	for (unsigned long n = 0; n < num; n++) {
+		assertion_failure_t *a = &thr_global->failure[n];
+
+		/*
+		 * Turn fatal failures into non-fatal failures as we are just
+		 * reporting them. Threads that saw fatal failures which
+		 * prevented them from continuing have already been stopped.
+		 */
+		CU_assertImplementation(0, a->line, a->cond, a->file, "", CU_FALSE);
+	}
+	thr_global->num_failures = 0;
+}
+
+static int threads_init(void)
+{
+	static int initialized;
+
+	if (initialized)
+		return 0;
+
+	/*
+	 * Use shared memory mapping for the global structure to make it
+	 * visible in the child processes if running in process mode.
+	 */
+	thr_global = mmap(NULL, sizeof(thr_global_t),
+			  PROT_READ | PROT_WRITE,
+			  MAP_SHARED | MAP_ANONYMOUS,
+			  -1, 0);
+	if (thr_global == MAP_FAILED)
+		return -1;
+
+	initialized = 1;
+	return 0;
+}
+
+static int run_thread(void *arg)
+{
+	int rc;
+
+	/* Make sure this is zero also in process mode "threads" */
+	initial_thread = 0;
+
+	if (setjmp(longjmp_env) == 0) {
+		/* Normal return, proceed to the thread function. */
+		rc = (*thread_func)(arg);
+	} else {
+		/*
+		 * Return from longjmp done by the thread function.
+		 * We return 0 here since odph_thread_join() does not like
+		 * nonzero exit statuses.
+		 */
+		rc = 0;
+	}
+
+	return rc;
+}
+
+int odp_cunit_thread_create(int num, int func_ptr(void *), void *const arg[], int priv)
+{
+	int i, ret;
 	odp_cpumask_t cpumask;
 	odph_thread_common_param_t thr_common;
-	int ret;
-	int num = arg->numthrds;
-	odph_thread_param_t thr_param;
+	odph_thread_param_t thr_param[num];
+
+	if (num > ODP_THREAD_COUNT_MAX) {
+		fprintf(stderr, "error: %s: too many threads: num=%d max=%d\n", __func__,
+			num, ODP_THREAD_COUNT_MAX);
+		return -1;
+	}
+
+	if (threads_running) {
+		/* thread_tbl is already in use */
+		fprintf(stderr, "error: %s: threads already running\n", __func__);
+		return -1;
+	}
+
+	thread_func = func_ptr;
 
 	odph_thread_common_param_init(&thr_common);
-	odph_thread_param_init(&thr_param);
 
-	thr_param.start    = func_ptr;
-	thr_param.arg      = arg;
-	thr_param.thr_type = ODP_THREAD_WORKER;
+	if (arg == NULL)
+		priv = 0;
+
+	for (i = 0; i < num; i++) {
+		odph_thread_param_init(&thr_param[i]);
+
+		thr_param[i].start    = run_thread;
+		thr_param[i].thr_type = ODP_THREAD_WORKER;
+
+		if (arg)
+			thr_param[i].arg = arg[i];
+		else
+			thr_param[i].arg = NULL;
+
+		if (priv == 0)
+			break;
+	}
 
 	odp_cpumask_default_worker(&cpumask, num);
 
 	thr_common.instance    = instance;
 	thr_common.cpumask     = &cpumask;
-	thr_common.share_param = 1;
+	thr_common.share_param = !priv;
 
 	/* Create and start additional threads */
-	ret = odph_thread_create(thread_tbl, &thr_common, &thr_param, num);
+	ret = odph_thread_create(thread_tbl, &thr_common, thr_param, num);
 
 	if (ret != num)
 		fprintf(stderr, "error: odph_thread_create() failed.\n");
 
+	threads_running = (ret > 0);
+
 	return ret;
 }
 
-/** exit from test thread */
-int odp_cunit_thread_exit(pthrd_arg *arg)
+int odp_cunit_thread_join(int num)
 {
-	int num = arg->numthrds;
-
-	/* Wait for other threads to exit */
+	/* Wait for threads to exit */
 	if (odph_thread_join(thread_tbl, num) != num) {
 		fprintf(stderr, "error: odph_thread_join() failed.\n");
 		return -1;
 	}
+	threads_running = 0;
+	thread_func = 0;
+
+	handle_postponed_asserts();
 
 	return 0;
 }
@@ -500,6 +663,9 @@ int odp_cunit_update(odp_suiteinfo_t testsuites[])
  */
 int odp_cunit_register(odp_suiteinfo_t testsuites[])
 {
+	if (threads_init())
+		return -1;
+
 	/* call test executable init hook, if any */
 	if (global_init_term.global_init_ptr) {
 		if ((*global_init_term.global_init_ptr)(&instance) == 0) {
