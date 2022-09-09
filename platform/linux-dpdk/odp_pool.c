@@ -1054,11 +1054,6 @@ int odp_pool_destroy(odp_pool_t pool_hdl)
 	return 0;
 }
 
-odp_pool_t odp_buffer_pool(odp_buffer_t buf)
-{
-	return _odp_buf_hdr(buf)->event_hdr.pool;
-}
-
 void odp_pool_param_init(odp_pool_param_t *params)
 {
 	memset(params, 0, sizeof(odp_pool_param_t));
