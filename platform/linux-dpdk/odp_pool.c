@@ -68,6 +68,7 @@ pool_global_t *_odp_pool_glb;
 
 /* Fill in pool header field offsets for inline functions */
 const _odp_pool_inline_offset_t _odp_pool_inline ODP_ALIGNED_CACHE = {
+	.index             = offsetof(pool_t, pool_idx),
 	.uarea_size        = offsetof(pool_t, params.pkt.uarea_size)
 };
 
@@ -1076,17 +1077,6 @@ uint64_t odp_pool_to_u64(odp_pool_t hdl)
 unsigned int odp_pool_max_index(void)
 {
 	return ODP_CONFIG_POOLS - 1;
-}
-
-int odp_pool_index(odp_pool_t pool_hdl)
-{
-	pool_t *pool;
-
-	ODP_ASSERT(pool_hdl != ODP_POOL_INVALID);
-
-	pool = _odp_pool_entry(pool_hdl);
-
-	return pool->pool_idx;
 }
 
 int odp_pool_stats(odp_pool_t pool_hdl, odp_pool_stats_t *stats)
