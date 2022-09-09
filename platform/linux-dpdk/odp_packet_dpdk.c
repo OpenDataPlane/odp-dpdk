@@ -962,12 +962,11 @@ static inline int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[
 		packet_init(pkt_hdr, input);
 
 		if (layer != ODP_PROTO_LAYER_NONE) {
-			if (_odp_dpdk_packet_parse_common(&pkt_hdr->p,
+			if (_odp_dpdk_packet_parse_common(pkt_hdr,
 							  rte_pktmbuf_mtod(mbuf, uint8_t *),
 							  rte_pktmbuf_pkt_len(mbuf),
 							  rte_pktmbuf_data_len(mbuf),
-							  mbuf, layer,
-							  supported_ptypes, pktin_cfg)) {
+							  mbuf, layer, pktin_cfg)) {
 				odp_packet_free(pkt);
 				continue;
 			}
