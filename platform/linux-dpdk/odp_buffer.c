@@ -62,7 +62,7 @@ void odp_buffer_print(odp_buffer_t buf)
 	}
 
 	hdr = _odp_buf_hdr(buf);
-	pool = hdr->event_hdr.pool_ptr;
+	pool = _odp_pool_entry(hdr->event_hdr.pool);
 
 	len += snprintf(&str[len], n - len, "Buffer\n------\n");
 	len += snprintf(&str[len], n - len, "  pool index    %u\n", pool->pool_idx);

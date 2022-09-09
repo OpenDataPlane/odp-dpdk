@@ -18,6 +18,7 @@ extern "C" {
 #endif
 
 #include <odp/api/event.h>
+#include <odp/api/pool_types.h>
 
 #include <stdint.h>
 
@@ -54,8 +55,8 @@ typedef struct _odp_event_hdr_t {
 
 	/* --- Mostly read only data --- */
 
-	/* Pool pointer */
-	void *pool_ptr;
+	/* Pool handle */
+	odp_pool_t pool;
 
 } _odp_event_hdr_t;
 

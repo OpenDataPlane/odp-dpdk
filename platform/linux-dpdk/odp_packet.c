@@ -54,7 +54,7 @@
 
 const _odp_packet_inline_offset_t _odp_packet_inline ODP_ALIGNED_CACHE = {
 	.mb               = offsetof(odp_packet_hdr_t, event_hdr.mb),
-	.pool             = offsetof(odp_packet_hdr_t, event_hdr.pool_ptr),
+	.pool             = offsetof(odp_packet_hdr_t, event_hdr.pool),
 	.input            = offsetof(odp_packet_hdr_t, input),
 	.user_ptr         = offsetof(odp_packet_hdr_t, user_ptr),
 	.l2_offset        = offsetof(odp_packet_hdr_t, p.l2_offset),
@@ -1081,7 +1081,7 @@ void odp_packet_print(odp_packet_t pkt)
 	int len = 0;
 	int n = max_len - 1;
 	odp_packet_hdr_t *hdr = packet_hdr(pkt);
-	pool_t *pool = hdr->event_hdr.pool_ptr;
+	pool_t *pool = _odp_pool_entry(hdr->event_hdr.pool);
 
 	len += snprintf(&str[len], n - len, "Packet\n------\n");
 	len += snprintf(&str[len], n - len, "  pool index   %u\n", pool->pool_idx);
@@ -1146,7 +1146,7 @@ void odp_packet_print_data(odp_packet_t pkt, uint32_t offset,
 	int len = 0;
 	int n = max_len - 1;
 	uint32_t data_len = odp_packet_len(pkt);
-	pool_t *pool = hdr->event_hdr.pool_ptr;
+	pool_t *pool = _odp_pool_entry(hdr->event_hdr.pool);
 
 	len += snprintf(&str[len], n - len, "Packet\n------\n");
 	len += snprintf(&str[len], n - len,
@@ -1959,7 +1959,7 @@ static inline odp_packet_hdr_t *packet_buf_to_hdr(odp_packet_buf_t pkt_buf)
 void *odp_packet_buf_head(odp_packet_buf_t pkt_buf)
 {
 	odp_packet_hdr_t *pkt_hdr = packet_buf_to_hdr(pkt_buf);
-	pool_t *pool = pkt_hdr->event_hdr.pool_ptr;
+	pool_t *pool = _odp_pool_entry(pkt_hdr->event_hdr.pool);
 
 	if (odp_unlikely(pool->pool_ext == 0)) {
 		ODP_ERR("Not an external memory pool\n");
@@ -1972,7 +1972,7 @@ void *odp_packet_buf_head(odp_packet_buf_t pkt_buf)
 uint32_t odp_packet_buf_size(odp_packet_buf_t pkt_buf)
 {
 	odp_packet_hdr_t *pkt_hdr = packet_buf_to_hdr(pkt_buf);
-	pool_t *pool = pkt_hdr->event_hdr.pool_ptr;
+	pool_t *pool = _odp_pool_entry(pkt_hdr->event_hdr.pool);
 
 	return pool->seg_len;
 }
@@ -2024,7 +2024,7 @@ uint32_t odp_packet_disassemble(odp_packet_t pkt, odp_packet_buf_t pkt_buf[],
 	uint32_t i;
 	odp_packet_seg_t seg;
 	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
-	pool_t *pool = pkt_hdr->event_hdr.pool_ptr;
+	pool_t *pool = _odp_pool_entry(pkt_hdr->event_hdr.pool);
 	uint32_t num_segs = odp_packet_num_segs(pkt);
 
 	if (odp_unlikely(pool->type != ODP_POOL_PACKET)) {
