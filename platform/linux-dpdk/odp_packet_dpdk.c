@@ -26,6 +26,7 @@
 #include <odp_packet_dpdk.h>
 #include <odp_packet_internal.h>
 #include <odp_packet_io_internal.h>
+#include <odp_pool_internal.h>
 #include <protocols/eth.h>
 
 #include <rte_config.h>
@@ -263,7 +264,7 @@ static int dpdk_setup_eth_dev(pktio_entry_t *pktio_entry)
 	int ret;
 	pkt_dpdk_t *pkt_dpdk = pkt_priv(pktio_entry);
 	struct rte_eth_conf eth_conf;
-	pool_t *pool = pool_entry_from_hdl(pktio_entry->pool);
+	pool_t *pool = _odp_pool_entry(pktio_entry->pool);
 	uint64_t rx_offloads = 0;
 	uint64_t tx_offloads = 0;
 
@@ -767,7 +768,7 @@ static int dpdk_setup_eth_rx(const pktio_entry_t *pktio_entry,
 	int ret;
 	uint16_t port_id = pkt_dpdk->port_id;
 	uint16_t num_rx_desc = pkt_dpdk->opt.num_rx_desc;
-	pool_t *pool = pool_entry_from_hdl(pktio_entry->pool);
+	pool_t *pool = _odp_pool_entry(pktio_entry->pool);
 
 	rxconf = dev_info->default_rxconf;
 

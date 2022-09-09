@@ -29,6 +29,7 @@
 #include <odp_packet_internal.h>
 #include <odp_packet_io_internal.h>
 #include <odp_parse_internal.h>
+#include <odp_pool_internal.h>
 
 #include <rte_version.h>
 
@@ -209,7 +210,7 @@ static odp_packet_t packet_alloc(pool_t *pool, uint32_t len)
 
 odp_packet_t odp_packet_alloc(odp_pool_t pool_hdl, uint32_t len)
 {
-	pool_t *pool = pool_entry_from_hdl(pool_hdl);
+	pool_t *pool = _odp_pool_entry(pool_hdl);
 
 	if (odp_unlikely(pool->type != ODP_POOL_PACKET)) {
 		_odp_errno = EINVAL;
@@ -226,7 +227,7 @@ int odp_packet_alloc_multi(odp_pool_t pool_hdl, uint32_t len,
 			   odp_packet_t pkt[], int num)
 {
 	int i;
-	pool_t *pool = pool_entry_from_hdl(pool_hdl);
+	pool_t *pool = _odp_pool_entry(pool_hdl);
 
 	if (odp_unlikely(pool->type != ODP_POOL_PACKET)) {
 		_odp_errno = EINVAL;
@@ -718,13 +719,13 @@ int odp_packet_add_data(odp_packet_t *pkt_ptr, uint32_t offset, uint32_t len)
 	odp_packet_t pkt = *pkt_ptr;
 	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
 	uint32_t pktlen = odp_packet_len(pkt);
-	pool_t *pool = pkt_hdr->event_hdr.pool_ptr;
+	odp_pool_t pool = pkt_hdr->event_hdr.pool;
 	odp_packet_t newpkt;
 
 	if (offset > pktlen)
 		return -1;
 
-	newpkt = odp_packet_alloc(pool->pool_hdl, pktlen + len);
+	newpkt = odp_packet_alloc(pool, pktlen + len);
 
 	if (newpkt == ODP_PACKET_INVALID)
 		return -1;
@@ -748,13 +749,13 @@ int odp_packet_rem_data(odp_packet_t *pkt_ptr, uint32_t offset, uint32_t len)
 	odp_packet_t pkt = *pkt_ptr;
 	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
 	uint32_t pktlen = odp_packet_len(pkt);
-	pool_t *pool = pkt_hdr->event_hdr.pool_ptr;
+	odp_pool_t pool = pkt_hdr->event_hdr.pool;
 	odp_packet_t newpkt;
 
 	if (odp_unlikely(offset + len >= pktlen))
 		return -1;
 
-	newpkt = odp_packet_alloc(pool->pool_hdl, pktlen - len);
+	newpkt = odp_packet_alloc(pool, pktlen - len);
 
 	if (newpkt == ODP_PACKET_INVALID)
 		return -1;
@@ -2002,7 +2003,7 @@ void odp_packet_buf_data_set(odp_packet_buf_t pkt_buf, uint32_t data_offset,
 
 odp_packet_buf_t odp_packet_buf_from_head(odp_pool_t pool_hdl, void *head)
 {
-	pool_t *pool = pool_entry_from_hdl(pool_hdl);
+	pool_t *pool = _odp_pool_entry(pool_hdl);
 
 	if (odp_unlikely(pool->type != ODP_POOL_PACKET)) {
 		ODP_ERR("Not a packet pool\n");
@@ -2060,7 +2061,7 @@ odp_packet_t odp_packet_reassemble(odp_pool_t pool_hdl,
 	odp_packet_hdr_t *pkt_hdr = (odp_packet_hdr_t *)(uintptr_t)pkt_buf[0];
 	uint32_t headroom = odp_packet_buf_data_offset(pkt_buf[0]);
 
-	pool_t *pool = pool_entry_from_hdl(pool_hdl);
+	pool_t *pool = _odp_pool_entry(pool_hdl);
 
 	if (odp_unlikely(pool->type != ODP_POOL_PACKET)) {
 		ODP_ERR("Not a packet pool\n");
