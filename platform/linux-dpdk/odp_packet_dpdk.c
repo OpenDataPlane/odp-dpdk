@@ -90,8 +90,6 @@ typedef struct {
 typedef struct ODP_ALIGNED_CACHE {
 	/* --- Fast path data --- */
 
-	/* Supported RTE_PTYPE_XXX flags in a mask */
-	uint32_t supported_ptypes;
 	/* DPDK port identifier */
 	uint16_t port_id;
 	struct {
@@ -809,49 +807,6 @@ static int dpdk_setup_eth_rx(const pktio_entry_t *pktio_entry,
 	return 0;
 }
 
-static void dpdk_ptype_support_set(pktio_entry_t *pktio_entry, uint16_t port_id)
-{
-	int max_num, num, i;
-	pkt_dpdk_t *pkt_dpdk = pkt_priv(pktio_entry);
-	uint32_t mask = RTE_PTYPE_L2_MASK | RTE_PTYPE_L3_MASK |
-			RTE_PTYPE_L4_MASK;
-
-	pkt_dpdk->supported_ptypes = 0;
-
-	max_num = rte_eth_dev_get_supported_ptypes(port_id, mask, NULL, 0);
-	if (max_num <= 0) {
-		ODP_DBG("Device does not support any ptype flags\n");
-		return;
-	}
-
-	uint32_t ptype[max_num];
-
-	num = rte_eth_dev_get_supported_ptypes(port_id, mask, ptype, max_num);
-	if (num <= 0) {
-		ODP_ERR("Device does not support any ptype flags\n");
-		return;
-	}
-
-	for (i = 0; i < num; i++) {
-		ODP_DBG("  supported ptype: 0x%x\n", ptype[i]);
-
-		if (ptype[i] == RTE_PTYPE_L2_ETHER_VLAN)
-			pkt_dpdk->supported_ptypes |= PTYPE_VLAN;
-		else if (ptype[i] == RTE_PTYPE_L2_ETHER_QINQ)
-			pkt_dpdk->supported_ptypes |= PTYPE_VLAN_QINQ;
-		else if (ptype[i] == RTE_PTYPE_L2_ETHER_ARP)
-			pkt_dpdk->supported_ptypes |= PTYPE_ARP;
-		else if (RTE_ETH_IS_IPV4_HDR(ptype[i]))
-			pkt_dpdk->supported_ptypes |= PTYPE_IPV4;
-		else if (RTE_ETH_IS_IPV6_HDR(ptype[i]))
-			pkt_dpdk->supported_ptypes |= PTYPE_IPV6;
-		else if (ptype[i] == RTE_PTYPE_L4_UDP)
-			pkt_dpdk->supported_ptypes |= PTYPE_UDP;
-		else if (ptype[i] == RTE_PTYPE_L4_TCP)
-			pkt_dpdk->supported_ptypes |= PTYPE_TCP;
-	}
-}
-
 static int dpdk_start(pktio_entry_t *pktio_entry)
 {
 	struct rte_eth_dev_info dev_info;
@@ -903,9 +858,6 @@ static int dpdk_start(pktio_entry_t *pktio_entry)
 		return -1;
 	}
 
-	/* Record supported parser ptype flags */
-	dpdk_ptype_support_set(pktio_entry, port_id);
-
 	return 0;
 }
 
@@ -932,14 +884,12 @@ static inline void prefetch_pkt(odp_packet_t pkt)
 
 static inline int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int num)
 {
-	pkt_dpdk_t * const pkt_dpdk = pkt_priv(pktio_entry);
 	uint16_t i;
 	uint16_t num_pkts = 0;
 	odp_pktin_config_opt_t pktin_cfg = pktio_entry->s.config.pktin;
 	odp_pktio_t input = pktio_entry->s.handle;
 	odp_time_t ts_val;
 	odp_time_t *ts = NULL;
-	const uint32_t supported_ptypes = pkt_dpdk->supported_ptypes;
 	uint16_t num_prefetch = RTE_MIN(num, NUM_RX_PREFETCH);
 	const odp_proto_layer_t layer = pktio_entry->s.parse_layer;
 
