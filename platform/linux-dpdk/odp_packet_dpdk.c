@@ -98,8 +98,6 @@ typedef struct ODP_ALIGNED_CACHE {
 		uint8_t lockless_rx : 1;
 		/* No locking for tx */
 		uint8_t lockless_tx : 1;
-		/* Promiscuous mode defined with system call */
-		uint8_t vdev_sysc_promisc : 1;
 	} flags;
 	/* Minimum RX burst size */
 	uint8_t min_rx_burst;
@@ -478,6 +476,25 @@ static int dpdk_term_global(void)
 	return 0;
 }
 
+static int promisc_mode_check(pkt_dpdk_t *pkt_dpdk)
+{
+	int ret;
+
+	ret = rte_eth_promiscuous_enable(pkt_dpdk->port_id);
+	if (ret) {
+		ODP_DBG("Promisc mode enable not supported: %d\n", ret);
+		return 0;
+	}
+
+	ret = rte_eth_promiscuous_disable(pkt_dpdk->port_id);
+	if (ret) {
+		ODP_DBG("Promisc mode disable not supported: %d\n", ret);
+		return 0;
+	}
+
+	return 1;
+}
+
 static int dpdk_init_capability(pktio_entry_t *pktio_entry,
 				const struct rte_eth_dev_info *dev_info)
 {
@@ -507,7 +524,7 @@ static int dpdk_init_capability(pktio_entry_t *pktio_entry,
 	capa->min_output_queue_size = dev_info->tx_desc_lim.nb_min;
 	capa->max_output_queue_size = dev_info->tx_desc_lim.nb_max;
 
-	capa->set_op.op.promisc_mode = 1;
+	capa->set_op.op.promisc_mode = promisc_mode_check(pkt_dpdk);
 
 	/* Check if setting default MAC address is supported */
 	rte_eth_macaddr_get(pkt_dpdk->port_id, &mac_addr);
@@ -617,23 +634,6 @@ static int dpdk_init_capability(pktio_entry_t *pktio_entry,
 	return 0;
 }
 
-/* Some DPDK PMD virtual devices, like PCAP, do not support promisc
- * mode change. Use system call for them. */
-static void promisc_mode_check(pkt_dpdk_t *pkt_dpdk)
-{
-	int ret;
-
-	ret = rte_eth_promiscuous_enable(pkt_dpdk->port_id);
-
-	if (!rte_eth_promiscuous_get(pkt_dpdk->port_id))
-		pkt_dpdk->flags.vdev_sysc_promisc = 1;
-
-	ret += rte_eth_promiscuous_disable(pkt_dpdk->port_id);
-
-	if (ret)
-		pkt_dpdk->flags.vdev_sysc_promisc = 1;
-}
-
 static int setup_pkt_dpdk(odp_pktio_t pktio ODP_UNUSED,
 			  pktio_entry_t *pktio_entry,
 			  const char *netdev, odp_pool_t pool ODP_UNUSED)
@@ -697,8 +697,7 @@ static int setup_pkt_dpdk(odp_pktio_t pktio ODP_UNUSED,
 		return -1;
 	}
 
-	/* Setup promiscuous mode and multicast */
-	promisc_mode_check(pkt_dpdk);
+	/* Setup multicast */
 	if (pkt_dpdk->opt.multicast_enable)
 		rte_eth_allmulticast_enable(pkt_dpdk->port_id);
 	else
@@ -1229,101 +1228,34 @@ static uint32_t dpdk_maxlen_get(pktio_entry_t *pktio_entry)
 	return pkt_dpdk->mtu;
 }
 
-static int _dpdk_vdev_promisc_mode_set(uint16_t port_id, int enable)
-{
-	struct rte_eth_dev_info dev_info;
-	struct ifreq ifr;
-	int ret;
-	int sockfd;
-
-	rte_eth_dev_info_get(port_id, &dev_info);
-	if_indextoname(dev_info.if_index, ifr.ifr_name);
-	sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-
-	ret = ioctl(sockfd, SIOCGIFFLAGS, &ifr);
-	if (ret < 0) {
-		close(sockfd);
-		ODP_DBG("ioctl SIOCGIFFLAGS error\n");
-		return -1;
-	}
-
-	if (enable)
-		ifr.ifr_flags |= IFF_PROMISC;
-	else
-		ifr.ifr_flags &= ~(IFF_PROMISC);
-
-	ret = ioctl(sockfd, SIOCSIFFLAGS, &ifr);
-	if (ret < 0) {
-		close(sockfd);
-		ODP_DBG("ioctl SIOCSIFFLAGS error\n");
-		return -1;
-	}
-
-	ret = ioctl(sockfd, SIOCGIFMTU, &ifr);
-	if (ret < 0) {
-		close(sockfd);
-		ODP_DBG("ioctl SIOCGIFMTU error\n");
-		return -1;
-	}
-
-	ODP_DBG("vdev promisc set to %d\n", enable);
-	close(sockfd);
-	return 0;
-}
-
 static int promisc_mode_set_pkt_dpdk(pktio_entry_t *pktio_entry,  int enable)
 {
 	uint16_t port_id = pkt_priv(pktio_entry)->port_id;
+	int ret;
 
 	if (enable)
-		rte_eth_promiscuous_enable(port_id);
+		ret = rte_eth_promiscuous_enable(port_id);
 	else
-		rte_eth_promiscuous_disable(port_id);
+		ret = rte_eth_promiscuous_disable(port_id);
 
-	if (pkt_priv(pktio_entry)->flags.vdev_sysc_promisc) {
-		int ret = _dpdk_vdev_promisc_mode_set(port_id, enable);
-
-		if (ret < 0)
-			ODP_DBG("vdev promisc mode fail\n");
-	}
-
-	return 0;
-}
-
-static int _dpdk_vdev_promisc_mode(uint16_t port_id)
-{
-	struct rte_eth_dev_info dev_info;
-	struct ifreq ifr;
-	int ret;
-	int sockfd;
-
-	rte_eth_dev_info_get(port_id, &dev_info);
-	if_indextoname(dev_info.if_index, ifr.ifr_name);
-	sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-	ret = ioctl(sockfd, SIOCGIFFLAGS, &ifr);
-	close(sockfd);
-	if (ret < 0) {
-		ODP_DBG("ioctl SIOCGIFFLAGS error\n");
+	if (ret) {
+		ODP_ERR("Setting promisc mode failed: %d\n", ret);
 		return -1;
 	}
-
-	if (ifr.ifr_flags & IFF_PROMISC) {
-		ODP_DBG("promisc is 1\n");
-		return 1;
-	} else {
-		return 0;
-	}
+	return 0;
 }
 
 static int promisc_mode_get_pkt_dpdk(pktio_entry_t *pktio_entry)
 {
-	pkt_dpdk_t * const pkt_dpdk = pkt_priv(pktio_entry);
-	uint16_t port_id = pkt_dpdk->port_id;
+	uint16_t port_id = pkt_priv(pktio_entry)->port_id;
+	int ret;
 
-	if (pkt_dpdk->flags.vdev_sysc_promisc)
-		return _dpdk_vdev_promisc_mode(port_id);
-	else
-		return rte_eth_promiscuous_get(port_id);
+	ret = rte_eth_promiscuous_get(port_id);
+	if (ret < 0) {
+		ODP_ERR("Getting promisc mode failed: %d\n", ret);
+		return -1;
+	}
+	return ret;
 }
 
 static int mac_get_pkt_dpdk(pktio_entry_t *pktio_entry, void *mac_addr)
