@@ -115,7 +115,7 @@ typedef struct ODP_ALIGNED_CACHE {
 	/* Maximum supported MTU value */
 	uint32_t mtu_max;
 	/* DPDK MTU has been modified */
-	odp_bool_t mtu_set;
+	uint8_t mtu_set;
 	/* Number of TX descriptors per queue */
 	uint16_t num_tx_desc[PKTIO_MAX_QUEUES];
 
@@ -254,7 +254,7 @@ static int dpdk_maxlen_set(pktio_entry_t *pktio_entry, uint32_t maxlen_input,
 		ODP_ERR("rte_eth_dev_set_mtu() failed: %d\n", ret);
 
 	pkt_dpdk->mtu = maxlen_input;
-	pkt_dpdk->mtu_set = true;
+	pkt_dpdk->mtu_set = 1;
 
 	return ret;
 }
@@ -690,7 +690,7 @@ static int setup_pkt_dpdk(odp_pktio_t pktio ODP_UNUSED,
 	}
 	pkt_dpdk->mtu = mtu + _ODP_ETHHDR_LEN;
 	pkt_dpdk->mtu_max = RTE_MAX(pkt_dpdk->mtu, DPDK_MTU_MAX);
-	pkt_dpdk->mtu_set = false;
+	pkt_dpdk->mtu_set = 0;
 
 	if (dpdk_init_capability(pktio_entry, &dev_info)) {
 		ODP_ERR("Failed to initialize capability\n");
