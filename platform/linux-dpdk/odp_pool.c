@@ -1077,6 +1077,7 @@ unsigned int odp_pool_max_index(void)
 int odp_pool_stats(odp_pool_t pool_hdl, odp_pool_stats_t *stats)
 {
 	pool_t *pool;
+	uint16_t first, last;
 
 	if (odp_unlikely(pool_hdl == ODP_POOL_INVALID)) {
 		ODP_ERR("Invalid pool handle\n");
@@ -1088,8 +1089,14 @@ int odp_pool_stats(odp_pool_t pool_hdl, odp_pool_stats_t *stats)
 	}
 
 	pool = _odp_pool_entry(pool_hdl);
+	first = stats->thread.first;
+	last = stats->thread.last;
 
 	memset(stats, 0, sizeof(odp_pool_stats_t));
+
+	/* Restore input parameters */
+	stats->thread.first = first;
+	stats->thread.last = last;
 
 	if (pool->params.stats.bit.available)
 		stats->available = rte_mempool_avail_count(pool->rte_mempool);
