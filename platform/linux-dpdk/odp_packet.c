@@ -158,6 +158,9 @@ static odp_packet_t packet_alloc(pool_t *pool, uint32_t len)
 			return ODP_PACKET_INVALID;
 		}
 
+		/* Avoid invalid 'maybe-uninitialized' warning with GCC 12 */
+		mbufs[0] = NULL;
+
 		ret = rte_pktmbuf_alloc_bulk(pool->rte_mempool, mbufs, num_seg);
 		if (odp_unlikely(ret)) {
 			/*
