@@ -319,13 +319,6 @@ int odp_event_filter_packet(const odp_event_t event[],
 	return num_pkt;
 }
 
-uint32_t odp_packet_buf_len(odp_packet_t pkt)
-{
-	struct rte_mbuf *mb = pkt_to_mbuf(pkt);
-
-	return (uint32_t)(mb->nb_segs * mb->buf_len);
-}
-
 void *odp_packet_tail(odp_packet_t pkt)
 {
 	struct rte_mbuf *mb = &(packet_hdr(pkt)->event_hdr.mb);
