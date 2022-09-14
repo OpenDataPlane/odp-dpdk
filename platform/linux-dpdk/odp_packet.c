@@ -819,8 +819,23 @@ int odp_packet_concat(odp_packet_t *dst, odp_packet_t src)
 	uint32_t dst_len;
 	uint32_t src_len;
 
-	if (odp_likely(!rte_pktmbuf_chain(mb_dst, mb_src)))
-		return 0;
+	/* Copy if packets are from different pools */
+	if (odp_likely(mb_dst->pool == mb_src->pool)) {
+		if (odp_likely(!rte_pktmbuf_chain(mb_dst, mb_src)))
+			return 0;
+	} else {
+		odp_packet_t new_src = odp_packet_copy_part(src, 0, odp_packet_len(src),
+							    odp_packet_pool(*dst));
+
+		if (odp_unlikely(new_src == ODP_PACKET_INVALID))
+			return -1;
+
+		if (odp_likely(!rte_pktmbuf_chain(mb_dst, pkt_to_mbuf(new_src)))) {
+			odp_packet_free(src);
+			return 1;
+		}
+		odp_packet_free(new_src);
+	}
 
 	/* Fall back to using standard copy operations after maximum number of
 	 * segments has been reached. */
