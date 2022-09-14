@@ -38,6 +38,9 @@ typedef struct _odp_event_hdr_t {
 	/* Underlying DPDK rte_mbuf */
 	struct rte_mbuf mb;
 
+	/* Pool handle */
+	odp_pool_t pool;
+
 	/* Buffer index in the pool */
 	uint32_t  index;
 
@@ -52,11 +55,6 @@ typedef struct _odp_event_hdr_t {
 
 	/* Event flow id */
 	uint8_t   flow_id;
-
-	/* --- Mostly read only data --- */
-
-	/* Pool handle */
-	odp_pool_t pool;
 
 } _odp_event_hdr_t;
 

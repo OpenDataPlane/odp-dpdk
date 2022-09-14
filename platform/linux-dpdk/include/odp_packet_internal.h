@@ -138,6 +138,8 @@ typedef struct odp_packet_hdr_t {
 	/* User context pointer */
 	const void *user_ptr;
 
+	/* --- 64-byte cache line boundary --- */
+
 	/* Classifier mark */
 	uint16_t cls_mark;
 
