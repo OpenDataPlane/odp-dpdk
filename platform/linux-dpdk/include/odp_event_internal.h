@@ -44,9 +44,6 @@ typedef struct _odp_event_hdr_t {
 	/* Buffer index in the pool */
 	uint32_t  index;
 
-	/* Total size of all allocated segs */
-	uint32_t  totsize;
-
 	/* Pool type */
 	int8_t    type;
 

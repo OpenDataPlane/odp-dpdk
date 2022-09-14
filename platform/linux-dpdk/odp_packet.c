@@ -203,8 +203,6 @@ static odp_packet_t packet_alloc(pool_t *pool, uint32_t len)
 		}
 	}
 
-	pkt_hdr->event_hdr.totsize = seg_len * num_seg;
-
 	pkt = packet_handle(pkt_hdr);
 	odp_packet_reset(pkt, len);
 
@@ -323,7 +321,9 @@ int odp_event_filter_packet(const odp_event_t event[],
 
 uint32_t odp_packet_buf_len(odp_packet_t pkt)
 {
-	return packet_hdr(pkt)->event_hdr.totsize;
+	struct rte_mbuf *mb = pkt_to_mbuf(pkt);
+
+	return (uint32_t)(mb->nb_segs * mb->buf_len);
 }
 
 void *odp_packet_tail(odp_packet_t pkt)
@@ -357,7 +357,6 @@ int odp_packet_extend_head(odp_packet_t *pkt, uint32_t len, void **data_ptr,
 
 	if (addheadsize > 0) {
 		struct rte_mbuf *newhead, *t;
-		uint32_t totsize_change;
 		int i;
 
 		newhead = rte_pktmbuf_alloc(mb->pool);
@@ -381,7 +380,6 @@ int odp_packet_extend_head(odp_packet_t *pkt, uint32_t len, void **data_ptr,
 			t->data_len = t->buf_len;
 			t->data_off = 0;
 		}
-		totsize_change = newhead->nb_segs * newhead->buf_len;
 		if (rte_pktmbuf_chain(newhead, mb)) {
 			rte_pktmbuf_free(newhead);
 			return -1;
@@ -393,7 +391,6 @@ int odp_packet_extend_head(odp_packet_t *pkt, uint32_t len, void **data_ptr,
 		_copy_head_metadata(newhead, mb);
 		mb = newhead;
 		*pkt = (odp_packet_t)newhead;
-		packet_hdr(*pkt)->event_hdr.totsize += totsize_change;
 	} else {
 		rte_pktmbuf_prepend(mb, len);
 	}
@@ -427,13 +424,11 @@ int odp_packet_trunc_head(odp_packet_t *pkt, uint32_t len, void **data_ptr,
 	if (len > mb->data_len) {
 		struct rte_mbuf *newhead = mb, *prev = NULL;
 		uint32_t left = len;
-		uint32_t totsize_change = 0;
 
 		while (newhead->next != NULL) {
 			if (newhead->data_len > left)
 				break;
 			left -= newhead->data_len;
-			totsize_change += newhead->buf_len;
 			prev = newhead;
 			newhead = newhead->next;
 			--mb->nb_segs;
@@ -447,7 +442,6 @@ int odp_packet_trunc_head(odp_packet_t *pkt, uint32_t len, void **data_ptr,
 		rte_pktmbuf_free(mb);
 		mb = newhead;
 		*pkt = (odp_packet_t)newhead;
-		packet_hdr(*pkt)->event_hdr.totsize -= totsize_change;
 	} else {
 		rte_pktmbuf_adj(mb, len);
 	}
@@ -515,8 +509,6 @@ int odp_packet_extend_tail(odp_packet_t *pkt, uint32_t len, void **data_ptr,
 		/* Expand the original tail */
 		m_last->data_len = m_last->buf_len - m_last->data_off;
 		mb->pkt_len += len - newtailsize;
-		packet_hdr(*pkt)->event_hdr.totsize +=
-				newtail->nb_segs * newtail->buf_len;
 	} else {
 		rte_pktmbuf_append(mb, len);
 	}
@@ -820,8 +812,6 @@ int odp_packet_align(odp_packet_t *pkt, uint32_t offset, uint32_t len,
 
 int odp_packet_concat(odp_packet_t *dst, odp_packet_t src)
 {
-	odp_packet_hdr_t *dst_hdr = packet_hdr(*dst);
-	odp_packet_hdr_t *src_hdr = packet_hdr(src);
 	struct rte_mbuf *mb_dst = pkt_to_mbuf(*dst);
 	struct rte_mbuf *mb_src = pkt_to_mbuf(src);
 	odp_packet_t new_dst;
@@ -829,10 +819,8 @@ int odp_packet_concat(odp_packet_t *dst, odp_packet_t src)
 	uint32_t dst_len;
 	uint32_t src_len;
 
-	if (odp_likely(!rte_pktmbuf_chain(mb_dst, mb_src))) {
-		dst_hdr->event_hdr.totsize += src_hdr->event_hdr.totsize;
+	if (odp_likely(!rte_pktmbuf_chain(mb_dst, mb_src)))
 		return 0;
-	}
 
 	/* Fall back to using standard copy operations after maximum number of
 	 * segments has been reached. */
