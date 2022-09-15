@@ -125,6 +125,48 @@ static inline int num_segments(uint32_t len, uint32_t seg_len)
 	return num;
 }
 
+static inline int packet_reset(odp_packet_t pkt, uint32_t len)
+{
+	odp_packet_hdr_t *const pkt_hdr = packet_hdr(pkt);
+	struct rte_mbuf *ms, *mb = &pkt_hdr->event_hdr.mb;
+	uint8_t nb_segs = 0;
+	int32_t lenleft = len;
+
+	pkt_hdr->p.input_flags.all  = 0;
+	pkt_hdr->p.flags.all_flags  = 0;
+
+	pkt_hdr->p.l2_offset = 0;
+	pkt_hdr->p.l3_offset = ODP_PACKET_OFFSET_INVALID;
+	pkt_hdr->p.l4_offset = ODP_PACKET_OFFSET_INVALID;
+
+	pkt_hdr->input = ODP_PKTIO_INVALID;
+	pkt_hdr->subtype = ODP_EVENT_PACKET_BASIC;
+
+	mb->port = 0xff;
+	mb->pkt_len = len;
+	mb->data_off = RTE_PKTMBUF_HEADROOM;
+	mb->vlan_tci = 0;
+	nb_segs = 1;
+
+	if (RTE_PKTMBUF_HEADROOM + lenleft <= mb->buf_len) {
+		mb->data_len = lenleft;
+	} else {
+		mb->data_len = mb->buf_len - RTE_PKTMBUF_HEADROOM;
+		lenleft -= mb->data_len;
+		ms = mb->next;
+		while (lenleft > 0) {
+			nb_segs++;
+			ms->data_len = lenleft <= ms->buf_len ?
+				lenleft : ms->buf_len;
+			lenleft -= ms->buf_len;
+			ms = ms->next;
+		}
+	}
+
+	mb->nb_segs = nb_segs;
+	return 0;
+}
+
 static odp_packet_t packet_alloc(pool_t *pool, uint32_t len)
 {
 	odp_packet_t pkt;
@@ -204,7 +246,7 @@ static odp_packet_t packet_alloc(pool_t *pool, uint32_t len)
 	}
 
 	pkt = packet_handle(pkt_hdr);
-	odp_packet_reset(pkt, len);
+	packet_reset(pkt, len);
 
 	return pkt;
 }
@@ -248,11 +290,6 @@ int odp_packet_alloc_multi(odp_pool_t pool_hdl, uint32_t len,
 
 int odp_packet_reset(odp_packet_t pkt, uint32_t len)
 {
-	odp_packet_hdr_t *const pkt_hdr = packet_hdr(pkt);
-	struct rte_mbuf *ms, *mb = &pkt_hdr->event_hdr.mb;
-	uint8_t nb_segs = 0;
-	int32_t lenleft = len;
-
 	if (odp_unlikely(len == 0))
 		return -1;
 
@@ -263,39 +300,7 @@ int odp_packet_reset(odp_packet_t pkt, uint32_t len)
 		return -1;
 	}
 
-	pkt_hdr->p.input_flags.all  = 0;
-	pkt_hdr->p.flags.all_flags  = 0;
-
-	pkt_hdr->p.l2_offset = 0;
-	pkt_hdr->p.l3_offset = ODP_PACKET_OFFSET_INVALID;
-	pkt_hdr->p.l4_offset = ODP_PACKET_OFFSET_INVALID;
-
-	pkt_hdr->input = ODP_PKTIO_INVALID;
-	pkt_hdr->subtype = ODP_EVENT_PACKET_BASIC;
-
-	mb->port = 0xff;
-	mb->pkt_len = len;
-	mb->data_off = RTE_PKTMBUF_HEADROOM;
-	mb->vlan_tci = 0;
-	nb_segs = 1;
-
-	if (RTE_PKTMBUF_HEADROOM + lenleft <= mb->buf_len) {
-		mb->data_len = lenleft;
-	} else {
-		mb->data_len = mb->buf_len - RTE_PKTMBUF_HEADROOM;
-		lenleft -= mb->data_len;
-		ms = mb->next;
-		while (lenleft > 0) {
-			nb_segs++;
-			ms->data_len = lenleft <= ms->buf_len ?
-				lenleft : ms->buf_len;
-			lenleft -= ms->buf_len;
-			ms = ms->next;
-		}
-	}
-
-	mb->nb_segs = nb_segs;
-	return 0;
+	return packet_reset(pkt, len);
 }
 
 int odp_event_filter_packet(const odp_event_t event[],
