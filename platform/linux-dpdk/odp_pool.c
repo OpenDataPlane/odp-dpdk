@@ -913,16 +913,6 @@ int odp_buffer_alloc_multi(odp_pool_t pool_hdl, odp_buffer_t buf[], int num)
 	return _odp_event_alloc_multi(pool, (_odp_event_hdr_t **)buf, num);
 }
 
-void odp_buffer_free(odp_buffer_t buf)
-{
-	_odp_event_free(odp_buffer_to_event(buf));
-}
-
-void odp_buffer_free_multi(const odp_buffer_t buf[], int num)
-{
-	_odp_event_free_multi((_odp_event_hdr_t **)(uintptr_t)buf, num);
-}
-
 void odp_pool_print(odp_pool_t pool_hdl)
 {
 	pool_t *pool = _odp_pool_entry(pool_hdl);
