@@ -882,9 +882,8 @@ odp_pool_t odp_pool_lookup(const char *name)
 
 odp_buffer_t odp_buffer_alloc(odp_pool_t pool_hdl)
 {
-	odp_buffer_t buf;
+	odp_event_t event;
 	pool_t *pool;
-	int ret;
 
 	ODP_ASSERT(ODP_POOL_INVALID != pool_hdl);
 
@@ -892,10 +891,9 @@ odp_buffer_t odp_buffer_alloc(odp_pool_t pool_hdl)
 
 	ODP_ASSERT(pool->type == ODP_POOL_BUFFER);
 
-	ret  = _odp_event_alloc_multi(pool, (_odp_event_hdr_t **)&buf, 1);
-
-	if (odp_likely(ret == 1))
-		return buf;
+	event = _odp_event_alloc(pool);
+	if (odp_likely(event != ODP_EVENT_INVALID))
+		return odp_buffer_from_event(event);
 
 	return ODP_BUFFER_INVALID;
 }
