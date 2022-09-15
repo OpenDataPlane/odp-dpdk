@@ -33,6 +33,7 @@ extern const _odp_event_inline_offset_t _odp_event_inline_offset;
 	#define odp_buffer_from_event __odp_buffer_from_event
 	#define odp_buffer_to_event __odp_buffer_to_event
 	#define odp_buffer_addr __odp_buffer_addr
+	#define odp_buffer_size __odp_buffer_size
 	#define odp_buffer_pool __odp_buffer_pool
 	#define odp_buffer_free __odp_buffer_free
 	#define odp_buffer_free_multi __odp_buffer_free_multi
@@ -53,6 +54,11 @@ _ODP_INLINE odp_event_t odp_buffer_to_event(odp_buffer_t buf)
 _ODP_INLINE void *odp_buffer_addr(odp_buffer_t buf)
 {
 	return _odp_event_hdr_field(buf, void *, base_data);
+}
+
+_ODP_INLINE uint32_t odp_buffer_size(odp_buffer_t buf)
+{
+	return _odp_event_hdr_field(buf, uint16_t, buf_len);
 }
 
 _ODP_INLINE odp_pool_t odp_buffer_pool(odp_buffer_t buf)

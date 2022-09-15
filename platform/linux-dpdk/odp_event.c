@@ -37,6 +37,7 @@ _odp_event_inline_offset ODP_ALIGNED_CACHE = {
 	.base_data  = offsetof(_odp_event_hdr_t, mb.buf_addr),
 	.flow_id    = offsetof(_odp_event_hdr_t, flow_id),
 	.pool       = offsetof(_odp_event_hdr_t, pool),
+	.buf_len    = offsetof(_odp_event_hdr_t, mb.buf_len)
 };
 
 #include <odp/visibility_end.h>
