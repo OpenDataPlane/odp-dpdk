@@ -944,16 +944,19 @@ static inline int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[
 		for (i = 0; i < num_pkts; i++) {
 			odp_packet_t pkt = pkt_table[i];
 			odp_pool_t new_pool;
-			uint8_t *data;
+			uint8_t *data = odp_packet_data(pkt);
 			odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
+			int ret;
 
-			data = odp_packet_data(pkt);
+			ret = _odp_cls_classify_packet(pktio_entry, data, &new_pool, pkt_hdr);
+			if (odp_unlikely(ret)) {
+				if (ret < 0)
+					odp_atomic_inc_u64(&pktio_entry->stats_extra.in_discards);
 
-			if (_odp_cls_classify_packet(pktio_entry, data,
-						     &new_pool, pkt_hdr)) {
 				odp_packet_free(pkt);
 				continue;
 			}
+
 			if (new_pool != odp_packet_pool(pkt)) {
 				odp_packet_t new_pkt = odp_packet_copy(pkt, new_pool);
 
