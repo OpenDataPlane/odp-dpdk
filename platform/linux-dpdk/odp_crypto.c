@@ -1866,8 +1866,12 @@ int odp_crypto_int(odp_packet_t pkt_in,
 		pkt_in = ODP_PACKET_INVALID;
 	}
 
-	if (linearize_pkt(session, out_pkt))
-		goto err;
+	if (odp_unlikely(linearize_pkt(session, out_pkt))) {
+		result_ok = false;
+		rc_cipher = ODP_CRYPTO_ALG_ERR_DATA_SIZE;
+		rc_auth = ODP_CRYPTO_ALG_ERR_DATA_SIZE;
+		goto out;
+	}
 
 	rte_session = session->rte_session;
 	/* NULL rte_session means that it is a NULL-NULL operation.
