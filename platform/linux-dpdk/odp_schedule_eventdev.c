@@ -183,7 +183,8 @@ static int link_group(int group, const odp_thrmask_t *mask, odp_bool_t unlink)
 		nb_links++;
 	}
 
-	new_mask = *mask;
+	odp_thrmask_copy(&new_mask, mask);
+
 	thr = odp_thrmask_first(&new_mask);
 	while (thr >= 0) {
 		uint8_t port_id = thr;
