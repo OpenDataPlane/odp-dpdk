@@ -132,15 +132,7 @@ static inline int packet_reset(odp_packet_t pkt, uint32_t len)
 	uint8_t nb_segs = 0;
 	int32_t lenleft = len;
 
-	pkt_hdr->p.input_flags.all  = 0;
-	pkt_hdr->p.flags.all_flags  = 0;
-
-	pkt_hdr->p.l2_offset = 0;
-	pkt_hdr->p.l3_offset = ODP_PACKET_OFFSET_INVALID;
-	pkt_hdr->p.l4_offset = ODP_PACKET_OFFSET_INVALID;
-
-	pkt_hdr->input = ODP_PKTIO_INVALID;
-	pkt_hdr->subtype = ODP_EVENT_PACKET_BASIC;
+	packet_init(pkt_hdr, ODP_PKTIO_INVALID);
 
 	mb->port = 0xff;
 	mb->pkt_len = len;
