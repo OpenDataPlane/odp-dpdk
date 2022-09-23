@@ -1803,6 +1803,58 @@ static int linearize_pkt(const crypto_session_entry_t *session, odp_packet_t pkt
 	return odp_packet_num_segs(pkt) != 1;
 }
 
+static int copy_data_and_metadata(odp_packet_t dst, odp_packet_t src)
+{
+	int md_copy;
+	int rc;
+
+	md_copy = _odp_packet_copy_md_possible(odp_packet_pool(dst),
+					       odp_packet_pool(src));
+	if (odp_unlikely(md_copy < 0)) {
+		ODP_ERR("Unable to copy packet metadata\n");
+		return -1;
+	}
+
+	rc = odp_packet_copy_from_pkt(dst, 0, src, 0, odp_packet_len(src));
+	if (odp_unlikely(rc < 0)) {
+		ODP_ERR("Unable to copy packet data\n");
+		return -1;
+	}
+
+	_odp_packet_copy_md(packet_hdr(dst), packet_hdr(src), md_copy);
+	return 0;
+}
+
+static odp_packet_t get_output_packet(const crypto_session_entry_t *session,
+				      odp_packet_t pkt_in,
+				      odp_packet_t pkt_out)
+{
+	int rc;
+
+	if (odp_likely(pkt_in == pkt_out))
+		return pkt_out;
+
+	if (pkt_out == ODP_PACKET_INVALID) {
+		odp_pool_t pool = session->p.output_pool;
+
+		ODP_ASSERT(pool != ODP_POOL_INVALID);
+		if (pool == odp_packet_pool(pkt_in)) {
+			pkt_out = pkt_in;
+		} else {
+			pkt_out = odp_packet_copy(pkt_in, pool);
+			if (odp_likely(pkt_out != ODP_PACKET_INVALID))
+				odp_packet_free(pkt_in);
+		}
+		return pkt_out;
+	}
+	rc = copy_data_and_metadata(pkt_out, pkt_in);
+	if (odp_unlikely(rc < 0))
+		return ODP_PACKET_INVALID;
+
+	odp_packet_free(pkt_in);
+	return pkt_out;
+}
+
 static
 int odp_crypto_int(odp_packet_t pkt_in,
 		   odp_packet_t *pkt_out,
@@ -1813,27 +1865,13 @@ int odp_crypto_int(odp_packet_t pkt_in,
 	odp_crypto_alg_err_t rc_auth = ODP_CRYPTO_ALG_ERR_NONE;
 	struct rte_cryptodev_sym_session *rte_session = NULL;
 	struct rte_crypto_op *op = NULL;
-	odp_bool_t allocated = false;
-	odp_packet_t out_pkt = *pkt_out;
+	odp_packet_t out_pkt;
 	odp_crypto_packet_result_t *op_result;
 	odp_bool_t result_ok = true;
 
 	session = (crypto_session_entry_t *)(intptr_t)param->session;
 	if (odp_unlikely(session == NULL))
 		return -1;
-
-	/* Resolve output buffer */
-	if (ODP_PACKET_INVALID == out_pkt &&
-	    ODP_POOL_INVALID != session->p.output_pool) {
-		out_pkt = odp_packet_alloc(session->p.output_pool,
-					   odp_packet_len(pkt_in));
-		allocated = true;
-	}
-
-	if (odp_unlikely(ODP_PACKET_INVALID == out_pkt)) {
-		ODP_DBG("Alloc failed.\n");
-		return -1;
-	}
 
 	op = rte_crypto_op_alloc(global->crypto_op_pool,
 				 RTE_CRYPTO_OP_TYPE_SYMMETRIC);
@@ -1842,29 +1880,9 @@ int odp_crypto_int(odp_packet_t pkt_in,
 		goto err;
 	}
 
-	if (pkt_in != out_pkt) {
-		int ret;
-		int md_copy;
-
-		md_copy = _odp_packet_copy_md_possible(odp_packet_pool(out_pkt),
-						       odp_packet_pool(pkt_in));
-		if (odp_unlikely(md_copy < 0)) {
-			ODP_ERR("Unable to copy packet metadata\n");
-			goto err;
-		}
-
-		ret = odp_packet_copy_from_pkt(out_pkt,
-					       0,
-					       pkt_in,
-					       0,
-					       odp_packet_len(pkt_in));
-		if (odp_unlikely(ret < 0))
-			goto err;
-
-		_odp_packet_copy_md(packet_hdr(out_pkt), packet_hdr(pkt_in), md_copy);
-		odp_packet_free(pkt_in);
-		pkt_in = ODP_PACKET_INVALID;
-	}
+	out_pkt = get_output_packet(session, pkt_in, *pkt_out);
+	if (odp_unlikely(out_pkt == ODP_PACKET_INVALID))
+		goto err;
 
 	if (odp_unlikely(linearize_pkt(session, out_pkt))) {
 		result_ok = false;
@@ -1995,10 +2013,6 @@ out:
 err:
 	if (op)
 		rte_crypto_op_free(op);
-	if (allocated) {
-		odp_packet_free(out_pkt);
-		out_pkt = ODP_PACKET_INVALID;
-	}
 
 	return -1;
 }
