@@ -12,6 +12,8 @@
 #include <odp_cunit_common.h>
 #include <unistd.h>
 
+#define MAX_WORKERS		32
+
 #define ADD_SUB_CNT		5
 
 #define CNT			100000ULL
@@ -969,7 +971,6 @@ static int atomic_init(odp_instance_t *inst)
 {
 	uint32_t workers_count, max_threads;
 	int ret = 0;
-	odp_cpumask_t mask;
 	odp_init_t init_param;
 	odph_helper_options_t helper_options;
 
@@ -1002,7 +1003,7 @@ static int atomic_init(odp_instance_t *inst)
 
 	global_mem->g_num_threads = MAX_WORKERS;
 
-	workers_count = odp_cpumask_default_worker(&mask, 0);
+	workers_count = odp_cpumask_default_worker(NULL, 0);
 
 	max_threads = (workers_count >= MAX_WORKERS) ?
 			MAX_WORKERS : workers_count;
@@ -1271,13 +1272,12 @@ static int test_atomic_non_relaxed_thread(void *arg UNUSED)
 
 static void test_atomic_functional(int test_fn(void *), void validate_fn(void))
 {
-	pthrd_arg arg;
+	int num = global_mem->g_num_threads;
 
-	arg.numthrds = global_mem->g_num_threads;
 	test_atomic_init();
 	test_atomic_store();
-	odp_cunit_thread_create(test_fn, &arg);
-	odp_cunit_thread_exit(&arg);
+	odp_cunit_thread_create(num, test_fn, NULL, 0);
+	odp_cunit_thread_join(num);
 	validate_fn();
 }
 

@@ -26,6 +26,7 @@
 #include <odp_packet_dpdk.h>
 #include <odp_packet_internal.h>
 #include <odp_packet_io_internal.h>
+#include <odp_pool_internal.h>
 #include <protocols/eth.h>
 
 #include <rte_config.h>
@@ -90,8 +91,6 @@ typedef struct {
 typedef struct ODP_ALIGNED_CACHE {
 	/* --- Fast path data --- */
 
-	/* Supported RTE_PTYPE_XXX flags in a mask */
-	uint32_t supported_ptypes;
 	/* DPDK port identifier */
 	uint16_t port_id;
 	struct {
@@ -99,8 +98,6 @@ typedef struct ODP_ALIGNED_CACHE {
 		uint8_t lockless_rx : 1;
 		/* No locking for tx */
 		uint8_t lockless_tx : 1;
-		/* Promiscuous mode defined with system call */
-		uint8_t vdev_sysc_promisc : 1;
 	} flags;
 	/* Minimum RX burst size */
 	uint8_t min_rx_burst;
@@ -116,7 +113,7 @@ typedef struct ODP_ALIGNED_CACHE {
 	/* Maximum supported MTU value */
 	uint32_t mtu_max;
 	/* DPDK MTU has been modified */
-	odp_bool_t mtu_set;
+	uint8_t mtu_set;
 	/* Number of TX descriptors per queue */
 	uint16_t num_tx_desc[PKTIO_MAX_QUEUES];
 
@@ -134,7 +131,7 @@ ODP_STATIC_ASSERT(PKTIO_PRIVATE_SIZE >= sizeof(pkt_dpdk_t),
 
 static inline pkt_dpdk_t *pkt_priv(pktio_entry_t *pktio_entry)
 {
-	return (pkt_dpdk_t *)(uintptr_t)(pktio_entry->s.pkt_priv);
+	return (pkt_dpdk_t *)(uintptr_t)(pktio_entry->pkt_priv);
 }
 
 /* Ops for all implementation of pktio.
@@ -255,7 +252,7 @@ static int dpdk_maxlen_set(pktio_entry_t *pktio_entry, uint32_t maxlen_input,
 		ODP_ERR("rte_eth_dev_set_mtu() failed: %d\n", ret);
 
 	pkt_dpdk->mtu = maxlen_input;
-	pkt_dpdk->mtu_set = true;
+	pkt_dpdk->mtu_set = 1;
 
 	return ret;
 }
@@ -265,7 +262,7 @@ static int dpdk_setup_eth_dev(pktio_entry_t *pktio_entry)
 	int ret;
 	pkt_dpdk_t *pkt_dpdk = pkt_priv(pktio_entry);
 	struct rte_eth_conf eth_conf;
-	pool_t *pool = pool_entry_from_hdl(pktio_entry->s.pool);
+	pool_t *pool = _odp_pool_entry(pktio_entry->pool);
 	uint64_t rx_offloads = 0;
 	uint64_t tx_offloads = 0;
 
@@ -276,34 +273,34 @@ static int dpdk_setup_eth_dev(pktio_entry_t *pktio_entry)
 	eth_conf.rx_adv_conf.rss_conf = pkt_dpdk->rss_conf;
 
 	/* Setup RX checksum offloads */
-	if (pktio_entry->s.config.pktin.bit.ipv4_chksum)
+	if (pktio_entry->config.pktin.bit.ipv4_chksum)
 		rx_offloads |= DEV_RX_OFFLOAD_IPV4_CKSUM;
 
-	if (pktio_entry->s.config.pktin.bit.udp_chksum)
+	if (pktio_entry->config.pktin.bit.udp_chksum)
 		rx_offloads |= DEV_RX_OFFLOAD_UDP_CKSUM;
 
-	if (pktio_entry->s.config.pktin.bit.tcp_chksum)
+	if (pktio_entry->config.pktin.bit.tcp_chksum)
 		rx_offloads |= DEV_RX_OFFLOAD_TCP_CKSUM;
 
 	eth_conf.rxmode.offloads = rx_offloads;
 
 	/* Setup TX checksum offloads */
-	if (pktio_entry->s.config.pktout.bit.ipv4_chksum_ena)
+	if (pktio_entry->config.pktout.bit.ipv4_chksum_ena)
 		tx_offloads |= DEV_TX_OFFLOAD_IPV4_CKSUM;
 
-	if (pktio_entry->s.config.pktout.bit.udp_chksum_ena)
+	if (pktio_entry->config.pktout.bit.udp_chksum_ena)
 		tx_offloads |= DEV_TX_OFFLOAD_UDP_CKSUM;
 
-	if (pktio_entry->s.config.pktout.bit.tcp_chksum_ena)
+	if (pktio_entry->config.pktout.bit.tcp_chksum_ena)
 		tx_offloads |= DEV_TX_OFFLOAD_TCP_CKSUM;
 
-	if (pktio_entry->s.config.pktout.bit.sctp_chksum_ena)
+	if (pktio_entry->config.pktout.bit.sctp_chksum_ena)
 		tx_offloads |= DEV_TX_OFFLOAD_SCTP_CKSUM;
 
 	eth_conf.txmode.offloads = tx_offloads;
 
 	if (tx_offloads)
-		pktio_entry->s.enabled.chksum_insert = 1;
+		pktio_entry->enabled.chksum_insert = 1;
 
 	/* RX packet len same size as pool segment minus headroom and double
 	 * VLAN tag
@@ -317,8 +314,8 @@ static int dpdk_setup_eth_dev(pktio_entry_t *pktio_entry)
 		2 * 4 - RTE_PKTMBUF_HEADROOM;
 
 	ret = rte_eth_dev_configure(pkt_dpdk->port_id,
-				    pktio_entry->s.num_in_queue,
-				    pktio_entry->s.num_out_queue, &eth_conf);
+				    pktio_entry->num_in_queue,
+				    pktio_entry->num_out_queue, &eth_conf);
 	if (ret < 0) {
 		ODP_ERR("Failed to setup device: err=%d, port=%" PRIu8 "\n",
 			ret, pkt_dpdk->port_id);
@@ -400,7 +397,7 @@ static void prepare_rss_conf(pktio_entry_t *pktio_entry,
 static int dpdk_input_queues_config(pktio_entry_t *pktio_entry,
 				    const odp_pktin_queue_param_t *p)
 {
-	odp_pktin_mode_t mode = pktio_entry->s.param.in_mode;
+	odp_pktin_mode_t mode = pktio_entry->param.in_mode;
 	uint8_t lockless;
 
 	prepare_rss_conf(pktio_entry, p);
@@ -479,11 +476,30 @@ static int dpdk_term_global(void)
 	return 0;
 }
 
+static int promisc_mode_check(pkt_dpdk_t *pkt_dpdk)
+{
+	int ret;
+
+	ret = rte_eth_promiscuous_enable(pkt_dpdk->port_id);
+	if (ret) {
+		ODP_DBG("Promisc mode enable not supported: %d\n", ret);
+		return 0;
+	}
+
+	ret = rte_eth_promiscuous_disable(pkt_dpdk->port_id);
+	if (ret) {
+		ODP_DBG("Promisc mode disable not supported: %d\n", ret);
+		return 0;
+	}
+
+	return 1;
+}
+
 static int dpdk_init_capability(pktio_entry_t *pktio_entry,
 				const struct rte_eth_dev_info *dev_info)
 {
 	pkt_dpdk_t *pkt_dpdk = pkt_priv(pktio_entry);
-	odp_pktio_capability_t *capa = &pktio_entry->s.capa;
+	odp_pktio_capability_t *capa = &pktio_entry->capa;
 	struct rte_ether_addr mac_addr;
 	int ret;
 	int ptype_cnt;
@@ -508,7 +524,7 @@ static int dpdk_init_capability(pktio_entry_t *pktio_entry,
 	capa->min_output_queue_size = dev_info->tx_desc_lim.nb_min;
 	capa->max_output_queue_size = dev_info->tx_desc_lim.nb_max;
 
-	capa->set_op.op.promisc_mode = 1;
+	capa->set_op.op.promisc_mode = promisc_mode_check(pkt_dpdk);
 
 	/* Check if setting default MAC address is supported */
 	rte_eth_macaddr_get(pkt_dpdk->port_id, &mac_addr);
@@ -618,23 +634,6 @@ static int dpdk_init_capability(pktio_entry_t *pktio_entry,
 	return 0;
 }
 
-/* Some DPDK PMD virtual devices, like PCAP, do not support promisc
- * mode change. Use system call for them. */
-static void promisc_mode_check(pkt_dpdk_t *pkt_dpdk)
-{
-	int ret;
-
-	ret = rte_eth_promiscuous_enable(pkt_dpdk->port_id);
-
-	if (!rte_eth_promiscuous_get(pkt_dpdk->port_id))
-		pkt_dpdk->flags.vdev_sysc_promisc = 1;
-
-	ret += rte_eth_promiscuous_disable(pkt_dpdk->port_id);
-
-	if (ret)
-		pkt_dpdk->flags.vdev_sysc_promisc = 1;
-}
-
 static int setup_pkt_dpdk(odp_pktio_t pktio ODP_UNUSED,
 			  pktio_entry_t *pktio_entry,
 			  const char *netdev, odp_pool_t pool ODP_UNUSED)
@@ -691,15 +690,14 @@ static int setup_pkt_dpdk(odp_pktio_t pktio ODP_UNUSED,
 	}
 	pkt_dpdk->mtu = mtu + _ODP_ETHHDR_LEN;
 	pkt_dpdk->mtu_max = RTE_MAX(pkt_dpdk->mtu, DPDK_MTU_MAX);
-	pkt_dpdk->mtu_set = false;
+	pkt_dpdk->mtu_set = 0;
 
 	if (dpdk_init_capability(pktio_entry, &dev_info)) {
 		ODP_ERR("Failed to initialize capability\n");
 		return -1;
 	}
 
-	/* Setup promiscuous mode and multicast */
-	promisc_mode_check(pkt_dpdk);
+	/* Setup multicast */
 	if (pkt_dpdk->opt.multicast_enable)
 		rte_eth_allmulticast_enable(pkt_dpdk->port_id);
 	else
@@ -734,7 +732,7 @@ static int dpdk_setup_eth_tx(pktio_entry_t *pktio_entry,
 	int ret;
 	uint16_t port_id = pkt_dpdk->port_id;
 
-	for (i = 0; i < pktio_entry->s.num_out_queue; i++) {
+	for (i = 0; i < pktio_entry->num_out_queue; i++) {
 		ret = rte_eth_tx_queue_setup(port_id, i,
 					     pkt_dpdk->num_tx_desc[i],
 					     rte_eth_dev_socket_id(port_id),
@@ -748,7 +746,7 @@ static int dpdk_setup_eth_tx(pktio_entry_t *pktio_entry,
 
 	/* Set per queue statistics mappings. Not supported by all PMDs, so
 	 * ignore the return value. */
-	for (i = 0; i < pktio_entry->s.num_out_queue && i < RTE_ETHDEV_QUEUE_STAT_CNTRS; i++) {
+	for (i = 0; i < pktio_entry->num_out_queue && i < RTE_ETHDEV_QUEUE_STAT_CNTRS; i++) {
 		ret = rte_eth_dev_set_tx_queue_stats_mapping(port_id, i, i);
 		if (ret) {
 			ODP_DBG("Mapping per TX queue statistics not supported: %d\n", ret);
@@ -769,7 +767,7 @@ static int dpdk_setup_eth_rx(const pktio_entry_t *pktio_entry,
 	int ret;
 	uint16_t port_id = pkt_dpdk->port_id;
 	uint16_t num_rx_desc = pkt_dpdk->opt.num_rx_desc;
-	pool_t *pool = pool_entry_from_hdl(pktio_entry->s.pool);
+	pool_t *pool = _odp_pool_entry(pktio_entry->pool);
 
 	rxconf = dev_info->default_rxconf;
 
@@ -784,7 +782,7 @@ static int dpdk_setup_eth_rx(const pktio_entry_t *pktio_entry,
 
 	ODP_DBG("RX queues using %" PRIu16 " descriptors\n", num_rx_desc);
 
-	for (i = 0; i < pktio_entry->s.num_in_queue; i++) {
+	for (i = 0; i < pktio_entry->num_in_queue; i++) {
 		ret = rte_eth_rx_queue_setup(port_id, i, num_rx_desc,
 					     rte_eth_dev_socket_id(port_id),
 					     &rxconf, pool->rte_mempool);
@@ -797,7 +795,7 @@ static int dpdk_setup_eth_rx(const pktio_entry_t *pktio_entry,
 
 	/* Set per queue statistics mappings. Not supported by all PMDs, so
 	 * ignore the return value. */
-	for (i = 0; i < pktio_entry->s.num_in_queue && i < RTE_ETHDEV_QUEUE_STAT_CNTRS; i++) {
+	for (i = 0; i < pktio_entry->num_in_queue && i < RTE_ETHDEV_QUEUE_STAT_CNTRS; i++) {
 		ret = rte_eth_dev_set_rx_queue_stats_mapping(port_id, i, i);
 		if (ret) {
 			ODP_DBG("Mapping per RX queue statistics not supported: %d\n", ret);
@@ -809,49 +807,6 @@ static int dpdk_setup_eth_rx(const pktio_entry_t *pktio_entry,
 	return 0;
 }
 
-static void dpdk_ptype_support_set(pktio_entry_t *pktio_entry, uint16_t port_id)
-{
-	int max_num, num, i;
-	pkt_dpdk_t *pkt_dpdk = pkt_priv(pktio_entry);
-	uint32_t mask = RTE_PTYPE_L2_MASK | RTE_PTYPE_L3_MASK |
-			RTE_PTYPE_L4_MASK;
-
-	pkt_dpdk->supported_ptypes = 0;
-
-	max_num = rte_eth_dev_get_supported_ptypes(port_id, mask, NULL, 0);
-	if (max_num <= 0) {
-		ODP_DBG("Device does not support any ptype flags\n");
-		return;
-	}
-
-	uint32_t ptype[max_num];
-
-	num = rte_eth_dev_get_supported_ptypes(port_id, mask, ptype, max_num);
-	if (num <= 0) {
-		ODP_ERR("Device does not support any ptype flags\n");
-		return;
-	}
-
-	for (i = 0; i < num; i++) {
-		ODP_DBG("  supported ptype: 0x%x\n", ptype[i]);
-
-		if (ptype[i] == RTE_PTYPE_L2_ETHER_VLAN)
-			pkt_dpdk->supported_ptypes |= PTYPE_VLAN;
-		else if (ptype[i] == RTE_PTYPE_L2_ETHER_QINQ)
-			pkt_dpdk->supported_ptypes |= PTYPE_VLAN_QINQ;
-		else if (ptype[i] == RTE_PTYPE_L2_ETHER_ARP)
-			pkt_dpdk->supported_ptypes |= PTYPE_ARP;
-		else if (RTE_ETH_IS_IPV4_HDR(ptype[i]))
-			pkt_dpdk->supported_ptypes |= PTYPE_IPV4;
-		else if (RTE_ETH_IS_IPV6_HDR(ptype[i]))
-			pkt_dpdk->supported_ptypes |= PTYPE_IPV6;
-		else if (ptype[i] == RTE_PTYPE_L4_UDP)
-			pkt_dpdk->supported_ptypes |= PTYPE_UDP;
-		else if (ptype[i] == RTE_PTYPE_L4_TCP)
-			pkt_dpdk->supported_ptypes |= PTYPE_TCP;
-	}
-}
-
 static int dpdk_start(pktio_entry_t *pktio_entry)
 {
 	struct rte_eth_dev_info dev_info;
@@ -859,15 +814,15 @@ static int dpdk_start(pktio_entry_t *pktio_entry)
 	uint16_t port_id = pkt_dpdk->port_id;
 	int ret;
 
-	if (pktio_entry->s.state == PKTIO_STATE_STOPPED ||
-	    pktio_entry->s.state == PKTIO_STATE_STOP_PENDING)
+	if (pktio_entry->state == PKTIO_STATE_STOPPED ||
+	    pktio_entry->state == PKTIO_STATE_STOP_PENDING)
 		rte_eth_dev_stop(pkt_dpdk->port_id);
 
 	/* DPDK doesn't support nb_rx_q/nb_tx_q being 0 */
-	if (!pktio_entry->s.num_in_queue)
-		pktio_entry->s.num_in_queue = 1;
-	if (!pktio_entry->s.num_out_queue)
-		pktio_entry->s.num_out_queue = 1;
+	if (!pktio_entry->num_in_queue)
+		pktio_entry->num_in_queue = 1;
+	if (!pktio_entry->num_out_queue)
+		pktio_entry->num_out_queue = 1;
 
 	rte_eth_dev_info_get(port_id, &dev_info);
 
@@ -886,7 +841,7 @@ static int dpdk_start(pktio_entry_t *pktio_entry)
 		return -1;
 
 	/* Restore MTU value resetted by dpdk_setup_eth_rx() */
-	if (pkt_dpdk->mtu_set && pktio_entry->s.capa.set_op.op.maxlen) {
+	if (pkt_dpdk->mtu_set && pktio_entry->capa.set_op.op.maxlen) {
 		ret = dpdk_maxlen_set(pktio_entry, pkt_dpdk->mtu, 0);
 		if (ret) {
 			ODP_ERR("Restoring device MTU failed: err=%d, port=%" PRIu8 "\n",
@@ -903,9 +858,6 @@ static int dpdk_start(pktio_entry_t *pktio_entry)
 		return -1;
 	}
 
-	/* Record supported parser ptype flags */
-	dpdk_ptype_support_set(pktio_entry, port_id);
-
 	return 0;
 }
 
@@ -915,9 +867,9 @@ static int stop_pkt_dpdk(pktio_entry_t *pktio_entry)
 	unsigned int i;
 	uint16_t port_id = pkt_dpdk->port_id;
 
-	for (i = 0; i < pktio_entry->s.num_in_queue; i++)
+	for (i = 0; i < pktio_entry->num_in_queue; i++)
 		rte_eth_dev_rx_queue_stop(port_id, i);
-	for (i = 0; i < pktio_entry->s.num_out_queue; i++)
+	for (i = 0; i < pktio_entry->num_out_queue; i++)
 		rte_eth_dev_tx_queue_stop(port_id, i);
 
 	return 0;
@@ -932,16 +884,14 @@ static inline void prefetch_pkt(odp_packet_t pkt)
 
 static inline int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int num)
 {
-	pkt_dpdk_t * const pkt_dpdk = pkt_priv(pktio_entry);
 	uint16_t i;
 	uint16_t num_pkts = 0;
-	odp_pktin_config_opt_t pktin_cfg = pktio_entry->s.config.pktin;
-	odp_pktio_t input = pktio_entry->s.handle;
+	odp_pktin_config_opt_t pktin_cfg = pktio_entry->config.pktin;
+	odp_pktio_t input = pktio_entry->handle;
 	odp_time_t ts_val;
 	odp_time_t *ts = NULL;
-	const uint32_t supported_ptypes = pkt_dpdk->supported_ptypes;
 	uint16_t num_prefetch = RTE_MIN(num, NUM_RX_PREFETCH);
-	const odp_proto_layer_t layer = pktio_entry->s.parse_layer;
+	const odp_proto_layer_t layer = pktio_entry->parse_layer;
 
 	for (i = 0; i < num_prefetch; i++)
 		prefetch_pkt(pkt_table[i]);
@@ -962,15 +912,22 @@ static inline int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[
 		packet_init(pkt_hdr, input);
 
 		if (layer != ODP_PROTO_LAYER_NONE) {
-			if (_odp_dpdk_packet_parse_common(&pkt_hdr->p,
-							  rte_pktmbuf_mtod(mbuf, uint8_t *),
-							  rte_pktmbuf_pkt_len(mbuf),
-							  rte_pktmbuf_data_len(mbuf),
-							  mbuf, layer,
-							  supported_ptypes, pktin_cfg)) {
-				odp_packet_free(pkt);
-				continue;
+			int ret;
+
+			ret = _odp_dpdk_packet_parse_common(pkt_hdr,
+							    rte_pktmbuf_mtod(mbuf, uint8_t *),
+							    rte_pktmbuf_pkt_len(mbuf),
+							    rte_pktmbuf_data_len(mbuf),
+							    mbuf, layer, pktin_cfg);
+			if (odp_unlikely(ret)) {
+				odp_atomic_inc_u64(&pktio_entry->stats_extra.in_errors);
+
+				if (ret < 0) {
+					odp_packet_free(pkt);
+					continue;
+				}
 			}
+
 			if (odp_unlikely(num_pkts != i))
 				pkt_table[num_pkts] = pkt;
 		}
@@ -986,22 +943,25 @@ static inline int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[
 		for (i = 0; i < num_pkts; i++) {
 			odp_packet_t pkt = pkt_table[i];
 			odp_pool_t new_pool;
-			uint8_t *data;
+			uint8_t *data = odp_packet_data(pkt);
 			odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
+			int ret;
 
-			data = odp_packet_data(pkt);
+			ret = _odp_cls_classify_packet(pktio_entry, data, &new_pool, pkt_hdr);
+			if (odp_unlikely(ret)) {
+				if (ret < 0)
+					odp_atomic_inc_u64(&pktio_entry->stats_extra.in_discards);
 
-			if (_odp_cls_classify_packet(pktio_entry, data,
-						     &new_pool, pkt_hdr)) {
 				odp_packet_free(pkt);
 				continue;
 			}
+
 			if (new_pool != odp_packet_pool(pkt)) {
 				odp_packet_t new_pkt = odp_packet_copy(pkt, new_pool);
 
 				odp_packet_free(pkt);
 				if (odp_unlikely(new_pkt == ODP_PACKET_INVALID)) {
-					odp_atomic_inc_u64(&pktio_entry->s.stats_extra.in_discards);
+					odp_atomic_inc_u64(&pktio_entry->stats_extra.in_discards);
 					continue;
 				}
 				pkt_table[i] = new_pkt;
@@ -1183,11 +1143,10 @@ static int send_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 			 const odp_packet_t pkt_table[], int num)
 {
 	pkt_dpdk_t * const pkt_dpdk = pkt_priv(pktio_entry);
-	uint8_t chksum_insert_ena = pktio_entry->s.enabled.chksum_insert;
-	uint8_t tx_ts_ena = pktio_entry->s.enabled.tx_ts;
-	odp_pktout_config_opt_t *pktout_cfg = &pktio_entry->s.config.pktout;
-	odp_pktout_config_opt_t *pktout_capa =
-		&pktio_entry->s.capa.config.pktout;
+	uint8_t chksum_insert_ena = pktio_entry->enabled.chksum_insert;
+	uint8_t tx_ts_ena = pktio_entry->enabled.tx_ts;
+	odp_pktout_config_opt_t *pktout_cfg = &pktio_entry->config.pktout;
+	odp_pktout_config_opt_t *pktout_capa = &pktio_entry->capa.config.pktout;
 	int tx_ts_idx = 0;
 	int pkts;
 
@@ -1269,101 +1228,34 @@ static uint32_t dpdk_maxlen_get(pktio_entry_t *pktio_entry)
 	return pkt_dpdk->mtu;
 }
 
-static int _dpdk_vdev_promisc_mode_set(uint16_t port_id, int enable)
-{
-	struct rte_eth_dev_info dev_info;
-	struct ifreq ifr;
-	int ret;
-	int sockfd;
-
-	rte_eth_dev_info_get(port_id, &dev_info);
-	if_indextoname(dev_info.if_index, ifr.ifr_name);
-	sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-
-	ret = ioctl(sockfd, SIOCGIFFLAGS, &ifr);
-	if (ret < 0) {
-		close(sockfd);
-		ODP_DBG("ioctl SIOCGIFFLAGS error\n");
-		return -1;
-	}
-
-	if (enable)
-		ifr.ifr_flags |= IFF_PROMISC;
-	else
-		ifr.ifr_flags &= ~(IFF_PROMISC);
-
-	ret = ioctl(sockfd, SIOCSIFFLAGS, &ifr);
-	if (ret < 0) {
-		close(sockfd);
-		ODP_DBG("ioctl SIOCSIFFLAGS error\n");
-		return -1;
-	}
-
-	ret = ioctl(sockfd, SIOCGIFMTU, &ifr);
-	if (ret < 0) {
-		close(sockfd);
-		ODP_DBG("ioctl SIOCGIFMTU error\n");
-		return -1;
-	}
-
-	ODP_DBG("vdev promisc set to %d\n", enable);
-	close(sockfd);
-	return 0;
-}
-
 static int promisc_mode_set_pkt_dpdk(pktio_entry_t *pktio_entry,  int enable)
 {
 	uint16_t port_id = pkt_priv(pktio_entry)->port_id;
+	int ret;
 
 	if (enable)
-		rte_eth_promiscuous_enable(port_id);
+		ret = rte_eth_promiscuous_enable(port_id);
 	else
-		rte_eth_promiscuous_disable(port_id);
+		ret = rte_eth_promiscuous_disable(port_id);
 
-	if (pkt_priv(pktio_entry)->flags.vdev_sysc_promisc) {
-		int ret = _dpdk_vdev_promisc_mode_set(port_id, enable);
-
-		if (ret < 0)
-			ODP_DBG("vdev promisc mode fail\n");
-	}
-
-	return 0;
-}
-
-static int _dpdk_vdev_promisc_mode(uint16_t port_id)
-{
-	struct rte_eth_dev_info dev_info;
-	struct ifreq ifr;
-	int ret;
-	int sockfd;
-
-	rte_eth_dev_info_get(port_id, &dev_info);
-	if_indextoname(dev_info.if_index, ifr.ifr_name);
-	sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-	ret = ioctl(sockfd, SIOCGIFFLAGS, &ifr);
-	close(sockfd);
-	if (ret < 0) {
-		ODP_DBG("ioctl SIOCGIFFLAGS error\n");
+	if (ret) {
+		ODP_ERR("Setting promisc mode failed: %d\n", ret);
 		return -1;
 	}
-
-	if (ifr.ifr_flags & IFF_PROMISC) {
-		ODP_DBG("promisc is 1\n");
-		return 1;
-	} else {
-		return 0;
-	}
+	return 0;
 }
 
 static int promisc_mode_get_pkt_dpdk(pktio_entry_t *pktio_entry)
 {
-	pkt_dpdk_t * const pkt_dpdk = pkt_priv(pktio_entry);
-	uint16_t port_id = pkt_dpdk->port_id;
+	uint16_t port_id = pkt_priv(pktio_entry)->port_id;
+	int ret;
 
-	if (pkt_dpdk->flags.vdev_sysc_promisc)
-		return _dpdk_vdev_promisc_mode(port_id);
-	else
-		return rte_eth_promiscuous_get(port_id);
+	ret = rte_eth_promiscuous_get(port_id);
+	if (ret < 0) {
+		ODP_ERR("Getting promisc mode failed: %d\n", ret);
+		return -1;
+	}
+	return ret;
 }
 
 static int mac_get_pkt_dpdk(pktio_entry_t *pktio_entry, void *mac_addr)
@@ -1384,7 +1276,7 @@ static int mac_set_pkt_dpdk(pktio_entry_t *pktio_entry, const void *mac_addr)
 static int capability_pkt_dpdk(pktio_entry_t *pktio_entry,
 			       odp_pktio_capability_t *capa)
 {
-	*capa = pktio_entry->s.capa;
+	*capa = pktio_entry->capa;
 	return 0;
 }
 

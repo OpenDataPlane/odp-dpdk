@@ -17,9 +17,9 @@ static inline int spsc_enq_multi(odp_queue_t handle,
 	ring_spsc_t ring_spsc;
 
 	queue = qentry_from_handle(handle);
-	ring_spsc = queue->s.ring_spsc;
+	ring_spsc = queue->ring_spsc;
 
-	if (odp_unlikely(queue->s.status < QUEUE_STATUS_READY)) {
+	if (odp_unlikely(queue->status < QUEUE_STATUS_READY)) {
 		ODP_ERR("Bad queue status\n");
 		return -1;
 	}
@@ -34,9 +34,9 @@ static inline int spsc_deq_multi(odp_queue_t handle,
 	ring_spsc_t ring_spsc;
 
 	queue = qentry_from_handle(handle);
-	ring_spsc = queue->s.ring_spsc;
+	ring_spsc = queue->ring_spsc;
 
-	if (odp_unlikely(queue->s.status < QUEUE_STATUS_READY)) {
+	if (odp_unlikely(queue->status < QUEUE_STATUS_READY)) {
 		/* Bad queue, or queue has been destroyed. */
 		return -1;
 	}
@@ -83,13 +83,13 @@ static _odp_event_hdr_t *queue_spsc_deq(odp_queue_t handle)
 
 void _odp_queue_spsc_init(queue_entry_t *queue, uint32_t queue_size)
 {
-	queue->s.enqueue = queue_spsc_enq;
-	queue->s.dequeue = queue_spsc_deq;
-	queue->s.enqueue_multi = queue_spsc_enq_multi;
-	queue->s.dequeue_multi = queue_spsc_deq_multi;
-	queue->s.orig_dequeue_multi = queue_spsc_deq_multi;
+	queue->enqueue = queue_spsc_enq;
+	queue->dequeue = queue_spsc_deq;
+	queue->enqueue_multi = queue_spsc_enq_multi;
+	queue->dequeue_multi = queue_spsc_deq_multi;
+	queue->orig_dequeue_multi = queue_spsc_deq_multi;
 
-	queue->s.ring_spsc = ring_spsc_create(queue->s.name, queue_size);
-	if (queue->s.ring_spsc == NULL)
+	queue->ring_spsc = ring_spsc_create(queue->name, queue_size);
+	if (queue->ring_spsc == NULL)
 		ODP_ABORT("Creating SPSC ring failed\n");
 }

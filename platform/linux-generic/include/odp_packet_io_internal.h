@@ -70,14 +70,14 @@ struct pktio_if_ops;
 #elif defined(_ODP_PKTIO_XDP)
 #define PKTIO_PRIVATE_SIZE 29696
 #elif defined(_ODP_PKTIO_DPDK) && ODP_CACHE_LINE_SIZE == 128
-#define PKTIO_PRIVATE_SIZE 10240
+#define PKTIO_PRIVATE_SIZE 4032
 #elif defined(_ODP_PKTIO_DPDK)
-#define PKTIO_PRIVATE_SIZE 5632
+#define PKTIO_PRIVATE_SIZE 3840
 #else
 #define PKTIO_PRIVATE_SIZE 384
 #endif
 
-struct pktio_entry {
+typedef struct ODP_ALIGNED_CACHE {
 	const struct pktio_if_ops *ops; /**< Implementation specific methods */
 	/* These two locks together lock the whole pktio device */
 	odp_ticketlock_t rxl;		/**< RX ticketlock */
@@ -131,6 +131,7 @@ struct pktio_entry {
 	/* Statistics counters used also outside drivers */
 	struct {
 		odp_atomic_u64_t in_discards;
+		odp_atomic_u64_t in_errors;
 		odp_atomic_u64_t out_discards;
 	} stats_extra;
 	/* Latest Tx timestamp */
@@ -172,11 +173,6 @@ struct pktio_entry {
 		} state[PKTIO_MAX_QUEUES];
 		int fd[PKTIO_MAX_QUEUES];
 	} pcapng;
-};
-
-typedef union {
-	struct pktio_entry s;
-	uint8_t pad[_ODP_ROUNDUP_CACHE_LINE(sizeof(struct pktio_entry))];
 } pktio_entry_t;
 
 typedef struct {
@@ -284,29 +280,29 @@ static inline pktio_entry_t *get_pktio_entry(odp_pktio_t pktio)
 
 static inline int pktio_cls_enabled(pktio_entry_t *entry)
 {
-	return entry->s.enabled.cls;
+	return entry->enabled.cls;
 }
 
 static inline int _odp_pktio_tx_ts_enabled(pktio_entry_t *entry)
 {
-	return entry->s.enabled.tx_ts;
+	return entry->enabled.tx_ts;
 }
 
 static inline int _odp_pktio_tx_compl_enabled(const pktio_entry_t *entry)
 {
-	return entry->s.enabled.tx_compl;
+	return entry->enabled.tx_compl;
 }
 
 static inline int _odp_pktio_tx_aging_enabled(pktio_entry_t *entry)
 {
-	return entry->s.enabled.tx_aging;
+	return entry->enabled.tx_aging;
 }
 
 static inline void _odp_pktio_tx_ts_set(pktio_entry_t *entry)
 {
 	odp_time_t ts_val = odp_time_global();
 
-	odp_atomic_store_u64(&entry->s.tx_ts, ts_val.u64);
+	odp_atomic_store_u64(&entry->tx_ts, ts_val.u64);
 }
 
 extern const pktio_if_ops_t _odp_netmap_pktio_ops;

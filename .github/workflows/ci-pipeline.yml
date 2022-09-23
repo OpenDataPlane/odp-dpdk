@@ -9,7 +9,7 @@ env:
 
 jobs:
   Checkpatch:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
     steps:
     - uses: actions/checkout@v2
       with:
@@ -39,7 +39,7 @@ jobs:
         ./scripts/ci-checkpatches.sh ${COMMIT_RANGE}
 
   Documentation:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
     steps:
     - uses: actions/checkout@v2
 
@@ -62,7 +62,7 @@ jobs:
         ! fgrep -rq warning ./doxygen.log
 
   Build:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
     strategy:
       fail-fast: false
       matrix:
@@ -83,7 +83,7 @@ jobs:
         run: find . -name config.log -exec cat {} \;
 
   Build_arm64:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
     env:
       ARCH: arm64
     strategy:
@@ -126,7 +126,7 @@ jobs:
         run: find . -name config.log -exec cat {} \;
 
   Build_ppc64el:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
     env:
       ARCH: ppc64el
     strategy:
@@ -142,7 +142,7 @@ jobs:
         run: find . -name config.log -exec cat {} \;
 
   Build_i386:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
     env:
       ARCH: i386
     strategy:
@@ -159,7 +159,7 @@ jobs:
         run: find . -name config.log -exec cat {} \;
 
   Build_OS:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
     strategy:
       fail-fast: false
       matrix:
@@ -174,25 +174,42 @@ jobs:
         if: ${{ failure() }}
         run: find . -name config.log -exec cat {} \;
 
-  Build_gcc-10:
-    runs-on: ubuntu-18.04
+  Build_gcc_u20:
+    runs-on: ubuntu-20.04
     env:
-      CC: gcc-10
       OS: ubuntu_20.04
     strategy:
       fail-fast: false
       matrix:
-        conf: ['', '--enable-lto']
+        cc_ver: [9]
+        conf: ['', '--enable-abi-compat']
     steps:
       - uses: actions/checkout@v2
-      - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}" -e CXX=g++-10
+      - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="gcc-${{matrix.cc_ver}}" -e CXX="g++-${{matrix.cc_ver}}"
+               -e CONF="${{matrix.conf}}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH} /odp/scripts/ci/build_${ARCH}.sh
+      - name: Failure log
+        if: ${{ failure() }}
+        run: find . -name config.log -exec cat {} \;
+
+  Build_gcc_u22:
+    runs-on: ubuntu-20.04
+    env:
+      OS: ubuntu_22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        cc_ver: [10, 11, 12]
+        conf: ['', '--enable-abi-compat']
+    steps:
+      - uses: actions/checkout@v2
+      - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="gcc-${{matrix.cc_ver}}" -e CXX="g++-${{matrix.cc_ver}}"
                -e CONF="${{matrix.conf}}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH} /odp/scripts/ci/build_${ARCH}.sh
       - name: Failure log
         if: ${{ failure() }}
         run: find . -name config.log -exec cat {} \;
 
   Build_out-of-tree:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
     steps:
     - uses: actions/checkout@v2
     - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}"
@@ -202,7 +219,7 @@ jobs:
       run: find . -name config.log -exec cat {} \;
 
   Build_linux-generic:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
     env:
       CONF: "--with-platform=linux-generic"
     steps:
@@ -214,7 +231,7 @@ jobs:
       run: find . -name config.log -exec cat {} \;
 
   Run_coverage:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v2
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}"
@@ -226,7 +243,7 @@ jobs:
         uses: codecov/codecov-action@v2
 
   Run_distcheck:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
     strategy:
       fail-fast: false
       matrix:
@@ -241,7 +258,7 @@ jobs:
       run: find . -name "*.trs" | xargs grep -l '^.test-result. FAIL' | while read trs ; do echo FAILURE detected at $trs; cat ${trs%%.trs}.log ; done
 
   Run:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
     strategy:
       fail-fast: false
       matrix:
@@ -259,7 +276,7 @@ jobs:
         run: find . -name "*.trs" | xargs grep -l '^.test-result. FAIL' | while read trs ; do echo FAILURE detected at $trs; cat ${trs%%.trs}.log ; done
 
   Run_OS:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
     strategy:
       fail-fast: false
       matrix:
@@ -274,7 +291,7 @@ jobs:
         run: find . -name "*.trs" | xargs grep -l '^.test-result. FAIL' | while read trs ; do echo FAILURE detected at $trs; cat ${trs%%.trs}.log ; done
 
   Run_sched_config:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v2
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}" -e ARCH="${ARCH}"
@@ -284,7 +301,7 @@ jobs:
         run: find . -name "*.trs" | xargs grep -l '^.test-result. FAIL' | while read trs ; do echo FAILURE detected at $trs; cat ${trs%%.trs}.log ; done
 
   Run_scheduler_sp:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v2
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}" -e ARCH="${ARCH}"
@@ -294,7 +311,7 @@ jobs:
         run: find . -name "*.trs" | xargs grep -l '^.test-result. FAIL' | while read trs ; do echo FAILURE detected at $trs; cat ${trs%%.trs}.log ; done
 
   Run_process_mode:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v2
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}" -e ARCH="${ARCH}"
@@ -304,7 +321,7 @@ jobs:
         run: find . -name "*.trs" | xargs grep -l '^.test-result. FAIL' | while read trs ; do echo FAILURE detected at $trs; cat ${trs%%.trs}.log ; done
 
   Run_alternate_timer:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v2
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}" -e ARCH="${ARCH}"
@@ -315,7 +332,7 @@ jobs:
         run: find . -name "*.trs" | xargs grep -l '^.test-result. FAIL' | while read trs ; do echo FAILURE detected at $trs; cat ${trs%%.trs}.log ; done
 
   Run_dpdk-20_11:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
     env:
       OS: ubuntu_20.04
     steps:
@@ -327,7 +344,7 @@ jobs:
         run: find . -name "*.trs" | xargs grep -l '^.test-result. FAIL' | while read trs ; do echo FAILURE detected at $trs; cat ${trs%%.trs}.log ; done
 
   Run_dpdk-21_11:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
     env:
       OS: ubuntu_20.04
     steps:
@@ -339,7 +356,7 @@ jobs:
         run: find . -name "*.trs" | xargs grep -l '^.test-result. FAIL' | while read trs ; do echo FAILURE detected at $trs; cat ${trs%%.trs}.log ; done
 
   Run_crypto:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
     env:
       OS: ubuntu_20.04
     strategy:

@@ -19,6 +19,7 @@
 
 #include <stdio.h>
 #include <stdint.h>
+#include <inttypes.h>
 #include <string.h>
 
 ODP_STATIC_ASSERT(CONFIG_INTERNAL_STASHES < CONFIG_MAX_STASHES, "TOO_MANY_INTERNAL_STASHES");
@@ -117,6 +118,7 @@ int odp_stash_capability(odp_stash_capability_t *capa, odp_stash_type_t type)
 	capa->max_stashes          = CONFIG_MAX_STASHES - CONFIG_INTERNAL_STASHES;
 	capa->max_num_obj          = MAX_RING_SIZE;
 	capa->max_obj_size         = sizeof(uint64_t);
+	capa->stats.bit.count      = 1;
 
 	return 0;
 }
@@ -520,6 +522,57 @@ int odp_stash_flush_cache(odp_stash_t st)
 {
 	if (odp_unlikely(st == ODP_STASH_INVALID))
 		return -1;
+
+	return 0;
+}
+
+static uint32_t stash_obj_count(stash_t *stash)
+{
+	ring_u32_t *ring_u32;
+	uint32_t obj_size = stash->obj_size;
+
+	if (obj_size == sizeof(uint64_t)) {
+		ring_u64_t *ring_u64 = &stash->ring_u64.hdr;
+
+		return ring_u64_len(ring_u64);
+	}
+
+	ring_u32 = &stash->ring_u32.hdr;
+
+	return ring_u32_len(ring_u32);
+}
+
+void odp_stash_print(odp_stash_t st)
+{
+	stash_t *stash = (stash_t *)(uintptr_t)st;
+
+	if (st == ODP_STASH_INVALID) {
+		ODP_ERR("Bad stash handle\n");
+		return;
+	}
+
+	ODP_PRINT("\nStash info\n");
+	ODP_PRINT("----------\n");
+	ODP_PRINT("  handle          0x%" PRIx64 "\n", odp_stash_to_u64(st));
+	ODP_PRINT("  name            %s\n", stash->name);
+	ODP_PRINT("  index           %i\n", stash->index);
+	ODP_PRINT("  obj size        %u\n", stash->obj_size);
+	ODP_PRINT("  obj count       %u\n", stash_obj_count(stash));
+	ODP_PRINT("  ring size       %u\n", stash->ring_mask + 1);
+	ODP_PRINT("\n");
+}
+
+int odp_stash_stats(odp_stash_t st, odp_stash_stats_t *stats)
+{
+	stash_t *stash = (stash_t *)(uintptr_t)st;
+
+	if (st == ODP_STASH_INVALID) {
+		ODP_ERR("Bad stash handle\n");
+		return -1;
+	}
+
+	stats->count       = stash_obj_count(stash);
+	stats->cache_count = 0;
 
 	return 0;
 }

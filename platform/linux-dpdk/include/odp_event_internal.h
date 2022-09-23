@@ -18,6 +18,7 @@ extern "C" {
 #endif
 
 #include <odp/api/event.h>
+#include <odp/api/pool_types.h>
 
 #include <stdint.h>
 
@@ -37,11 +38,11 @@ typedef struct _odp_event_hdr_t {
 	/* Underlying DPDK rte_mbuf */
 	struct rte_mbuf mb;
 
+	/* Pool handle */
+	odp_pool_t pool;
+
 	/* Buffer index in the pool */
 	uint32_t  index;
-
-	/* Total size of all allocated segs */
-	uint32_t  totsize;
 
 	/* Pool type */
 	int8_t    type;
@@ -51,11 +52,6 @@ typedef struct _odp_event_hdr_t {
 
 	/* Event flow id */
 	uint8_t   flow_id;
-
-	/* --- Mostly read only data --- */
-
-	/* Pool pointer */
-	void *pool_ptr;
 
 } _odp_event_hdr_t;
 

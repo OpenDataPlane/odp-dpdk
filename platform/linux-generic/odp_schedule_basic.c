@@ -1,5 +1,5 @@
 /* Copyright (c) 2013-2018, Linaro Limited
- * Copyright (c) 2019-2021, Nokia
+ * Copyright (c) 2019-2022, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -48,9 +48,6 @@
 
 /* Number of scheduling groups */
 #define NUM_SCHED_GRPS 32
-
-/* Group weight table size */
-#define GRP_WEIGHT_TBL_SIZE NUM_SCHED_GRPS
 
 /* Spread balancing frequency. Balance every BALANCE_ROUNDS_M1 + 1 scheduling rounds. */
 #define BALANCE_ROUNDS_M1 0xfffff
@@ -179,10 +176,11 @@ typedef struct ODP_ALIGNED_CACHE {
 	} stash;
 
 	uint32_t grp_epoch;
+	uint32_t grp_mask;
 	uint16_t num_grp;
+	uint8_t grp_idx;
 	uint8_t grp[NUM_SCHED_GRPS];
 	uint8_t spread_tbl[SPREAD_TBL_SIZE];
-	uint8_t grp_weight[GRP_WEIGHT_TBL_SIZE];
 
 	struct {
 		/* Source queue index */
@@ -239,6 +237,9 @@ typedef struct {
 	odp_ticketlock_t mask_lock[NUM_SCHED_GRPS];
 	prio_q_mask_t    prio_q_mask[NUM_SCHED_GRPS][NUM_PRIO];
 
+	/* Groups on a priority level that have queues created */
+	odp_atomic_u32_t prio_grp_mask[NUM_PRIO];
+
 	struct {
 		uint8_t grp;
 		/* Inverted prio value (max = 0) vs API (min = 0)*/
@@ -257,6 +258,9 @@ typedef struct {
 	prio_queue_t prio_q[NUM_SCHED_GRPS][NUM_PRIO][MAX_SPREAD];
 #pragma GCC diagnostic pop
 	uint32_t prio_q_count[NUM_SCHED_GRPS][NUM_PRIO][MAX_SPREAD];
+
+	/* Number of queues per group and priority  */
+	uint32_t prio_grp_count[NUM_PRIO][NUM_SCHED_GRPS];
 
 	odp_thrmask_t  mask_all;
 	odp_ticketlock_t grp_lock;
@@ -283,13 +287,12 @@ typedef struct {
 } sched_global_t;
 
 /* Check that queue[] variables are large enough */
-ODP_STATIC_ASSERT(NUM_SCHED_GRPS  <= 256, "Group_does_not_fit_8_bits");
+ODP_STATIC_ASSERT(NUM_SCHED_GRPS  <= 32,  "Group mask is 32 bits");
 ODP_STATIC_ASSERT(NUM_PRIO        <= 256, "Prio_does_not_fit_8_bits");
 ODP_STATIC_ASSERT(MAX_SPREAD      <= 256, "Spread_does_not_fit_8_bits");
 ODP_STATIC_ASSERT(CONFIG_QUEUE_MAX_ORD_LOCKS <= 256,
 		  "Ordered_lock_count_does_not_fit_8_bits");
 ODP_STATIC_ASSERT(NUM_PKTIO        <= 256, "Pktio_index_does_not_fit_8_bits");
-ODP_STATIC_ASSERT(_ODP_CHECK_IS_POWER2(GRP_WEIGHT_TBL_SIZE), "Not_power_of_2");
 
 /* Global scheduler context */
 static sched_global_t *sched;
@@ -534,6 +537,9 @@ static int schedule_init_global(void)
 	odp_atomic_init_u32(&sched->grp_epoch, 0);
 	odp_atomic_init_u32(&sched->next_rand, 0);
 
+	for (i = 0; i < NUM_PRIO; i++)
+		odp_atomic_init_u32(&sched->prio_grp_mask[i], 0);
+
 	for (i = 0; i < NUM_SCHED_GRPS; i++) {
 		memset(sched->sched_grp[i].name, 0, ODP_SCHED_GROUP_NAME_LEN);
 		odp_thrmask_zero(&sched->sched_grp[i].mask);
@@ -611,6 +617,7 @@ static inline int grp_update_tbl(void)
 	int i;
 	int num = 0;
 	int thr = sched_local.thr;
+	uint32_t mask = 0;
 
 	odp_ticketlock_lock(&sched->grp_lock);
 
@@ -621,20 +628,43 @@ static inline int grp_update_tbl(void)
 		if (odp_thrmask_isset(&sched->sched_grp[i].mask, thr)) {
 			sched_local.grp[num] = i;
 			num++;
+			mask |= 0x1u << i;
 		}
 	}
 
 	odp_ticketlock_unlock(&sched->grp_lock);
 
-	if (odp_unlikely(num == 0))
-		return 0;
-
-	/* Update group weights. Round robin over all thread's groups. */
-	for (i = 0; i < GRP_WEIGHT_TBL_SIZE; i++)
-		sched_local.grp_weight[i] = i % num;
-
+	sched_local.grp_mask = mask;
+	sched_local.grp_idx = 0;
 	sched_local.num_grp = num;
+
 	return num;
+}
+
+static inline void prio_grp_mask_set(int prio, int grp)
+{
+	uint32_t grp_mask = 0x1u << grp;
+	uint32_t mask = odp_atomic_load_u32(&sched->prio_grp_mask[prio]);
+
+	odp_atomic_store_u32(&sched->prio_grp_mask[prio], mask | grp_mask);
+
+	sched->prio_grp_count[prio][grp]++;
+}
+
+static inline void prio_grp_mask_clear(int prio, int grp)
+{
+	uint32_t grp_mask = 0x1u << grp;
+	uint32_t mask = odp_atomic_load_u32(&sched->prio_grp_mask[prio]);
+
+	sched->prio_grp_count[prio][grp]--;
+
+	if (sched->prio_grp_count[prio][grp] == 0)
+		odp_atomic_store_u32(&sched->prio_grp_mask[prio], mask &= (~grp_mask));
+}
+
+static inline uint32_t prio_grp_mask_check(int prio, uint32_t grp_mask)
+{
+	return odp_atomic_load_u32(&sched->prio_grp_mask[prio]) & grp_mask;
 }
 
 static uint32_t schedule_max_ordered_locks(void)
@@ -777,6 +807,8 @@ static int schedule_create_queue(uint32_t queue_index,
 		return -1;
 	}
 
+	prio_grp_mask_set(prio, grp);
+
 	odp_ticketlock_unlock(&sched->grp_lock);
 
 	spread = allocate_spread(grp, prio);
@@ -811,6 +843,10 @@ static void schedule_destroy_queue(uint32_t queue_index)
 	int spread = sched->queue[queue_index].spread;
 
 	dec_queue_count(grp, prio, spread);
+
+	odp_ticketlock_lock(&sched->grp_lock);
+	prio_grp_mask_clear(prio, grp);
+	odp_ticketlock_unlock(&sched->grp_lock);
 
 	sched->queue[queue_index].grp    = 0;
 	sched->queue[queue_index].prio   = 0;
@@ -1063,7 +1099,7 @@ static inline int balance_spread(int grp, int prio, int cur_spr)
 	return new_spr;
 }
 
-static inline int copy_from_stash(odp_event_t out_ev[], unsigned int max)
+static inline int copy_from_stash(odp_event_t out_ev[], uint32_t max)
 {
 	int i = 0;
 
@@ -1096,7 +1132,7 @@ static int schedule_ord_enq_multi(odp_queue_t dst_queue, void *event_hdr[],
 
 	dst_qentry = qentry_from_handle(dst_queue);
 
-	if (dst_qentry->s.param.order == ODP_QUEUE_ORDER_IGNORE)
+	if (dst_qentry->param.order == ODP_QUEUE_ORDER_IGNORE)
 		return 0;
 
 	src_queue  = sched_local.ordered.src_queue;
@@ -1110,7 +1146,7 @@ static int schedule_ord_enq_multi(odp_queue_t dst_queue, void *event_hdr[],
 	}
 
 	/* Pktout may drop packets, so the operation cannot be stashed. */
-	if (dst_qentry->s.pktout.pktio != ODP_PKTIO_INVALID ||
+	if (dst_qentry->pktout.pktio != ODP_PKTIO_INVALID ||
 	    odp_unlikely(stash_num >=  MAX_ORDERED_STASH)) {
 		/* If the local stash is full, wait until it is our turn and
 		 * then release the stash and do enqueue directly. */
@@ -1202,173 +1238,164 @@ static inline int poll_pktin(uint32_t qi, int direct_recv,
 	return ret;
 }
 
-static inline int do_schedule_grp(odp_queue_t *out_queue, odp_event_t out_ev[],
-				  unsigned int max_num, int grp, int first_spr, int balance)
+static inline int schedule_grp_prio(odp_queue_t *out_queue, odp_event_t out_ev[], uint32_t max_num,
+				    int grp, int prio, int first_spr, int balance)
 {
-	int prio, spr, new_spr, i, ret;
+	int spr, new_spr, i, ret;
 	uint32_t qi;
-	uint16_t burst_def;
 	int num_spread = sched->config.num_spread;
 	uint32_t ring_mask = sched->ring_mask;
+	uint16_t burst_def = sched->config.burst_default[prio];
 
-	/* Schedule events */
-	for (prio = 0; prio < NUM_PRIO; prio++) {
-		if (sched->prio_q_mask[grp][prio] == 0)
+	/* Select the first spread based on weights */
+	spr = first_spr;
+
+	for (i = 0; i < num_spread;) {
+		int num;
+		uint8_t sync_ctx, ordered;
+		odp_queue_t handle;
+		ring_u32_t *ring;
+		int pktin;
+		uint16_t max_deq = burst_def;
+		int stashed = 1;
+		odp_event_t *ev_tbl = sched_local.stash.ev;
+
+		if (spr >= num_spread)
+			spr = 0;
+
+		/* No queues allocated to this spread */
+		if (odp_unlikely((sched->prio_q_mask[grp][prio] & (1 << spr)) == 0)) {
+			i++;
+			spr++;
 			continue;
-
-		burst_def = sched->config.burst_default[prio];
-
-		/* Select the first spread based on weights */
-		spr = first_spr;
-
-		for (i = 0; i < num_spread;) {
-			int num;
-			uint8_t sync_ctx, ordered;
-			odp_queue_t handle;
-			ring_u32_t *ring;
-			int pktin;
-			uint16_t max_deq = burst_def;
-			int stashed = 1;
-			odp_event_t *ev_tbl = sched_local.stash.ev;
-
-			if (spr >= num_spread)
-				spr = 0;
-
-			/* No queues created for this priority queue */
-			if (odp_unlikely((sched->prio_q_mask[grp][prio] & (1 << spr))
-			    == 0)) {
-				i++;
-				spr++;
-				continue;
-			}
-
-			/* Get queue index from the priority queue */
-			ring = &sched->prio_q[grp][prio][spr].ring;
-
-			if (ring_u32_deq(ring, ring_mask, &qi) == 0) {
-				/* Priority queue empty */
-				i++;
-				spr++;
-				continue;
-			}
-
-			sync_ctx = sched_sync_type(qi);
-			ordered  = (sync_ctx == ODP_SCHED_SYNC_ORDERED);
-
-			/* When application's array is larger than default burst
-			 * size, output all events directly there. Also, ordered
-			 * queues are not stashed locally to improve
-			 * parallelism. Ordered context can only be released
-			 * when the local cache is empty. */
-			if (max_num > burst_def || ordered) {
-				uint16_t burst_max;
-
-				burst_max = sched->config.burst_max[prio];
-				stashed = 0;
-				ev_tbl  = out_ev;
-				max_deq = max_num;
-				if (max_num > burst_max)
-					max_deq = burst_max;
-			}
-
-			pktin = queue_is_pktin(qi);
-
-			/* Update queue spread before dequeue. Dequeue changes status of an empty
-			 * queue, which enables a following enqueue operation to insert the queue
-			 * back into scheduling (with new spread). */
-			if (odp_unlikely(balance)) {
-				new_spr = balance_spread(grp, prio, spr);
-
-				if (new_spr != spr) {
-					sched->queue[qi].spread = new_spr;
-					ring = &sched->prio_q[grp][prio][new_spr].ring;
-					update_queue_count(grp, prio, spr, new_spr);
-				}
-			}
-
-			num = _odp_sched_queue_deq(qi, ev_tbl, max_deq, !pktin);
-
-			if (odp_unlikely(num < 0)) {
-				/* Destroyed queue. Continue scheduling the same
-				 * priority queue. */
-				continue;
-			}
-
-			if (num == 0) {
-				/* Poll packet input. Continue scheduling queue
-				 * connected to a packet input. Move to the next
-				 * priority to avoid starvation of other
-				 * priorities. Stop scheduling queue when pktio
-				 * has been stopped. */
-				if (pktin) {
-					int direct_recv = !ordered;
-					int num_pkt;
-
-					num_pkt = poll_pktin(qi, direct_recv,
-							     ev_tbl, max_deq);
-
-					if (odp_unlikely(num_pkt < 0))
-						continue;
-
-					if (num_pkt == 0 || !direct_recv) {
-						ring_u32_enq(ring, ring_mask,
-							     qi);
-						break;
-					}
-
-					/* Process packets from an atomic or
-					 * parallel queue right away. */
-					num = num_pkt;
-				} else {
-					/* Remove empty queue from scheduling.
-					 * Continue scheduling the same priority
-					 * queue. */
-					continue;
-				}
-			}
-
-			if (ordered) {
-				uint64_t ctx;
-				odp_atomic_u64_t *next_ctx;
-
-				next_ctx = &sched->order[qi].next_ctx;
-				ctx = odp_atomic_fetch_inc_u64(next_ctx);
-
-				sched_local.ordered.ctx = ctx;
-				sched_local.ordered.src_queue = qi;
-
-				/* Continue scheduling ordered queues */
-				ring_u32_enq(ring, ring_mask, qi);
-				sched_local.sync_ctx = sync_ctx;
-
-			} else if (sync_ctx == ODP_SCHED_SYNC_ATOMIC) {
-				/* Hold queue during atomic access */
-				sched_local.stash.qi   = qi;
-				sched_local.stash.ring = ring;
-				sched_local.sync_ctx   = sync_ctx;
-			} else {
-				/* Continue scheduling the queue */
-				ring_u32_enq(ring, ring_mask, qi);
-			}
-
-			handle = queue_from_index(qi);
-
-			if (stashed) {
-				sched_local.stash.num_ev   = num;
-				sched_local.stash.ev_index = 0;
-				sched_local.stash.queue    = handle;
-				ret = copy_from_stash(out_ev, max_num);
-			} else {
-				sched_local.stash.num_ev = 0;
-				ret = num;
-			}
-
-			/* Output the source queue handle */
-			if (out_queue)
-				*out_queue = handle;
-
-			return ret;
 		}
+
+		ring = &sched->prio_q[grp][prio][spr].ring;
+
+		/* Get queue index from the spread queue */
+		if (ring_u32_deq(ring, ring_mask, &qi) == 0) {
+			/* Spread queue is empty */
+			i++;
+			spr++;
+			continue;
+		}
+
+		sync_ctx = sched_sync_type(qi);
+		ordered  = (sync_ctx == ODP_SCHED_SYNC_ORDERED);
+
+		/* When application's array is larger than default burst
+		 * size, output all events directly there. Also, ordered
+		 * queues are not stashed locally to improve
+		 * parallelism. Ordered context can only be released
+		 * when the local cache is empty. */
+		if (max_num > burst_def || ordered) {
+			uint16_t burst_max;
+
+			burst_max = sched->config.burst_max[prio];
+			stashed = 0;
+			ev_tbl  = out_ev;
+			max_deq = max_num;
+			if (max_num > burst_max)
+				max_deq = burst_max;
+		}
+
+		pktin = queue_is_pktin(qi);
+
+		/* Update queue spread before dequeue. Dequeue changes status of an empty
+		 * queue, which enables a following enqueue operation to insert the queue
+		 * back into scheduling (with new spread). */
+		if (odp_unlikely(balance)) {
+			new_spr = balance_spread(grp, prio, spr);
+
+			if (new_spr != spr) {
+				sched->queue[qi].spread = new_spr;
+				ring = &sched->prio_q[grp][prio][new_spr].ring;
+				update_queue_count(grp, prio, spr, new_spr);
+			}
+		}
+
+		num = _odp_sched_queue_deq(qi, ev_tbl, max_deq, !pktin);
+
+		if (odp_unlikely(num < 0)) {
+			/* Remove destroyed queue from scheduling. Continue scheduling
+			 * the same group/prio/spread. */
+			continue;
+		}
+
+		if (num == 0) {
+			int direct_recv = !ordered;
+			int num_pkt;
+
+			if (!pktin) {
+				/* Remove empty queue from scheduling */
+				continue;
+			}
+
+			/* Poll packet input queue */
+			num_pkt = poll_pktin(qi, direct_recv, ev_tbl, max_deq);
+
+			if (odp_unlikely(num_pkt < 0)) {
+				/* Pktio has been stopped or closed. Stop polling
+				 * the packet input queue. */
+				continue;
+			}
+
+			if (num_pkt == 0 || !direct_recv) {
+				/* No packets to be returned. Continue scheduling
+				 * packet input queue even when it is empty. */
+				ring_u32_enq(ring, ring_mask, qi);
+
+				/* Continue scheduling from the next spread */
+				i++;
+				spr++;
+				continue;
+			}
+
+			/* Process packets from an atomic or parallel queue right away. */
+			num = num_pkt;
+		}
+
+		if (ordered) {
+			uint64_t ctx;
+			odp_atomic_u64_t *next_ctx;
+
+			next_ctx = &sched->order[qi].next_ctx;
+			ctx = odp_atomic_fetch_inc_u64(next_ctx);
+
+			sched_local.ordered.ctx = ctx;
+			sched_local.ordered.src_queue = qi;
+
+			/* Continue scheduling ordered queues */
+			ring_u32_enq(ring, ring_mask, qi);
+			sched_local.sync_ctx = sync_ctx;
+
+		} else if (sync_ctx == ODP_SCHED_SYNC_ATOMIC) {
+			/* Hold queue during atomic access */
+			sched_local.stash.qi   = qi;
+			sched_local.stash.ring = ring;
+			sched_local.sync_ctx   = sync_ctx;
+		} else {
+			/* Continue scheduling parallel queues */
+			ring_u32_enq(ring, ring_mask, qi);
+		}
+
+		handle = queue_from_index(qi);
+
+		if (stashed) {
+			sched_local.stash.num_ev   = num;
+			sched_local.stash.ev_index = 0;
+			sched_local.stash.queue    = handle;
+			ret = copy_from_stash(out_ev, max_num);
+		} else {
+			sched_local.stash.num_ev = 0;
+			ret = num;
+		}
+
+		/* Output the source queue handle */
+		if (out_queue)
+			*out_queue = handle;
+
+		return ret;
 	}
 
 	return 0;
@@ -1377,20 +1404,20 @@ static inline int do_schedule_grp(odp_queue_t *out_queue, odp_event_t out_ev[],
 /*
  * Schedule queues
  */
-static inline int do_schedule(odp_queue_t *out_queue, odp_event_t out_ev[],
-			      unsigned int max_num)
+static inline int do_schedule(odp_queue_t *out_q, odp_event_t out_ev[], uint32_t max_num)
 {
-	int i, num_grp, ret, spr, grp_id;
+	int i, num_grp, ret, spr, first_id, grp_id, grp, prio;
 	uint32_t sched_round;
-	uint16_t spread_round, grp_round;
+	uint16_t spread_round;
 	uint32_t epoch;
+	uint32_t my_groups;
 	int balance = 0;
 
 	if (sched_local.stash.num_ev) {
 		ret = copy_from_stash(out_ev, max_num);
 
-		if (out_queue)
-			*out_queue = sched_local.stash.queue;
+		if (out_q)
+			*out_q = sched_local.stash.queue;
 
 		return ret;
 	}
@@ -1405,7 +1432,6 @@ static inline int do_schedule(odp_queue_t *out_queue, odp_event_t out_ev[],
 		return 0;
 
 	sched_round = sched_local.sched_round++;
-	grp_round   = sched_round & (GRP_WEIGHT_TBL_SIZE - 1);
 
 	/* Each thread prefers a priority queue. Spread weight table avoids
 	 * starvation of other priority queues on low thread counts. */
@@ -1442,28 +1468,51 @@ static inline int do_schedule(odp_queue_t *out_queue, odp_event_t out_ev[],
 		sched_local.grp_epoch = epoch;
 	}
 
-	grp_id = sched_local.grp_weight[grp_round];
+	if (odp_unlikely(num_grp == 0))
+		return 0;
 
-	/* Schedule queues per group and priority */
-	for (i = 0; i < num_grp; i++) {
-		int grp;
+	my_groups = sched_local.grp_mask;
+	first_id = sched_local.grp_idx;
+	sched_local.grp_idx = (first_id + 1) % num_grp;
 
-		grp = sched_local.grp[grp_id];
-		ret = do_schedule_grp(out_queue, out_ev, max_num, grp, spr, balance);
+	for (prio = 0; prio < NUM_PRIO; prio++) {
+		grp_id = first_id;
 
-		if (odp_likely(ret))
-			return ret;
+		if (prio_grp_mask_check(prio, my_groups) == 0) {
+			/* My groups do not have queues at this priority level, continue to
+			 * the next level.
+			 *
+			 * As a performance optimization, prio_grp_mask[] is checked without
+			 * taking the lock. Masks change infrequently and usage of an old mask
+			 * just leads into searching events from old priority levels,
+			 * new levels are likely used on the next schedule call. */
+			continue;
+		}
 
-		grp_id++;
-		if (odp_unlikely(grp_id >= num_grp))
-			grp_id = 0;
+		for (i = 0; i < num_grp; i++) {
+			grp = sched_local.grp[grp_id];
+
+			grp_id++;
+			if (odp_unlikely(grp_id >= num_grp))
+				grp_id = 0;
+
+			if (sched->prio_q_mask[grp][prio] == 0) {
+				/* Group does not have queues at this priority level */
+				continue;
+			}
+
+			/* Schedule events from the selected group and priority level */
+			ret = schedule_grp_prio(out_q, out_ev, max_num, grp, prio, spr, balance);
+
+			if (odp_likely(ret))
+				return ret;
+		}
 	}
 
 	return 0;
 }
 
-static inline int schedule_run(odp_queue_t *out_queue, odp_event_t out_ev[],
-			       unsigned int max_num)
+static inline int schedule_run(odp_queue_t *out_queue, odp_event_t out_ev[], uint32_t max_num)
 {
 	timer_run(1);
 
@@ -1471,7 +1520,7 @@ static inline int schedule_run(odp_queue_t *out_queue, odp_event_t out_ev[],
 }
 
 static inline int schedule_loop(odp_queue_t *out_queue, uint64_t wait,
-				odp_event_t out_ev[], unsigned int max_num)
+				odp_event_t out_ev[], uint32_t max_num)
 {
 	odp_time_t next, wtime;
 	int first = 1;

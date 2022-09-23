@@ -138,6 +138,8 @@ typedef struct odp_packet_hdr_t {
 	/* User context pointer */
 	const void *user_ptr;
 
+	/* --- 64-byte cache line boundary --- */
+
 	/* Classifier mark */
 	uint16_t cls_mark;
 
@@ -248,8 +250,8 @@ static inline int _odp_packet_copy_md_possible(odp_pool_t dst_pool,
 	if (src_pool == dst_pool)
 		return 0;
 
-	src_hdr = pool_entry_from_hdl(src_pool);
-	dst_hdr = pool_entry_from_hdl(dst_pool);
+	src_hdr = _odp_pool_entry(src_pool);
+	dst_hdr = _odp_pool_entry(dst_pool);
 
 	if (dst_hdr->params.pkt.uarea_size < src_hdr->params.pkt.uarea_size)
 		return -1;
@@ -305,8 +307,8 @@ static inline void _odp_packet_copy_md(odp_packet_hdr_t *dst_hdr,
 
 	if (src_hdr->uarea_addr) {
 		if (uarea_copy) {
-			const pool_t *src_pool = src_hdr->event_hdr.pool_ptr;
-			const pool_t *dst_pool = dst_hdr->event_hdr.pool_ptr;
+			const pool_t *src_pool = _odp_pool_entry(src_hdr->event_hdr.pool);
+			const pool_t *dst_pool = _odp_pool_entry(dst_hdr->event_hdr.pool);
 			const uint32_t src_uarea_size = src_pool->params.pkt.uarea_size;
 			const uint32_t dst_uarea_size = dst_pool->params.pkt.uarea_size;
 
@@ -319,7 +321,7 @@ static inline void _odp_packet_copy_md(odp_packet_hdr_t *dst_hdr,
 
 			/* If user area exists, packets should always be from the same pool, so
 			 * user area pointers can simply be swapped. */
-			ODP_ASSERT(dst_hdr->event_hdr.pool_ptr == src_hdr->event_hdr.pool_ptr);
+			ODP_ASSERT(dst_hdr->event_hdr.pool == src_hdr->event_hdr.pool);
 
 			src_hdr->uarea_addr = dst_hdr->uarea_addr;
 			dst_hdr->uarea_addr = src_uarea;

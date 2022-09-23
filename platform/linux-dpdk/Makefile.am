@@ -40,6 +40,7 @@ odpapiplatinclude_HEADERS = \
 		  include/odp/api/plat/packet_inlines.h \
 		  include/odp/api/plat/packet_vector_inlines.h \
 		  include/odp/api/plat/packet_io_inlines.h \
+		  include/odp/api/plat/pool_inlines.h \
 		  include/odp/api/plat/pool_inline_types.h \
 		  include/odp/api/plat/queue_inlines.h \
 		  include/odp/api/plat/queue_inline_types.h \
@@ -92,6 +93,7 @@ odpapiabiarchinclude_HEADERS += \
 		  include-abi/odp/api/abi/spinlock.h \
 		  include-abi/odp/api/abi/spinlock_recursive.h \
 		  include-abi/odp/api/abi/stash.h \
+		  include-abi/odp/api/abi/stash_types.h \
 		  include-abi/odp/api/abi/std.h \
 		  include-abi/odp/api/abi/std_types.h \
 		  include-abi/odp/api/abi/sync.h \
@@ -196,7 +198,6 @@ __LIB__libodp_dpdk_la_SOURCES = \
 			   odp_packet.c \
 			   odp_packet_dpdk.c \
 			   ../linux-generic/odp_packet_vector.c \
-			   ../linux-generic/pktio/dpdk_parse.c \
 			   odp_packet_flags.c \
 			   ../linux-generic/odp_packet_io.c \
 			   ../linux-generic/odp_parse.c \
@@ -244,6 +245,7 @@ __LIB__libodp_dpdk_la_SOURCES += \
 			   ../linux-generic/odp_packet_api.c \
 			   ../linux-generic/odp_packet_flags_api.c \
 			   ../linux-generic/odp_packet_io_api.c \
+			   ../linux-generic/odp_pool_api.c \
 			   ../linux-generic/odp_queue_api.c \
 			   ../linux-generic/odp_spinlock_api.c \
 			   ../linux-generic/odp_spinlock_recursive_api.c \
