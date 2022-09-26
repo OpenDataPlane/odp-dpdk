@@ -25,6 +25,7 @@
 #include <odp_global_data.h>
 #include <odp_init_internal.h>
 #include <odp_packet_internal.h>
+#include <odp_macros_internal.h>
 
 /* Inlined API functions */
 #include <odp/api/plat/event_inlines.h>
@@ -38,6 +39,7 @@
 #include <string.h>
 #include <math.h>
 
+#define MAX_BURST 32
 #define MAX_SESSIONS 4000
 /*
  * Max size of per-thread session object cache. May be useful if sessions
@@ -45,15 +47,25 @@
  */
 #define SESSION_CACHE_SIZE 16
 /*
- * Max size of per-thread crypto operation cache. We can have only one
- * operation per thread in flight at a time so this can be very small.
+ * Max size of per-thread crypto operation cache. We can have at most
+ * MAX_BURST operations per thread in flight at a time. Make op cache
+ * larger than MAX_BURST to avoid frequent access of the shared pool.
  */
-#define OP_CACHE_SIZE 16
-#define NB_DESC_PER_QUEUE_PAIR  16
+#define OP_CACHE_SIZE (2 * MAX_BURST)
+/*
+ * Have enough descriptors for a full burst plus some extra as required
+ * by the crypto drivers.
+ */
+#define NB_DESC_PER_QUEUE_PAIR (2 * MAX_BURST)
+/* Required by crypto_aesni_mb driver */
+ODP_STATIC_ASSERT(NB_DESC_PER_QUEUE_PAIR > MAX_BURST,
+		  "NB_DESC_PER_QUEUE_PAIR must be greater than MAX_BURST");
+/* Required by crypto_aesni_mb driver */
+ODP_STATIC_ASSERT(_ODP_CHECK_IS_POWER2(NB_DESC_PER_QUEUE_PAIR),
+		  "NB_DESC_PER_QUEUE_PAIR must be a power of 2");
+
 #define MAX_IV_LENGTH 16
 #define AES_CCM_AAD_OFFSET 18
-#define IV_OFFSET	(sizeof(struct rte_crypto_op) + \
-			 sizeof(struct rte_crypto_sym_op))
 
 /* Max number of rte_cryptodev_dequeue_burst() retries before error printout */
 #define MAX_DEQ_RETRIES (10 * 1000 * 1000)
@@ -70,7 +82,6 @@ typedef struct crypto_session_entry_s {
 		unsigned int cdev_qpairs_shared:1;
 		unsigned int chained_bufs_ok:1;
 	} flags;
-	uint16_t cdev_nb_qpairs;
 	uint8_t cdev_id;
 #if ODP_DEPRECATED_API
 	uint8_t cipher_iv_data[MAX_IV_LENGTH];
@@ -91,6 +102,34 @@ typedef struct crypto_global_s {
 	crypto_session_entry_t *free;
 	crypto_session_entry_t sessions[];
 } crypto_global_t;
+
+typedef enum op_status_t {
+	S_OK,		/* everything ok this far */
+	S_NOP,		/* no-op: null crypto & null auth */
+	S_DEV,		/* processed by cryptodev */
+	S_ERROR,	/* error occurred */
+	S_ERROR_LIN,	/* packet linearization error occurred */
+} op_status_t;
+
+typedef struct crypto_op_state_t {
+	uint8_t cipher_iv[MAX_IV_LENGTH] ODP_ALIGNED(8);
+	uint8_t auth_iv[MAX_IV_LENGTH] ODP_ALIGNED(8);
+	odp_packet_t pkt;
+	op_status_t status;
+	crypto_session_entry_t *session;
+	uint32_t hash_result_offset;
+} crypto_op_state_t;
+
+typedef struct crypto_op_t {
+	/* these must be first */
+	struct rte_crypto_op op;
+	struct rte_crypto_sym_op sym_op;
+
+	crypto_op_state_t state;
+} crypto_op_t;
+
+#define IV_OFFSET offsetof(crypto_op_t, state.cipher_iv)
+#define AUTH_IV_OFFSET offsetof(crypto_op_t, state.auth_iv)
 
 static crypto_global_t *global;
 
@@ -439,10 +478,9 @@ int _odp_crypto_init_global(void)
 	}
 
 	/*
-	 * Make pool size big enough to fill all per-thread caches but
-	 * not much bigger since we only have single operation in
-	 * flight per thread. Multiply by 2 since mempool can cache
-	 * 1.5 times more elements than the specified cache size.
+	 * Make pool size big enough to fill all per-thread caches.
+	 * Multiply by 2 since mempool can cache 1.5 times more elements
+	 * than the specified cache size.
 	 */
 	pool_size = 2 * odp_thread_count_max() * OP_CACHE_SIZE;
 
@@ -451,7 +489,9 @@ int _odp_crypto_init_global(void)
 		rte_crypto_op_pool_create("crypto_op_pool",
 					  RTE_CRYPTO_OP_TYPE_SYMMETRIC,
 					  pool_size, OP_CACHE_SIZE,
-					  2 * MAX_IV_LENGTH,
+					  sizeof(crypto_op_t)
+					  - sizeof(struct rte_crypto_op)
+					  - sizeof(struct rte_crypto_sym_op),
 					  rte_socket_id());
 
 	if (global->crypto_op_pool == NULL) {
@@ -746,7 +786,6 @@ static int cipher_capability(odp_cipher_alg_t cipher,
 	odp_crypto_cipher_capability_t src[num_copy];
 	int idx = 0, rc = 0;
 	int size = sizeof(odp_crypto_cipher_capability_t);
-
 	uint8_t cdev_id, cdev_count;
 	const struct rte_cryptodev_capabilities *cap;
 	struct rte_crypto_sym_xform cipher_xform;
@@ -1283,7 +1322,7 @@ static int crypto_fill_auth_xform(struct rte_crypto_sym_xform *auth_xform,
 
 	auth_xform->auth.key.data = param->auth_key.data;
 	auth_xform->auth.key.length = param->auth_key.length;
-	auth_xform->auth.iv.offset = IV_OFFSET + MAX_IV_LENGTH;
+	auth_xform->auth.iv.offset = AUTH_IV_OFFSET;
 	auth_xform->auth.iv.length = param->auth_iv_len;
 
 	if (ODP_CRYPTO_OP_ENCODE == param->op)
@@ -1411,7 +1450,6 @@ int odp_crypto_session_create(const odp_crypto_session_param_t *param,
 			rte_session = NULL;
 			cdev_id = ~0;
 			session->flags.chained_bufs_ok = 1;
-			session->cdev_nb_qpairs = 0;
 			goto out_null;
 		} else if (param->cipher_alg == ODP_CIPHER_ALG_NULL) {
 			first_xform = &auth_xform;
@@ -1454,7 +1492,6 @@ int odp_crypto_session_create(const odp_crypto_session_param_t *param,
 	}
 
 	session->flags.chained_bufs_ok = chained_bufs_ok(param, cdev_id);
-	session->cdev_nb_qpairs = global->enabled_crypto_dev_qpairs[cdev_id];
 	if (global->enabled_crypto_dev_qpairs_shared[cdev_id])
 		session->flags.cdev_qpairs_shared = 1;
 	else
@@ -1626,7 +1663,7 @@ int odp_crypto_result(odp_crypto_packet_result_t *result,
 	return 0;
 }
 
-static uint8_t *crypto_prepare_digest(crypto_session_entry_t *session,
+static uint8_t *crypto_prepare_digest(const crypto_session_entry_t *session,
 				      odp_packet_t pkt,
 				      const odp_crypto_packet_op_param_t *param,
 				      rte_iova_t *phys_addr)
@@ -1652,7 +1689,7 @@ static uint8_t *crypto_prepare_digest(crypto_session_entry_t *session,
 	return data;
 }
 
-static void crypto_fill_aead_param(crypto_session_entry_t *session,
+static void crypto_fill_aead_param(const crypto_session_entry_t *session,
 				   odp_packet_t pkt,
 				   const odp_crypto_packet_op_param_t *param,
 				   struct rte_crypto_op *op)
@@ -1701,7 +1738,7 @@ static void crypto_fill_aead_param(crypto_session_entry_t *session,
 	op->sym->aead.data.length = param->cipher_range.length;
 }
 
-static void crypto_fill_sym_param(crypto_session_entry_t *session,
+static void crypto_fill_sym_param(const crypto_session_entry_t *session,
 				  odp_packet_t pkt,
 				  const odp_crypto_packet_op_param_t *param,
 				  struct rte_crypto_op *op)
@@ -1856,170 +1893,292 @@ static odp_packet_t get_output_packet(const crypto_session_entry_t *session,
 	return pkt_out;
 }
 
-static
-int odp_crypto_int(odp_packet_t pkt_in,
-		   odp_packet_t *pkt_out,
-		   const odp_crypto_packet_op_param_t *param)
+/*
+ * Return number of ops allocated and packets consumed.
+ */
+static int op_alloc(crypto_op_t *op[],
+		    const odp_packet_t pkt_in[],
+		    odp_packet_t pkt_out[],
+		    const odp_crypto_packet_op_param_t param[],
+		    int num_pkts)
 {
 	crypto_session_entry_t *session;
-	odp_crypto_alg_err_t rc_cipher = ODP_CRYPTO_ALG_ERR_NONE;
-	odp_crypto_alg_err_t rc_auth = ODP_CRYPTO_ALG_ERR_NONE;
-	struct rte_cryptodev_sym_session *rte_session = NULL;
-	struct rte_crypto_op *op = NULL;
-	odp_packet_t out_pkt;
-	odp_crypto_packet_result_t *op_result;
-	odp_bool_t result_ok = true;
+	int n;
 
-	session = (crypto_session_entry_t *)(intptr_t)param->session;
-	if (odp_unlikely(session == NULL))
-		return -1;
-
-	op = rte_crypto_op_alloc(global->crypto_op_pool,
-				 RTE_CRYPTO_OP_TYPE_SYMMETRIC);
-	if (odp_unlikely(op == NULL)) {
-		ODP_ERR("Failed to allocate crypto operation\n");
-		goto err;
+	if (odp_unlikely(rte_crypto_op_bulk_alloc(global->crypto_op_pool,
+						  RTE_CRYPTO_OP_TYPE_SYMMETRIC,
+						  (struct rte_crypto_op **)op,
+						  num_pkts) == 0)) {
+		/* This should not happen since we made op pool big enough */
+		ODP_DBG("falling back to single crypto op alloc\n");
+		op[0] = (crypto_op_t *)rte_crypto_op_alloc(global->crypto_op_pool,
+							   RTE_CRYPTO_OP_TYPE_SYMMETRIC);
+		if (odp_unlikely(op[0] == NULL)) {
+			ODP_ERR("Failed to allocate crypto operation\n");
+			return 0;
+		}
+		num_pkts = 1;
 	}
 
-	out_pkt = get_output_packet(session, pkt_in, *pkt_out);
-	if (odp_unlikely(out_pkt == ODP_PACKET_INVALID))
-		goto err;
+	for (n = 0; n < num_pkts; n++) {
+		odp_packet_t pkt;
 
-	if (odp_unlikely(linearize_pkt(session, out_pkt))) {
-		result_ok = false;
-		rc_cipher = ODP_CRYPTO_ALG_ERR_DATA_SIZE;
-		rc_auth = ODP_CRYPTO_ALG_ERR_DATA_SIZE;
-		goto out;
+		session = (crypto_session_entry_t *)(intptr_t)param[n].session;
+		ODP_ASSERT(session != NULL);
+
+		pkt = get_output_packet(session, pkt_in[n], pkt_out[n]);
+		if (odp_unlikely(pkt == ODP_PACKET_INVALID)) {
+			for (int i = n; i < num_pkts; i++)
+				rte_crypto_op_free((struct rte_crypto_op *)op[i]);
+			break;
+		}
+		op[n]->state.pkt = pkt;
 	}
+	return n;
+}
 
-	rte_session = session->rte_session;
-	/* NULL rte_session means that it is a NULL-NULL operation.
-	 * Just return new packet. */
-	if (odp_unlikely(rte_session == NULL))
-		goto out;
+static void op_prepare(crypto_op_t *ops[],
+		       const odp_crypto_packet_op_param_t param[],
+		       int num_op)
+{
+	for (int n = 0; n < num_op; n++) {
+		struct crypto_op_t *op = ops[n];
+		struct rte_crypto_op *rte_op = (struct rte_crypto_op *)op;
+		crypto_session_entry_t *session;
+		struct rte_cryptodev_sym_session *rte_session;
 
-	if (cipher_is_aead(session->p.cipher_alg))
-		crypto_fill_aead_param(session, out_pkt, param, op);
-	else
-		crypto_fill_sym_param(session, out_pkt, param, op);
+		session = (crypto_session_entry_t *)(intptr_t)param[n].session;
+		rte_session = session->rte_session;
 
-	if (odp_likely(rc_cipher == ODP_CRYPTO_ALG_ERR_NONE &&
-		       rc_auth == ODP_CRYPTO_ALG_ERR_NONE)) {
-		uint32_t retry_count = 0;
-		int queue_pair;
-		int rc;
-		odp_bool_t queue_pairs_shared = session->flags.cdev_qpairs_shared;
+		op->state.status = S_OK;
+		op->state.session = session;
+		op->state.hash_result_offset = param[n].hash_result_offset;
 
-		if (odp_unlikely(queue_pairs_shared))
-			queue_pair = odp_thread_id() % session->cdev_nb_qpairs;
-		else
-			queue_pair = odp_thread_id();
-
-		/* Set crypto operation data parameters */
-		rte_crypto_op_attach_sym_session(op, rte_session);
-
-		op->sym->m_src = (struct rte_mbuf *)(intptr_t)out_pkt;
-		/*
-		 * If queue pairs are shared between multiple threads,
-		 * we protect enqueue and dequeue using a lock. In addition,
-		 * we keep the lock over the whole enqueue-dequeue sequence
-		 * to guarantee that we get the same op back as what we
-		 * enqueued. Otherwise synchronous ODP crypto operations
-		 * could report the completion and status of an unrelated
-		 * operation that was sent to the same queue pair from
-		 * another thread.
-		 */
-		if (odp_unlikely(queue_pairs_shared))
-			odp_spinlock_lock(&global->lock);
-		rc = rte_cryptodev_enqueue_burst(session->cdev_id,
-						 queue_pair, &op, 1);
-		if (odp_unlikely(rc == 0)) {
-			if (odp_unlikely(queue_pairs_shared))
-				odp_spinlock_unlock(&global->lock);
-			ODP_ERR("Failed to enqueue packet\n");
-			result_ok = false;
-			goto out;
+		/* NULL rte_session means that it is a NULL-NULL operation. */
+		if (odp_unlikely(rte_session == NULL)) {
+			op->state.status = S_NOP;
+			continue;
 		}
 
-		/* There may be a delay until the crypto operation is
-		 * completed. */
-		while (1) {
-			rc = rte_cryptodev_dequeue_burst(session->cdev_id,
-							 queue_pair, &op, 1);
-			if (odp_likely(rc == 1))
-				break;
+		if (odp_unlikely(linearize_pkt(session, op->state.pkt))) {
+			op->state.status = S_ERROR_LIN;
+			continue;
+		}
+
+		if (cipher_is_aead(session->p.cipher_alg))
+			crypto_fill_aead_param(session, op->state.pkt, &param[n], rte_op);
+		else
+			crypto_fill_sym_param(session, op->state.pkt, &param[n], rte_op);
+
+		rte_crypto_op_attach_sym_session(rte_op, rte_session);
+		rte_op->sym->m_src = pkt_to_mbuf(op->state.pkt);
+	}
+}
+
+static void dev_enq_deq(uint8_t cdev_id, int thread_id, crypto_op_t *op[], int num_op)
+{
+	int retry_count = 0;
+	int rc;
+	int queue_pairs_shared;
+	int queue_pair;
+	struct rte_crypto_op *deq_op[MAX_BURST];
+
+	queue_pairs_shared = op[0]->state.session->flags.cdev_qpairs_shared;
+	if (odp_unlikely(queue_pairs_shared))
+		queue_pair = thread_id % global->enabled_crypto_dev_qpairs[cdev_id];
+	else
+		queue_pair = thread_id;
+
+	/*
+	 * If queue pairs are shared between multiple threads,
+	 * we protect enqueue and dequeue using a lock. In addition,
+	 * we keep the lock over the whole enqueue-dequeue sequence
+	 * to guarantee that we get the same op back as what we
+	 * enqueued. Otherwise synchronous ODP crypto operations
+	 * could report the completion and status of an unrelated
+	 * operation that was sent to the same queue pair from
+	 * another thread.
+	 */
+	if (odp_unlikely(queue_pairs_shared))
+		odp_spinlock_lock(&global->lock);
+
+	rc = rte_cryptodev_enqueue_burst(cdev_id, queue_pair,
+					 (struct rte_crypto_op **)op, num_op);
+	if (odp_unlikely(rc < num_op)) {
+		if (odp_unlikely(queue_pairs_shared))
+			odp_spinlock_unlock(&global->lock);
+		/*
+		 * This should not happen since we allocated enough
+		 * descriptors for our max burst and there are no other ops
+		 * in flight using this queue pair.
+		 */
+		for (int n = rc; n < num_op; n++)
+			op[n]->state.status = S_ERROR;
+		ODP_ERR("Failed to enqueue crypto operations\n");
+		num_op = rc;
+		if (num_op == 0)
+			return;
+	}
+
+	/* There may be a delay until the crypto operation is completed. */
+	int num_dequeued = 0;
+
+	while (1) {
+		int num_left = num_op - num_dequeued;
+
+		rc = rte_cryptodev_dequeue_burst(cdev_id, queue_pair,
+						 &deq_op[num_dequeued],
+						 num_left);
+		num_dequeued += rc;
+		if (odp_likely(rc == num_left))
+			break;
+		if (odp_unlikely(rc == 0)) {
 			odp_time_wait_ns(DEQ_RETRY_DELAY_NS);
 			if (++retry_count == MAX_DEQ_RETRIES) {
-				ODP_ERR("Failed to dequeue a crypto operation\n");
+				ODP_ERR("Failed to dequeue crypto operations\n");
 				/*
 				 * We cannot give up and return to the caller
-				 * since the packet and the crypto operation
+				 * since some packets and crypto operations
 				 * are still owned by the cryptodev.
 				 */
 			}
 		}
-		if (odp_unlikely(queue_pairs_shared))
-			odp_spinlock_unlock(&global->lock);
-		if (odp_unlikely(rc == 0)) {
-			ODP_ERR("Failed to dequeue packet\n");
-			result_ok = false;
-			op = NULL;
-			goto out;
-		}
+	};
 
-		out_pkt = (odp_packet_t)op->sym->m_src;
-		switch (op->status) {
-		case RTE_CRYPTO_OP_STATUS_SUCCESS:
+	if (odp_unlikely(queue_pairs_shared))
+		odp_spinlock_unlock(&global->lock);
+
+	for (int n = 0; n < num_dequeued; n++) {
+		ODP_ASSERT((crypto_op_t *)deq_op[n] == op[n]);
+		ODP_ASSERT((odp_packet_t)deq_op[n]->sym->m_src == op[n]->state.pkt);
+	}
+}
+
+static void op_enq_deq(crypto_op_t *op[], int num_op)
+{
+	crypto_op_t *burst[MAX_BURST];
+	int burst_size = 0;
+	int idx = 0;
+	uint8_t cdev_id;
+	int tid = odp_thread_id();
+	int done = 0;
+
+	while (done < num_op) {
+		if (op[idx]->state.status != S_OK) {
+			idx++;
+			done++;
+			continue;
+		}
+		burst[0] = op[idx];
+		burst_size = 1;
+		cdev_id = op[idx]->state.session->cdev_id;
+		op[idx]->state.status = S_DEV;
+		idx++;
+
+		/*
+		 * Build a burst of ops that are for the same device
+		 * and have not failed already and are not no-ops.
+		 */
+		for (int n = idx; n < num_op; n++) {
+			if (odp_likely(op[n]->state.session->cdev_id == cdev_id) &&
+			    odp_likely(op[n]->state.status == S_OK)) {
+				burst[burst_size++] = op[n];
+				op[n]->state.status = S_DEV;
+			}
+		}
+		/*
+		 * Process burst.
+		 */
+		dev_enq_deq(cdev_id, tid, burst, burst_size);
+		done += burst_size;
+	}
+}
+
+static void op_finish(crypto_op_t *op)
+{
+	crypto_session_entry_t *session = op->state.session;
+	odp_packet_t pkt = op->state.pkt;
+	struct rte_crypto_op *rte_op = (struct rte_crypto_op *)op;
+	odp_crypto_alg_err_t rc_cipher;
+	odp_crypto_alg_err_t rc_auth;
+	odp_bool_t result_ok;
+	odp_crypto_packet_result_t *op_result;
+
+	if (odp_likely(op->state.status == S_DEV)) {
+		/* cryptodev processed packet */
+		if (odp_likely(rte_op->status == RTE_CRYPTO_OP_STATUS_SUCCESS)) {
 			rc_cipher = ODP_CRYPTO_ALG_ERR_NONE;
 			rc_auth = ODP_CRYPTO_ALG_ERR_NONE;
-			break;
-		case RTE_CRYPTO_OP_STATUS_AUTH_FAILED:
+			result_ok = true;
+			if (session->p.op == ODP_CRYPTO_OP_ENCODE &&
+			    session->p.auth_digest_len != 0) {
+				odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
+
+				odp_packet_copy_from_mem(pkt,
+							 op->state.hash_result_offset,
+							 session->p.auth_digest_len,
+							 pkt_hdr->crypto_digest_buf);
+			}
+		} else if (rte_op->status == RTE_CRYPTO_OP_STATUS_AUTH_FAILED) {
 			result_ok = false;
 			rc_cipher = ODP_CRYPTO_ALG_ERR_NONE;
 			rc_auth = ODP_CRYPTO_ALG_ERR_ICV_CHECK;
-			break;
-		default:
+		} else {
 			result_ok = false;
 			rc_cipher = ODP_CRYPTO_ALG_ERR_NONE;
 			rc_auth = ODP_CRYPTO_ALG_ERR_NONE;
-			break;
 		}
-	} else {
+	} else if (odp_unlikely(op->state.status == S_NOP)) {
+		/* null cipher & null auth, cryptodev skipped */
+		result_ok = true;
+		rc_cipher = ODP_CRYPTO_ALG_ERR_NONE;
+		rc_auth = ODP_CRYPTO_ALG_ERR_NONE;
+	} else if (op->state.status == S_ERROR_LIN) {
+		/* packet linearization error before cryptodev enqueue */
 		result_ok = false;
+		rc_cipher = ODP_CRYPTO_ALG_ERR_DATA_SIZE;
+		rc_auth = ODP_CRYPTO_ALG_ERR_DATA_SIZE;
+	} else {
+		/*
+		 * other error before cryptodev enqueue
+		 */
+		result_ok = false;
+		rc_cipher = ODP_CRYPTO_ALG_ERR_NONE;
+		rc_auth = ODP_CRYPTO_ALG_ERR_NONE;
 	}
 
-	if (session->p.op == ODP_CRYPTO_OP_ENCODE &&
-	    session->p.auth_digest_len != 0 &&
-	    op->status == RTE_CRYPTO_OP_STATUS_SUCCESS) {
-		odp_packet_hdr_t *pkt_hdr = packet_hdr(out_pkt);
-
-		odp_packet_copy_from_mem(out_pkt, param->hash_result_offset,
-					 session->p.auth_digest_len,
-					 pkt_hdr->crypto_digest_buf);
-	}
-
-out:
-	if (odp_likely(op))
-		rte_crypto_op_free(op);
 	/* Fill in result */
-	packet_subtype_set(out_pkt, ODP_EVENT_PACKET_CRYPTO);
-	op_result = get_op_result_from_packet(out_pkt);
+	packet_subtype_set(pkt, ODP_EVENT_PACKET_CRYPTO);
+	op_result = get_op_result_from_packet(pkt);
 	op_result->cipher_status.alg_err = rc_cipher;
 	op_result->cipher_status.hw_err = ODP_CRYPTO_HW_ERR_NONE;
 	op_result->auth_status.alg_err = rc_auth;
 	op_result->auth_status.hw_err = ODP_CRYPTO_HW_ERR_NONE;
 	op_result->ok = result_ok;
+}
 
-	/* Synchronous, simply return results */
-	*pkt_out = out_pkt;
+static
+int odp_crypto_int(const odp_packet_t pkt_in[],
+		   odp_packet_t pkt_out[],
+		   const odp_crypto_packet_op_param_t param[],
+		   int num_pkt)
+{
+	crypto_op_t *op[MAX_BURST];
 
-	return 0;
+	num_pkt = op_alloc(op, pkt_in, pkt_out, param, num_pkt);
+	if (odp_unlikely(num_pkt == 0))
+		return 0;
 
-err:
-	if (op)
-		rte_crypto_op_free(op);
+	op_prepare(op, param, num_pkt);
 
-	return -1;
+	op_enq_deq(op, num_pkt);
+
+	for (int n = 0; n < num_pkt; n++) {
+		op_finish(op[n]);
+		pkt_out[n] = op[n]->state.pkt;
+		rte_crypto_op_free((struct rte_crypto_op *)op[n]);
+	}
+	return num_pkt;
 }
 
 #if ODP_DEPRECATED_API
@@ -2041,7 +2200,7 @@ int odp_crypto_operation(odp_crypto_op_param_t *param,
 	packet_param.cipher_range = param->cipher_range;
 	packet_param.auth_range = param->auth_range;
 
-	rc = odp_crypto_int(param->pkt, &out_pkt, &packet_param);
+	rc = odp_crypto_int(&param->pkt, &out_pkt, &packet_param, 1);
 	if (rc < 0)
 		return rc;
 
@@ -2083,18 +2242,16 @@ int odp_crypto_op(const odp_packet_t pkt_in[],
 		  int num_pkt)
 {
 	crypto_session_entry_t *session;
-	int i, rc;
+	int i;
+
+	if (num_pkt > MAX_BURST)
+		num_pkt = MAX_BURST;
 
 	for (i = 0; i < num_pkt; i++) {
 		session = (crypto_session_entry_t *)(intptr_t)param[i].session;
 		ODP_ASSERT(ODP_CRYPTO_SYNC == session->p.op_mode);
-
-		rc = odp_crypto_int(pkt_in[i], &pkt_out[i], &param[i]);
-		if (rc < 0)
-			break;
 	}
-
-	return i;
+	return odp_crypto_int(pkt_in, pkt_out, param, num_pkt);
 }
 
 int odp_crypto_op_enq(const odp_packet_t pkt_in[],
@@ -2102,22 +2259,27 @@ int odp_crypto_op_enq(const odp_packet_t pkt_in[],
 		      const odp_crypto_packet_op_param_t param[],
 		      int num_pkt)
 {
-	odp_packet_t pkt;
 	odp_event_t event;
 	crypto_session_entry_t *session;
-	int i, rc;
+	int i;
+	odp_packet_t out_pkts[MAX_BURST];
+
+	if (num_pkt > MAX_BURST)
+		num_pkt = MAX_BURST;
 
 	for (i = 0; i < num_pkt; i++) {
 		session = (crypto_session_entry_t *)(intptr_t)param[i].session;
 		ODP_ASSERT(ODP_CRYPTO_ASYNC == session->p.op_mode);
 		ODP_ASSERT(ODP_QUEUE_INVALID != session->p.compl_queue);
 
-		pkt = pkt_out[i];
-		rc = odp_crypto_int(pkt_in[i], &pkt, &param[i]);
-		if (rc < 0)
-			break;
+		out_pkts[i] = pkt_out[i];
+	}
 
-		event = odp_packet_to_event(pkt);
+	num_pkt = odp_crypto_int(pkt_in, out_pkts, param, num_pkt);
+
+	for (i = 0; i < num_pkt; i++) {
+		session = (crypto_session_entry_t *)(intptr_t)param[i].session;
+		event = odp_packet_to_event(out_pkts[i]);
 		if (odp_queue_enq(session->p.compl_queue, event)) {
 			odp_event_free(event);
 			break;
