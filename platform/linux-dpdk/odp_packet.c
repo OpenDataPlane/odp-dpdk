@@ -159,6 +159,21 @@ static inline int packet_reset(odp_packet_t pkt, uint32_t len)
 	return 0;
 }
 
+static inline int pktmbuf_alloc_multi(struct rte_mempool *mp, struct rte_mbuf **mbufs, int num)
+{
+	if (odp_likely(rte_pktmbuf_alloc_bulk(mp, mbufs, num) == 0))
+		return num;
+
+	for (int i = 0; i < num; i++) {
+		mbufs[i] = rte_pktmbuf_alloc(mp);
+
+		if (odp_unlikely(mbufs[i] == NULL))
+			return i;
+	}
+
+	return num;
+}
+
 static odp_packet_t packet_alloc(pool_t *pool, uint32_t len)
 {
 	odp_packet_t pkt;
@@ -195,31 +210,13 @@ static odp_packet_t packet_alloc(pool_t *pool, uint32_t len)
 		/* Avoid invalid 'maybe-uninitialized' warning with GCC 12 */
 		mbufs[0] = NULL;
 
-		ret = rte_pktmbuf_alloc_bulk(pool->rte_mempool, mbufs, num_seg);
-		if (odp_unlikely(ret)) {
-			/*
-			 * rte_pktmbuf_alloc_bulk() fails when allocating the
-			 * last buffers from the pool, if some of them, but not
-			 * all, are in the cache.
-			 *
-			 * Try to allocate the buffers one by one.
-			 */
-			for (i = 0; i < num_seg; i++) {
-				mbufs[i] = rte_pktmbuf_alloc(pool->rte_mempool);
-				if (!mbufs[i]) {
-					/*
-					 * Failed to allocate the number of
-					 * buffers that we wanted. Free the ones
-					 * we managed to allocate, if any, and
-					 * return error.
-					 */
-					while (i > 0)
-						rte_pktmbuf_free(mbufs[--i]);
+		ret = pktmbuf_alloc_multi(pool->rte_mempool, mbufs, num_seg);
+		if (odp_unlikely(ret != num_seg)) {
+			for (i = 0; i < ret; i++)
+				rte_pktmbuf_free(mbufs[i]);
 
-					_odp_errno = ENOMEM;
-					return ODP_PACKET_INVALID;
-				}
-			}
+			_odp_errno = ENOMEM;
+			return ODP_PACKET_INVALID;
 		}
 
 		head = mbufs[0];
@@ -243,6 +240,40 @@ static odp_packet_t packet_alloc(pool_t *pool, uint32_t len)
 	return pkt;
 }
 
+static int packet_alloc_multi(pool_t *pool, uint32_t len, odp_packet_t pkt[], int num)
+{
+	uintmax_t totsize = RTE_PKTMBUF_HEADROOM + len;
+	int num_seg, i;
+
+	num_seg = num_segments(totsize, pool->seg_len);
+
+	if (odp_likely(num_seg == 1)) {
+		int ret;
+
+		ret = pktmbuf_alloc_multi(pool->rte_mempool, (struct rte_mbuf **)pkt, num);
+
+		for (i = 0; i < ret; i++) {
+			struct rte_mbuf *mbuf = pkt_to_mbuf(pkt[i]);
+
+			odp_prefetch((uint8_t *)mbuf + sizeof(struct rte_mbuf));
+			odp_prefetch((uint8_t *)mbuf + sizeof(struct rte_mbuf) +
+				ODP_CACHE_LINE_SIZE);
+
+			packet_reset(pkt[i], len);
+		}
+		return ret;
+	}
+
+	/* Fall back to using packet_alloc() for segmented packets */
+
+	for (i = 0; i < num; i++) {
+		pkt[i] = packet_alloc(pool, len);
+		if (odp_unlikely(pkt[i] == ODP_PACKET_INVALID))
+			return (i == 0 && _odp_errno != ENOMEM) ? -1 : i;
+	}
+	return i;
+}
+
 odp_packet_t odp_packet_alloc(odp_pool_t pool_hdl, uint32_t len)
 {
 	pool_t *pool = _odp_pool_entry(pool_hdl);
@@ -261,7 +292,6 @@ odp_packet_t odp_packet_alloc(odp_pool_t pool_hdl, uint32_t len)
 int odp_packet_alloc_multi(odp_pool_t pool_hdl, uint32_t len,
 			   odp_packet_t pkt[], int num)
 {
-	int i;
 	pool_t *pool = _odp_pool_entry(pool_hdl);
 
 	if (odp_unlikely(pool->type != ODP_POOL_PACKET)) {
@@ -272,12 +302,7 @@ int odp_packet_alloc_multi(odp_pool_t pool_hdl, uint32_t len,
 	if (odp_unlikely(len == 0))
 		return -1;
 
-	for (i = 0; i < num; i++) {
-		pkt[i] = packet_alloc(pool, len);
-		if (odp_unlikely(pkt[i] == ODP_PACKET_INVALID))
-			return (i == 0 && _odp_errno != ENOMEM) ? -1 : i;
-	}
-	return i;
+	return packet_alloc_multi(pool, len, pkt, num);
 }
 
 int odp_packet_reset(odp_packet_t pkt, uint32_t len)
