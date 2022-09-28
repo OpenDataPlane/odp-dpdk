@@ -159,6 +159,18 @@ static inline int packet_reset(odp_packet_t pkt, uint32_t len)
 	return 0;
 }
 
+/* Reset unmodified single segment packet after rte_pktmbuf_alloc(), which has already called
+ * rte_pktmbuf_reset() internally. */
+static inline void packet_reset_fresh(odp_packet_t pkt, uint32_t len)
+{
+	struct rte_mbuf *mb = pkt_to_mbuf(pkt);
+
+	packet_init(packet_hdr(pkt), ODP_PKTIO_INVALID);
+
+	mb->pkt_len = len;
+	mb->data_len = len;
+}
+
 static inline int pktmbuf_alloc_multi(struct rte_mempool *mp, struct rte_mbuf **mbufs, int num)
 {
 	if (odp_likely(rte_pktmbuf_alloc_bulk(mp, mbufs, num) == 0))
@@ -195,43 +207,49 @@ static odp_packet_t packet_alloc(pool_t *pool, uint32_t len)
 		odp_prefetch((uint8_t *)mbuf + sizeof(struct rte_mbuf));
 		odp_prefetch((uint8_t *)mbuf + sizeof(struct rte_mbuf) +
 			     ODP_CACHE_LINE_SIZE);
-	} else {
-		struct rte_mbuf *mbufs[num_seg];
-		struct rte_mbuf *head;
-		int ret;
-		int i;
 
-		/* Check num_seg here so rte_pktmbuf_chain() always succeeds */
-		if (odp_unlikely(num_seg > RTE_MBUF_MAX_NB_SEGS)) {
-			_odp_errno = EOVERFLOW;
-			return ODP_PACKET_INVALID;
-		}
+		pkt = packet_handle(pkt_hdr);
+		packet_reset_fresh(pkt, len);
 
-		/* Avoid invalid 'maybe-uninitialized' warning with GCC 12 */
-		mbufs[0] = NULL;
+		return pkt;
+	}
 
-		ret = pktmbuf_alloc_multi(pool->rte_mempool, mbufs, num_seg);
-		if (odp_unlikely(ret != num_seg)) {
-			for (i = 0; i < ret; i++)
-				rte_pktmbuf_free(mbufs[i]);
+	/* Create segmented packet */
 
-			_odp_errno = ENOMEM;
-			return ODP_PACKET_INVALID;
-		}
+	struct rte_mbuf *mbufs[num_seg];
+	struct rte_mbuf *head;
+	int ret;
 
-		head = mbufs[0];
-		pkt_hdr = (odp_packet_hdr_t *)head;
-		odp_prefetch((uint8_t *)head + sizeof(struct rte_mbuf));
-		odp_prefetch((uint8_t *)head + sizeof(struct rte_mbuf) +
-			     ODP_CACHE_LINE_SIZE);
+	/* Check num_seg here so rte_pktmbuf_chain() always succeeds */
+	if (odp_unlikely(num_seg > RTE_MBUF_MAX_NB_SEGS)) {
+		_odp_errno = EOVERFLOW;
+		return ODP_PACKET_INVALID;
+	}
 
-		for (i = 1; i < num_seg; i++) {
-			struct rte_mbuf *nextseg = mbufs[i];
+	/* Avoid invalid 'maybe-uninitialized' warning with GCC 12 */
+	mbufs[0] = NULL;
 
-			nextseg->data_off = 0;
+	ret = pktmbuf_alloc_multi(pool->rte_mempool, mbufs, num_seg);
+	if (odp_unlikely(ret != num_seg)) {
+		for (int i = 0; i < ret; i++)
+			rte_pktmbuf_free(mbufs[i]);
 
-			rte_pktmbuf_chain(head, nextseg);
-		}
+		_odp_errno = ENOMEM;
+		return ODP_PACKET_INVALID;
+	}
+
+	head = mbufs[0];
+	pkt_hdr = (odp_packet_hdr_t *)head;
+	odp_prefetch((uint8_t *)head + sizeof(struct rte_mbuf));
+	odp_prefetch((uint8_t *)head + sizeof(struct rte_mbuf) +
+			ODP_CACHE_LINE_SIZE);
+
+	for (int i = 1; i < num_seg; i++) {
+		struct rte_mbuf *nextseg = mbufs[i];
+
+		nextseg->data_off = 0;
+
+		rte_pktmbuf_chain(head, nextseg);
 	}
 
 	pkt = packet_handle(pkt_hdr);
@@ -259,7 +277,7 @@ static int packet_alloc_multi(pool_t *pool, uint32_t len, odp_packet_t pkt[], in
 			odp_prefetch((uint8_t *)mbuf + sizeof(struct rte_mbuf) +
 				ODP_CACHE_LINE_SIZE);
 
-			packet_reset(pkt[i], len);
+			packet_reset_fresh(pkt[i], len);
 		}
 		return ret;
 	}
