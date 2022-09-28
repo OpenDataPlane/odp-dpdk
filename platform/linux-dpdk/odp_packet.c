@@ -23,7 +23,6 @@
 
 #include <odp_chksum_internal.h>
 #include <odp_debug_internal.h>
-#include <odp_errno_define.h>
 #include <odp_event_internal.h>
 #include <odp_macros_internal.h>
 #include <odp_packet_internal.h>
@@ -199,10 +198,9 @@ static odp_packet_t packet_alloc(pool_t *pool, uint32_t len)
 	if (odp_likely(num_seg == 1)) {
 		struct rte_mbuf *mbuf = rte_pktmbuf_alloc(pool->rte_mempool);
 
-		if (odp_unlikely(mbuf == NULL)) {
-			_odp_errno = ENOMEM;
+		if (odp_unlikely(mbuf == NULL))
 			return ODP_PACKET_INVALID;
-		}
+
 		pkt_hdr = (odp_packet_hdr_t *)mbuf;
 		odp_prefetch((uint8_t *)mbuf + sizeof(struct rte_mbuf));
 		odp_prefetch((uint8_t *)mbuf + sizeof(struct rte_mbuf) +
@@ -221,10 +219,8 @@ static odp_packet_t packet_alloc(pool_t *pool, uint32_t len)
 	int ret;
 
 	/* Check num_seg here so rte_pktmbuf_chain() always succeeds */
-	if (odp_unlikely(num_seg > RTE_MBUF_MAX_NB_SEGS)) {
-		_odp_errno = EOVERFLOW;
+	if (odp_unlikely(num_seg > RTE_MBUF_MAX_NB_SEGS))
 		return ODP_PACKET_INVALID;
-	}
 
 	/* Avoid invalid 'maybe-uninitialized' warning with GCC 12 */
 	mbufs[0] = NULL;
@@ -234,7 +230,6 @@ static odp_packet_t packet_alloc(pool_t *pool, uint32_t len)
 		for (int i = 0; i < ret; i++)
 			rte_pktmbuf_free(mbufs[i]);
 
-		_odp_errno = ENOMEM;
 		return ODP_PACKET_INVALID;
 	}
 
@@ -287,7 +282,7 @@ static int packet_alloc_multi(pool_t *pool, uint32_t len, odp_packet_t pkt[], in
 	for (i = 0; i < num; i++) {
 		pkt[i] = packet_alloc(pool, len);
 		if (odp_unlikely(pkt[i] == ODP_PACKET_INVALID))
-			return (i == 0 && _odp_errno != ENOMEM) ? -1 : i;
+			return i;
 	}
 	return i;
 }
@@ -296,10 +291,7 @@ odp_packet_t odp_packet_alloc(odp_pool_t pool_hdl, uint32_t len)
 {
 	pool_t *pool = _odp_pool_entry(pool_hdl);
 
-	if (odp_unlikely(pool->type != ODP_POOL_PACKET)) {
-		_odp_errno = EINVAL;
-		return ODP_PACKET_INVALID;
-	}
+	ODP_ASSERT(pool->type == ODP_POOL_PACKET);
 
 	if (odp_unlikely(len == 0))
 		return ODP_PACKET_INVALID;
@@ -312,10 +304,7 @@ int odp_packet_alloc_multi(odp_pool_t pool_hdl, uint32_t len,
 {
 	pool_t *pool = _odp_pool_entry(pool_hdl);
 
-	if (odp_unlikely(pool->type != ODP_POOL_PACKET)) {
-		_odp_errno = EINVAL;
-		return -1;
-	}
+	ODP_ASSERT(pool->type == ODP_POOL_PACKET);
 
 	if (odp_unlikely(len == 0))
 		return -1;
@@ -329,7 +318,7 @@ int odp_packet_reset(odp_packet_t pkt, uint32_t len)
 		return -1;
 
 	if (RTE_PKTMBUF_HEADROOM + len > odp_packet_buf_len(pkt)) {
-		ODP_DBG("Not enought head room for that packet %d/%d\n",
+		ODP_DBG("Not enough head room for that packet %d/%d\n",
 			RTE_PKTMBUF_HEADROOM + len,
 			odp_packet_buf_len(pkt));
 		return -1;
