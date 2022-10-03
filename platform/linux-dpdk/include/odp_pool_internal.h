@@ -149,15 +149,34 @@ static inline odp_event_t _odp_event_alloc(pool_t *pool)
 
 static inline void _odp_event_free_multi(_odp_event_hdr_t *event_hdr[], int num_free)
 {
-	int i;
+	struct rte_mbuf *mbuf_tbl[num_free];
+	struct rte_mempool *mp_pending;
+	unsigned int num_pending;
 
-	for (i = 0; i < num_free; i++)
-		rte_mbuf_raw_free(_odp_event_to_mbuf(_odp_event_from_hdr(event_hdr[i])));
+	mbuf_tbl[0] = &event_hdr[0]->mb;
+	mp_pending = mbuf_tbl[0]->pool;
+	num_pending = 1;
+
+	for (int i = 1; i < num_free; i++) {
+		struct rte_mbuf *mbuf = &event_hdr[i]->mb;
+
+		if (mbuf->pool != mp_pending) {
+			rte_mempool_put_bulk(mp_pending, (void **)mbuf_tbl, num_pending);
+			mbuf_tbl[0] = mbuf;
+			num_pending = 1;
+			mp_pending = mbuf->pool;
+		} else {
+			mbuf_tbl[num_pending++] = mbuf;
+		}
+	}
+	rte_mempool_put_bulk(mp_pending, (void **)mbuf_tbl, num_pending);
 }
 
 static inline void _odp_event_free(odp_event_t event)
 {
-	rte_mbuf_raw_free(_odp_event_to_mbuf(event));
+	struct rte_mbuf *mbuf = _odp_event_to_mbuf(event);
+
+	rte_mempool_put(mbuf->pool, mbuf);
 }
 
 int _odp_event_is_valid(odp_event_t event);

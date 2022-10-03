@@ -8,6 +8,7 @@
 #define ODP_PLAT_BUFFER_INLINES_H_
 
 #include <odp/api/event_types.h>
+#include <odp/api/hints.h>
 #include <odp/api/pool_types.h>
 
 #include <odp/api/abi/buffer.h>
@@ -15,6 +16,7 @@
 #include <odp/api/plat/event_inline_types.h>
 
 #include <rte_mbuf.h>
+#include <rte_mempool.h>
 #if defined(__PPC64__) && defined(bool)
 	#undef bool
 	#define bool _Bool
@@ -68,13 +70,37 @@ _ODP_INLINE odp_pool_t odp_buffer_pool(odp_buffer_t buf)
 
 _ODP_INLINE void odp_buffer_free(odp_buffer_t buf)
 {
-	rte_mbuf_raw_free((struct rte_mbuf *)buf);
+	struct rte_mbuf *mbuf = (struct rte_mbuf *)buf;
+
+	rte_mempool_put(mbuf->pool, mbuf);
 }
 
 _ODP_INLINE void odp_buffer_free_multi(const odp_buffer_t buf[], int num)
 {
-	for (int i = 0; i < num; i++)
-		rte_mbuf_raw_free((struct rte_mbuf *)buf[i]);
+	struct rte_mbuf *mbuf_tbl[num];
+	struct rte_mempool *mp_pending;
+	unsigned int num_pending;
+
+	if (odp_unlikely(num <= 0))
+		return;
+
+	mbuf_tbl[0] = (struct rte_mbuf *)buf[0];
+	mp_pending = mbuf_tbl[0]->pool;
+	num_pending = 1;
+
+	for (int i = 1; i < num; i++) {
+		struct rte_mbuf *mbuf = (struct rte_mbuf *)buf[i];
+
+		if (mbuf->pool != mp_pending) {
+			rte_mempool_put_bulk(mp_pending, (void **)mbuf_tbl, num_pending);
+			mbuf_tbl[0] = mbuf;
+			num_pending = 1;
+			mp_pending = mbuf->pool;
+		} else {
+			mbuf_tbl[num_pending++] = mbuf;
+		}
+	}
+	rte_mempool_put_bulk(mp_pending, (void **)mbuf_tbl, num_pending);
 }
 
 /** @endcond */
