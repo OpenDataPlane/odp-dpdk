@@ -121,11 +121,13 @@ static inline int _odp_event_alloc_multi(pool_t *pool, _odp_event_hdr_t *event_h
 	int i;
 	struct rte_mempool *mp = pool->rte_mempool;
 
+	if (odp_likely(rte_mempool_get_bulk(mp, (void **)event_hdr, num) == 0))
+		return num;
+
 	for (i = 0; i < num; i++) {
 		struct rte_mbuf *mbuf;
 
-		mbuf = rte_mbuf_raw_alloc(mp);
-		if (odp_unlikely(mbuf == NULL))
+		if (odp_unlikely(rte_mempool_get(mp, (void **)&mbuf) != 0))
 			return i;
 
 		event_hdr[i] = _odp_event_hdr(_odp_event_from_mbuf(mbuf));
@@ -139,8 +141,7 @@ static inline odp_event_t _odp_event_alloc(pool_t *pool)
 	struct rte_mbuf *mbuf;
 	struct rte_mempool *mp = pool->rte_mempool;
 
-	mbuf = rte_mbuf_raw_alloc(mp);
-	if (odp_unlikely(mbuf == NULL))
+	if (odp_unlikely(rte_mempool_get(mp, (void **)&mbuf) != 0))
 		return ODP_EVENT_INVALID;
 
 	return _odp_event_from_mbuf(mbuf);
