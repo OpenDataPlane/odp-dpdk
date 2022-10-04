@@ -457,10 +457,7 @@ _ODP_INLINE void odp_packet_free(odp_packet_t pkt)
 
 _ODP_INLINE void odp_packet_free_multi(const odp_packet_t pkt[], int num)
 {
-	int i;
-
-	for (i = 0; i < num; i++)
-		rte_pktmbuf_free((struct rte_mbuf *)pkt[i]);
+	rte_pktmbuf_free_bulk((struct rte_mbuf **)(uintptr_t)pkt, (unsigned int)num);
 }
 
 _ODP_INLINE void odp_packet_free_sp(const odp_packet_t pkt[], int num)
