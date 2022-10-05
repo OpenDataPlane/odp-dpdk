@@ -24,6 +24,7 @@ extern const _odp_timeout_inline_offset_t _odp_timeout_inline_offset;
 	#define odp_timeout_timer __odp_timeout_timer
 	#define odp_timeout_tick __odp_timeout_tick
 	#define odp_timeout_user_ptr __odp_timeout_user_ptr
+	#define odp_timeout_user_area __odp_timeout_user_area
 	#define odp_timeout_from_event __odp_timeout_from_event
 	#define odp_timeout_to_event __odp_timeout_to_event
 #else
@@ -43,6 +44,11 @@ _ODP_INLINE uint64_t odp_timeout_tick(odp_timeout_t tmo)
 _ODP_INLINE void *odp_timeout_user_ptr(odp_timeout_t tmo)
 {
 	return _odp_timeout_hdr_field(tmo, void *, user_ptr);
+}
+
+_ODP_INLINE void *odp_timeout_user_area(odp_timeout_t tmo)
+{
+	return _odp_timeout_hdr_field(tmo, void *, uarea_addr);
 }
 
 _ODP_INLINE odp_timeout_t odp_timeout_from_event(odp_event_t ev)
