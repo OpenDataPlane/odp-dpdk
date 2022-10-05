@@ -26,6 +26,9 @@ extern "C" {
 #define _odp_pkt_get(pkt, cast, field) \
 	(*(cast *)(uintptr_t)((uint8_t *)pkt + _odp_packet_inline.field))
 
+#define _odp_pkt_get_ptr(pkt, cast, field) \
+	((cast *)(uintptr_t)((uint8_t *)pkt + _odp_packet_inline.field))
+
 /* Packet header field offsets for inline functions */
 typedef struct _odp_packet_inline_offset_t {
 	uint16_t mb;
@@ -113,12 +116,13 @@ typedef union {
 	uint32_t all_flags;
 
 	struct {
-		uint32_t reserved1:      7;
+		uint32_t reserved1:      6;
 
 	/*
 	 * Init flags
 	 */
 		uint32_t user_ptr_set:   1; /* User has set a non-NULL value */
+		uint32_t user_flag:      1;
 
 	/*
 	 * Packet output flags
@@ -148,8 +152,8 @@ typedef union {
 
 	/* Flag groups */
 	struct {
-		uint32_t reserved2:      7;
-		uint32_t other:         18; /* All other flags */
+		uint32_t reserved2:      6;
+		uint32_t other:         19; /* All other flags */
 		uint32_t error:          7; /* All error flags */
 	} all;
 
