@@ -129,6 +129,7 @@ noinst_HEADERS = \
 		  ${top_srcdir}/platform/linux-generic/include/odp_name_table_internal.h \
 		  include/odp_packet_io_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_parse_internal.h \
+		  ${top_srcdir}/platform/linux-generic/include/odp_print_internal.h \
 		  include/odp_errno_define.h \
 		  include/odp_event_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_packet_dpdk.h \
@@ -204,6 +205,7 @@ __LIB__libodp_dpdk_la_SOURCES = \
 			   ../linux-generic/pktio/loop.c \
 			   ../linux-generic/pktio/null.c \
 			   ../linux-generic/odp_pkt_queue.c \
+			   ../linux-generic/odp_print.c \
 			   odp_pool.c \
 			   odp_queue_basic.c \
 			   odp_queue_eventdev.c \
