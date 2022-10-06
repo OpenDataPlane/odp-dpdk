@@ -55,9 +55,10 @@
 #define IV_OFFSET	(sizeof(struct rte_crypto_op) + \
 			 sizeof(struct rte_crypto_sym_op))
 
-/* Max number of rte_cryptodev_dequeue_burst() retries (1 usec wait between
- * retries). */
-#define MAX_DEQ_RETRIES 100000
+/* Max number of rte_cryptodev_dequeue_burst() retries before error printout */
+#define MAX_DEQ_RETRIES (10 * 1000 * 1000)
+/* Min delay between rte_cryptodev_dequeue_burst() retries in nanoseconds */
+#define DEQ_RETRY_DELAY_NS 10
 
 typedef struct crypto_session_entry_s {
 	struct crypto_session_entry_s *next;
@@ -1904,7 +1905,7 @@ int odp_crypto_int(odp_packet_t pkt_in,
 
 	if (odp_likely(rc_cipher == ODP_CRYPTO_ALG_ERR_NONE &&
 		       rc_auth == ODP_CRYPTO_ALG_ERR_NONE)) {
-		int retry_count = 0;
+		uint32_t retry_count = 0;
 		int queue_pair;
 		int rc;
 		odp_bool_t queue_pairs_shared = session->flags.cdev_qpairs_shared;
@@ -1945,13 +1946,17 @@ int odp_crypto_int(odp_packet_t pkt_in,
 		while (1) {
 			rc = rte_cryptodev_dequeue_burst(session->cdev_id,
 							 queue_pair, &op, 1);
-			if (odp_unlikely(rc == 0) &&
-			    retry_count < MAX_DEQ_RETRIES) {
-				odp_time_wait_ns(ODP_TIME_USEC_IN_NS);
-				retry_count++;
-				continue;
+			if (odp_likely(rc == 1))
+				break;
+			odp_time_wait_ns(DEQ_RETRY_DELAY_NS);
+			if (++retry_count == MAX_DEQ_RETRIES) {
+				ODP_ERR("Failed to dequeue a crypto operation\n");
+				/*
+				 * We cannot give up and return to the caller
+				 * since the packet and the crypto operation
+				 * are still owned by the cryptodev.
+				 */
 			}
-			break;
 		}
 		if (odp_unlikely(queue_pairs_shared))
 			odp_spinlock_unlock(&global->lock);
