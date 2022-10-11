@@ -108,6 +108,7 @@ extern "C" {
 	#define odp_packet_color __odp_packet_color
 	#define odp_packet_drop_eligible __odp_packet_drop_eligible
 	#define odp_packet_shaper_len_adjust __odp_packet_shaper_len_adjust
+	#define odp_packet_buf_data_len __odp_packet_buf_data_len
 #else
 	#undef _ODP_INLINE
 	#define _ODP_INLINE
@@ -540,6 +541,11 @@ _ODP_INLINE int8_t odp_packet_shaper_len_adjust(odp_packet_t pkt)
 	flags.all_flags = _odp_pkt_get(pkt, uint32_t, flags);
 
 	return (int8_t)flags.shaper_len_adj;
+}
+
+_ODP_INLINE uint32_t odp_packet_buf_data_len(odp_packet_buf_t pkt_buf)
+{
+	return odp_packet_seg_data_len(ODP_PACKET_INVALID, (odp_packet_seg_t)pkt_buf);
 }
 
 #ifdef __cplusplus

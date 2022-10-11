@@ -2007,12 +2007,6 @@ uint32_t odp_packet_buf_data_offset(odp_packet_buf_t pkt_buf)
 	return (uintptr_t)data - (uintptr_t)head;
 }
 
-uint32_t odp_packet_buf_data_len(odp_packet_buf_t pkt_buf)
-{
-	return odp_packet_seg_data_len(ODP_PACKET_INVALID,
-				       (odp_packet_seg_t)pkt_buf);
-}
-
 void odp_packet_buf_data_set(odp_packet_buf_t pkt_buf, uint32_t data_offset,
 			     uint32_t data_len)
 {
