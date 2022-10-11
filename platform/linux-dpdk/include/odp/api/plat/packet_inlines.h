@@ -111,6 +111,7 @@ extern "C" {
 	#define odp_packet_buf_data_len __odp_packet_buf_data_len
 	#define odp_packet_buf_size __odp_packet_buf_size
 	#define odp_packet_buf_head __odp_packet_buf_head
+	#define odp_packet_buf_data_offset __odp_packet_buf_data_offset
 #else
 	#undef _ODP_INLINE
 	#define _ODP_INLINE
@@ -567,6 +568,14 @@ _ODP_INLINE void *odp_packet_buf_head(odp_packet_buf_t pkt_buf)
 		return NULL;
 
 	return (uint8_t *)(uintptr_t)pkt_buf + head_offset;
+}
+
+_ODP_INLINE uint32_t odp_packet_buf_data_offset(odp_packet_buf_t pkt_buf)
+{
+	void *data = odp_packet_seg_data(ODP_PACKET_INVALID, (odp_packet_seg_t)pkt_buf);
+	void *head = odp_packet_buf_head(pkt_buf);
+
+	return (uint32_t)((uintptr_t)data - (uintptr_t)head);
 }
 
 #ifdef __cplusplus

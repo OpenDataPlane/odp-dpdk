@@ -1977,15 +1977,6 @@ static inline odp_packet_hdr_t *packet_buf_to_hdr(odp_packet_buf_t pkt_buf)
 	return (odp_packet_hdr_t *)(uintptr_t)pkt_buf;
 }
 
-uint32_t odp_packet_buf_data_offset(odp_packet_buf_t pkt_buf)
-{
-	void *data = odp_packet_seg_data(ODP_PACKET_INVALID,
-					 (odp_packet_seg_t)pkt_buf);
-	void *head = odp_packet_buf_head(pkt_buf);
-
-	return (uintptr_t)data - (uintptr_t)head;
-}
-
 void odp_packet_buf_data_set(odp_packet_buf_t pkt_buf, uint32_t data_offset,
 			     uint32_t data_len)
 {
