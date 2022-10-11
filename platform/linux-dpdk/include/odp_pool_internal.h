@@ -73,7 +73,7 @@ typedef struct ODP_ALIGNED_CACHE {
 	uint8_t			memset_mark;
 	struct rte_mempool	*rte_mempool;
 	uint32_t		seg_len;
-	uint32_t		hdr_size;
+	uint32_t		ext_head_offset;
 	uint32_t		num;
 	uint32_t		num_populated;
 	odp_pool_type_t		type_2;

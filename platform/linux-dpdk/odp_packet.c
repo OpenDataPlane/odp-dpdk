@@ -1987,15 +1987,7 @@ void *odp_packet_buf_head(odp_packet_buf_t pkt_buf)
 		return NULL;
 	}
 
-	return (uint8_t *)pkt_hdr + pool->hdr_size;
-}
-
-uint32_t odp_packet_buf_size(odp_packet_buf_t pkt_buf)
-{
-	odp_packet_hdr_t *pkt_hdr = packet_buf_to_hdr(pkt_buf);
-	pool_t *pool = _odp_pool_entry(pkt_hdr->event_hdr.pool);
-
-	return pool->seg_len;
+	return (uint8_t *)pkt_hdr + pool->ext_head_offset;
 }
 
 uint32_t odp_packet_buf_data_offset(odp_packet_buf_t pkt_buf)
@@ -2030,7 +2022,7 @@ odp_packet_buf_t odp_packet_buf_from_head(odp_pool_t pool_hdl, void *head)
 		return ODP_PACKET_BUF_INVALID;
 	}
 
-	return (odp_packet_buf_t)((uintptr_t)head - pool->hdr_size);
+	return (odp_packet_buf_t)((uintptr_t)head - pool->ext_head_offset);
 }
 
 uint32_t odp_packet_disassemble(odp_packet_t pkt, odp_packet_buf_t pkt_buf[],

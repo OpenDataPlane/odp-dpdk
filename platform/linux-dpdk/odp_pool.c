@@ -69,7 +69,9 @@ pool_global_t *_odp_pool_glb;
 /* Fill in pool header field offsets for inline functions */
 const _odp_pool_inline_offset_t _odp_pool_inline ODP_ALIGNED_CACHE = {
 	.index             = offsetof(pool_t, pool_idx),
-	.uarea_size        = offsetof(pool_t, params.pkt.uarea_size)
+	.seg_len           = offsetof(pool_t, seg_len),
+	.uarea_size        = offsetof(pool_t, params.pkt.uarea_size),
+	.ext_head_offset   = offsetof(pool_t, ext_head_offset)
 };
 
 #include <odp/visibility_end.h>
@@ -1335,7 +1337,7 @@ odp_pool_t odp_pool_ext_create(const char *name,
 		}
 
 		pool->ext_param = *params;
-		pool->hdr_size = hdr_size;
+		pool->ext_head_offset = hdr_size;
 		pool->num = num;
 		pool->num_populated = 0;
 		pool->params.pkt.uarea_size = params->pkt.uarea_size;
