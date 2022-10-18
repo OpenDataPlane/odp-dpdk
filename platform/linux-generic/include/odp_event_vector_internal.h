@@ -17,6 +17,8 @@
 #include <odp/api/debug.h>
 #include <odp/api/packet.h>
 
+#include <odp/api/plat/event_vector_inline_types.h>
+
 #include <odp_event_internal.h>
 
 #include <stdint.h>
@@ -28,8 +30,14 @@ typedef struct ODP_ALIGNED_CACHE odp_event_vector_hdr_t {
 	/* Common event header */
 	_odp_event_hdr_t event_hdr;
 
+	/* User area pointer */
+	void *uarea_addr;
+
 	/* Event vector size */
 	uint32_t size;
+
+	/* Flags */
+	_odp_event_vector_flags_t flags;
 
 	/* Vector of packet handles */
 	odp_packet_t packet[];

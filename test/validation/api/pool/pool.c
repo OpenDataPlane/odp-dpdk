@@ -51,17 +51,21 @@ static void test_param_init(uint8_t fill)
 	memset(&param, fill, sizeof(param));
 	odp_pool_param_init(&param);
 
+	CU_ASSERT(param.buf.uarea_size == 0);
 	CU_ASSERT(param.buf.cache_size >= global_pool_capa.buf.min_cache_size &&
 		  param.buf.cache_size <= global_pool_capa.buf.max_cache_size);
 
 	CU_ASSERT(param.pkt.max_num == 0);
 	CU_ASSERT(param.pkt.num_subparam == 0);
+	CU_ASSERT(param.pkt.uarea_size == 0);
 	CU_ASSERT(param.pkt.cache_size >= global_pool_capa.pkt.min_cache_size &&
 		  param.pkt.cache_size <= global_pool_capa.pkt.max_cache_size);
 
+	CU_ASSERT(param.tmo.uarea_size == 0);
 	CU_ASSERT(param.tmo.cache_size >= global_pool_capa.tmo.min_cache_size &&
 		  param.tmo.cache_size <= global_pool_capa.tmo.max_cache_size);
 
+	CU_ASSERT(param.vector.uarea_size == 0);
 	CU_ASSERT(param.vector.cache_size >= global_pool_capa.vector.min_cache_size &&
 		  param.vector.cache_size <= global_pool_capa.vector.max_cache_size);
 }
@@ -915,7 +919,7 @@ static void pool_test_create_after_fork(void)
 	odp_atomic_init_u32(&global_mem->index, 0);
 
 	/* Fork here */
-	odp_cunit_thread_create(num, run_pool_test_create_after_fork, NULL, 0);
+	odp_cunit_thread_create(num, run_pool_test_create_after_fork, NULL, 0, 0);
 
 	/* Wait until thread 0 has created the test pool */
 	odp_barrier_wait(&global_mem->init_barrier);
@@ -1027,7 +1031,7 @@ static void pool_test_create_max_pkt_pools(void)
 	CU_ASSERT(num_shm == shm_capa.max_blocks);
 
 	/* Create maximum number of packet pools */
-	if (global_pool_capa.pkt.max_uarea_size && global_pool_capa.pkt.max_uarea_size < uarea_size)
+	if (uarea_size > global_pool_capa.pkt.max_uarea_size)
 		uarea_size = global_pool_capa.pkt.max_uarea_size;
 
 	odp_pool_param_init(&param);
@@ -1656,6 +1660,8 @@ static void packet_pool_ext_alloc(int len_test)
 		if (pkt[i] == ODP_PACKET_INVALID)
 			break;
 
+		CU_ASSERT(odp_packet_is_valid(pkt[i]) == 1);
+		CU_ASSERT(odp_event_is_valid(odp_packet_to_event(pkt[i])) == 1);
 		CU_ASSERT(odp_packet_len(pkt[i]) == pkt_len);
 		CU_ASSERT(odp_packet_headroom(pkt[i]) >= headroom);
 		buf_index = find_buf(pkt[i], buf, num_buf, head_offset);
@@ -1683,7 +1689,7 @@ static void packet_pool_ext_alloc(int len_test)
 
 		if (uarea_size) {
 			CU_ASSERT(odp_packet_user_area(pkt[i]) != NULL);
-			CU_ASSERT(odp_packet_user_area_size(pkt[i]) == uarea_size);
+			CU_ASSERT(odp_packet_user_area_size(pkt[i]) >= uarea_size);
 		}
 
 		/* Check that application header content has not changed */

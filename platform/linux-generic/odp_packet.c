@@ -1039,13 +1039,6 @@ void odp_packet_user_ptr_set(odp_packet_t pkt, const void *ptr)
 	pkt_hdr->p.flags.user_ptr_set = 1;
 }
 
-void odp_packet_input_set(odp_packet_t pkt, odp_pktio_t pktio)
-{
-	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
-
-	pkt_hdr->input = pktio;
-}
-
 int odp_packet_l2_offset_set(odp_packet_t pkt, uint32_t offset)
 {
 	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
@@ -2430,75 +2423,6 @@ odp_packet_reass_partial_state(odp_packet_t pkt, odp_packet_t frags[],
 	(void)frags;
 	(void)res;
 	return -ENOTSUP;
-}
-
-static inline odp_packet_hdr_t *packet_buf_to_hdr(odp_packet_buf_t pkt_buf)
-{
-	return (odp_packet_hdr_t *)(uintptr_t)pkt_buf;
-}
-
-void *odp_packet_buf_head(odp_packet_buf_t pkt_buf)
-{
-	odp_packet_hdr_t *pkt_hdr = packet_buf_to_hdr(pkt_buf);
-	pool_t *pool = _odp_pool_entry(pkt_hdr->event_hdr.pool);
-	uint32_t head_offset = sizeof(odp_packet_hdr_t) + pool->ext_param.pkt.app_header_size;
-
-	if (odp_unlikely(pool->pool_ext == 0)) {
-		ODP_ERR("Not an external memory pool\n");
-		return NULL;
-	}
-
-	return (uint8_t *)pkt_hdr + head_offset;
-}
-
-uint32_t odp_packet_buf_size(odp_packet_buf_t pkt_buf)
-{
-	odp_packet_hdr_t *pkt_hdr = packet_buf_to_hdr(pkt_buf);
-	pool_t *pool = _odp_pool_entry(pkt_hdr->event_hdr.pool);
-	uint32_t head_offset = sizeof(odp_packet_hdr_t) + pool->ext_param.pkt.app_header_size;
-
-	return pool->ext_param.pkt.buf_size - head_offset;
-}
-
-uint32_t odp_packet_buf_data_offset(odp_packet_buf_t pkt_buf)
-{
-	odp_packet_hdr_t *pkt_hdr = packet_buf_to_hdr(pkt_buf);
-
-	return (uintptr_t)pkt_hdr->seg_data - (uintptr_t)odp_packet_buf_head(pkt_buf);
-}
-
-uint32_t odp_packet_buf_data_len(odp_packet_buf_t pkt_buf)
-{
-	odp_packet_hdr_t *pkt_hdr = packet_buf_to_hdr(pkt_buf);
-
-	return pkt_hdr->seg_len;
-}
-
-void odp_packet_buf_data_set(odp_packet_buf_t pkt_buf, uint32_t data_offset, uint32_t data_len)
-{
-	odp_packet_hdr_t *pkt_hdr = packet_buf_to_hdr(pkt_buf);
-	uint8_t *head = odp_packet_buf_head(pkt_buf);
-
-	pkt_hdr->seg_len  = data_len;
-	pkt_hdr->seg_data = head + data_offset;
-}
-
-odp_packet_buf_t odp_packet_buf_from_head(odp_pool_t pool_hdl, void *head)
-{
-	pool_t *pool = _odp_pool_entry(pool_hdl);
-	uint32_t head_offset = sizeof(odp_packet_hdr_t) + pool->ext_param.pkt.app_header_size;
-
-	if (odp_unlikely(pool->type != ODP_POOL_PACKET)) {
-		ODP_ERR("Not a packet pool\n");
-		return ODP_PACKET_BUF_INVALID;
-	}
-
-	if (odp_unlikely(pool->pool_ext == 0)) {
-		ODP_ERR("Not an external memory pool\n");
-		return ODP_PACKET_BUF_INVALID;
-	}
-
-	return (odp_packet_buf_t)((uintptr_t)head - head_offset);
 }
 
 uint32_t odp_packet_disassemble(odp_packet_t pkt, odp_packet_buf_t pkt_buf[], uint32_t num)
