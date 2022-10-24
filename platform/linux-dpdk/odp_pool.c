@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2013-2018 Linaro Limited
- * Copyright (c) 2019-2025 Nokia
+ * Copyright (c) 2019-2026 Nokia
  */
 
 #include <odp/api/align.h>
@@ -826,6 +826,7 @@ odp_pool_t _odp_pool_create(const char *name, const odp_pool_param_t *params,
 		return ODP_POOL_INVALID;
 	}
 
+	pool->num = num;
 	pool->rte_mempool = mp;
 	pool->seg_len = seg_size;
 	pool->type_2 = type_2;
@@ -900,6 +901,28 @@ int odp_buffer_alloc_multi(odp_pool_t pool_hdl, odp_buffer_t buf[], int num)
 	return _odp_event_alloc_multi(pool, (_odp_event_hdr_t **)buf, num);
 }
 
+static const char *get_long_type_str(odp_pool_type_t type)
+{
+	switch (type) {
+	case ODP_POOL_BUFFER:
+		return "buffer";
+	case ODP_POOL_PACKET:
+		return "packet";
+	case ODP_POOL_TIMEOUT:
+		return "timeout";
+	case ODP_POOL_VECTOR:
+		return "packet vector";
+	case ODP_POOL_EVENT_VECTOR:
+		return "event vector";
+	case ODP_POOL_DMA_COMPL:
+		return "dma completion";
+	case ODP_POOL_ML_COMPL:
+		return "ml completion";
+	default:
+		return "unknown";
+	}
+}
+
 static const char *get_short_type_str(odp_pool_type_t type)
 {
 	switch (type) {
@@ -925,6 +948,32 @@ static const char *get_short_type_str(odp_pool_type_t type)
 void odp_pool_print(odp_pool_t pool_hdl)
 {
 	pool_t *pool = _odp_pool_entry(pool_hdl);
+	int max_len = 512;
+	char str[max_len];
+	int len = 0;
+	int n = max_len - 1;
+
+	len += _odp_snprint(&str[len], n - len, "\nPool info\n");
+	len += _odp_snprint(&str[len], n - len, "---------\n");
+	len += _odp_snprint(&str[len], n - len, "  pool            %" PRIu64 "\n",
+			    odp_pool_to_u64(_odp_pool_handle(pool)));
+	len += _odp_snprint(&str[len], n - len, "  name            %s\n", pool->name);
+	len += _odp_snprint(&str[len], n - len, "  index           %" PRIu32 "\n", pool->pool_idx);
+	len += _odp_snprint(&str[len], n - len, "  pool type       %s\n",
+			    get_long_type_str(pool->type_2));
+	len += _odp_snprint(&str[len], n - len, "  num             %" PRIu32 "\n", pool->num);
+	len += _odp_snprint(&str[len], n - len, "  external        %" PRIu8 "\n", pool->pool_ext);
+	len += _odp_snprint(&str[len], n - len, "  uarea size      %" PRIu32 "\n",
+			    pool->uarea_size);
+	len += _odp_snprint(&str[len], n - len, "  user area shm   %" PRIu64 "\n",
+			    odp_shm_to_u64(pool->uarea_shm));
+	len += _odp_snprint(&str[len], n - len, "  uarea shm size  %" PRIu64 "\n",
+			    pool->uarea_shm_size);
+	len += _odp_snprint(&str[len], n - len, "  uarea base addr %p\n",
+			    (void *)pool->uarea_base_addr);
+	str[len] = '\0';
+
+	_ODP_PRINT("%s\n", str);
 
 	rte_mempool_dump(stdout, pool->rte_mempool);
 }
