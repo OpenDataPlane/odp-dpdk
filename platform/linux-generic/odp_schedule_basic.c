@@ -37,6 +37,7 @@
 #include <odp_global_data.h>
 #include <odp_event_internal.h>
 #include <odp_macros_internal.h>
+#include <odp_print_internal.h>
 
 #include <string.h>
 
@@ -51,6 +52,14 @@
 
 /* Spread balancing frequency. Balance every BALANCE_ROUNDS_M1 + 1 scheduling rounds. */
 #define BALANCE_ROUNDS_M1 0xfffff
+
+/* Number of scheduled queue synchronization types */
+#define NUM_SCHED_SYNC 3
+
+/* Queue types used as array indices */
+ODP_STATIC_ASSERT(ODP_SCHED_SYNC_PARALLEL == 0, "ODP_SCHED_SYNC_PARALLEL_value_changed");
+ODP_STATIC_ASSERT(ODP_SCHED_SYNC_ATOMIC == 1, "ODP_SCHED_SYNC_ATOMIC_value_changed");
+ODP_STATIC_ASSERT(ODP_SCHED_SYNC_ORDERED == 2, "ODP_SCHED_SYNC_ORDERED_value_changed");
 
 /* Load of a queue */
 #define QUEUE_LOAD 256
@@ -223,8 +232,8 @@ typedef struct ODP_ALIGNED_CACHE {
 
 typedef struct {
 	struct {
-		uint8_t burst_default[NUM_PRIO];
-		uint8_t burst_max[NUM_PRIO];
+		uint8_t burst_default[NUM_SCHED_SYNC][NUM_PRIO];
+		uint8_t burst_max[NUM_SCHED_SYNC][NUM_PRIO];
 		uint8_t num_spread;
 		uint8_t prefer_ratio;
 	} config;
@@ -300,11 +309,46 @@ static sched_global_t *sched;
 /* Thread local scheduler context */
 static __thread sched_local_t sched_local;
 
+static int read_burst_size_conf(uint8_t out_tbl[], const char *conf_str,
+				int min_val, int max_val, int print)
+{
+	int burst_val[NUM_PRIO];
+	const int max_len = 256;
+	const int n = max_len - 1;
+	char line[max_len];
+	int len = 0;
+
+	if (_odp_libconfig_lookup_array(conf_str, burst_val, NUM_PRIO) !=
+	    NUM_PRIO) {
+		ODP_ERR("Config option '%s' not found.\n", conf_str);
+		return -1;
+	}
+
+	char str[strlen(conf_str) + 4];
+
+	snprintf(str, sizeof(str), "%s[]:", conf_str);
+	len += snprintf(&line[len], n - len, "  %-38s", str);
+
+	for (int i = 0; i < NUM_PRIO; i++) {
+		int val = burst_val[i];
+
+		if (val > max_val || val < min_val) {
+			ODP_ERR("Bad value for %s: %i\n", conf_str, val);
+			return -1;
+		}
+		len += snprintf(&line[len], n - len, " %3i", val);
+		if (val > 0)
+			out_tbl[i] = val;
+	}
+	if (print)
+		ODP_PRINT("%s\n", line);
+
+	return 0;
+}
+
 static int read_config_file(sched_global_t *sched)
 {
 	const char *str;
-	int i;
-	int burst_val[NUM_PRIO];
 	int val = 0;
 
 	ODP_PRINT("Scheduler config:\n");
@@ -355,46 +399,48 @@ static int read_config_file(sched_global_t *sched)
 	if (val == 0 || sched->config.num_spread == 1)
 		sched->load_balance = 0;
 
+	/* Initialize default values for all queue types */
 	str = "sched_basic.burst_size_default";
-	if (_odp_libconfig_lookup_array(str, burst_val, NUM_PRIO) !=
-	    NUM_PRIO) {
-		ODP_ERR("Config option '%s' not found.\n", str);
+	if (read_burst_size_conf(sched->config.burst_default[ODP_SCHED_SYNC_ATOMIC], str, 1,
+				 STASH_SIZE, 1) ||
+	    read_burst_size_conf(sched->config.burst_default[ODP_SCHED_SYNC_PARALLEL], str, 1,
+				 STASH_SIZE, 0) ||
+	    read_burst_size_conf(sched->config.burst_default[ODP_SCHED_SYNC_ORDERED], str, 1,
+				 STASH_SIZE, 0))
 		return -1;
-	}
-
-	ODP_PRINT("  %s[] =", str);
-	for (i = 0; i < NUM_PRIO; i++) {
-		val = burst_val[i];
-		sched->config.burst_default[i] = val;
-		ODP_PRINT(" %3i", val);
-
-		if (val > STASH_SIZE || val < 1) {
-			ODP_ERR("Bad value %i\n", val);
-			return -1;
-		}
-	}
-	ODP_PRINT("\n");
 
 	str = "sched_basic.burst_size_max";
-	if (_odp_libconfig_lookup_array(str, burst_val, NUM_PRIO) !=
-	    NUM_PRIO) {
-		ODP_ERR("Config option '%s' not found.\n", str);
+	if (read_burst_size_conf(sched->config.burst_max[ODP_SCHED_SYNC_ATOMIC], str, 1,
+				 BURST_MAX, 1) ||
+	    read_burst_size_conf(sched->config.burst_max[ODP_SCHED_SYNC_PARALLEL], str, 1,
+				 BURST_MAX, 0) ||
+	    read_burst_size_conf(sched->config.burst_max[ODP_SCHED_SYNC_ORDERED], str, 1,
+				 BURST_MAX, 0))
 		return -1;
-	}
 
-	ODP_PRINT("  %s[] =    ", str);
-	for (i = 0; i < NUM_PRIO; i++) {
-		val = burst_val[i];
-		sched->config.burst_max[i] = val;
-		ODP_PRINT(" %3i", val);
+	if (read_burst_size_conf(sched->config.burst_default[ODP_SCHED_SYNC_ATOMIC],
+				 "sched_basic.burst_size_atomic", 0, STASH_SIZE, 1))
+		return -1;
 
-		if (val > BURST_MAX || val < 1) {
-			ODP_ERR("Bad value %i\n", val);
-			return -1;
-		}
-	}
+	if (read_burst_size_conf(sched->config.burst_max[ODP_SCHED_SYNC_ATOMIC],
+				 "sched_basic.burst_size_max_atomic", 0, BURST_MAX, 1))
+		return -1;
 
-	ODP_PRINT("\n");
+	if (read_burst_size_conf(sched->config.burst_default[ODP_SCHED_SYNC_PARALLEL],
+				 "sched_basic.burst_size_parallel", 0, STASH_SIZE, 1))
+		return -1;
+
+	if (read_burst_size_conf(sched->config.burst_max[ODP_SCHED_SYNC_PARALLEL],
+				 "sched_basic.burst_size_max_parallel", 0, BURST_MAX, 1))
+		return -1;
+
+	if (read_burst_size_conf(sched->config.burst_default[ODP_SCHED_SYNC_ORDERED],
+				 "sched_basic.burst_size_ordered", 0, STASH_SIZE, 1))
+		return -1;
+
+	if (read_burst_size_conf(sched->config.burst_max[ODP_SCHED_SYNC_ORDERED],
+				 "sched_basic.burst_size_max_ordered", 0, BURST_MAX, 1))
+		return -1;
 
 	str = "sched_basic.group_enable.all";
 	if (!_odp_libconfig_lookup_int(str, &val)) {
@@ -1245,7 +1291,14 @@ static inline int schedule_grp_prio(odp_queue_t *out_queue, odp_event_t out_ev[]
 	uint32_t qi;
 	int num_spread = sched->config.num_spread;
 	uint32_t ring_mask = sched->ring_mask;
-	uint16_t burst_def = sched->config.burst_default[prio];
+	const uint32_t burst_def_sync[NUM_SCHED_SYNC] = {
+		sched->config.burst_default[ODP_SCHED_SYNC_PARALLEL][prio],
+		sched->config.burst_default[ODP_SCHED_SYNC_ATOMIC][prio],
+		sched->config.burst_default[ODP_SCHED_SYNC_ORDERED][prio]};
+	const uint32_t burst_max_sync[NUM_SCHED_SYNC] = {
+		sched->config.burst_max[ODP_SCHED_SYNC_PARALLEL][prio],
+		sched->config.burst_max[ODP_SCHED_SYNC_ATOMIC][prio],
+		sched->config.burst_max[ODP_SCHED_SYNC_ORDERED][prio]};
 
 	/* Select the first spread based on weights */
 	spr = first_spr;
@@ -1256,7 +1309,7 @@ static inline int schedule_grp_prio(odp_queue_t *out_queue, odp_event_t out_ev[]
 		odp_queue_t handle;
 		ring_u32_t *ring;
 		int pktin;
-		uint16_t max_deq = burst_def;
+		uint32_t max_deq;
 		int stashed = 1;
 		odp_event_t *ev_tbl = sched_local.stash.ev;
 
@@ -1282,16 +1335,16 @@ static inline int schedule_grp_prio(odp_queue_t *out_queue, odp_event_t out_ev[]
 
 		sync_ctx = sched_sync_type(qi);
 		ordered  = (sync_ctx == ODP_SCHED_SYNC_ORDERED);
+		max_deq = burst_def_sync[sync_ctx];
 
 		/* When application's array is larger than default burst
 		 * size, output all events directly there. Also, ordered
 		 * queues are not stashed locally to improve
 		 * parallelism. Ordered context can only be released
 		 * when the local cache is empty. */
-		if (max_num > burst_def || ordered) {
-			uint16_t burst_max;
+		if (max_num > max_deq || ordered) {
+			const uint32_t burst_max = burst_max_sync[sync_ctx];
 
-			burst_max = sched->config.burst_max[prio];
 			stashed = 0;
 			ev_tbl  = out_ev;
 			max_deq = max_num;
@@ -2035,12 +2088,14 @@ static int schedule_capability(odp_schedule_capability_t *capa)
 
 static void schedule_print(void)
 {
-	int spr, prio, grp;
+	int spr, prio, grp, pos;
 	uint32_t num_queues, num_active;
 	ring_u32_t *ring;
 	odp_schedule_capability_t capa;
 	int num_spread = sched->config.num_spread;
 	const int col_width = 24;
+	const int size = 512;
+	char str[size];
 
 	(void)schedule_capability(&capa);
 
@@ -2053,42 +2108,42 @@ static void schedule_print(void)
 	ODP_PRINT("  prefer ratio:      %u\n", sched->config.prefer_ratio);
 	ODP_PRINT("\n");
 
-	ODP_PRINT("  Number of active event queues:\n");
-	ODP_PRINT("              spread\n");
-	ODP_PRINT("            ");
+	pos  = 0;
+	pos += _odp_snprint(&str[pos], size - pos, "  Number of active event queues:\n");
+	pos += _odp_snprint(&str[pos], size - pos, "              spread\n");
+	pos += _odp_snprint(&str[pos], size - pos, "            ");
 
 	for (spr = 0; spr < num_spread; spr++)
-		ODP_PRINT(" %7i", spr);
+		pos += _odp_snprint(&str[pos], size - pos, " %7i", spr);
 
-	ODP_PRINT("\n");
+	ODP_PRINT("%s\n", str);
 
 	for (prio = 0; prio < NUM_PRIO; prio++) {
-		ODP_PRINT("  prio %i", prio);
-
 		for (grp = 0; grp < NUM_SCHED_GRPS; grp++)
 			if (sched->prio_q_mask[grp][prio])
 				break;
 
-		if (grp == NUM_SCHED_GRPS) {
-			ODP_PRINT(":-\n");
+		if (grp == NUM_SCHED_GRPS)
 			continue;
-		}
 
-		ODP_PRINT("\n");
+		ODP_PRINT("  prio: %i\n", prio);
 
 		for (grp = 0; grp < NUM_SCHED_GRPS; grp++) {
 			if (sched->sched_grp[grp].allocated == 0)
 				continue;
 
-			ODP_PRINT("    group %i:", grp);
+			pos  = 0;
+			pos += _odp_snprint(&str[pos], size - pos, "    group %i:", grp);
 
 			for (spr = 0; spr < num_spread; spr++) {
 				num_queues = sched->prio_q_count[grp][prio][spr];
 				ring = &sched->prio_q[grp][prio][spr].ring;
 				num_active = ring_u32_len(ring);
-				ODP_PRINT(" %3u/%3u", num_active, num_queues);
+				pos += _odp_snprint(&str[pos], size - pos, " %3u/%3u",
+						    num_active, num_queues);
 			}
-			ODP_PRINT("\n");
+
+			ODP_PRINT("%s\n", str);
 		}
 	}
 
@@ -2099,12 +2154,15 @@ static void schedule_print(void)
 		if (sched->sched_grp[grp].allocated == 0)
 			continue;
 
-		ODP_PRINT("    group %i: %-*s", grp, col_width, sched->sched_grp[grp].name);
+		pos  = 0;
+		pos += _odp_snprint(&str[pos], size - pos, "    group %i: %-*s", grp, col_width,
+				    sched->sched_grp[grp].name);
 
 		for (spr = 0; spr < num_spread; spr++)
-			ODP_PRINT(" %u", sched->sched_grp[grp].spread_thrs[spr]);
+			pos += _odp_snprint(&str[pos], size - pos, " %u",
+					    sched->sched_grp[grp].spread_thrs[spr]);
 
-		ODP_PRINT("\n");
+		ODP_PRINT("%s\n", str);
 	}
 
 	ODP_PRINT("\n");

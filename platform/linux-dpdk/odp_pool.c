@@ -69,7 +69,9 @@ pool_global_t *_odp_pool_glb;
 /* Fill in pool header field offsets for inline functions */
 const _odp_pool_inline_offset_t _odp_pool_inline ODP_ALIGNED_CACHE = {
 	.index             = offsetof(pool_t, pool_idx),
-	.uarea_size        = offsetof(pool_t, params.pkt.uarea_size)
+	.seg_len           = offsetof(pool_t, seg_len),
+	.uarea_size        = offsetof(pool_t, params.pkt.uarea_size),
+	.ext_head_offset   = offsetof(pool_t, ext_head_offset)
 };
 
 #include <odp/visibility_end.h>
@@ -250,6 +252,7 @@ int odp_pool_capability(odp_pool_capability_t *capa)
 	capa->buf.max_align = ODP_CONFIG_BUFFER_ALIGN_MAX;
 	capa->buf.max_size  = MAX_SIZE;
 	capa->buf.max_num   = CONFIG_POOL_MAX_NUM;
+	capa->buf.max_uarea_size   = MAX_UAREA_SIZE;
 	capa->buf.min_cache_size   = 0;
 	capa->buf.max_cache_size   = RTE_MEMPOOL_CACHE_MAX_SIZE;
 	capa->buf.stats.all = supported_stats.all;
@@ -273,6 +276,7 @@ int odp_pool_capability(odp_pool_capability_t *capa)
 	/* Timeout pools */
 	capa->tmo.max_pools = max_pools;
 	capa->tmo.max_num   = CONFIG_POOL_MAX_NUM;
+	capa->tmo.max_uarea_size   = MAX_UAREA_SIZE;
 	capa->tmo.min_cache_size   = 0;
 	capa->tmo.max_cache_size   = RTE_MEMPOOL_CACHE_MAX_SIZE;
 	capa->tmo.stats.all = supported_stats.all;
@@ -280,6 +284,7 @@ int odp_pool_capability(odp_pool_capability_t *capa)
 	/* Vector pools */
 	capa->vector.max_pools      = max_pools;
 	capa->vector.max_num        = CONFIG_POOL_MAX_NUM;
+	capa->vector.max_uarea_size   = MAX_UAREA_SIZE;
 	capa->vector.max_size       = CONFIG_PACKET_VECTOR_MAX_SIZE;
 	capa->vector.min_cache_size = 0;
 	capa->vector.max_cache_size = RTE_MEMPOOL_CACHE_MAX_SIZE;
@@ -309,10 +314,12 @@ odp_dpdk_mbuf_ctor(struct rte_mempool *mp,
 	struct mbuf_ctor_arg *mb_ctor_arg;
 	struct rte_mbuf *mb = raw_mbuf;
 	_odp_event_hdr_t *event_hdr;
+	void *uarea;
 
-	/* The rte_mbuf is at the begninning in all cases */
+	/* The rte_mbuf is at the beginning in all cases */
 	mb_ctor_arg = (struct mbuf_ctor_arg *)opaque_arg;
 	mb = (struct rte_mbuf *)raw_mbuf;
+	uarea = mb_ctor_arg->pool->uarea_base_addr + (i * mb_ctor_arg->pool->uarea_size);
 
 	RTE_ASSERT(mp->elt_size >= sizeof(struct rte_mbuf));
 
@@ -359,20 +366,32 @@ odp_dpdk_mbuf_ctor(struct rte_mempool *mp,
 	event_hdr->type = mb_ctor_arg->type;
 	event_hdr->event_type = mb_ctor_arg->event_type;
 
+	/* Initialize buffer metadata */
+	if (mb_ctor_arg->type == ODP_POOL_BUFFER) {
+		odp_buffer_hdr_t *buf_hdr = (void *)raw_mbuf;
+
+		buf_hdr->uarea_addr = uarea;
+	}
+
 	/* Initialize packet metadata */
 	if (mb_ctor_arg->type == ODP_POOL_PACKET) {
-		odp_packet_hdr_t *pkt_hdr = (odp_packet_hdr_t *)raw_mbuf;
+		odp_packet_hdr_t *pkt_hdr = (void *)raw_mbuf;
 
-		pkt_hdr->uarea_addr = mb_ctor_arg->pool->uarea_base_addr +
-					i * mb_ctor_arg->pool->uarea_size;
+		pkt_hdr->uarea_addr = uarea;
 	}
 
 	/* Initialize event vector metadata */
 	if (mb_ctor_arg->type == ODP_POOL_VECTOR) {
-		odp_event_vector_hdr_t *vect_hdr;
+		odp_event_vector_hdr_t *vect_hdr = (void *)raw_mbuf;
 
-		vect_hdr = (odp_event_vector_hdr_t *)raw_mbuf;
-		vect_hdr->size = 0;
+		vect_hdr->uarea_addr = uarea;
+	}
+
+	/* Initialize timeout metadata */
+	if (mb_ctor_arg->type == ODP_POOL_TIMEOUT) {
+		odp_timeout_hdr_t *tmo_hdr = (void *)raw_mbuf;
+
+		tmo_hdr->uarea_addr = uarea;
 	}
 }
 
@@ -421,6 +440,11 @@ static int check_params(const odp_pool_param_t *params)
 		if (params->buf.cache_size > capa.buf.max_cache_size) {
 			ODP_ERR("buf.cache_size too large %u\n",
 				params->buf.cache_size);
+			return -1;
+		}
+
+		if (params->buf.uarea_size > capa.buf.max_uarea_size) {
+			ODP_ERR("buf.uarea_size too large %u\n", params->buf.uarea_size);
 			return -1;
 		}
 
@@ -506,6 +530,11 @@ static int check_params(const odp_pool_param_t *params)
 			return -1;
 		}
 
+		if (params->tmo.uarea_size > capa.tmo.max_uarea_size) {
+			ODP_ERR("tmo.uarea_size too large %u\n", params->tmo.uarea_size);
+			return -1;
+		}
+
 		if (params->stats.all & ~capa.tmo.stats.all) {
 			ODP_ERR("Unsupported pool statistics counter\n");
 			return -1;
@@ -536,6 +565,11 @@ static int check_params(const odp_pool_param_t *params)
 
 		if (params->vector.cache_size > capa.vector.max_cache_size) {
 			ODP_ERR("vector.cache_size too large %u\n", params->vector.cache_size);
+			return -1;
+		}
+
+		if (params->vector.uarea_size > capa.vector.max_uarea_size) {
+			ODP_ERR("vector.uarea_size too large %u\n", params->vector.uarea_size);
 			return -1;
 		}
 
@@ -684,6 +718,7 @@ odp_pool_t _odp_pool_create(const char *name, const odp_pool_param_t *params,
 			buf_align = params->buf.align;
 			blk_size = params->buf.size;
 			cache_size = params->buf.cache_size;
+			uarea_size = params->buf.uarea_size;
 
 			/* Set correct alignment based on input request */
 			if (buf_align == 0)
@@ -754,6 +789,7 @@ odp_pool_t _odp_pool_create(const char *name, const odp_pool_param_t *params,
 			mbp_ctor_arg.mbuf_data_room_size = 0;
 			num = params->tmo.num;
 			cache_size = params->tmo.cache_size;
+			uarea_size = params->tmo.uarea_size;
 			event_type = ODP_EVENT_TIMEOUT;
 
 			ODP_DBG("type: tmo, name: %s, num: %u\n", pool_name, num);
@@ -764,6 +800,7 @@ odp_pool_t _odp_pool_create(const char *name, const odp_pool_param_t *params,
 			mbp_ctor_arg.mbuf_data_room_size = 0;
 			num = params->vector.num;
 			cache_size = params->vector.cache_size;
+			uarea_size = params->vector.uarea_size;
 			event_type = ODP_EVENT_PACKET_VECTOR;
 
 			ODP_DBG("type: vector, name: %s, num: %u\n", pool_name, num);
@@ -1300,7 +1337,7 @@ odp_pool_t odp_pool_ext_create(const char *name,
 		}
 
 		pool->ext_param = *params;
-		pool->hdr_size = hdr_size;
+		pool->ext_head_offset = hdr_size;
 		pool->num = num;
 		pool->num_populated = 0;
 		pool->params.pkt.uarea_size = params->pkt.uarea_size;
@@ -1430,8 +1467,7 @@ int odp_pool_ext_populate(odp_pool_t pool_hdl, void *buf[], uint32_t buf_size,
 		mb_ctor_arg.type = params->type;
 		mb_ctor_arg.event_type = pool->type;
 		mb_ctor_arg.pool = pool;
-		odp_dpdk_mbuf_ctor(mp, (void *)&mb_ctor_arg, (void *)mb,
-				   mp->populated_size);
+		odp_dpdk_mbuf_ctor(mp, (void *)&mb_ctor_arg, (void *)mb, num_populated);
 		pool->num_populated++;
 	}
 

@@ -1,5 +1,5 @@
 /* Copyright (c) 2014-2018, Linaro Limited
- * Copyright (c) 2019-2021, Nokia
+ * Copyright (c) 2019-2022, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -181,6 +181,7 @@ int odp_cls_capability(odp_cls_capability_t *capability)
 	capability->supported_terms.bit.dip_addr = 1;
 	capability->supported_terms.bit.sip6_addr = 1;
 	capability->supported_terms.bit.dip6_addr = 1;
+	capability->supported_terms.bit.ipsec_spi = 1;
 	capability->supported_terms.bit.custom_frame = 1;
 	capability->supported_terms.bit.custom_l3 = 1;
 	capability->random_early_detection = ODP_SUPPORT_NO;
@@ -188,6 +189,12 @@ int odp_cls_capability(odp_cls_capability_t *capability)
 	capability->threshold_red.all_bits = 0;
 	capability->threshold_bp.all_bits = 0;
 	capability->max_hash_queues = CLS_COS_QUEUE_MAX;
+	capability->hash_protocols.proto.ipv4_udp = 1;
+	capability->hash_protocols.proto.ipv4_tcp = 1;
+	capability->hash_protocols.proto.ipv4 = 1;
+	capability->hash_protocols.proto.ipv6_udp = 1;
+	capability->hash_protocols.proto.ipv6_tcp = 1;
+	capability->hash_protocols.proto.ipv6 = 1;
 	capability->max_mark = MAX_MARK;
 	capability->stats.cos.counter.discards = 1;
 	capability->stats.cos.counter.packets = 1;
@@ -290,14 +297,17 @@ odp_cos_t odp_cls_cos_create(const char *name, const odp_cls_cos_param_t *param_
 			cos->num_queue = param.num_queue;
 
 			if (param.num_queue > 1) {
-				odp_queue_param_init(&cos->queue_param);
+				cos->queue_param = param.queue_param;
 				cos->queue_group = true;
 				cos->queue = ODP_QUEUE_INVALID;
 				_odp_cls_update_hash_proto(cos,
 							   param.hash_proto);
 				tbl_index = i * CLS_COS_QUEUE_MAX;
 				for (j = 0; j < param.num_queue; j++) {
-					queue = odp_queue_create(NULL, &cos->queue_param);
+					char name[ODP_QUEUE_NAME_LEN];
+
+					snprintf(name, sizeof(name), "_odp_cos_hq_%u_%u", i, j);
+					queue = odp_queue_create(name, &cos->queue_param);
 					if (queue == ODP_QUEUE_INVALID) {
 						/* unwind the queues */
 						_cls_queue_unwind(tbl_index, j);
@@ -309,6 +319,7 @@ odp_cos_t odp_cls_cos_create(const char *name, const odp_cls_cos_param_t *param_
 				}
 
 			} else {
+				cos->queue_group = false;
 				cos->queue = param.queue;
 			}
 
@@ -397,6 +408,9 @@ int odp_cos_destroy(odp_cos_t cos_id)
 		ODP_ERR("Invalid odp_cos_t handle\n");
 		return -1;
 	}
+
+	if (cos->queue_group)
+		_cls_queue_unwind(cos->index * CLS_COS_QUEUE_MAX, cos->num_queue);
 
 	cos->valid = 0;
 	return 0;
@@ -1155,17 +1169,12 @@ static inline int verify_pmr_ipsec_spi(const uint8_t *pkt_addr,
 
 	pkt_addr += pkt_hdr->p.l4_offset;
 
-	if (pkt_hdr->p.input_flags.ipsec_ah) {
-		const _odp_ahhdr_t *ahhdr = (const _odp_ahhdr_t *)pkt_addr;
-
-		spi = odp_be_to_cpu_32(ahhdr->spi);
-	} else if (pkt_hdr->p.input_flags.ipsec_esp) {
-		const _odp_esphdr_t *esphdr = (const _odp_esphdr_t *)pkt_addr;
-
-		spi = odp_be_to_cpu_32(esphdr->spi);
-	} else {
+	if (pkt_hdr->p.input_flags.ipsec_ah)
+		spi = ((const _odp_ahhdr_t *)pkt_addr)->spi;
+	else if (pkt_hdr->p.input_flags.ipsec_esp)
+		spi = ((const _odp_esphdr_t *)pkt_addr)->spi;
+	else
 		return 0;
-	}
 
 	if (term_value->match.value == (spi & term_value->match.mask))
 		return 1;
@@ -1959,11 +1968,9 @@ void print_queue_ident(odp_queue_t q)
 	odp_queue_info_t info;
 
 	if (!odp_queue_info(q, &info) && strlen(info.name))
-		ODP_PRINT("%s", info.name);
+		ODP_PRINT("        %s\n", info.name);
 	else
-		ODP_PRINT("%" PRIx64, odp_queue_to_u64(q));
-
-	ODP_PRINT("\n");
+		ODP_PRINT("        %" PRIx64 "\n", odp_queue_to_u64(q));
 }
 
 static
@@ -1978,13 +1985,20 @@ void print_hex(const void *vp, int len)
 static
 void cls_print_cos(cos_t *cos)
 {
+	uint32_t tbl_index = cos->index * CLS_COS_QUEUE_MAX;
 	uint32_t num_rule = odp_atomic_load_u32(&cos->num_rule);
 	bool first = true;
 
 	ODP_PRINT("cos: ");
 	print_cos_ident(cos);
-	ODP_PRINT("    queue: ");
-	print_queue_ident(cos->queue);
+	ODP_PRINT("    queues:\n");
+
+	if (!cos->queue_group) {
+		print_queue_ident(cos->queue);
+	} else {
+		for (uint32_t i = 0; i < cos->num_queue; i++)
+			print_queue_ident(queue_grp_tbl->queue[tbl_index + i]);
+	}
 
 	for (uint32_t j = 0; j < num_rule; j++) {
 		pmr_t *pmr = cos->pmr[j];

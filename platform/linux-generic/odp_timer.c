@@ -112,29 +112,37 @@ const _odp_timeout_inline_offset_t
 _odp_timeout_inline_offset ODP_ALIGNED_CACHE = {
 	.expiration = offsetof(odp_timeout_hdr_t, expiration),
 	.timer = offsetof(odp_timeout_hdr_t, timer),
-	.user_ptr = offsetof(odp_timeout_hdr_t, user_ptr)
+	.user_ptr = offsetof(odp_timeout_hdr_t, user_ptr),
+	.uarea_addr = offsetof(odp_timeout_hdr_t, uarea_addr),
 };
 
 #include <odp/visibility_end.h>
 
-typedef struct
+typedef union
 #if USE_128BIT_ATOMICS
 ODP_ALIGNED(16) /* 16-byte atomic operations need properly aligned addresses */
 #endif
 tick_buf_s {
-	/* Expiration tick or TMO_xxx */
-	odp_atomic_u64_t exp_tck;
-	union {
-		/* ODP_EVENT_INVALID if timer not active */
-		odp_event_t tmo_event;
+#if USE_128BIT_ATOMICS
+	odp_atomic_u128_t tb_atomic_u128;
 
-		/* Ensures that tick_buf_t is 128 bits */
-		uint64_t tmo_u64;
+	odp_u128_t tb_u128;
+#endif
+
+	struct {
+		/* Expiration tick or TMO_xxx */
+		odp_atomic_u64_t exp_tck;
+		union {
+			/* ODP_EVENT_INVALID if timer not active */
+			odp_event_t tmo_event;
+
+			/* Ensures that tick_buf_t is 128 bits */
+			uint64_t tmo_u64;
+		};
 	};
-
 } tick_buf_t;
 
-#ifndef ODP_ATOMIC_U64_LOCK
+#if USE_128BIT_ATOMICS
 ODP_STATIC_ASSERT(sizeof(tick_buf_t) == 16, "sizeof(tick_buf_t) == 16");
 #endif
 
@@ -683,11 +691,11 @@ static bool timer_reset(uint32_t idx, uint64_t abs_tck, odp_event_t *tmo_event,
 		new.tmo_u64 = 0;
 		old.tmo_u64 = 0;
 
-		do {
-			/* Relaxed and non-atomic read of current values */
-			old.exp_tck.v = tb->exp_tck.v;
-			old.tmo_event = tb->tmo_event;
+		/* Relaxed and non-atomic read of current values */
+		old.exp_tck.v = tb->exp_tck.v;
+		old.tmo_event = tb->tmo_event;
 
+		do {
 			/* Check if there actually is a timeout event
 			 * present */
 			if (old.tmo_event == ODP_EVENT_INVALID) {
@@ -702,9 +710,8 @@ static bool timer_reset(uint32_t idx, uint64_t abs_tck, odp_event_t *tmo_event,
 
 			/* Atomic CAS will fail if we experienced torn reads,
 			 * retry update sequence until CAS succeeds */
-		} while (!_odp_atomic_u128_cmp_xchg_mm((_odp_atomic_u128_t *)tb,
-						       (_odp_u128_t *)&old, (_odp_u128_t *)&new,
-						       _ODP_MEMMODEL_RLS, _ODP_MEMMODEL_RLX));
+		} while (!odp_atomic_cas_rel_u128(&tb->tb_atomic_u128,
+						  &old.tb_u128, new.tb_u128));
 #else
 		/* Take a related lock */
 		while (_odp_atomic_flag_tas(IDX2LOCK(tp, idx)))
@@ -830,11 +837,11 @@ static odp_event_t timer_cancel(timer_pool_t *tp, uint32_t idx)
 	new.tmo_u64 = 0;
 	old.tmo_u64 = 0;
 
-	do {
-		/* Relaxed and non-atomic read of current values */
-		old.exp_tck.v = tb->exp_tck.v;
-		old.tmo_event = tb->tmo_event;
+	/* Relaxed and non-atomic read of current values */
+	old.exp_tck.v = tb->exp_tck.v;
+	old.tmo_event = tb->tmo_event;
 
+	do {
 		/* Check if it is not expired already */
 		if (old.exp_tck.v & TMO_INACTIVE) {
 			old.tmo_event = ODP_EVENT_INVALID;
@@ -847,11 +854,9 @@ static odp_event_t timer_cancel(timer_pool_t *tp, uint32_t idx)
 
 		/* Atomic CAS will fail if we experienced torn reads,
 		 * retry update sequence until CAS succeeds */
-	} while (!_odp_atomic_u128_cmp_xchg_mm((_odp_atomic_u128_t *)tb,
-					       (_odp_u128_t *)&old,
-					       (_odp_u128_t *)&new,
-					       _ODP_MEMMODEL_RLS,
-					       _ODP_MEMMODEL_RLX));
+	} while (!odp_atomic_cas_rel_u128(&tb->tb_atomic_u128, &old.tb_u128,
+					  new.tb_u128));
+
 	old_event = old.tmo_event;
 #else
 	/* Take a related lock */
@@ -905,9 +910,8 @@ static inline void timer_expire(timer_pool_t *tp, uint32_t idx, uint64_t tick)
 		new.exp_tck.v = exp_tck | TMO_INACTIVE;
 		new.tmo_event = ODP_EVENT_INVALID;
 
-		int succ = _odp_atomic_u128_cmp_xchg_mm((_odp_atomic_u128_t *)tb,
-							(_odp_u128_t *)&old, (_odp_u128_t *)&new,
-							_ODP_MEMMODEL_RLS, _ODP_MEMMODEL_RLX);
+		int succ = odp_atomic_cas_rel_u128(&tb->tb_atomic_u128,
+						   &old.tb_u128, new.tb_u128);
 		if (succ)
 			tmo_event = old.tmo_event;
 		/* Else CAS failed, something changed => skip timer

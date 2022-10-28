@@ -66,11 +66,14 @@ extern "C" {
 	#define odp_packet_tailroom __odp_packet_tailroom
 	#define odp_packet_pool __odp_packet_pool
 	#define odp_packet_input __odp_packet_input
+	#define odp_packet_input_set __odp_packet_input_set
 	#define odp_packet_input_index __odp_packet_input_index
 	#define odp_packet_num_segs __odp_packet_num_segs
 	#define odp_packet_user_ptr __odp_packet_user_ptr
 	#define odp_packet_user_area __odp_packet_user_area
 	#define odp_packet_user_area_size __odp_packet_user_area_size
+	#define odp_packet_user_flag __odp_packet_user_flag
+	#define odp_packet_user_flag_set __odp_packet_user_flag_set
 	#define odp_packet_l2_offset __odp_packet_l2_offset
 	#define odp_packet_l3_offset __odp_packet_l3_offset
 	#define odp_packet_l4_offset __odp_packet_l4_offset
@@ -105,6 +108,12 @@ extern "C" {
 	#define odp_packet_color __odp_packet_color
 	#define odp_packet_drop_eligible __odp_packet_drop_eligible
 	#define odp_packet_shaper_len_adjust __odp_packet_shaper_len_adjust
+	#define odp_packet_buf_data_len __odp_packet_buf_data_len
+	#define odp_packet_buf_size __odp_packet_buf_size
+	#define odp_packet_buf_head __odp_packet_buf_head
+	#define odp_packet_buf_data_offset __odp_packet_buf_data_offset
+	#define odp_packet_buf_data_set __odp_packet_buf_data_set
+	#define odp_packet_buf_from_head __odp_packet_buf_from_head
 #else
 	#undef _ODP_INLINE
 	#define _ODP_INLINE
@@ -198,6 +207,13 @@ _ODP_INLINE odp_pktio_t odp_packet_input(odp_packet_t pkt)
 	return _odp_pkt_get(pkt, odp_pktio_t, input);
 }
 
+_ODP_INLINE void odp_packet_input_set(odp_packet_t pkt, odp_pktio_t pktio)
+{
+	odp_pktio_t *pktio_ptr = _odp_pkt_get_ptr(pkt, odp_pktio_t, input);
+
+	*pktio_ptr = pktio;
+}
+
 _ODP_INLINE int odp_packet_input_index(odp_packet_t pkt)
 {
 	odp_pktio_t pktio = odp_packet_input(pkt);
@@ -232,6 +248,22 @@ _ODP_INLINE uint32_t odp_packet_user_area_size(odp_packet_t pkt)
 	void *pool = _odp_pkt_get(pkt, void *, pool);
 
 	return _odp_pool_get(pool, uint32_t, uarea_size);
+}
+
+_ODP_INLINE int odp_packet_user_flag(odp_packet_t pkt)
+{
+	_odp_packet_flags_t flags;
+
+	flags.all_flags = _odp_pkt_get(pkt, uint32_t, flags);
+
+	return flags.user_flag;
+}
+
+_ODP_INLINE void odp_packet_user_flag_set(odp_packet_t pkt, int val)
+{
+	_odp_packet_flags_t *flags = _odp_pkt_get_ptr(pkt, _odp_packet_flags_t, flags);
+
+	flags->user_flag = !!val;
 }
 
 _ODP_INLINE uint32_t odp_packet_l2_offset(odp_packet_t pkt)
@@ -514,6 +546,58 @@ _ODP_INLINE int8_t odp_packet_shaper_len_adjust(odp_packet_t pkt)
 	flags.all_flags = _odp_pkt_get(pkt, uint32_t, flags);
 
 	return (int8_t)flags.shaper_len_adj;
+}
+
+_ODP_INLINE uint32_t odp_packet_buf_data_len(odp_packet_buf_t pkt_buf)
+{
+	return odp_packet_seg_data_len(ODP_PACKET_INVALID, (odp_packet_seg_t)pkt_buf);
+}
+
+_ODP_INLINE uint32_t odp_packet_buf_size(odp_packet_buf_t pkt_buf)
+{
+	odp_pool_t pool = _odp_pkt_get((odp_packet_buf_t)pkt_buf, odp_pool_t, pool);
+
+	return _odp_pool_get(pool, uint32_t, seg_len);
+}
+
+_ODP_INLINE void *odp_packet_buf_head(odp_packet_buf_t pkt_buf)
+{
+	odp_pool_t pool = _odp_pkt_get(pkt_buf, odp_pool_t, pool);
+	const uint32_t head_offset = _odp_pool_get(pool, uint32_t, ext_head_offset);
+
+	/* Check that pool is external */
+	if (odp_unlikely(!head_offset))
+		return NULL;
+
+	return (uint8_t *)(uintptr_t)pkt_buf + head_offset;
+}
+
+_ODP_INLINE uint32_t odp_packet_buf_data_offset(odp_packet_buf_t pkt_buf)
+{
+	void *data = odp_packet_seg_data(ODP_PACKET_INVALID, (odp_packet_seg_t)pkt_buf);
+	void *head = odp_packet_buf_head(pkt_buf);
+
+	return (uint32_t)((uintptr_t)data - (uintptr_t)head);
+}
+
+_ODP_INLINE void odp_packet_buf_data_set(odp_packet_buf_t pkt_buf, uint32_t data_offset,
+					 uint32_t data_len)
+{
+	struct rte_mbuf *mb = (struct rte_mbuf *)pkt_buf;
+
+	mb->data_off = (uint16_t)data_offset;
+	mb->data_len = (uint16_t)data_len;
+}
+
+_ODP_INLINE odp_packet_buf_t odp_packet_buf_from_head(odp_pool_t pool, void *head)
+{
+	const uint32_t head_offset = _odp_pool_get(pool, uint32_t, ext_head_offset);
+
+	/* Check that pool is external */
+	if (odp_unlikely(!head_offset))
+		return ODP_PACKET_BUF_INVALID;
+
+	return (odp_packet_buf_t)((uintptr_t)head - head_offset);
 }
 
 #ifdef __cplusplus

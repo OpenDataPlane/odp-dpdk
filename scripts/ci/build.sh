@@ -28,17 +28,16 @@ ODP_LIB_NAME=libodp-dpdk
 fi
 
 # Additional warning checks
-EXTRA_CHECKS="-Werror -Wall -Wextra -Wconversion -Wfloat-equal -Wpacked"
+EXTRA_CHECKS="-Werror -Wall -Wextra -Wfloat-equal -Wpacked"
 # Ignore clang warning about large atomic operations causing significant performance penalty
 if [ "${CC#clang}" != "${CC}" ] ; then
 	EXTRA_CHECKS="${EXTRA_CHECKS} -Wno-unknown-warning-option -Wno-atomic-alignment"
 fi
 # Ignore warnings from aarch64 DPDK internals
 if [ "${TARGET_ARCH}" == "aarch64-linux-gnu" ] ; then
-	EXTRA_CHECKS="${EXTRA_CHECKS} -Wno-conversion -Wno-packed"
+	EXTRA_CHECKS="${EXTRA_CHECKS} -Wno-packed"
 fi
 
-CC="${CC:-${TARGET_ARCH}-gcc}"
 ${CC} ${CFLAGS} ${EXTRA_CHECKS} ${OLDPWD}/example/sysinfo/odp_sysinfo.c -o odp_sysinfo_inst_dynamic \
 	`PKG_CONFIG_PATH=/opt/odp/lib/pkgconfig:${PKG_CONFIG_PATH} ${PKG_CONFIG} --cflags --libs ${ODP_LIB_NAME}`
 

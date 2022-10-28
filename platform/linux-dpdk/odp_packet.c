@@ -626,13 +626,6 @@ void odp_packet_user_ptr_set(odp_packet_t pkt, const void *ptr)
 	pkt_hdr->p.flags.user_ptr_set = 1;
 }
 
-void odp_packet_input_set(odp_packet_t pkt, odp_pktio_t pktio)
-{
-	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
-
-	pkt_hdr->input = pktio;
-}
-
 int odp_packet_l2_offset_set(odp_packet_t pkt, uint32_t offset)
 {
 	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
@@ -1977,73 +1970,6 @@ int odp_packet_reass_partial_state(odp_packet_t pkt, odp_packet_t frags[],
 	(void)frags;
 	(void)res;
 	return -ENOTSUP;
-}
-
-static inline odp_packet_hdr_t *packet_buf_to_hdr(odp_packet_buf_t pkt_buf)
-{
-	return (odp_packet_hdr_t *)(uintptr_t)pkt_buf;
-}
-
-void *odp_packet_buf_head(odp_packet_buf_t pkt_buf)
-{
-	odp_packet_hdr_t *pkt_hdr = packet_buf_to_hdr(pkt_buf);
-	pool_t *pool = _odp_pool_entry(pkt_hdr->event_hdr.pool);
-
-	if (odp_unlikely(pool->pool_ext == 0)) {
-		ODP_ERR("Not an external memory pool\n");
-		return NULL;
-	}
-
-	return (uint8_t *)pkt_hdr + pool->hdr_size;
-}
-
-uint32_t odp_packet_buf_size(odp_packet_buf_t pkt_buf)
-{
-	odp_packet_hdr_t *pkt_hdr = packet_buf_to_hdr(pkt_buf);
-	pool_t *pool = _odp_pool_entry(pkt_hdr->event_hdr.pool);
-
-	return pool->seg_len;
-}
-
-uint32_t odp_packet_buf_data_offset(odp_packet_buf_t pkt_buf)
-{
-	void *data = odp_packet_seg_data(ODP_PACKET_INVALID,
-					 (odp_packet_seg_t)pkt_buf);
-	void *head = odp_packet_buf_head(pkt_buf);
-
-	return (uintptr_t)data - (uintptr_t)head;
-}
-
-uint32_t odp_packet_buf_data_len(odp_packet_buf_t pkt_buf)
-{
-	return odp_packet_seg_data_len(ODP_PACKET_INVALID,
-				       (odp_packet_seg_t)pkt_buf);
-}
-
-void odp_packet_buf_data_set(odp_packet_buf_t pkt_buf, uint32_t data_offset,
-			     uint32_t data_len)
-{
-	odp_packet_hdr_t *pkt_hdr = packet_buf_to_hdr(pkt_buf);
-
-	pkt_hdr->event_hdr.mb.data_off = data_offset;
-	pkt_hdr->event_hdr.mb.data_len = data_len;
-}
-
-odp_packet_buf_t odp_packet_buf_from_head(odp_pool_t pool_hdl, void *head)
-{
-	pool_t *pool = _odp_pool_entry(pool_hdl);
-
-	if (odp_unlikely(pool->type != ODP_POOL_PACKET)) {
-		ODP_ERR("Not a packet pool\n");
-		return ODP_PACKET_BUF_INVALID;
-	}
-
-	if (odp_unlikely(pool->pool_ext == 0)) {
-		ODP_ERR("Not an external memory pool\n");
-		return ODP_PACKET_BUF_INVALID;
-	}
-
-	return (odp_packet_buf_t)((uintptr_t)head - pool->hdr_size);
 }
 
 uint32_t odp_packet_disassemble(odp_packet_t pkt, odp_packet_buf_t pkt_buf[],

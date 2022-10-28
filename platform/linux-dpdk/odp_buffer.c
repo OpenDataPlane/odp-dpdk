@@ -40,6 +40,13 @@ int odp_buffer_is_valid(odp_buffer_t buf)
 	return 1;
 }
 
+void *odp_buffer_user_area(odp_buffer_t buf)
+{
+	odp_buffer_hdr_t *hdr = _odp_buf_hdr(buf);
+
+	return hdr->uarea_addr;
+}
+
 void odp_buffer_print(odp_buffer_t buf)
 {
 	odp_buffer_hdr_t *hdr;

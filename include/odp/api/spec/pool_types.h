@@ -174,6 +174,9 @@ typedef struct odp_pool_capability_t {
 		 * memory size for the pool. */
 		uint32_t max_num;
 
+		/** Maximum user area size in bytes */
+		uint32_t max_uarea_size;
+
 		/** Minimum size of thread local cache */
 		uint32_t min_cache_size;
 
@@ -250,10 +253,7 @@ typedef struct odp_pool_capability_t {
 		 * memory size for the pool. */
 		uint32_t max_seg_len;
 
-		/** Maximum user area size in bytes
-		 *
-		 * The value of zero means that limited only by the available
-		 * memory size for the pool. */
+		/** Maximum user area size in bytes */
 		uint32_t max_uarea_size;
 
 		/** Maximum number of subparameters
@@ -283,6 +283,9 @@ typedef struct odp_pool_capability_t {
 		 * memory size for the pool. */
 		uint32_t max_num;
 
+		/** Maximum user area size in bytes */
+		uint32_t max_uarea_size;
+
 		/** Minimum size of thread local cache */
 		uint32_t min_cache_size;
 
@@ -304,8 +307,11 @@ typedef struct odp_pool_capability_t {
 		 * memory size for the pool. */
 		uint32_t max_num;
 
-		/** Maximum number of general types, such as odp_packet_t, in a vector. */
+		/** Maximum number of handles (such as odp_packet_t) in a vector. */
 		uint32_t max_size;
+
+		/** Maximum user area size in bytes */
+		uint32_t max_uarea_size;
 
 		/** Minimum size of thread local cache */
 		uint32_t min_cache_size;
@@ -344,10 +350,10 @@ typedef enum odp_pool_type_t {
 	/** Timeout pool */
 	ODP_POOL_TIMEOUT = ODP_EVENT_TIMEOUT,
 
-	/** Vector pool
+	/** Vector event pool
 	 *
-	 * The pool to hold a vector of general type such as odp_packet_t.
-	 * Each vector holds an array of generic types of the same type.
+	 * Each vector event holds an array of handles. All handles of a vector
+	 * are the same type (such as odp_packet_t).
 	 * @see ODP_EVENT_PACKET_VECTOR
 	 */
 	ODP_POOL_VECTOR,
@@ -379,6 +385,12 @@ typedef struct odp_pool_param_t {
 		 *  Default will always be a multiple of 8.
 		 */
 		uint32_t align;
+
+		/** Minimum user area size in bytes. The maximum value is defined by
+		 *  pool capability buf.max_uarea_size. Specify as 0 if no user
+		 *  area is needed. The default value is 0.
+		 */
+		uint32_t uarea_size;
 
 		/** Maximum number of buffers cached locally per thread
 		 *
@@ -454,9 +466,9 @@ typedef struct odp_pool_param_t {
 		 */
 		uint32_t seg_len;
 
-		/** User area size in bytes. The maximum value is defined by
+		/** Minimum user area size in bytes. The maximum value is defined by
 		 *  pool capability pkt.max_uarea_size. Specify as 0 if no user
-		 *  area is needed.
+		 *  area is needed. The default value is 0.
 		 */
 		uint32_t uarea_size;
 
@@ -503,6 +515,12 @@ typedef struct odp_pool_param_t {
 		/** Number of timeouts in the pool */
 		uint32_t num;
 
+		/** Minimum user area size in bytes. The maximum value is defined by
+		 *  pool capability tmo.max_uarea_size. Specify as 0 if no user
+		 *  area is needed. The default value is 0.
+		 */
+		uint32_t uarea_size;
+
 		/** Maximum number of timeouts cached locally per thread
 		 *
 		 *  See buf.cache_size documentation for details.
@@ -515,8 +533,14 @@ typedef struct odp_pool_param_t {
 		/** Number of vectors in the pool */
 		uint32_t num;
 
-		/** Maximum number of general types, such as odp_packet_t, in a vector. */
+		/** Maximum number of handles (such as odp_packet_t) in a vector. */
 		uint32_t max_size;
+
+		/** Minimum user area size in bytes. The maximum value is defined by
+		 *  pool capability vector.max_uarea_size. Specify as 0 if no user
+		 *  area is needed. The default value is 0.
+		 */
+		uint32_t uarea_size;
 
 		/** Maximum number of vectors cached locally per thread
 		 *
