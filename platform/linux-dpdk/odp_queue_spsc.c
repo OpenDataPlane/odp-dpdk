@@ -20,7 +20,7 @@ static inline int spsc_enq_multi(odp_queue_t handle,
 	ring_spsc = queue->ring_spsc;
 
 	if (odp_unlikely(queue->status < QUEUE_STATUS_READY)) {
-		ODP_ERR("Bad queue status\n");
+		_ODP_ERR("Bad queue status\n");
 		return -1;
 	}
 
@@ -91,5 +91,5 @@ void _odp_queue_spsc_init(queue_entry_t *queue, uint32_t queue_size)
 
 	queue->ring_spsc = ring_spsc_create(queue->name, queue_size);
 	if (queue->ring_spsc == NULL)
-		ODP_ABORT("Creating SPSC ring failed\n");
+		_ODP_ABORT("Creating SPSC ring failed\n");
 }

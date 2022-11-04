@@ -23,9 +23,9 @@ void odp_errno_zero(void)
 void odp_errno_print(const char *str)
 {
 	if (str != NULL)
-		ODP_PRINT("%s %s\n", str, strerror(rte_errno));
+		_ODP_PRINT("%s %s\n", str, strerror(rte_errno));
 	else
-		ODP_PRINT("%s\n", strerror(rte_errno));
+		_ODP_PRINT("%s\n", strerror(rte_errno));
 }
 
 const char *odp_errno_str(int errnum)
