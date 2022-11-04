@@ -13,6 +13,8 @@
 #include <odp/api/ticketlock.h>
 #include <odp/api/thrmask.h>
 
+#include <odp/api/plat/schedule_inline_types.h>
+
 #include <odp_config_internal.h>
 #include <odp_debug_internal.h>
 #include <odp_eventdev_internal.h>
@@ -1087,7 +1089,7 @@ const schedule_fn_t _odp_schedule_eventdev_fn = {
 };
 
 /* Fill in scheduler API calls */
-const schedule_api_t _odp_schedule_eventdev_api = {
+const _odp_schedule_api_fn_t _odp_schedule_eventdev_api = {
 	.schedule_wait_time       = schedule_wait_time,
 	.schedule_capability      = schedule_capability,
 	.schedule_config_init     = schedule_config_init,
