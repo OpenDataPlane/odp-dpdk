@@ -45,6 +45,7 @@ odpapiplatinclude_HEADERS = \
 		  include/odp/api/plat/pool_inline_types.h \
 		  include/odp/api/plat/queue_inlines.h \
 		  include/odp/api/plat/queue_inline_types.h \
+		  include/odp/api/plat/rwlock_inlines.h \
 		  include/odp/api/plat/spinlock_inlines.h \
 		  include/odp/api/plat/spinlock_recursive_inlines.h \
 		  include/odp/api/plat/std_inlines.h \
@@ -217,7 +218,6 @@ __LIB__libodp_dpdk_la_SOURCES = \
 			   ../linux-generic/odp_random.c \
 			   ../linux-generic/odp_random_std.c \
 			   ../linux-generic/odp_random_openssl.c \
-			   ../linux-generic/odp_rwlock.c \
 			   ../linux-generic/odp_rwlock_recursive.c \
 			   ../linux-generic/odp_schedule_basic.c \
 			   odp_schedule_eventdev.c \
@@ -251,6 +251,7 @@ __LIB__libodp_dpdk_la_SOURCES += \
 			   ../linux-generic/odp_packet_io_api.c \
 			   ../linux-generic/odp_pool_api.c \
 			   ../linux-generic/odp_queue_api.c \
+			   ../linux-generic/odp_rwlock_api.c \
 			   ../linux-generic/odp_spinlock_api.c \
 			   ../linux-generic/odp_spinlock_recursive_api.c \
 			   odp_std_api.c \
