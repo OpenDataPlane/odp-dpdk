@@ -7,9 +7,10 @@
 #ifndef ODP_PLAT_TIMER_INLINES_H_
 #define ODP_PLAT_TIMER_INLINES_H_
 
-#include <odp/api/event_types.h>
+#include <odp/api/event.h>
 #include <odp/api/timer_types.h>
 
+#include <odp/api/plat/debug_inlines.h>
 #include <odp/api/plat/timer_inline_types.h>
 
 #include <stdint.h>
@@ -53,6 +54,8 @@ _ODP_INLINE void *odp_timeout_user_area(odp_timeout_t tmo)
 
 _ODP_INLINE odp_timeout_t odp_timeout_from_event(odp_event_t ev)
 {
+	_ODP_ASSERT(odp_event_type(ev) == ODP_EVENT_TIMEOUT);
+
 	return (odp_timeout_t)ev;
 }
 
