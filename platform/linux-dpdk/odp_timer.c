@@ -1305,6 +1305,8 @@ void odp_timer_print(odp_timer_t timer_hdl)
 
 	len += _odp_snprint(&str[len], n - len, "Timer info\n");
 	len += _odp_snprint(&str[len], n - len, "----------\n");
+	len += _odp_snprint(&str[len], n - len, "  handle         0x%" PRIx64 "\n",
+			    odp_timer_to_u64(timer_hdl));
 	len += _odp_snprint(&str[len], n - len, "  timer pool     0x%" PRIx64 "\n",
 			    odp_timer_pool_to_u64(timer_pool_to_hdl(timer->timer_pool)));
 	len += _odp_snprint(&str[len], n - len, "  timer index    %" PRIu32 "\n", timer->timer_idx);
@@ -1345,6 +1347,7 @@ void odp_timeout_print(odp_timeout_t tmo)
 	len += _odp_snprint(&str[len], n - len, "  expiration     %" PRIu64 "\n",
 			    tmo_hdr->expiration);
 	len += _odp_snprint(&str[len], n - len, "  user ptr       %p\n", tmo_hdr->user_ptr);
+	len += _odp_snprint(&str[len], n - len, "  user area      %p\n", tmo_hdr->uarea_addr);
 
 	if (timer != ODP_TIMER_INVALID) {
 		timer_entry_t *timer_entry = timer_from_hdl(timer);
@@ -1352,6 +1355,8 @@ void odp_timeout_print(odp_timeout_t tmo)
 
 		len += _odp_snprint(&str[len], n - len, "  timer pool     0x%" PRIx64 "\n",
 				    odp_timer_pool_to_u64(timer_pool_to_hdl(tp)));
+		len += _odp_snprint(&str[len], n - len, "  timer          0x%" PRIx64 "\n",
+				    odp_timer_to_u64(timer));
 		len += _odp_snprint(&str[len], n - len, "  timer index    %u\n",
 				    timer_entry->timer_idx);
 		len += _odp_snprint(&str[len], n - len, "  periodic       %i\n", tp->periodic);
