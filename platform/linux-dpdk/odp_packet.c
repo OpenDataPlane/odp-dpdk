@@ -621,13 +621,6 @@ uint16_t odp_packet_ones_comp(odp_packet_t pkt, odp_packet_data_range_t *range)
 	return 0;
 }
 
-void odp_packet_ts_set(odp_packet_t pkt, odp_time_t timestamp)
-{
-	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
-
-	packet_set_ts(pkt_hdr, &timestamp);
-}
-
 /*
  *
  * Manipulation

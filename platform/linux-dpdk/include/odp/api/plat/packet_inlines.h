@@ -91,6 +91,7 @@ extern "C" {
 	#define odp_packet_flow_hash __odp_packet_flow_hash
 	#define odp_packet_flow_hash_set __odp_packet_flow_hash_set
 	#define odp_packet_ts __odp_packet_ts
+	#define odp_packet_ts_set __odp_packet_ts_set
 	#define odp_packet_ts_request __odp_packet_ts_request
 	#define odp_packet_head __odp_packet_head
 	#define odp_packet_is_segmented __odp_packet_is_segmented
@@ -478,6 +479,16 @@ _ODP_INLINE void odp_packet_flow_hash_set(odp_packet_t pkt,
 _ODP_INLINE odp_time_t odp_packet_ts(odp_packet_t pkt)
 {
 	return _odp_pkt_get(pkt, odp_time_t, timestamp);
+}
+
+_ODP_INLINE void odp_packet_ts_set(odp_packet_t pkt, odp_time_t timestamp)
+{
+	odp_time_t *ts = _odp_pkt_get_ptr(pkt, odp_time_t, timestamp);
+	_odp_packet_input_flags_t *input_flags = _odp_pkt_get_ptr(pkt, _odp_packet_input_flags_t,
+								  input_flags);
+
+	*ts = timestamp;
+	input_flags->timestamp = 1;
 }
 
 _ODP_INLINE void odp_packet_ts_request(odp_packet_t pkt, int enable)
