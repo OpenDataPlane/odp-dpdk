@@ -43,6 +43,7 @@ extern const _odp_buffer_inline_offset_t _odp_buffer_inline_offset;
 	#define odp_buffer_user_area __odp_buffer_user_area
 	#define odp_buffer_free __odp_buffer_free
 	#define odp_buffer_free_multi __odp_buffer_free_multi
+	#define odp_buffer_is_valid __odp_buffer_is_valid
 #else
 	#define _ODP_INLINE
 #endif
@@ -112,6 +113,17 @@ _ODP_INLINE void odp_buffer_free_multi(const odp_buffer_t buf[], int num)
 		}
 	}
 	rte_mempool_put_bulk(mp_pending, (void **)mbuf_tbl, num_pending);
+}
+
+_ODP_INLINE int odp_buffer_is_valid(odp_buffer_t buf)
+{
+	if (odp_event_is_valid(odp_buffer_to_event(buf)) == 0)
+		return 0;
+
+	if (odp_event_type(odp_buffer_to_event(buf)) != ODP_EVENT_BUFFER)
+		return 0;
+
+	return 1;
 }
 
 /** @endcond */

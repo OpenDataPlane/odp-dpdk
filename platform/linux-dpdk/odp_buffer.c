@@ -27,17 +27,6 @@ const _odp_buffer_inline_offset_t _odp_buffer_inline_offset ODP_ALIGNED_CACHE = 
 
 #include <odp/visibility_end.h>
 
-int odp_buffer_is_valid(odp_buffer_t buf)
-{
-	if (odp_event_is_valid(odp_buffer_to_event(buf)) == 0)
-		return 0;
-
-	if (odp_event_type(odp_buffer_to_event(buf)) != ODP_EVENT_BUFFER)
-		return 0;
-
-	return 1;
-}
-
 void odp_buffer_print(odp_buffer_t buf)
 {
 	odp_buffer_hdr_t *hdr;
