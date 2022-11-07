@@ -13,6 +13,7 @@
 #include <odp_buffer_internal.h>
 #include <odp_debug_internal.h>
 #include <odp_pool_internal.h>
+#include <odp_print_internal.h>
 
 #include <string.h>
 #include <stdio.h>
@@ -44,14 +45,14 @@ void odp_buffer_print(odp_buffer_t buf)
 	hdr = _odp_buf_hdr(buf);
 	pool = _odp_pool_entry(hdr->event_hdr.pool);
 
-	len += snprintf(&str[len], n - len, "Buffer\n------\n");
-	len += snprintf(&str[len], n - len, "  pool index    %u\n", pool->pool_idx);
-	len += snprintf(&str[len], n - len, "  buffer index  %u\n", hdr->event_hdr.index);
-	len += snprintf(&str[len], n - len, "  addr          %p\n", odp_buffer_addr(buf));
-	len += snprintf(&str[len], n - len, "  size          %u\n", odp_buffer_size(buf));
+	len += _odp_snprint(&str[len], n - len, "Buffer\n------\n");
+	len += _odp_snprint(&str[len], n - len, "  pool index     %u\n", pool->pool_idx);
+	len += _odp_snprint(&str[len], n - len, "  buffer index   %u\n", hdr->event_hdr.index);
+	len += _odp_snprint(&str[len], n - len, "  addr           %p\n", odp_buffer_addr(buf));
+	len += _odp_snprint(&str[len], n - len, "  size           %u\n", odp_buffer_size(buf));
 	str[len] = 0;
 
-	_ODP_PRINT("\n%s\n", str);
+	_ODP_PRINT("%s\n", str);
 }
 
 uint64_t odp_buffer_to_u64(odp_buffer_t hdl)
