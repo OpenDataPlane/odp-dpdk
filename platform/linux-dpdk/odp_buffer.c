@@ -5,7 +5,10 @@
  * SPDX-License-Identifier:     BSD-3-Clause
  */
 
+#include <odp/api/align.h>
 #include <odp/api/buffer.h>
+
+#include <odp/api/plat/buffer_inline_types.h>
 
 #include <odp_buffer_internal.h>
 #include <odp_debug_internal.h>
@@ -15,19 +18,14 @@
 #include <stdio.h>
 #include <inttypes.h>
 
-int _odp_buffer_type(odp_buffer_t buf)
-{
-	odp_buffer_hdr_t *hdr = _odp_buf_hdr(buf);
+#include <odp/visibility_begin.h>
 
-	return hdr->event_hdr.type;
-}
+/* Buffer header field offsets for inline functions */
+const _odp_buffer_inline_offset_t _odp_buffer_inline_offset ODP_ALIGNED_CACHE = {
+	.uarea_addr = offsetof(odp_buffer_hdr_t, uarea_addr)
+};
 
-void _odp_buffer_type_set(odp_buffer_t buf, int type)
-{
-	odp_buffer_hdr_t *hdr = _odp_buf_hdr(buf);
-
-	hdr->event_hdr.type = type;
-}
+#include <odp/visibility_end.h>
 
 int odp_buffer_is_valid(odp_buffer_t buf)
 {
@@ -38,13 +36,6 @@ int odp_buffer_is_valid(odp_buffer_t buf)
 		return 0;
 
 	return 1;
-}
-
-void *odp_buffer_user_area(odp_buffer_t buf)
-{
-	odp_buffer_hdr_t *hdr = _odp_buf_hdr(buf);
-
-	return hdr->uarea_addr;
 }
 
 void odp_buffer_print(odp_buffer_t buf)
