@@ -27,6 +27,7 @@
 #include <inttypes.h>
 
 #include <rte_config.h>
+#include <rte_errno.h>
 #include <rte_lcore.h>
 #include <rte_memzone.h>
 
@@ -254,7 +255,7 @@ odp_shm_t odp_shm_reserve(const char *name, uint64_t size, uint64_t align,
 	uint32_t supported_flgs = SUPPORTED_SHM_FLAGS;
 
 	if (flags & ~supported_flgs) {
-		_ODP_ERR("Unsupported SHM flag\n");
+		_ODP_ERR("Unsupported SHM flag: %" PRIx32 "\n", flags);
 		return ODP_SHM_INVALID;
 	}
 
@@ -284,7 +285,8 @@ odp_shm_t odp_shm_reserve(const char *name, uint64_t size, uint64_t align,
 					 rte_socket_id(), mz_flags, align);
 	if (mz == NULL) {
 		odp_spinlock_unlock(&shm_tbl->lock);
-		_ODP_ERR("Reserving DPDK memzone failed\n");
+		_ODP_ERR("Reserving DPDK memzone '%s' failed: %s\n", mz_name,
+			 rte_strerror(rte_errno));
 		return ODP_SHM_INVALID;
 	}
 
