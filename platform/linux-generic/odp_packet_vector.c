@@ -1,4 +1,4 @@
-/* Copyright (c) 2020-2021, Nokia
+/* Copyright (c) 2020-2022, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -14,6 +14,7 @@
 #include <odp_debug_internal.h>
 #include <odp_event_vector_internal.h>
 #include <odp_pool_internal.h>
+#include <odp_print_internal.h>
 
 #include <inttypes.h>
 #include <stdint.h>
@@ -41,17 +42,17 @@ odp_packet_vector_t odp_packet_vector_alloc(odp_pool_t pool_hdl)
 	odp_event_t event;
 	pool_t *pool;
 
-	ODP_ASSERT(pool_hdl != ODP_POOL_INVALID);
+	_ODP_ASSERT(pool_hdl != ODP_POOL_INVALID);
 
 	pool = _odp_pool_entry(pool_hdl);
 
-	ODP_ASSERT(pool->type == ODP_POOL_VECTOR);
+	_ODP_ASSERT(pool->type == ODP_POOL_VECTOR);
 
 	event = _odp_event_alloc(pool);
 	if (odp_unlikely(event == ODP_EVENT_INVALID))
 		return ODP_PACKET_VECTOR_INVALID;
 
-	ODP_ASSERT(event_vector_hdr_from_event(event)->size == 0);
+	_ODP_ASSERT(event_vector_hdr_from_event(event)->size == 0);
 
 	return odp_packet_vector_from_event(event);
 }
@@ -107,30 +108,32 @@ void odp_packet_vector_print(odp_packet_vector_t pktv)
 	uint32_t i;
 	odp_event_vector_hdr_t *pktv_hdr = _odp_packet_vector_hdr(pktv);
 
-	len += snprintf(&str[len], n - len, "Packet Vector\n");
-	len += snprintf(&str[len], n - len,
-			"  handle %p\n", (void *)pktv);
-	len += snprintf(&str[len], n - len,
-			"  size   %" PRIu32 "\n", pktv_hdr->size);
+	len += _odp_snprint(&str[len], n - len, "Packet vector info\n");
+	len += _odp_snprint(&str[len], n - len, "------------------\n");
+	len += _odp_snprint(&str[len], n - len, "  handle         0x%" PRIx64 "\n",
+			    odp_packet_vector_to_u64(pktv));
+	len += _odp_snprint(&str[len], n - len, "  size           %" PRIu32 "\n", pktv_hdr->size);
+	len += _odp_snprint(&str[len], n - len, "  flags          0x%" PRIx32 "\n",
+			    pktv_hdr->flags.all_flags);
+	len += _odp_snprint(&str[len], n - len, "  user area      %p\n", pktv_hdr->uarea_addr);
 
 	for (i = 0; i < pktv_hdr->size; i++) {
 		odp_packet_t pkt = pktv_hdr->packet[i];
 		char seg_str[max_len];
 		int str_len;
 
-		str_len = snprintf(seg_str, max_len,
-				   "    packet     %p  len %" PRIu32 "\n",
-				   (void *)pkt, odp_packet_len(pkt));
+		str_len = _odp_snprint(seg_str, max_len, "    packet     %p  len %" PRIu32 "\n",
+				       (void *)pkt, odp_packet_len(pkt));
 
 		/* Prevent print buffer overflow */
 		if (n - len - str_len < 10) {
-			len += snprintf(&str[len], n - len, "    ...\n");
+			len += _odp_snprint(&str[len], n - len, "    ...\n");
 			break;
 		}
-		len += snprintf(&str[len], n - len, "%s", seg_str);
+		len += _odp_snprint(&str[len], n - len, "%s", seg_str);
 	}
 
-	ODP_PRINT("%s\n", str);
+	_ODP_PRINT("%s\n", str);
 }
 
 uint64_t odp_packet_vector_to_u64(odp_packet_vector_t pktv)

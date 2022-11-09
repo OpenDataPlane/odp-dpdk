@@ -5,3 +5,6 @@
  */
 
 #include <odp/api/abi-default/rwlock.h>
+
+/* Inlined API functions */
+#include <odp/api/plat/rwlock_inlines.h>
