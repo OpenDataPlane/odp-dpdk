@@ -5,7 +5,7 @@ env:
   ARCH: x86_64
   CC: gcc
   CONTAINER_NAMESPACE: ghcr.io/opendataplane/odp-docker-images
-  OS: ubuntu_18.04
+  OS: ubuntu_20.04
 
 jobs:
   Checkpatch:
@@ -104,40 +104,32 @@ jobs:
     runs-on: ubuntu-20.04
     env:
       ARCH: arm64
+      CONF: "--enable-dpdk-shared"
+    strategy:
+      fail-fast: false
+      matrix:
+        cc: [gcc, clang]
+        conf: ['', '--enable-abi-compat', 'CFLAGS=-march=armv8.2-a', 'CFLAGS=-march=armv8-a+lse']
+    steps:
+      - uses: actions/checkout@v3
+      - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${{matrix.cc}}"
+               -e CONF="${CONF} ${{matrix.conf}}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH} /odp/scripts/ci/build_${ARCH}.sh
+      - name: Failure log
+        if: ${{ failure() }}
+        run: find . -name config.log -exec cat {} \;
+
+  Build_arm64_u18:
+    runs-on: ubuntu-20.04
+    env:
+      ARCH: arm64
+      OS: ubuntu_18.04
     strategy:
       fail-fast: false
       matrix:
         cc: [gcc, clang]
     steps:
       - uses: actions/checkout@v3
-
-      - name: Minimal
-        run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${{matrix.cc}}"
-               -e CONF="${CONF}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH} /odp/scripts/ci/build_${ARCH}.sh
-
-      - name: --enable-abi-compat
-        env:
-          CONF: "--enable-abi-compat"
-        run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${{matrix.cc}}"
-               -e CONF="${CONF}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH} /odp/scripts/ci/build_${ARCH}.sh
-
-      - name: CFLAGS="-march=armv8.2-a"
-        env:
-          CONF: "CFLAGS=-march=armv8.2-a"
-        run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${{matrix.cc}}"
-               -e CONF="${CONF}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH} /odp/scripts/ci/build_${ARCH}.sh
-
-      - name: CFLAGS="-march=armv8-a+lse"
-        env:
-          CONF: "CFLAGS=-march=armv8-a+lse"
-        run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${{matrix.cc}}"
-               -e CONF="${CONF}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH} /odp/scripts/ci/build_${ARCH}.sh
-
-      - name: Ubuntu 20.04
-        env:
-          CONF: "--enable-dpdk-shared"
-          OS: ubuntu_20.04
-        run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${{matrix.compiler}}"
+      - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${{matrix.cc}}"
                -e CONF="${CONF}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH} /odp/scripts/ci/build_${ARCH}.sh
       - name: Failure log
         if: ${{ failure() }}
@@ -147,6 +139,7 @@ jobs:
     runs-on: ubuntu-20.04
     env:
       ARCH: ppc64el
+      CONF: "--enable-dpdk-shared"
     strategy:
       fail-fast: false
       matrix:
@@ -154,7 +147,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}"
-               -e CONF="${{matrix.conf}}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH} /odp/scripts/ci/build_${ARCH}.sh
+               -e CONF="${CONF} ${{matrix.conf}}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH} /odp/scripts/ci/build_${ARCH}.sh
       - name: Failure log
         if: ${{ failure() }}
         run: find . -name config.log -exec cat {} \;
@@ -163,6 +156,7 @@ jobs:
     runs-on: ubuntu-20.04
     env:
       ARCH: i386
+      OS: ubuntu_18.04
     strategy:
       fail-fast: false
       matrix:
@@ -192,14 +186,14 @@ jobs:
         if: ${{ failure() }}
         run: find . -name config.log -exec cat {} \;
 
-  Build_gcc_u20:
+  Build_gcc_u18:
     runs-on: ubuntu-20.04
     env:
-      OS: ubuntu_20.04
+      OS: ubuntu_18.04
     strategy:
       fail-fast: false
       matrix:
-        cc_ver: [9]
+        cc_ver: [7, 8]
         conf: ['', '--enable-abi-compat']
     steps:
       - uses: actions/checkout@v3
@@ -299,7 +293,7 @@ jobs:
       fail-fast: false
       matrix:
         cc: [gcc, clang]
-        os: ['ubuntu_20.04', 'ubuntu_22.04-openssl']
+        os: ['ubuntu_18.04', 'ubuntu_22.04-openssl']
     steps:
       - uses: actions/checkout@v3
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${{matrix.cc}}" -e ARCH="${ARCH}"
@@ -351,8 +345,6 @@ jobs:
 
   Run_dpdk-20_11:
     runs-on: ubuntu-20.04
-    env:
-      OS: ubuntu_20.04
     steps:
       - uses: actions/checkout@v3
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}" -e ARCH="${ARCH}"
@@ -363,8 +355,6 @@ jobs:
 
   Run_dpdk-21_11:
     runs-on: ubuntu-20.04
-    env:
-      OS: ubuntu_20.04
     steps:
       - uses: actions/checkout@v3
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}" -e ARCH="${ARCH}"
@@ -375,8 +365,6 @@ jobs:
 
   Run_crypto:
     runs-on: ubuntu-20.04
-    env:
-      OS: ubuntu_20.04
     strategy:
       fail-fast: false
       matrix:

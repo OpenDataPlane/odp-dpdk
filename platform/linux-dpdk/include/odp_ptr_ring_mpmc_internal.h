@@ -48,8 +48,7 @@ static inline ring_mpmc_t ring_mpmc_create(const char *name, uint32_t size)
 
 	rte_ring = rte_ring_create(ring_name, size, rte_socket_id(), 0);
 	if (rte_ring == NULL) {
-		ODP_ERR("Creating DPDK ring failed: %s\n",
-			rte_strerror(rte_errno));
+		_ODP_ERR("Creating DPDK ring failed: %s\n", rte_strerror(rte_errno));
 		return NULL;
 	}
 

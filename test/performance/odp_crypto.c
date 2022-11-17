@@ -26,6 +26,7 @@
 #define POOL_NUM_PKT  64
 
 #define AAD_LEN 8 /* typical AAD length used in IPsec when ESN is not in use */
+#define MAX_AUTH_DIGEST_LEN 32 /* maximum MAC length in bytes */
 
 static uint8_t test_aad[AAD_LEN] = "01234567";
 static uint8_t test_iv[16] = "0123456789abcdef";
@@ -407,6 +408,49 @@ static crypto_alg_config_t algs_config[] = {
 			.auth_aad_len = AAD_LEN,
 		},
 	},
+	{
+		.name = "zuc-eea3",
+		.session = {
+			.cipher_alg = ODP_CIPHER_ALG_ZUC_EEA3,
+			.cipher_key = {
+				.data = test_key16,
+				.length = sizeof(test_key16)
+			},
+			.cipher_iv_len = 16,
+			.auth_alg = ODP_AUTH_ALG_NULL,
+		},
+	},
+	{
+		.name = "zuc-eia3",
+		.session = {
+			.cipher_alg = ODP_CIPHER_ALG_NULL,
+			.auth_alg = ODP_AUTH_ALG_ZUC_EIA3,
+			.auth_key = {
+				.data = test_key16,
+				.length = sizeof(test_key16)
+			},
+			.auth_iv_len = 16,
+			.auth_digest_len = 4,
+		},
+	},
+	{
+		.name = "zuc-eea3-zuc-eia3",
+		.session = {
+			.cipher_alg = ODP_CIPHER_ALG_ZUC_EEA3,
+			.cipher_key = {
+				.data = test_key16,
+				.length = sizeof(test_key16)
+			},
+			.cipher_iv_len = 16,
+			.auth_alg = ODP_AUTH_ALG_ZUC_EIA3,
+			.auth_key = {
+				.data = test_key16,
+				.length = sizeof(test_key16)
+			},
+			.auth_iv_len = 16,
+			.auth_digest_len = 4,
+		},
+	},
 };
 
 /**
@@ -516,7 +560,7 @@ get_elapsed_usec(time_record_t *start, time_record_t *end)
 	return e - s;
 }
 
-#define REPORT_HEADER	    "\n%30.30s %15s %15s %15s %15s %15s %15s\n"
+#define REPORT_HEADER	    "%30.30s %15s %15s %15s %15s %15s %15s\n"
 #define REPORT_LINE	    "%30.30s %15d %15d %15.3f %15.3f %15.3f %15d\n"
 
 /**
@@ -610,6 +654,7 @@ create_session_from_config(odp_crypto_session_t *session,
 	odp_crypto_session_param_init(&params);
 	memcpy(&params, &config->session, sizeof(odp_crypto_session_param_t));
 	params.op = ODP_CRYPTO_OP_ENCODE;
+	params.auth_cipher_text = true;
 
 	/* Lookup the packet pool */
 	pkt_pool = odp_pool_lookup("packet_pool");
@@ -633,6 +678,19 @@ create_session_from_config(odp_crypto_session_t *session,
 	}
 	if (odp_crypto_session_create(&params, session,
 				      &ses_create_rc)) {
+		switch (ses_create_rc) {
+		case ODP_CRYPTO_SES_ERR_ALG_COMBO:
+			printf("    requested algorithm combination not supported\n");
+			return 1;
+		case ODP_CRYPTO_SES_ERR_ALG_ORDER:
+			printf("    requested algorithm order not supported\n");
+			return 1;
+		case ODP_CRYPTO_SES_ERR_PARAMS:
+			printf("    requested session parameters not supported\n");
+			return 1;
+		default:
+			break;
+		}
 		ODPH_ERR("crypto session create failed.\n");
 		return -1;
 	}
@@ -675,6 +733,7 @@ run_measure_one(crypto_args_t *cargs,
 	odp_queue_t out_queue;
 	odp_packet_t pkt = ODP_PACKET_INVALID;
 	int rc = 0;
+	uint32_t packet_len = payload_length + MAX_AUTH_DIGEST_LEN;
 
 	pkt_pool = odp_pool_lookup("packet_pool");
 	if (pkt_pool == ODP_POOL_INVALID) {
@@ -691,7 +750,7 @@ run_measure_one(crypto_args_t *cargs,
 	}
 
 	if (cargs->reuse_packet) {
-		pkt = make_packet(pkt_pool, payload_length);
+		pkt = make_packet(pkt_pool, packet_len);
 		if (ODP_PACKET_INVALID == pkt)
 			return -1;
 	}
@@ -727,7 +786,7 @@ run_measure_one(crypto_args_t *cargs,
 			odp_packet_t out_pkt;
 
 			if (!cargs->reuse_packet) {
-				pkt = make_packet(pkt_pool, payload_length);
+				pkt = make_packet(pkt_pool, packet_len);
 				if (ODP_PACKET_INVALID == pkt)
 					return -1;
 			}
@@ -874,6 +933,9 @@ static int check_cipher_alg(const odp_crypto_capability_t *capa,
 		if (capa->ciphers.bit.chacha20_poly1305)
 			return 0;
 		break;
+	case ODP_CIPHER_ALG_ZUC_EEA3:
+		if (capa->ciphers.bit.zuc_eea3)
+			return 0;
 	default:
 		break;
 	}
@@ -925,6 +987,9 @@ static int check_auth_alg(const odp_crypto_capability_t *capa,
 		if (capa->auths.bit.chacha20_poly1305)
 			return 0;
 		break;
+	case ODP_AUTH_ALG_ZUC_EIA3:
+		if (capa->auths.bit.zuc_eia3)
+			return 0;
 	default:
 		break;
 	}
@@ -983,6 +1048,11 @@ static int check_auth_params(const odp_crypto_capability_t *crypto_capa,
 {
 	int num, rc;
 
+	if (param->auth_digest_len > MAX_AUTH_DIGEST_LEN) {
+		ODPH_ERR("MAX_AUTH_DIGEST_LEN too low\n");
+		return 1;
+	}
+
 	if (check_auth_alg(crypto_capa, param->auth_alg))
 		return 1;
 
@@ -1026,6 +1096,8 @@ static int run_measure_one_config(test_run_arg_t *arg)
 	odp_crypto_capability_t crypto_capa = arg->crypto_capa;
 	int rc = 0;
 
+	printf("\n");
+
 	if (check_cipher_params(&crypto_capa, &config->session,
 				&config->cipher_in_bit_mode)) {
 		printf("    Cipher algorithm not supported\n");
@@ -1038,13 +1110,12 @@ static int run_measure_one_config(test_run_arg_t *arg)
 		rc = 1;
 	}
 
+	if (rc == 0)
+		rc = create_session_from_config(&session, config, cargs);
 	if (rc) {
-		printf("    => %s skipped\n\n", config->name);
-		return 0;
+		printf("    => %s skipped\n", config->name);
+		return rc > 0 ? 0 : -1;
 	}
-
-	if (create_session_from_config(&session, config, cargs))
-		return -1;
 
 	if (cargs->payload_length) {
 		rc = run_measure_one(cargs, config, &session,
@@ -1150,7 +1221,7 @@ int main(int argc, char *argv[])
 	max_seg_len = pool_capa.pkt.max_seg_len;
 
 	for (i = 0; i < sizeof(payloads) / sizeof(unsigned int); i++) {
-		if (payloads[i] > max_seg_len)
+		if (payloads[i] + MAX_AUTH_DIGEST_LEN > max_seg_len)
 			break;
 	}
 

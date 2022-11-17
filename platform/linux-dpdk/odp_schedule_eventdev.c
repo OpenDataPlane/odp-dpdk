@@ -13,6 +13,8 @@
 #include <odp/api/ticketlock.h>
 #include <odp/api/thrmask.h>
 
+#include <odp/api/plat/schedule_inline_types.h>
+
 #include <odp_config_internal.h>
 #include <odp_debug_internal.h>
 #include <odp_eventdev_internal.h>
@@ -65,7 +67,7 @@ static int link_port(uint8_t dev_id, uint8_t port_id, uint8_t queue_ids[],
 	ret = rte_event_port_link(dev_id, port_id, queue_ids, priorities,
 				  nb_links);
 	if (ret < 0 || (queue_ids && ret != nb_links)) {
-		ODP_ERR("rte_event_port_link failed: %d\n", ret);
+		_ODP_ERR("rte_event_port_link failed: %d\n", ret);
 		odp_ticketlock_unlock(&_odp_eventdev_gbl->port_lock);
 		return ret;
 	}
@@ -91,7 +93,7 @@ static int unlink_port(uint8_t dev_id, uint8_t port_id, uint8_t queue_ids[],
 
 	ret = rte_event_port_unlink(dev_id, port_id, queue_ids, nb_links);
 	if (ret < 0) {
-		ODP_ERR("rte_event_port_unlink failed: %d\n", ret);
+		_ODP_ERR("rte_event_port_unlink failed: %d\n", ret);
 		odp_ticketlock_unlock(&_odp_eventdev_gbl->port_lock);
 		return ret;
 	}
@@ -99,7 +101,7 @@ static int unlink_port(uint8_t dev_id, uint8_t port_id, uint8_t queue_ids[],
 	do {
 		ret = rte_event_port_unlinks_in_progress(dev_id, port_id);
 		if (ret < 0) {
-			ODP_ERR("rte_event_port_unlinks_in_progress failed: "
+			_ODP_ERR("rte_event_port_unlinks_in_progress failed: "
 				"%d\n", ret);
 			break;
 		}
@@ -197,7 +199,7 @@ static int link_group(int group, const odp_thrmask_t *mask, odp_bool_t unlink)
 			ret = link_port(dev_id, port_id, queue_ids, priorities,
 					nb_links, 0);
 		if (ret < 0) {
-			ODP_ERR("Modifying port links failed\n");
+			_ODP_ERR("Modifying port links failed\n");
 			return -1;
 		}
 	}
@@ -214,7 +216,7 @@ static int rx_adapter_create(uint8_t dev_id, uint8_t rx_adapter_id,
 
 	ret = rte_event_eth_rx_adapter_caps_get(dev_id, rx_adapter_id, &capa);
 	if (ret) {
-		ODP_ERR("rte_event_eth_rx_adapter_caps_get failed: %d\n", ret);
+		_ODP_ERR("rte_event_eth_rx_adapter_caps_get failed: %d\n", ret);
 		return -1;
 	}
 	if ((capa & RTE_EVENT_ETH_RX_ADAPTER_CAP_MULTI_EVENTQ) == 0)
@@ -227,7 +229,7 @@ static int rx_adapter_create(uint8_t dev_id, uint8_t rx_adapter_id,
 	ret = rte_event_eth_rx_adapter_create(rx_adapter_id, dev_id,
 					      &port_config);
 	if (ret) {
-		ODP_ERR("rte_event_eth_rx_adapter_create failed: %d\n", ret);
+		_ODP_ERR("rte_event_eth_rx_adapter_create failed: %d\n", ret);
 		return -1;
 	}
 
@@ -273,7 +275,7 @@ static int rx_adapter_add_queues(uint8_t rx_adapter_id, uint8_t port_id,
 		ret = rte_event_eth_rx_adapter_queue_add(rx_adapter_id, port_id,
 							 rx_queue_id, &qconf);
 		if (ret) {
-			ODP_ERR("rte_event_eth_rx_adapter_queue_add failed\n");
+			_ODP_ERR("rte_event_eth_rx_adapter_queue_add failed\n");
 			return -1;
 		}
 
@@ -299,7 +301,7 @@ int _odp_rx_adapter_close(void)
 
 	if (_odp_eventdev_gbl->rx_adapter.status != RX_ADAPTER_STOPPED &&
 	    rte_event_eth_rx_adapter_stop(rx_adapter_id)) {
-		ODP_ERR("Failed to stop RX adapter\n");
+		_ODP_ERR("Failed to stop RX adapter\n");
 		ret = -1;
 	}
 
@@ -317,14 +319,14 @@ void _odp_rx_adapter_port_stop(uint16_t port_id)
 	uint8_t rx_adapter_id = _odp_eventdev_gbl->rx_adapter.id;
 
 	if (rte_event_eth_rx_adapter_queue_del(rx_adapter_id, port_id, -1))
-		ODP_ERR("Failed to delete RX queue\n");
+		_ODP_ERR("Failed to delete RX queue\n");
 
 	rte_eth_dev_stop(port_id);
 }
 
 static int schedule_init_global(void)
 {
-	ODP_DBG("Using eventdev scheduler\n");
+	_ODP_DBG("Using eventdev scheduler\n");
 	return 0;
 }
 
@@ -374,7 +376,7 @@ static int schedule_create_queue(uint32_t qi,
 	int thr;
 
 	if (sched_param->group < 0 || sched_param->group >= NUM_SCHED_GRPS) {
-		ODP_ERR("Bad schedule group\n");
+		_ODP_ERR("Bad schedule group\n");
 		return -1;
 	}
 
@@ -427,9 +429,8 @@ static void schedule_pktio_start(int pktio_index, int num_pktin,
 	 * event queues are linked when rte_event_eth_rx_adapter_queue_add() is
 	 * called. */
 	if (odp_atomic_load_u32(&_odp_eventdev_gbl->num_started))
-		ODP_PRINT("All ODP pktio devices used by the scheduler should "
-			  "be started before calling odp_schedule() for the "
-			  "first time.\n");
+		_ODP_PRINT("All ODP pktio devices used by the scheduler should "
+			   "be started before calling odp_schedule() for the first time.\n");
 
 	_odp_eventdev_gbl->pktio[port_id] = entry;
 
@@ -438,11 +439,11 @@ static void schedule_pktio_start(int pktio_index, int num_pktin,
 	if (_odp_eventdev_gbl->rx_adapter.status == RX_ADAPTER_INIT &&
 	    rx_adapter_create(_odp_eventdev_gbl->dev_id, rx_adapter_id,
 			      &_odp_eventdev_gbl->config))
-		ODP_ABORT("Creating eventdev RX adapter failed\n");
+		_ODP_ABORT("Creating eventdev RX adapter failed\n");
 
 	if (rx_adapter_add_queues(rx_adapter_id, port_id, num_pktin, pktin_idx,
 				  queue))
-		ODP_ABORT("Adding RX adapter queues failed\n");
+		_ODP_ABORT("Adding RX adapter queues failed\n");
 
 	if (_odp_eventdev_gbl->rx_adapter.status == RX_ADAPTER_STOPPED) {
 		uint32_t service_id = 0;
@@ -451,14 +452,14 @@ static void schedule_pktio_start(int pktio_index, int num_pktin,
 		ret = rte_event_eth_rx_adapter_service_id_get(rx_adapter_id,
 							      &service_id);
 		if (ret && ret != -ESRCH) {
-			ODP_ABORT("Unable to retrieve service ID\n");
+			_ODP_ABORT("Unable to retrieve service ID\n");
 		} else if (!ret) {
 			if (_odp_service_setup(service_id))
-				ODP_ABORT("Unable to start RX service\n");
+				_ODP_ABORT("Unable to start RX service\n");
 		}
 
 		if (rte_event_eth_rx_adapter_start(rx_adapter_id))
-			ODP_ABORT("Unable to start RX adapter\n");
+			_ODP_ABORT("Unable to start RX adapter\n");
 
 		_odp_eventdev_gbl->rx_adapter.status = RX_ADAPTER_RUNNING;
 	}
@@ -628,8 +629,8 @@ static inline int schedule_loop(odp_queue_t *out_queue, uint64_t wait,
 	uint8_t port_id = _odp_eventdev_local.port_id;
 
 	if (odp_unlikely(port_id >= _odp_eventdev_gbl->num_event_ports)) {
-		ODP_ERR("Max %" PRIu8 " scheduled workers supported\n",
-			_odp_eventdev_gbl->num_event_ports);
+		_ODP_ERR("Max %" PRIu8 " scheduled workers supported\n",
+			 _odp_eventdev_gbl->num_event_ports);
 		return 0;
 	}
 
@@ -715,7 +716,7 @@ static void schedule_pause(void)
 {
 	if (unlink_port(_odp_eventdev_gbl->dev_id,
 			_odp_eventdev_local.port_id, NULL, 0) < 0)
-		ODP_ERR("Unable to pause scheduling\n");
+		_ODP_ERR("Unable to pause scheduling\n");
 
 	_odp_eventdev_local.paused = 1;
 }
@@ -723,7 +724,7 @@ static void schedule_pause(void)
 static void schedule_resume(void)
 {
 	if (resume_scheduling(_odp_eventdev_gbl->dev_id, _odp_eventdev_local.port_id))
-		ODP_ERR("Unable to resume scheduling\n");
+		_ODP_ERR("Unable to resume scheduling\n");
 
 	_odp_eventdev_local.paused = 0;
 }
@@ -1059,12 +1060,12 @@ static void schedule_print(void)
 
 	(void)schedule_capability(&capa);
 
-	ODP_PRINT("\nScheduler debug info\n");
-	ODP_PRINT("--------------------\n");
-	ODP_PRINT("  scheduler:         eventdev\n");
-	ODP_PRINT("  max groups:        %u\n", capa.max_groups);
-	ODP_PRINT("  max priorities:    %u\n", capa.max_prios);
-	ODP_PRINT("\n");
+	_ODP_PRINT("\nScheduler debug info\n");
+	_ODP_PRINT("--------------------\n");
+	_ODP_PRINT("  scheduler:         eventdev\n");
+	_ODP_PRINT("  max groups:        %u\n", capa.max_groups);
+	_ODP_PRINT("  max priorities:    %u\n", capa.max_prios);
+	_ODP_PRINT("\n");
 }
 
 /* Fill in scheduler interface */
@@ -1088,7 +1089,7 @@ const schedule_fn_t _odp_schedule_eventdev_fn = {
 };
 
 /* Fill in scheduler API calls */
-const schedule_api_t _odp_schedule_eventdev_api = {
+const _odp_schedule_api_fn_t _odp_schedule_eventdev_api = {
 	.schedule_wait_time       = schedule_wait_time,
 	.schedule_capability      = schedule_capability,
 	.schedule_config_init     = schedule_config_init,

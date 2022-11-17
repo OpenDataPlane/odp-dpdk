@@ -5,3 +5,6 @@
  */
 
 #include <odp/api/abi-default/rwlock_recursive.h>
+
+/* Inlined API functions */
+#include <odp/api/plat/rwlock_recursive_inlines.h>

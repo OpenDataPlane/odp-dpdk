@@ -163,8 +163,7 @@ static int lookup_opt(const char *opt_name, const char *drv_name, int *val)
 
 	ret = _odp_libconfig_lookup_ext_int(base, drv_name, opt_name, val);
 	if (ret == 0)
-		ODP_ERR("Unable to find DPDK configuration option: %s\n",
-			opt_name);
+		_ODP_ERR("Unable to find DPDK configuration option: %s\n", opt_name);
 
 	return ret;
 }
@@ -192,12 +191,12 @@ static int init_options(pktio_entry_t *pktio_entry,
 		return -1;
 	opt->multicast_enable = !!opt->multicast_enable;
 
-	ODP_DBG("DPDK interface (%s): %" PRIu16 "\n", dev_info->driver_name,
-		pkt_priv(pktio_entry)->port_id);
-	ODP_DBG("  multicast:   %d\n", opt->multicast_enable);
-	ODP_DBG("  num_rx_desc: %d\n", opt->num_rx_desc);
-	ODP_DBG("  num_tx_desc: %d\n", opt->num_tx_desc_default);
-	ODP_DBG("  rx_drop_en:  %d\n", opt->rx_drop_en);
+	_ODP_DBG("DPDK interface (%s): %" PRIu16 "\n", dev_info->driver_name,
+		 pkt_priv(pktio_entry)->port_id);
+	_ODP_DBG("  multicast:   %d\n", opt->multicast_enable);
+	_ODP_DBG("  num_rx_desc: %d\n", opt->num_rx_desc);
+	_ODP_DBG("  num_tx_desc: %d\n", opt->num_tx_desc_default);
+	_ODP_DBG("  rx_drop_en:  %d\n", opt->rx_drop_en);
 
 	return 0;
 }
@@ -249,7 +248,7 @@ static int dpdk_maxlen_set(pktio_entry_t *pktio_entry, uint32_t maxlen_input,
 
 	ret = rte_eth_dev_set_mtu(pkt_dpdk->port_id, mtu);
 	if (odp_unlikely(ret))
-		ODP_ERR("rte_eth_dev_set_mtu() failed: %d\n", ret);
+		_ODP_ERR("rte_eth_dev_set_mtu() failed: %d\n", ret);
 
 	pkt_dpdk->mtu = maxlen_input;
 	pkt_dpdk->mtu_set = 1;
@@ -317,8 +316,8 @@ static int dpdk_setup_eth_dev(pktio_entry_t *pktio_entry)
 				    pktio_entry->num_in_queue,
 				    pktio_entry->num_out_queue, &eth_conf);
 	if (ret < 0) {
-		ODP_ERR("Failed to setup device: err=%d, port=%" PRIu8 "\n",
-			ret, pkt_dpdk->port_id);
+		_ODP_ERR("Failed to setup device: err=%d, port=%" PRIu8 "\n",
+			 ret, pkt_dpdk->port_id);
 		return -1;
 	}
 	return 0;
@@ -330,15 +329,14 @@ static void _dpdk_print_port_mac(uint16_t port_id)
 
 	memset(&eth_addr, 0, sizeof(eth_addr));
 	rte_eth_macaddr_get(port_id, &eth_addr);
-	ODP_DBG("Port %" PRIu16 ", "
-		"MAC address: %02X:%02X:%02X:%02X:%02X:%02X\n",
-		port_id,
-		eth_addr.addr_bytes[0],
-		eth_addr.addr_bytes[1],
-		eth_addr.addr_bytes[2],
-		eth_addr.addr_bytes[3],
-		eth_addr.addr_bytes[4],
-		eth_addr.addr_bytes[5]);
+	_ODP_DBG("Port %" PRIu16 ", MAC address: %02X:%02X:%02X:%02X:%02X:%02X\n",
+		 port_id,
+		 eth_addr.addr_bytes[0],
+		 eth_addr.addr_bytes[1],
+		 eth_addr.addr_bytes[2],
+		 eth_addr.addr_bytes[3],
+		 eth_addr.addr_bytes[4],
+		 eth_addr.addr_bytes[5]);
 }
 
 static void prepare_rss_conf(pktio_entry_t *pktio_entry,
@@ -360,33 +358,33 @@ static void prepare_rss_conf(pktio_entry_t *pktio_entry,
 	/* Print debug info about unsupported hash protocols */
 	if (p->hash_proto.proto.ipv4 &&
 	    ((rss_hf_capa & ETH_RSS_IPV4) == 0))
-		ODP_PRINT("DPDK: hash_proto.ipv4 not supported (rss_hf_capa 0x%" PRIx64 ")\n",
-			  rss_hf_capa);
+		_ODP_PRINT("DPDK: hash_proto.ipv4 not supported (rss_hf_capa 0x%" PRIx64 ")\n",
+			   rss_hf_capa);
 
 	if (p->hash_proto.proto.ipv4_udp &&
 	    ((rss_hf_capa & ETH_RSS_NONFRAG_IPV4_UDP) == 0))
-		ODP_PRINT("DPDK: hash_proto.ipv4_udp not supported (rss_hf_capa 0x%" PRIx64 ")\n",
-			  rss_hf_capa);
+		_ODP_PRINT("DPDK: hash_proto.ipv4_udp not supported (rss_hf_capa 0x%" PRIx64 ")\n",
+			   rss_hf_capa);
 
 	if (p->hash_proto.proto.ipv4_tcp &&
 	    ((rss_hf_capa & ETH_RSS_NONFRAG_IPV4_TCP) == 0))
-		ODP_PRINT("DPDK: hash_proto.ipv4_tcp not supported (rss_hf_capa 0x%" PRIx64 ")\n",
-			  rss_hf_capa);
+		_ODP_PRINT("DPDK: hash_proto.ipv4_tcp not supported (rss_hf_capa 0x%" PRIx64 ")\n",
+			   rss_hf_capa);
 
 	if (p->hash_proto.proto.ipv6 &&
 	    ((rss_hf_capa & ETH_RSS_IPV6) == 0))
-		ODP_PRINT("DPDK: hash_proto.ipv6 not supported (rss_hf_capa 0x%" PRIx64 ")\n",
-			  rss_hf_capa);
+		_ODP_PRINT("DPDK: hash_proto.ipv6 not supported (rss_hf_capa 0x%" PRIx64 ")\n",
+			   rss_hf_capa);
 
 	if (p->hash_proto.proto.ipv6_udp &&
 	    ((rss_hf_capa & ETH_RSS_NONFRAG_IPV6_UDP) == 0))
-		ODP_PRINT("DPDK: hash_proto.ipv6_udp not supported (rss_hf_capa 0x%" PRIx64 ")\n",
-			  rss_hf_capa);
+		_ODP_PRINT("DPDK: hash_proto.ipv6_udp not supported (rss_hf_capa 0x%" PRIx64 ")\n",
+			   rss_hf_capa);
 
 	if (p->hash_proto.proto.ipv6_tcp &&
 	    ((rss_hf_capa & ETH_RSS_NONFRAG_IPV6_TCP) == 0))
-		ODP_PRINT("DPDK: hash_proto.ipv6_tcp not supported (rss_hf_capa 0x%" PRIx64 ")\n",
-			  rss_hf_capa);
+		_ODP_PRINT("DPDK: hash_proto.ipv6_tcp not supported (rss_hf_capa 0x%" PRIx64 ")\n",
+			   rss_hf_capa);
 
 	hash_proto_to_rss_conf(&pkt_dpdk->rss_conf, &p->hash_proto);
 
@@ -433,7 +431,7 @@ static int dpdk_output_queues_config(pktio_entry_t *pktio_entry,
 
 	ret  = rte_eth_dev_info_get(pkt_dpdk->port_id, &dev_info);
 	if (ret) {
-		ODP_ERR("DPDK: rte_eth_dev_info_get() failed: %d\n", ret);
+		_ODP_ERR("DPDK: rte_eth_dev_info_get() failed: %d\n", ret);
 		return -1;
 	}
 
@@ -447,12 +445,12 @@ static int dpdk_output_queues_config(pktio_entry_t *pktio_entry,
 		/* Adjust descriptor count */
 		ret = rte_eth_dev_adjust_nb_rx_tx_desc(pkt_dpdk->port_id, NULL, &num_tx_desc);
 		if (ret && ret != -ENOTSUP) {
-			ODP_ERR("DPDK: rte_eth_dev_adjust_nb_rx_tx_desc() failed: %d\n", ret);
+			_ODP_ERR("DPDK: rte_eth_dev_adjust_nb_rx_tx_desc() failed: %d\n", ret);
 			return -1;
 		}
 		pkt_dpdk->num_tx_desc[i] = num_tx_desc;
 
-		ODP_DBG("TX queue %" PRIu32 " using %" PRIu16 " descriptors\n", i, num_tx_desc);
+		_ODP_DBG("TX queue %" PRIu32 " using %" PRIu16 " descriptors\n", i, num_tx_desc);
 	}
 	return 0;
 }
@@ -482,13 +480,13 @@ static int promisc_mode_check(pkt_dpdk_t *pkt_dpdk)
 
 	ret = rte_eth_promiscuous_enable(pkt_dpdk->port_id);
 	if (ret) {
-		ODP_DBG("Promisc mode enable not supported: %d\n", ret);
+		_ODP_DBG("Promisc mode enable not supported: %d\n", ret);
 		return 0;
 	}
 
 	ret = rte_eth_promiscuous_disable(pkt_dpdk->port_id);
 	if (ret) {
-		ODP_DBG("Promisc mode disable not supported: %d\n", ret);
+		_ODP_DBG("Promisc mode disable not supported: %d\n", ret);
 		return 0;
 	}
 
@@ -532,8 +530,7 @@ static int dpdk_init_capability(pktio_entry_t *pktio_entry,
 	if (ret == 0) {
 		capa->set_op.op.mac_addr = 1;
 	} else if (ret != -ENOTSUP && ret != -EPERM) {
-		ODP_ERR("Failed to set interface default MAC: %d\n",
-			ret);
+		_ODP_ERR("Failed to set interface default MAC: %d\n", ret);
 		return -1;
 	}
 
@@ -649,25 +646,25 @@ static int setup_pkt_dpdk(odp_pktio_t pktio ODP_UNUSED,
 	else if (_dpdk_netdev_is_valid(netdev))
 		pkt_dpdk->port_id = atoi(netdev);
 	else {
-		ODP_ERR("Invalid interface name!: %s\n", netdev);
+		_ODP_ERR("Invalid interface name!: %s\n", netdev);
 		return -1;
 	}
 
 	if (!rte_eth_dev_is_valid_port(pkt_dpdk->port_id)) {
-		ODP_ERR("Port id=%" PRIu16 " not attached\n", pkt_dpdk->port_id);
+		_ODP_ERR("Port id=%" PRIu16 " not attached\n", pkt_dpdk->port_id);
 		return -1;
 	}
 
 	memset(&dev_info, 0, sizeof(struct rte_eth_dev_info));
 	ret = rte_eth_dev_info_get(pkt_dpdk->port_id, &dev_info);
 	if (ret) {
-		ODP_ERR("Failed to read device info: %d\n", ret);
+		_ODP_ERR("Failed to read device info: %d\n", ret);
 		return -1;
 	}
 
 	/* Initialize runtime options */
 	if (init_options(pktio_entry, &dev_info)) {
-		ODP_ERR("Initializing runtime options failed\n");
+		_ODP_ERR("Initializing runtime options failed\n");
 		return -1;
 	}
 
@@ -685,7 +682,7 @@ static int setup_pkt_dpdk(odp_pktio_t pktio ODP_UNUSED,
 
 	mtu = mtu_get_pkt_dpdk(pktio_entry);
 	if (mtu == 0) {
-		ODP_ERR("Failed to read interface MTU\n");
+		_ODP_ERR("Failed to read interface MTU\n");
 		return -1;
 	}
 	pkt_dpdk->mtu = mtu + _ODP_ETHHDR_LEN;
@@ -693,7 +690,7 @@ static int setup_pkt_dpdk(odp_pktio_t pktio ODP_UNUSED,
 	pkt_dpdk->mtu_set = 0;
 
 	if (dpdk_init_capability(pktio_entry, &dev_info)) {
-		ODP_ERR("Failed to initialize capability\n");
+		_ODP_ERR("Failed to initialize capability\n");
 		return -1;
 	}
 
@@ -738,8 +735,7 @@ static int dpdk_setup_eth_tx(pktio_entry_t *pktio_entry,
 					     rte_eth_dev_socket_id(port_id),
 					     &dev_info->default_txconf);
 		if (ret < 0) {
-			ODP_ERR("Queue setup failed: err=%d, port=%" PRIu8 "\n",
-				ret, port_id);
+			_ODP_ERR("Queue setup failed: err=%d, port=%" PRIu8 "\n", ret, port_id);
 			return -1;
 		}
 	}
@@ -749,11 +745,11 @@ static int dpdk_setup_eth_tx(pktio_entry_t *pktio_entry,
 	for (i = 0; i < pktio_entry->num_out_queue && i < RTE_ETHDEV_QUEUE_STAT_CNTRS; i++) {
 		ret = rte_eth_dev_set_tx_queue_stats_mapping(port_id, i, i);
 		if (ret) {
-			ODP_DBG("Mapping per TX queue statistics not supported: %d\n", ret);
+			_ODP_DBG("Mapping per TX queue statistics not supported: %d\n", ret);
 			break;
 		}
 	}
-	ODP_DBG("Mapped %" PRIu32 "/%d TX counters\n", i, RTE_ETHDEV_QUEUE_STAT_CNTRS);
+	_ODP_DBG("Mapped %" PRIu32 "/%d TX counters\n", i, RTE_ETHDEV_QUEUE_STAT_CNTRS);
 
 	return 0;
 }
@@ -776,19 +772,18 @@ static int dpdk_setup_eth_rx(const pktio_entry_t *pktio_entry,
 	/* Adjust descriptor count */
 	ret = rte_eth_dev_adjust_nb_rx_tx_desc(port_id, &num_rx_desc, NULL);
 	if (ret && ret != -ENOTSUP) {
-		ODP_ERR("DPDK: rte_eth_dev_adjust_nb_rx_tx_desc() failed: %d\n", ret);
+		_ODP_ERR("DPDK: rte_eth_dev_adjust_nb_rx_tx_desc() failed: %d\n", ret);
 		return -1;
 	}
 
-	ODP_DBG("RX queues using %" PRIu16 " descriptors\n", num_rx_desc);
+	_ODP_DBG("RX queues using %" PRIu16 " descriptors\n", num_rx_desc);
 
 	for (i = 0; i < pktio_entry->num_in_queue; i++) {
 		ret = rte_eth_rx_queue_setup(port_id, i, num_rx_desc,
 					     rte_eth_dev_socket_id(port_id),
 					     &rxconf, pool->rte_mempool);
 		if (ret < 0) {
-			ODP_ERR("Queue setup failed: err=%d, port=%" PRIu8 "\n",
-				ret, port_id);
+			_ODP_ERR("Queue setup failed: err=%d, port=%" PRIu8 "\n", ret, port_id);
 			return -1;
 		}
 	}
@@ -798,11 +793,11 @@ static int dpdk_setup_eth_rx(const pktio_entry_t *pktio_entry,
 	for (i = 0; i < pktio_entry->num_in_queue && i < RTE_ETHDEV_QUEUE_STAT_CNTRS; i++) {
 		ret = rte_eth_dev_set_rx_queue_stats_mapping(port_id, i, i);
 		if (ret) {
-			ODP_DBG("Mapping per RX queue statistics not supported: %d\n", ret);
+			_ODP_DBG("Mapping per RX queue statistics not supported: %d\n", ret);
 			break;
 		}
 	}
-	ODP_DBG("Mapped %" PRIu32 "/%d RX counters\n", i, RTE_ETHDEV_QUEUE_STAT_CNTRS);
+	_ODP_DBG("Mapped %" PRIu32 "/%d RX counters\n", i, RTE_ETHDEV_QUEUE_STAT_CNTRS);
 
 	return 0;
 }
@@ -828,7 +823,7 @@ static int dpdk_start(pktio_entry_t *pktio_entry)
 
 	/* Setup device */
 	if (dpdk_setup_eth_dev(pktio_entry)) {
-		ODP_ERR("Failed to configure device\n");
+		_ODP_ERR("Failed to configure device\n");
 		return -1;
 	}
 
@@ -844,8 +839,8 @@ static int dpdk_start(pktio_entry_t *pktio_entry)
 	if (pkt_dpdk->mtu_set && pktio_entry->capa.set_op.op.maxlen) {
 		ret = dpdk_maxlen_set(pktio_entry, pkt_dpdk->mtu, 0);
 		if (ret) {
-			ODP_ERR("Restoring device MTU failed: err=%d, port=%" PRIu8 "\n",
-				ret, port_id);
+			_ODP_ERR("Restoring device MTU failed: err=%d, port=%" PRIu8 "\n",
+				 ret, port_id);
 			return -1;
 		}
 	}
@@ -853,8 +848,7 @@ static int dpdk_start(pktio_entry_t *pktio_entry)
 	/* Start device */
 	ret = rte_eth_dev_start(port_id);
 	if (ret < 0) {
-		ODP_ERR("Device start failed: err=%d, port=%" PRIu8 "\n",
-			ret, port_id);
+		_ODP_ERR("Device start failed: err=%d, port=%" PRIu8 "\n", ret, port_id);
 		return -1;
 	}
 
@@ -1002,8 +996,8 @@ static int recv_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 		odp_packet_t min_burst[min];
 		uint16_t i;
 
-		ODP_DBG("PMD requires >%d buffers burst.  Current %d, dropped "
-			"%d\n", min, num, min - num);
+		_ODP_DBG("PMD requires >%d buffers burst.  Current %d, dropped %d\n",
+			 min, num, min - num);
 		nb_rx = rte_eth_rx_burst(port_id, (uint16_t)index,
 					 (struct rte_mbuf **)min_burst, min);
 
@@ -1197,7 +1191,7 @@ static uint32_t _dpdk_vdev_mtu(uint16_t port_id)
 	ret = ioctl(sockfd, SIOCGIFMTU, &ifr);
 	close(sockfd);
 	if (ret < 0) {
-		ODP_DBG("ioctl SIOCGIFMTU error\n");
+		_ODP_DBG("ioctl SIOCGIFMTU error\n");
 		return 0;
 	}
 
@@ -1239,7 +1233,7 @@ static int promisc_mode_set_pkt_dpdk(pktio_entry_t *pktio_entry,  int enable)
 		ret = rte_eth_promiscuous_disable(port_id);
 
 	if (ret) {
-		ODP_ERR("Setting promisc mode failed: %d\n", ret);
+		_ODP_ERR("Setting promisc mode failed: %d\n", ret);
 		return -1;
 	}
 	return 0;
@@ -1252,7 +1246,7 @@ static int promisc_mode_get_pkt_dpdk(pktio_entry_t *pktio_entry)
 
 	ret = rte_eth_promiscuous_get(port_id);
 	if (ret < 0) {
-		ODP_ERR("Getting promisc mode failed: %d\n", ret);
+		_ODP_ERR("Getting promisc mode failed: %d\n", ret);
 		return -1;
 	}
 	return ret;
@@ -1288,9 +1282,9 @@ static int link_status_pkt_dpdk(pktio_entry_t *pktio_entry)
 	ret = rte_eth_link_get_nowait(pkt_priv(pktio_entry)->port_id, &link);
 	if (ret) {
 		if (ret == -ENOTSUP)
-			ODP_DBG("rte_eth_link_get_nowait() not supported\n");
+			_ODP_DBG("rte_eth_link_get_nowait() not supported\n");
 		else
-			ODP_ERR("rte_eth_link_get_nowait() failed\n");
+			_ODP_ERR("rte_eth_link_get_nowait() failed\n");
 		return ODP_PKTIO_LINK_STATUS_UNKNOWN;
 	}
 
@@ -1314,10 +1308,10 @@ static int dpdk_link_info(pktio_entry_t *pktio_entry, odp_pktio_link_info_t *inf
 	ret = rte_eth_dev_flow_ctrl_get(port_id, &fc_conf);
 	if (ret) {
 		if (ret != -ENOTSUP) {
-			ODP_ERR("rte_eth_dev_flow_ctrl_get() failed\n");
+			_ODP_ERR("rte_eth_dev_flow_ctrl_get() failed\n");
 			return -1;
 		}
-		ODP_DBG("rte_eth_dev_flow_ctrl_get() not supported\n");
+		_ODP_DBG("rte_eth_dev_flow_ctrl_get() not supported\n");
 		link_info.pause_rx = ODP_PKTIO_LINK_PAUSE_UNKNOWN;
 		link_info.pause_tx = ODP_PKTIO_LINK_PAUSE_UNKNOWN;
 	} else {
@@ -1336,10 +1330,10 @@ static int dpdk_link_info(pktio_entry_t *pktio_entry, odp_pktio_link_info_t *inf
 	ret = rte_eth_link_get_nowait(port_id, &link);
 	if (ret) {
 		if (ret != -ENOTSUP) {
-			ODP_ERR("rte_eth_link_get_nowait() failed\n");
+			_ODP_ERR("rte_eth_link_get_nowait() failed\n");
 			return -1;
 		}
-		ODP_DBG("rte_eth_link_get_nowait() not supported\n");
+		_ODP_DBG("rte_eth_link_get_nowait() not supported\n");
 		link_info.autoneg = ODP_PKTIO_LINK_AUTONEG_UNKNOWN;
 		link_info.duplex = ODP_PKTIO_LINK_DUPLEX_UNKNOWN;
 		link_info.speed = ODP_PKTIO_LINK_SPEED_UNKNOWN;
@@ -1426,7 +1420,7 @@ static int dpdk_extra_stat_info(pktio_entry_t *pktio_entry,
 
 	num_stats = rte_eth_xstats_get_names(port_id, NULL, 0);
 	if (num_stats < 0) {
-		ODP_ERR("rte_eth_xstats_get_names() failed: %d\n", num_stats);
+		_ODP_ERR("rte_eth_xstats_get_names() failed: %d\n", num_stats);
 		return num_stats;
 	} else if (info == NULL || num == 0 || num_stats == 0) {
 		return num_stats;
@@ -1436,7 +1430,7 @@ static int dpdk_extra_stat_info(pktio_entry_t *pktio_entry,
 
 	ret = rte_eth_xstats_get_names(port_id, xstats_names, num_stats);
 	if (ret < 0 || ret > num_stats) {
-		ODP_ERR("rte_eth_xstats_get_names() failed: %d\n", ret);
+		_ODP_ERR("rte_eth_xstats_get_names() failed: %d\n", ret);
 		return -1;
 	}
 	num_stats = ret;
@@ -1456,7 +1450,7 @@ static int dpdk_extra_stats(pktio_entry_t *pktio_entry,
 
 	num_stats = rte_eth_xstats_get(port_id, NULL, 0);
 	if (num_stats < 0) {
-		ODP_ERR("rte_eth_xstats_get() failed: %d\n", num_stats);
+		_ODP_ERR("rte_eth_xstats_get() failed: %d\n", num_stats);
 		return num_stats;
 	} else if (stats == NULL || num == 0 || num_stats == 0) {
 		return num_stats;
@@ -1466,7 +1460,7 @@ static int dpdk_extra_stats(pktio_entry_t *pktio_entry,
 
 	ret = rte_eth_xstats_get(port_id, xstats, num_stats);
 	if (ret < 0 || ret > num_stats) {
-		ODP_ERR("rte_eth_xstats_get() failed: %d\n", ret);
+		_ODP_ERR("rte_eth_xstats_get() failed: %d\n", ret);
 		return -1;
 	}
 	num_stats = ret;
@@ -1486,7 +1480,7 @@ static int dpdk_extra_stat_counter(pktio_entry_t *pktio_entry, uint32_t id,
 
 	ret = rte_eth_xstats_get_by_id(port_id, &xstat_id, stat, 1);
 	if (ret != 1) {
-		ODP_ERR("rte_eth_xstats_get_by_id() failed: %d\n", ret);
+		_ODP_ERR("rte_eth_xstats_get_by_id() failed: %d\n", ret);
 		return -1;
 	}
 
@@ -1500,14 +1494,14 @@ static int dpdk_pktin_stats(pktio_entry_t *pktio_entry, uint32_t index,
 	int ret;
 
 	if (odp_unlikely(index > RTE_ETHDEV_QUEUE_STAT_CNTRS - 1)) {
-		ODP_ERR("DPDK supports max %d per queue counters\n",
-			RTE_ETHDEV_QUEUE_STAT_CNTRS);
+		_ODP_ERR("DPDK supports max %d per queue counters\n",
+			 RTE_ETHDEV_QUEUE_STAT_CNTRS);
 		return -1;
 	}
 
 	ret = rte_eth_stats_get(pkt_priv(pktio_entry)->port_id, &rte_stats);
 	if (odp_unlikely(ret)) {
-		ODP_ERR("Failed to read DPDK pktio stats: %d\n", ret);
+		_ODP_ERR("Failed to read DPDK pktio stats: %d\n", ret);
 		return -1;
 	}
 
@@ -1527,14 +1521,14 @@ static int dpdk_pktout_stats(pktio_entry_t *pktio_entry, uint32_t index,
 	int ret;
 
 	if (odp_unlikely(index > RTE_ETHDEV_QUEUE_STAT_CNTRS - 1)) {
-		ODP_ERR("DPDK supports max %d per queue counters\n",
-			RTE_ETHDEV_QUEUE_STAT_CNTRS);
+		_ODP_ERR("DPDK supports max %d per queue counters\n",
+			 RTE_ETHDEV_QUEUE_STAT_CNTRS);
 		return -1;
 	}
 
 	ret = rte_eth_stats_get(pkt_priv(pktio_entry)->port_id, &rte_stats);
 	if (odp_unlikely(ret)) {
-		ODP_ERR("Failed to read DPDK pktio stats: %d\n", ret);
+		_ODP_ERR("Failed to read DPDK pktio stats: %d\n", ret);
 		return -1;
 	}
 

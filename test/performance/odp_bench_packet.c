@@ -1,4 +1,5 @@
 /* Copyright (c) 2017-2018, Linaro Limited
+ * Copyright (c) 2022, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -84,6 +85,7 @@ const uint32_t test_packet_len[] = {WARM_UP, TEST_MIN_PKT_SIZE, 128, 256, 512,
 typedef struct {
 	int bench_idx;   /** Benchmark index to run indefinitely */
 	int burst_size;  /** Burst size for *_multi operations */
+	int cache_size;  /** Pool cache size */
 } appl_args_t;
 
 /**
@@ -143,7 +145,7 @@ typedef struct {
 	/** Array for storing test packets */
 	odp_packet_t pkt2_tbl[TEST_REPEAT_COUNT];
 	/** Array for storing test event */
-	odp_event_t event_tbl[TEST_REPEAT_COUNT];
+	odp_event_t event_tbl[TEST_REPEAT_COUNT * TEST_MAX_BURST];
 	/** Array for storing test pointers */
 	void *ptr_tbl[TEST_REPEAT_COUNT];
 	/** Array for storing test segments */
@@ -182,7 +184,7 @@ static void run_indef(args_t *args, int idx)
 	desc = args->bench[idx].desc != NULL ?
 			args->bench[idx].desc : args->bench[idx].name;
 
-	printf("Running %s() indefinitely\n", desc);
+	printf("Running odp_%s test indefinitely\n", desc);
 
 	while (!odp_atomic_load_u32(&gbl_args->exit_thread)) {
 		int ret;
@@ -270,7 +272,7 @@ static int run_benchmarks(void *arg)
 					  TEST_REPEAT_COUNT);
 				results[j][i] = cycles;
 
-				printf("%-30s: %8.1f\n", desc, cycles);
+				printf("odp_%-26s: %8.1f\n", desc, cycles);
 
 				j++;
 				k = 0;
@@ -290,7 +292,7 @@ static int run_benchmarks(void *arg)
 		printf("----------");
 
 	for (i = 0; i < gbl_args->num_bench; i++) {
-		printf("\n[%02d] %-30s", i + 1, args->bench[i].desc != NULL ?
+		printf("\n[%02d] odp_%-26s", i + 1, args->bench[i].desc != NULL ?
 		       args->bench[i].desc : args->bench[i].name);
 
 		for (j = 0; j < num_sizes; j++)
@@ -516,17 +518,7 @@ static void free_packets_twice(void)
 	odp_packet_free_multi(gbl_args->pkt2_tbl, TEST_REPEAT_COUNT);
 }
 
-static int bench_empty(void)
-{
-	int i;
-
-	for (i = 0; i < TEST_REPEAT_COUNT; i++)
-		gbl_args->output_tbl[i] = i;
-
-	return i;
-}
-
-static int bench_packet_alloc(void)
+static int packet_alloc(void)
 {
 	int i;
 
@@ -541,7 +533,7 @@ static int bench_packet_alloc(void)
 	return i;
 }
 
-static int bench_packet_alloc_multi(void)
+static int packet_alloc_multi(void)
 {
 	int i;
 	int pkts = 0;
@@ -554,7 +546,7 @@ static int bench_packet_alloc_multi(void)
 	return pkts;
 }
 
-static int bench_packet_free(void)
+static int packet_free(void)
 {
 	int i;
 
@@ -564,7 +556,7 @@ static int bench_packet_free(void)
 	return i;
 }
 
-static int bench_packet_free_multi(void)
+static int packet_free_multi(void)
 {
 	int i;
 
@@ -577,7 +569,7 @@ static int bench_packet_free_multi(void)
 	return i;
 }
 
-static int bench_packet_free_sp(void)
+static int packet_free_sp(void)
 {
 	int i;
 
@@ -590,7 +582,7 @@ static int bench_packet_free_sp(void)
 	return i;
 }
 
-static int bench_packet_alloc_free(void)
+static int packet_alloc_free(void)
 {
 	int i;
 
@@ -604,7 +596,7 @@ static int bench_packet_alloc_free(void)
 	return i;
 }
 
-static int bench_packet_alloc_free_multi(void)
+static int packet_alloc_free_multi(void)
 {
 	int i;
 	int pkts;
@@ -622,7 +614,7 @@ static int bench_packet_alloc_free_multi(void)
 	return i;
 }
 
-static int bench_packet_reset(void)
+static int packet_reset(void)
 {
 	int i;
 	int ret = 0;
@@ -633,7 +625,7 @@ static int bench_packet_reset(void)
 	return !ret;
 }
 
-static int bench_packet_from_event(void)
+static int packet_from_event(void)
 {
 	int i;
 	odp_packet_t *pkt_tbl = gbl_args->pkt_tbl;
@@ -644,7 +636,7 @@ static int bench_packet_from_event(void)
 	return i;
 }
 
-static int bench_packet_from_event_multi(void)
+static int packet_from_event_multi(void)
 {
 	int i;
 
@@ -658,7 +650,7 @@ static int bench_packet_from_event_multi(void)
 	return i;
 }
 
-static int bench_packet_to_event(void)
+static int packet_to_event(void)
 {
 	int i;
 	odp_packet_t *pkt_tbl = gbl_args->pkt_tbl;
@@ -669,7 +661,7 @@ static int bench_packet_to_event(void)
 	return i;
 }
 
-static int bench_packet_to_event_multi(void)
+static int packet_to_event_multi(void)
 {
 	int i;
 
@@ -683,7 +675,7 @@ static int bench_packet_to_event_multi(void)
 	return i;
 }
 
-static int bench_packet_head(void)
+static int packet_head(void)
 {
 	int i;
 
@@ -693,7 +685,7 @@ static int bench_packet_head(void)
 	return i;
 }
 
-static int bench_packet_buf_len(void)
+static int packet_buf_len(void)
 {
 	int i;
 	uint32_t ret = 0;
@@ -704,7 +696,7 @@ static int bench_packet_buf_len(void)
 	return ret;
 }
 
-static int bench_packet_data(void)
+static int packet_data(void)
 {
 	int i;
 
@@ -714,7 +706,7 @@ static int bench_packet_data(void)
 	return i;
 }
 
-static int bench_packet_data_seg_len(void)
+static int packet_data_seg_len(void)
 {
 	odp_packet_t *pkt_tbl = gbl_args->pkt_tbl;
 	uint32_t *output_tbl = gbl_args->output_tbl;
@@ -726,7 +718,7 @@ static int bench_packet_data_seg_len(void)
 	return i;
 }
 
-static int bench_packet_seg_len(void)
+static int packet_seg_len(void)
 {
 	int i;
 	uint32_t ret = 0;
@@ -737,7 +729,7 @@ static int bench_packet_seg_len(void)
 	return ret;
 }
 
-static int bench_packet_len(void)
+static int packet_len(void)
 {
 	int i;
 	uint32_t ret = 0;
@@ -748,7 +740,7 @@ static int bench_packet_len(void)
 	return ret;
 }
 
-static int bench_packet_headroom(void)
+static int packet_headroom(void)
 {
 	int i;
 	uint32_t ret = 0;
@@ -759,7 +751,7 @@ static int bench_packet_headroom(void)
 	return i + ret;
 }
 
-static int bench_packet_tailroom(void)
+static int packet_tailroom(void)
 {
 	int i;
 	uint32_t ret = 0;
@@ -770,7 +762,7 @@ static int bench_packet_tailroom(void)
 	return i + ret;
 }
 
-static int bench_packet_tail(void)
+static int packet_tail(void)
 {
 	int i;
 
@@ -780,7 +772,7 @@ static int bench_packet_tail(void)
 	return i;
 }
 
-static int bench_packet_offset(void)
+static int packet_offset(void)
 {
 	int i;
 	uint32_t offset = gbl_args->pkt.len / 2;
@@ -791,7 +783,7 @@ static int bench_packet_offset(void)
 	return i;
 }
 
-static int bench_packet_prefetch(void)
+static int packet_prefetch(void)
 {
 	int i;
 
@@ -801,7 +793,7 @@ static int bench_packet_prefetch(void)
 	return i;
 }
 
-static int bench_packet_push_head(void)
+static int packet_push_head(void)
 {
 	int i;
 	odp_packet_t *pkt_tbl = gbl_args->pkt_tbl;
@@ -813,7 +805,7 @@ static int bench_packet_push_head(void)
 	return i;
 }
 
-static int bench_packet_pull_head(void)
+static int packet_pull_head(void)
 {
 	int i;
 	uint32_t len = gbl_args->pkt.seg_len - 1;
@@ -825,7 +817,7 @@ static int bench_packet_pull_head(void)
 	return i;
 }
 
-static int bench_packet_push_tail(void)
+static int packet_push_tail(void)
 {
 	int i;
 	odp_packet_t *pkt_tbl = gbl_args->pkt_tbl;
@@ -837,7 +829,7 @@ static int bench_packet_push_tail(void)
 	return i;
 }
 
-static int bench_packet_pull_tail(void)
+static int packet_pull_tail(void)
 {
 	int i;
 	uint32_t len = gbl_args->pkt.seg_len - 1;
@@ -849,7 +841,7 @@ static int bench_packet_pull_tail(void)
 	return i;
 }
 
-static int bench_packet_extend_head(void)
+static int packet_extend_head(void)
 {
 	int i;
 	int ret = 0;
@@ -864,7 +856,7 @@ static int bench_packet_extend_head(void)
 	return ret >= 0;
 }
 
-static int bench_packet_trunc_head(void)
+static int packet_trunc_head(void)
 {
 	int i;
 	int ret = 0;
@@ -879,7 +871,7 @@ static int bench_packet_trunc_head(void)
 	return ret >= 0;
 }
 
-static int bench_packet_extend_tail(void)
+static int packet_extend_tail(void)
 {
 	int i;
 	int ret = 0;
@@ -894,7 +886,7 @@ static int bench_packet_extend_tail(void)
 	return ret >= 0;
 }
 
-static int bench_packet_trunc_tail(void)
+static int packet_trunc_tail(void)
 {
 	int i;
 	int ret = 0;
@@ -909,7 +901,7 @@ static int bench_packet_trunc_tail(void)
 	return ret >= 0;
 }
 
-static int bench_packet_add_data(void)
+static int packet_add_data(void)
 {
 	int i;
 	int ret = 0;
@@ -922,7 +914,7 @@ static int bench_packet_add_data(void)
 	return ret >= 0;
 }
 
-static int bench_packet_rem_data(void)
+static int packet_rem_data(void)
 {
 	int i;
 	int ret = 0;
@@ -935,7 +927,7 @@ static int bench_packet_rem_data(void)
 	return ret >= 0;
 }
 
-static int bench_packet_align(void)
+static int packet_align(void)
 {
 	int i;
 	int ret = 0;
@@ -947,7 +939,7 @@ static int bench_packet_align(void)
 	return ret >= 0;
 }
 
-static int bench_packet_is_segmented(void)
+static int packet_is_segmented(void)
 {
 	int i;
 	uint32_t ret = 0;
@@ -958,7 +950,7 @@ static int bench_packet_is_segmented(void)
 	return (ret == 0) ? 1 : ret;
 }
 
-static int bench_packet_num_segs(void)
+static int packet_num_segs(void)
 {
 	int i;
 	uint32_t ret = 0;
@@ -969,7 +961,7 @@ static int bench_packet_num_segs(void)
 	return ret;
 }
 
-static int bench_packet_first_seg(void)
+static int packet_first_seg(void)
 {
 	int i;
 	odp_packet_t *pkt_tbl = gbl_args->pkt_tbl;
@@ -980,7 +972,7 @@ static int bench_packet_first_seg(void)
 	return i;
 }
 
-static int bench_packet_last_seg(void)
+static int packet_last_seg(void)
 {
 	int i;
 	odp_packet_t *pkt_tbl = gbl_args->pkt_tbl;
@@ -991,7 +983,7 @@ static int bench_packet_last_seg(void)
 	return i;
 }
 
-static int bench_packet_next_seg(void)
+static int packet_next_seg(void)
 {
 	int i;
 	odp_packet_t *pkt_tbl = gbl_args->pkt_tbl;
@@ -1003,7 +995,7 @@ static int bench_packet_next_seg(void)
 	return i;
 }
 
-static int bench_packet_seg_data(void)
+static int packet_seg_data(void)
 {
 	int i;
 	odp_packet_t *pkt_tbl = gbl_args->pkt_tbl;
@@ -1015,7 +1007,7 @@ static int bench_packet_seg_data(void)
 	return i;
 }
 
-static int bench_packet_seg_data_len(void)
+static int packet_seg_data_len(void)
 {
 	int i;
 	uint32_t ret = 0;
@@ -1028,7 +1020,7 @@ static int bench_packet_seg_data_len(void)
 	return ret;
 }
 
-static int bench_packet_concat(void)
+static int packet_concat(void)
 {
 	int i;
 	int ret = 0;
@@ -1041,7 +1033,7 @@ static int bench_packet_concat(void)
 	return ret >= 0;
 }
 
-static int bench_packet_split(void)
+static int packet_split(void)
 {
 	int i;
 	int ret = 0;
@@ -1057,7 +1049,7 @@ static int bench_packet_split(void)
 	return ret >= 0;
 }
 
-static int bench_packet_copy(void)
+static int packet_copy(void)
 {
 	int i;
 	odp_packet_t *pkt_tbl = gbl_args->pkt_tbl;
@@ -1069,7 +1061,7 @@ static int bench_packet_copy(void)
 	return i;
 }
 
-static int bench_packet_copy_part(void)
+static int packet_copy_part(void)
 {
 	int i;
 	uint32_t len = gbl_args->pkt.len / 2;
@@ -1082,7 +1074,7 @@ static int bench_packet_copy_part(void)
 	return i;
 }
 
-static int bench_packet_copy_to_mem(void)
+static int packet_copy_to_mem(void)
 {
 	int i;
 	uint32_t ret = 0;
@@ -1095,7 +1087,7 @@ static int bench_packet_copy_to_mem(void)
 	return !ret;
 }
 
-static int bench_packet_copy_from_mem(void)
+static int packet_copy_from_mem(void)
 {
 	int i;
 	uint32_t ret = 0;
@@ -1108,7 +1100,7 @@ static int bench_packet_copy_from_mem(void)
 	return !ret;
 }
 
-static int bench_packet_copy_from_pkt(void)
+static int packet_copy_from_pkt(void)
 {
 	int i;
 	uint32_t ret = 0;
@@ -1122,7 +1114,7 @@ static int bench_packet_copy_from_pkt(void)
 	return !ret;
 }
 
-static int bench_packet_copy_data(void)
+static int packet_copy_data(void)
 {
 	int i;
 	uint32_t ret = 0;
@@ -1135,7 +1127,7 @@ static int bench_packet_copy_data(void)
 	return !ret;
 }
 
-static int bench_packet_move_data(void)
+static int packet_move_data(void)
 {
 	int i;
 	uint32_t ret = 0;
@@ -1149,7 +1141,7 @@ static int bench_packet_move_data(void)
 	return !ret;
 }
 
-static int bench_packet_pool(void)
+static int packet_pool(void)
 {
 	int i;
 
@@ -1159,7 +1151,7 @@ static int bench_packet_pool(void)
 	return i;
 }
 
-static int bench_packet_input(void)
+static int packet_input(void)
 {
 	int i;
 
@@ -1169,7 +1161,7 @@ static int bench_packet_input(void)
 	return i;
 }
 
-static int bench_packet_input_index(void)
+static int packet_input_index(void)
 {
 	int i;
 	int ret = 0;
@@ -1180,7 +1172,7 @@ static int bench_packet_input_index(void)
 	return (ret == 0) ? 1 : ret;
 }
 
-static int bench_packet_user_ptr(void)
+static int packet_user_ptr(void)
 {
 	int i;
 	odp_packet_t *pkt_tbl = gbl_args->pkt_tbl;
@@ -1191,7 +1183,7 @@ static int bench_packet_user_ptr(void)
 	return i;
 }
 
-static int bench_packet_user_ptr_set(void)
+static int packet_user_ptr_set(void)
 {
 	int i;
 
@@ -1202,7 +1194,7 @@ static int bench_packet_user_ptr_set(void)
 	return i;
 }
 
-static int bench_packet_user_area(void)
+static int packet_user_area(void)
 {
 	int i;
 	odp_packet_t *pkt_tbl = gbl_args->pkt_tbl;
@@ -1213,7 +1205,7 @@ static int bench_packet_user_area(void)
 	return i;
 }
 
-static int bench_packet_user_area_size(void)
+static int packet_user_area_size(void)
 {
 	int i;
 	uint32_t ret = 0;
@@ -1224,7 +1216,7 @@ static int bench_packet_user_area_size(void)
 	return ret;
 }
 
-static int bench_packet_l2_ptr(void)
+static int packet_l2_ptr(void)
 {
 	int i;
 
@@ -1234,7 +1226,7 @@ static int bench_packet_l2_ptr(void)
 	return i;
 }
 
-static int bench_packet_l2_offset(void)
+static int packet_l2_offset(void)
 {
 	int i;
 	int ret = 0;
@@ -1245,7 +1237,7 @@ static int bench_packet_l2_offset(void)
 	return ret >= 0;
 }
 
-static int bench_packet_l2_offset_set(void)
+static int packet_l2_offset_set(void)
 {
 	int i;
 	uint32_t ret = 0;
@@ -1257,7 +1249,7 @@ static int bench_packet_l2_offset_set(void)
 	return !ret;
 }
 
-static int bench_packet_l3_ptr(void)
+static int packet_l3_ptr(void)
 {
 	int i;
 
@@ -1267,7 +1259,7 @@ static int bench_packet_l3_ptr(void)
 	return i;
 }
 
-static int bench_packet_l3_offset(void)
+static int packet_l3_offset(void)
 {
 	int i;
 	int ret = 0;
@@ -1278,7 +1270,7 @@ static int bench_packet_l3_offset(void)
 	return ret >= 0;
 }
 
-static int bench_packet_l3_offset_set(void)
+static int packet_l3_offset_set(void)
 {
 	int i;
 	uint32_t ret = 0;
@@ -1290,7 +1282,7 @@ static int bench_packet_l3_offset_set(void)
 	return !ret;
 }
 
-static int bench_packet_l4_ptr(void)
+static int packet_l4_ptr(void)
 {
 	int i;
 
@@ -1300,7 +1292,7 @@ static int bench_packet_l4_ptr(void)
 	return i;
 }
 
-static int bench_packet_l4_offset(void)
+static int packet_l4_offset(void)
 {
 	int i;
 	int ret = 0;
@@ -1311,7 +1303,7 @@ static int bench_packet_l4_offset(void)
 	return ret >= 0;
 }
 
-static int bench_packet_l4_offset_set(void)
+static int packet_l4_offset_set(void)
 {
 	int i;
 	uint32_t ret = 0;
@@ -1323,7 +1315,7 @@ static int bench_packet_l4_offset_set(void)
 	return !ret;
 }
 
-static int bench_packet_flow_hash(void)
+static int packet_flow_hash(void)
 {
 	int i;
 	uint32_t ret = 0;
@@ -1334,7 +1326,7 @@ static int bench_packet_flow_hash(void)
 	return ret;
 }
 
-static int bench_packet_flow_hash_set(void)
+static int packet_flow_hash_set(void)
 {
 	int i;
 
@@ -1344,7 +1336,7 @@ static int bench_packet_flow_hash_set(void)
 	return i;
 }
 
-static int bench_packet_ts(void)
+static int packet_ts(void)
 {
 	int i;
 
@@ -1354,7 +1346,7 @@ static int bench_packet_ts(void)
 	return i;
 }
 
-static int bench_packet_ts_set(void)
+static int packet_ts_set(void)
 {
 	int i;
 	odp_time_t ts = odp_time_local();
@@ -1365,7 +1357,7 @@ static int bench_packet_ts_set(void)
 	return i;
 }
 
-static int bench_packet_ref_static(void)
+static int packet_ref_static(void)
 {
 	int i;
 	odp_packet_t *pkt_tbl = gbl_args->pkt_tbl;
@@ -1377,7 +1369,7 @@ static int bench_packet_ref_static(void)
 	return i;
 }
 
-static int bench_packet_ref(void)
+static int packet_ref(void)
 {
 	int i;
 	uint32_t offset = TEST_MIN_PKT_SIZE / 2;
@@ -1390,7 +1382,7 @@ static int bench_packet_ref(void)
 	return i;
 }
 
-static int bench_packet_ref_pkt(void)
+static int packet_ref_pkt(void)
 {
 	int i;
 	uint32_t offset = TEST_MIN_PKT_SIZE / 2;
@@ -1403,7 +1395,7 @@ static int bench_packet_ref_pkt(void)
 	return i;
 }
 
-static int bench_packet_has_ref(void)
+static int packet_has_ref(void)
 {
 	int i;
 	uint32_t ret = 0;
@@ -1415,7 +1407,7 @@ static int bench_packet_has_ref(void)
 	return i + ret;
 }
 
-static int bench_packet_subtype(void)
+static int packet_subtype(void)
 {
 	int i;
 	odp_packet_t *pkt_tbl = gbl_args->pkt_tbl;
@@ -1426,7 +1418,7 @@ static int bench_packet_subtype(void)
 	return i;
 }
 
-static int bench_packet_parse(void)
+static int packet_parse(void)
 {
 	odp_packet_parse_param_t param;
 	odp_packet_t *pkt_tbl = gbl_args->pkt_tbl;
@@ -1446,7 +1438,7 @@ static int bench_packet_parse(void)
 	return !ret;
 }
 
-static int bench_packet_parse_multi(void)
+static int packet_parse_multi(void)
 {
 	int burst_size = gbl_args->appl.burst_size;
 	int ret = 0;
@@ -1485,9 +1477,10 @@ static void usage(char *progname)
 	       "  E.g. %s\n"
 	       "\n"
 	       "Optional OPTIONS:\n"
-	       "  -b, --burst      Test packet burst size.\n"
-	       "  -i, --index      Benchmark index to run indefinitely.\n"
-	       "  -h, --help       Display help and exit.\n\n"
+	       "  -b, --burst <num>       Test packet burst size.\n"
+	       "  -c, --cache_size <num>  Pool cache size.\n"
+	       "  -i, --index <idx>       Benchmark index to run indefinitely.\n"
+	       "  -h, --help              Display help and exit.\n\n"
 	       "\n", NO_PATH(progname), NO_PATH(progname));
 }
 
@@ -1504,15 +1497,17 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 	int long_index;
 	static const struct option longopts[] = {
 		{"burst", required_argument, NULL, 'b'},
+		{"cache_size", required_argument, NULL, 'c'},
 		{"help", no_argument, NULL, 'h'},
 		{"index", required_argument, NULL, 'i'},
 		{NULL, 0, NULL, 0}
 	};
 
-	static const char *shortopts =  "b:i:h";
+	static const char *shortopts =  "c:b:i:h";
 
 	appl_args->bench_idx = 0; /* Run all benchmarks */
 	appl_args->burst_size = TEST_DEF_BURST;
+	appl_args->cache_size = -1;
 
 	while (1) {
 		opt = getopt_long(argc, argv, shortopts, longopts, &long_index);
@@ -1521,6 +1516,9 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 			break;	/* No more options */
 
 		switch (opt) {
+		case 'c':
+			appl_args->cache_size = atoi(optarg);
+			break;
 		case 'b':
 			appl_args->burst_size = atoi(optarg);
 			break;
@@ -1561,176 +1559,97 @@ static void print_info(char *progname, appl_args_t *appl_args ODP_UNUSED)
  * Test functions
  */
 bench_info_t test_suite[] = {
-		BENCH_INFO(bench_empty, NULL, NULL, NULL),
-		BENCH_INFO(bench_packet_alloc, NULL, free_packets, NULL),
-		BENCH_INFO(bench_packet_alloc_multi, NULL, free_packets_multi,
-			   NULL),
-		BENCH_INFO(bench_packet_free, create_packets, NULL, NULL),
-		BENCH_INFO(bench_packet_free_multi, alloc_packets_multi, NULL,
-			   NULL),
-		BENCH_INFO(bench_packet_free_sp, alloc_packets_multi, NULL,
-			   NULL),
-		BENCH_INFO(bench_packet_alloc_free, NULL, NULL, NULL),
-		BENCH_INFO(bench_packet_alloc_free_multi, NULL, NULL, NULL),
-		BENCH_INFO(bench_packet_reset, create_packets, free_packets,
-			   NULL),
-		BENCH_INFO(bench_packet_from_event, create_events, free_packets,
-			   NULL),
-		BENCH_INFO(bench_packet_from_event_multi, create_events_multi,
-			   free_packets_multi, NULL),
-		BENCH_INFO(bench_packet_to_event, create_packets, free_packets,
-			   NULL),
-		BENCH_INFO(bench_packet_to_event_multi, alloc_packets_multi,
-			   free_packets_multi, NULL),
-		BENCH_INFO(bench_packet_head, create_packets, free_packets,
-			   NULL),
-		BENCH_INFO(bench_packet_buf_len, create_packets, free_packets,
-			   NULL),
-		BENCH_INFO(bench_packet_data, create_packets, free_packets,
-			   NULL),
-		BENCH_INFO(bench_packet_data_seg_len, create_packets,
-			   free_packets, NULL),
-		BENCH_INFO(bench_packet_seg_len, create_packets, free_packets,
-			   NULL),
-		BENCH_INFO(bench_packet_len, create_packets, free_packets,
-			   NULL),
-		BENCH_INFO(bench_packet_headroom, create_packets, free_packets,
-			   NULL),
-		BENCH_INFO(bench_packet_tailroom, create_packets, free_packets,
-			   NULL),
-		BENCH_INFO(bench_packet_tail, create_packets, free_packets,
-			   NULL),
-		BENCH_INFO(bench_packet_offset, create_packets, free_packets,
-			   NULL),
-		BENCH_INFO(bench_packet_prefetch, create_packets, free_packets,
-			   NULL),
-		BENCH_INFO(bench_packet_push_head, create_packets, free_packets,
-			   NULL),
-		BENCH_INFO(bench_packet_pull_head, create_packets, free_packets,
-			   NULL),
-		BENCH_INFO(bench_packet_push_tail, create_packets, free_packets,
-			   NULL),
-		BENCH_INFO(bench_packet_pull_tail, create_packets, free_packets,
-			   NULL),
-		BENCH_INFO(bench_packet_extend_head, alloc_packets_half,
-			   free_packets, NULL),
-		BENCH_INFO(bench_packet_trunc_head, create_packets,
-			   free_packets, NULL),
-		BENCH_INFO(bench_packet_extend_tail, alloc_packets_half,
-			   free_packets, NULL),
-		BENCH_INFO(bench_packet_trunc_tail, create_packets,
-			   free_packets, NULL),
-		BENCH_INFO(bench_packet_add_data, alloc_packets_half,
-			   free_packets, NULL),
-		BENCH_INFO(bench_packet_rem_data, create_packets, free_packets,
-			   NULL),
-		BENCH_INFO(bench_packet_align, create_packets, free_packets,
-			   NULL),
-		BENCH_INFO(bench_packet_is_segmented, create_packets,
-			   free_packets, NULL),
-		BENCH_INFO(bench_packet_num_segs, create_packets, free_packets,
-			   NULL),
-		BENCH_INFO(bench_packet_first_seg, create_packets, free_packets,
-			   NULL),
-		BENCH_INFO(bench_packet_last_seg, create_packets, free_packets,
-			   NULL),
-		BENCH_INFO(bench_packet_next_seg, create_packets, free_packets,
-			   NULL),
-		BENCH_INFO(bench_packet_seg_data, create_packets, free_packets,
-			   NULL),
-		BENCH_INFO(bench_packet_seg_data_len, create_packets,
-			   free_packets, NULL),
-		BENCH_INFO(bench_packet_concat, alloc_concat_packets,
-			   free_packets, NULL),
-		BENCH_INFO(bench_packet_split, create_packets,
-			   free_packets_twice, NULL),
-		BENCH_INFO(bench_packet_copy, create_packets,
-			   free_packets_twice, NULL),
-		BENCH_INFO(bench_packet_copy_part, create_packets,
-			   free_packets_twice, NULL),
-		BENCH_INFO(bench_packet_copy_to_mem, create_packets,
-			   free_packets, NULL),
-		BENCH_INFO(bench_packet_copy_from_mem, create_packets,
-			   free_packets, NULL),
-		BENCH_INFO(bench_packet_copy_from_pkt, alloc_packets_twice,
-			   free_packets_twice, NULL),
-		BENCH_INFO(bench_packet_copy_data, create_packets, free_packets,
-			   NULL),
-		BENCH_INFO(bench_packet_move_data, create_packets, free_packets,
-			   NULL),
-		BENCH_INFO(bench_packet_pool, create_packets, free_packets,
-			   NULL),
-		BENCH_INFO(bench_packet_input, create_packets, free_packets,
-			   NULL),
-		BENCH_INFO(bench_packet_input_index, create_packets,
-			   free_packets, NULL),
-		BENCH_INFO(bench_packet_user_ptr, create_packets, free_packets,
-			   NULL),
-		BENCH_INFO(bench_packet_user_ptr_set, create_packets,
-			   free_packets, NULL),
-		BENCH_INFO(bench_packet_user_area, create_packets, free_packets,
-			   NULL),
-		BENCH_INFO(bench_packet_user_area_size, create_packets,
-			   free_packets, NULL),
-		BENCH_INFO(bench_packet_l2_ptr, create_packets, free_packets,
-			   NULL),
-		BENCH_INFO(bench_packet_l2_offset, create_packets, free_packets,
-			   NULL),
-		BENCH_INFO(bench_packet_l2_offset_set, create_packets,
-			   free_packets, NULL),
-		BENCH_INFO(bench_packet_l3_ptr, create_packets, free_packets,
-			   NULL),
-		BENCH_INFO(bench_packet_l3_offset, create_packets, free_packets,
-			   NULL),
-		BENCH_INFO(bench_packet_l3_offset_set, create_packets,
-			   free_packets, NULL),
-		BENCH_INFO(bench_packet_l4_ptr, create_packets, free_packets,
-			   NULL),
-		BENCH_INFO(bench_packet_l4_offset, create_packets, free_packets,
-			   NULL),
-		BENCH_INFO(bench_packet_l4_offset_set, create_packets,
-			   free_packets, NULL),
-		BENCH_INFO(bench_packet_flow_hash, create_packets, free_packets,
-			   NULL),
-		BENCH_INFO(bench_packet_flow_hash_set, create_packets,
-			   free_packets, NULL),
-		BENCH_INFO(bench_packet_ts, create_packets, free_packets, NULL),
-		BENCH_INFO(bench_packet_ts_set, create_packets, free_packets,
-			   NULL),
-		BENCH_INFO(bench_packet_ref_static, create_packets,
-			   free_packets_twice, NULL),
-		BENCH_INFO(bench_packet_ref, create_packets,
-			   free_packets_twice, NULL),
-		BENCH_INFO(bench_packet_ref_pkt, alloc_packets_twice,
-			   free_packets_twice, NULL),
-		BENCH_INFO(bench_packet_has_ref, alloc_ref_packets,
-			   free_packets_twice, NULL),
-		BENCH_INFO(bench_packet_subtype, create_packets, free_packets,
-			   NULL),
-		BENCH_INFO(bench_packet_parse, alloc_parse_packets_ipv4_tcp,
-			   free_packets, "bench_packet_parse_ipv4_tcp"),
-		BENCH_INFO(bench_packet_parse, alloc_parse_packets_ipv4_udp,
-			   free_packets, "bench_packet_parse_ipv4_udp"),
-		BENCH_INFO(bench_packet_parse, alloc_parse_packets_ipv6_tcp,
-			   free_packets, "bench_packet_parse_ipv6_tcp"),
-		BENCH_INFO(bench_packet_parse, alloc_parse_packets_ipv6_udp,
-			   free_packets, "bench_packet_parse_ipv6_udp"),
-		BENCH_INFO(bench_packet_parse_multi,
-			   alloc_parse_packets_multi_ipv4_tcp,
-			   free_packets_multi,
-			   "bench_packet_parse_multi_ipv4_tcp"),
-		BENCH_INFO(bench_packet_parse_multi,
-			   alloc_parse_packets_multi_ipv4_udp,
-			   free_packets_multi,
-			   "bench_packet_parse_multi_ipv4_udp"),
-		BENCH_INFO(bench_packet_parse_multi,
-			   alloc_parse_packets_multi_ipv6_tcp,
-			   free_packets_multi,
-			   "bench_packet_parse_multi_ipv6_tcp"),
-		BENCH_INFO(bench_packet_parse_multi,
-			   alloc_parse_packets_multi_ipv6_udp,
-			   free_packets_multi,
-			   "bench_packet_parse_multi_ipv6_udp"),
+	BENCH_INFO(packet_alloc, NULL, free_packets, NULL),
+	BENCH_INFO(packet_alloc_multi, NULL, free_packets_multi, NULL),
+	BENCH_INFO(packet_free, create_packets, NULL, NULL),
+	BENCH_INFO(packet_free_multi, alloc_packets_multi, NULL, NULL),
+	BENCH_INFO(packet_free_sp, alloc_packets_multi, NULL, NULL),
+	BENCH_INFO(packet_alloc_free, NULL, NULL, NULL),
+	BENCH_INFO(packet_alloc_free_multi, NULL, NULL, NULL),
+	BENCH_INFO(packet_reset, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_from_event, create_events, free_packets, NULL),
+	BENCH_INFO(packet_from_event_multi, create_events_multi, free_packets_multi, NULL),
+	BENCH_INFO(packet_to_event, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_to_event_multi, alloc_packets_multi, free_packets_multi, NULL),
+	BENCH_INFO(packet_head, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_buf_len, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_data, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_data_seg_len, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_seg_len, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_len, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_headroom, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_tailroom, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_tail, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_offset, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_prefetch, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_push_head, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_pull_head, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_push_tail, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_pull_tail, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_extend_head, alloc_packets_half, free_packets, NULL),
+	BENCH_INFO(packet_trunc_head, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_extend_tail, alloc_packets_half, free_packets, NULL),
+	BENCH_INFO(packet_trunc_tail, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_add_data, alloc_packets_half, free_packets, NULL),
+	BENCH_INFO(packet_rem_data, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_align, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_is_segmented, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_num_segs, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_first_seg, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_last_seg, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_next_seg, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_seg_data, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_seg_data_len, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_concat, alloc_concat_packets, free_packets, NULL),
+	BENCH_INFO(packet_split, create_packets, free_packets_twice, NULL),
+	BENCH_INFO(packet_copy, create_packets, free_packets_twice, NULL),
+	BENCH_INFO(packet_copy_part, create_packets, free_packets_twice, NULL),
+	BENCH_INFO(packet_copy_to_mem, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_copy_from_mem, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_copy_from_pkt, alloc_packets_twice, free_packets_twice, NULL),
+	BENCH_INFO(packet_copy_data, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_move_data, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_pool, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_input, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_input_index, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_user_ptr, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_user_ptr_set, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_user_area, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_user_area_size, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_l2_ptr, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_l2_offset, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_l2_offset_set, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_l3_ptr, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_l3_offset, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_l3_offset_set, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_l4_ptr, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_l4_offset, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_l4_offset_set, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_flow_hash, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_flow_hash_set, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_ts, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_ts_set, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_ref_static, create_packets, free_packets_twice, NULL),
+	BENCH_INFO(packet_ref, create_packets, free_packets_twice, NULL),
+	BENCH_INFO(packet_ref_pkt, alloc_packets_twice, free_packets_twice, NULL),
+	BENCH_INFO(packet_has_ref, alloc_ref_packets, free_packets_twice, NULL),
+	BENCH_INFO(packet_subtype, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_parse, alloc_parse_packets_ipv4_tcp, free_packets,
+		   "packet_parse ipv4/tcp"),
+	BENCH_INFO(packet_parse, alloc_parse_packets_ipv4_udp, free_packets,
+		   "packet_parse ipv4/udp"),
+	BENCH_INFO(packet_parse, alloc_parse_packets_ipv6_tcp, free_packets,
+		   "packet_parse ipv6/tcp"),
+	BENCH_INFO(packet_parse, alloc_parse_packets_ipv6_udp, free_packets,
+		   "packet_parse ipv6/udp"),
+	BENCH_INFO(packet_parse_multi, alloc_parse_packets_multi_ipv4_tcp, free_packets_multi,
+		   "packet_parse_multi ipv4/tcp"),
+	BENCH_INFO(packet_parse_multi, alloc_parse_packets_multi_ipv4_udp, free_packets_multi,
+		   "packet_parse_multi ipv4/udp"),
+	BENCH_INFO(packet_parse_multi, alloc_parse_packets_multi_ipv6_tcp, free_packets_multi,
+		   "packet_parse_multi ipv6/tcp"),
+	BENCH_INFO(packet_parse_multi, alloc_parse_packets_multi_ipv6_udp, free_packets_multi,
+		   "packet_parse_multi ipv6/udp"),
 };
 
 /**
@@ -1838,18 +1757,24 @@ int main(int argc, char *argv[])
 		   capa.pkt.max_uarea_size < PKT_POOL_UAREA_SIZE) {
 		ODPH_ERR("Error: user area size not supported.\n");
 		exit(EXIT_FAILURE);
+	} else if (gbl_args->appl.cache_size > (int)capa.pkt.max_cache_size) {
+		ODPH_ERR("Error: cache size not supported (max %" PRIu32 ")\n",
+			 capa.pkt.max_cache_size);
+		exit(EXIT_FAILURE);
 	}
 
 	/* Create packet pool */
 	odp_pool_param_init(&params);
 	params.pkt.seg_len = PKT_POOL_SEG_LEN;
 	/* Using packet length as twice the TEST_MAX_PKT_SIZE as some
-	 * test cases (bench_packet_ref_pkt) might allocate a bigger
+	 * test cases (packet_ref_pkt) might allocate a bigger
 	 * packet than TEST_MAX_PKT_SIZE.
 	 */
 	params.pkt.len     = 2 * TEST_MAX_PKT_SIZE;
 	params.pkt.num     = pkt_num;
 	params.pkt.uarea_size = PKT_POOL_UAREA_SIZE;
+	if (gbl_args->appl.cache_size >= 0)
+		params.pkt.cache_size = gbl_args->appl.cache_size;
 	params.type        = ODP_POOL_PACKET;
 
 	gbl_args->pool = odp_pool_create("packet pool", &params);
@@ -1863,6 +1788,10 @@ int main(int argc, char *argv[])
 	printf("CPU mask:        %s\n", cpumaskstr);
 	printf("Burst size:      %d\n", gbl_args->appl.burst_size);
 	printf("Bench repeat:    %d\n", TEST_REPEAT_COUNT);
+	if (gbl_args->appl.cache_size < 0)
+		printf("Pool cache size: default\n");
+	else
+		printf("Pool cache size: %d\n", gbl_args->appl.cache_size);
 
 	odp_pool_print(gbl_args->pool);
 

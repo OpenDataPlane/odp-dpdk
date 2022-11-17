@@ -9,12 +9,14 @@
 
 #include <odp/api/debug.h>
 #include <odp/api/deprecated.h>
-#include <odp/api/plat/strong_types.h>
 #include <odp/api/shared_memory.h>
 #include <odp/api/spinlock.h>
 
+#include <odp/api/plat/strong_types.h>
+
 #include <odp_config_internal.h>
 #include <odp_debug_internal.h>
+#include <odp_global_data.h>
 #include <odp_macros_internal.h>
 #include <odp_shm_internal.h>
 
@@ -25,6 +27,7 @@
 #include <inttypes.h>
 
 #include <rte_config.h>
+#include <rte_errno.h>
 #include <rte_lcore.h>
 #include <rte_memzone.h>
 
@@ -160,8 +163,7 @@ static inline odp_bool_t handle_is_valid(odp_shm_t shm)
 
 	if (idx < 0 || idx >= SHM_MAX_NB_BLOCKS ||
 	    shm_tbl->block[idx].mz == NULL) {
-		ODP_ERR("Invalid odp_shm_t handle: %" PRIu64 "\n",
-			odp_shm_to_u64(shm));
+		_ODP_ERR("Invalid odp_shm_t handle: %" PRIu64 "\n", odp_shm_to_u64(shm));
 		return 0;
 	}
 	return 1;
@@ -173,8 +175,7 @@ int _odp_shm_init_global(const odp_init_t *init ODP_UNUSED)
 
 	if ((getpid() != odp_global_ro.main_pid) ||
 	    (syscall(SYS_gettid) != getpid())) {
-		ODP_ERR("shm_init_global() must be performed by the main "
-			"ODP process!\n.");
+		_ODP_ERR("shm_init_global() must be performed by the main ODP process!\n.");
 		return -1;
 	}
 
@@ -182,7 +183,7 @@ int _odp_shm_init_global(const odp_init_t *init ODP_UNUSED)
 	addr = mmap(NULL, sizeof(shm_table_t), PROT_READ | PROT_WRITE,
 		    MAP_SHARED | MAP_ANONYMOUS, -1, 0);
 	if (addr == MAP_FAILED) {
-		ODP_ERR("Unable to mmap the shm block table\n");
+		_ODP_ERR("Unable to mmap the shm block table\n");
 		return -1;
 	}
 
@@ -206,8 +207,7 @@ int _odp_shm_term_global(void)
 
 	if ((getpid() != odp_global_ro.main_pid) ||
 	    (syscall(SYS_gettid) != getpid())) {
-		ODP_ERR("shm_term_global() must be performed by the main "
-			"ODP process!\n.");
+		_ODP_ERR("shm_term_global() must be performed by the main ODP process!\n.");
 		return -1;
 	}
 
@@ -215,14 +215,13 @@ int _odp_shm_term_global(void)
 	for (idx = 0; idx < SHM_MAX_NB_BLOCKS; idx++) {
 		block = &shm_tbl->block[idx];
 		if (block->mz) {
-			ODP_ERR("block '%s' was never freed (cleaning up...)\n",
-				block->name);
+			_ODP_ERR("block '%s' was never freed (cleaning up...)\n", block->name);
 			rte_memzone_free(block->mz);
 		}
 	}
 	/* Free the shared memory block table */
 	if (munmap(shm_tbl, sizeof(shm_table_t)) < 0) {
-		ODP_ERR("Unable to munmap the shm block table\n");
+		_ODP_ERR("Unable to munmap the shm block table\n");
 		return -1;
 	}
 	return 0;
@@ -256,12 +255,12 @@ odp_shm_t odp_shm_reserve(const char *name, uint64_t size, uint64_t align,
 	uint32_t supported_flgs = SUPPORTED_SHM_FLAGS;
 
 	if (flags & ~supported_flgs) {
-		ODP_ERR("Unsupported SHM flag\n");
+		_ODP_ERR("Unsupported SHM flag: %" PRIx32 "\n", flags);
 		return ODP_SHM_INVALID;
 	}
 
 	if (align > SHM_MAX_ALIGN) {
-		ODP_ERR("Align too large: %" PRIu64 "\n", align);
+		_ODP_ERR("Align too large: %" PRIu64 "\n", align);
 		return ODP_SHM_INVALID;
 	}
 
@@ -274,7 +273,7 @@ odp_shm_t odp_shm_reserve(const char *name, uint64_t size, uint64_t align,
 	idx = find_free_block();
 	if (idx < 0) {
 		odp_spinlock_unlock(&shm_tbl->lock);
-		ODP_ERR("No free SHM blocks left\n");
+		_ODP_ERR("No free SHM blocks left\n");
 		return ODP_SHM_INVALID;
 	}
 	block = &shm_tbl->block[idx];
@@ -286,7 +285,8 @@ odp_shm_t odp_shm_reserve(const char *name, uint64_t size, uint64_t align,
 					 rte_socket_id(), mz_flags, align);
 	if (mz == NULL) {
 		odp_spinlock_unlock(&shm_tbl->lock);
-		ODP_ERR("Reserving DPDK memzone failed\n");
+		_ODP_ERR("Reserving DPDK memzone '%s' failed: %s\n", mz_name,
+			 rte_strerror(rte_errno));
 		return ODP_SHM_INVALID;
 	}
 
@@ -317,12 +317,12 @@ odp_shm_t odp_shm_import(const char *remote_name, odp_instance_t odp_inst,
 
 	mz = rte_memzone_lookup(mz_name);
 	if (mz == NULL) {
-		ODP_ERR("Unable to find remote SHM block: %s\n", remote_name);
+		_ODP_ERR("Unable to find remote SHM block: %s\n", remote_name);
 		return ODP_SHM_INVALID;
 	}
 
 	if (!(shm_zone(mz)->flags & ODP_SHM_EXPORT)) {
-		ODP_ERR("Not exported SHM block!\n");
+		_ODP_ERR("Not exported SHM block!\n");
 		return ODP_SHM_INVALID;
 	}
 
@@ -331,7 +331,7 @@ odp_shm_t odp_shm_import(const char *remote_name, odp_instance_t odp_inst,
 	idx = find_free_block();
 	if (idx < 0) {
 		odp_spinlock_unlock(&shm_tbl->lock);
-		ODP_ERR("No free SHM blocks left\n");
+		_ODP_ERR("No free SHM blocks left\n");
 		return ODP_SHM_INVALID;
 	}
 	block = &shm_tbl->block[idx];
@@ -443,15 +443,15 @@ void odp_shm_print_all(void)
 
 	odp_spinlock_lock(&shm_tbl->lock);
 
-	ODP_PRINT("\nShared memory blocks\n--------------------\n");
+	_ODP_PRINT("\nShared memory blocks\n--------------------\n");
 
 	for (idx = 0; idx < SHM_MAX_NB_BLOCKS; idx++) {
 		block = &shm_tbl->block[idx];
 		if (block->mz == NULL)
 			continue;
-		ODP_PRINT("  %s: addr: %p, len: %" PRIu64 " page size: "
-			  "%" PRIu64 "\n", block->name, block->mz->addr,
-			  shm_size(block->mz), block->mz->hugepage_sz);
+		_ODP_PRINT("  %s: addr: %p, len: %" PRIu64 " page size: %" PRIu64 "\n",
+			   block->name, block->mz->addr,
+			   shm_size(block->mz), block->mz->hugepage_sz);
 	}
 
 	odp_spinlock_unlock(&shm_tbl->lock);
@@ -471,16 +471,15 @@ void odp_shm_print(odp_shm_t shm)
 
 	block = &shm_tbl->block[idx];
 
-	ODP_PRINT("\nSHM block info\n--------------\n");
-	ODP_PRINT(" name:       %s\n",   block->name);
-	ODP_PRINT(" type:       %s\n",   block->type == SHM_TYPE_LOCAL ? "local"
-			: "remote");
-	ODP_PRINT(" flags:      0x%x\n", shm_zone(block->mz)->flags);
-	ODP_PRINT(" start:      %p\n",   block->mz->addr);
-	ODP_PRINT(" len:        %" PRIu64 "\n",  shm_size(block->mz));
-	ODP_PRINT(" page size:  %" PRIu64 "\n", block->mz->hugepage_sz);
-	ODP_PRINT(" NUMA ID:    %" PRIi32 "\n",  block->mz->socket_id);
-	ODP_PRINT("\n");
+	_ODP_PRINT("\nSHM block info\n--------------\n");
+	_ODP_PRINT(" name:       %s\n",   block->name);
+	_ODP_PRINT(" type:       %s\n",   block->type == SHM_TYPE_LOCAL ? "local" : "remote");
+	_ODP_PRINT(" flags:      0x%x\n", shm_zone(block->mz)->flags);
+	_ODP_PRINT(" start:      %p\n",   block->mz->addr);
+	_ODP_PRINT(" len:        %" PRIu64 "\n",  shm_size(block->mz));
+	_ODP_PRINT(" page size:  %" PRIu64 "\n", block->mz->hugepage_sz);
+	_ODP_PRINT(" NUMA ID:    %" PRIi32 "\n",  block->mz->socket_id);
+	_ODP_PRINT("\n");
 
 	odp_spinlock_unlock(&shm_tbl->lock);
 }

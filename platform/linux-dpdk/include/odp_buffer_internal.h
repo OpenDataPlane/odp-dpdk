@@ -57,24 +57,6 @@ typedef struct ODP_ALIGNED_CACHE odp_buffer_hdr_t {
 
 } odp_buffer_hdr_t;
 
-/*
- * Buffer type
- *
- * @param buf      Buffer handle
- *
- * @return Buffer type
- */
-int _odp_buffer_type(odp_buffer_t buf);
-
-/*
- * Buffer type set
- *
- * @param buf      Buffer handle
- * @param type     New type value
- *
- */
-void _odp_buffer_type_set(odp_buffer_t buf, int type);
-
 static inline struct rte_mbuf *_odp_buf_to_mbuf(odp_buffer_t buf)
 {
 	return (struct rte_mbuf *)(uintptr_t)buf;

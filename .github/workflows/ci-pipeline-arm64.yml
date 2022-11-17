@@ -180,8 +180,6 @@ jobs:
   Run_dpdk-20_11:
     if: ${{ github.repository == 'OpenDataPlane/odp-dpdk' }}
     runs-on: [self-hosted, ARM64]
-    env:
-      OS: ubuntu_20.04
     steps:
       - uses: AutoModality/action-clean@v1.1.0
       - uses: actions/checkout@v3
@@ -194,8 +192,6 @@ jobs:
   Run_dpdk-21_11:
     if: ${{ github.repository == 'OpenDataPlane/odp-dpdk' }}
     runs-on: [self-hosted, ARM64]
-    env:
-      OS: ubuntu_20.04
     steps:
       - uses: AutoModality/action-clean@v1.1.0
       - uses: actions/checkout@v3

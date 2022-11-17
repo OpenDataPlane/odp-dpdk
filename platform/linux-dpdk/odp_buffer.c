@@ -5,47 +5,28 @@
  * SPDX-License-Identifier:     BSD-3-Clause
  */
 
+#include <odp/api/align.h>
 #include <odp/api/buffer.h>
+
+#include <odp/api/plat/buffer_inline_types.h>
 
 #include <odp_buffer_internal.h>
 #include <odp_debug_internal.h>
 #include <odp_pool_internal.h>
+#include <odp_print_internal.h>
 
 #include <string.h>
 #include <stdio.h>
 #include <inttypes.h>
 
-int _odp_buffer_type(odp_buffer_t buf)
-{
-	odp_buffer_hdr_t *hdr = _odp_buf_hdr(buf);
+#include <odp/visibility_begin.h>
 
-	return hdr->event_hdr.type;
-}
+/* Buffer header field offsets for inline functions */
+const _odp_buffer_inline_offset_t _odp_buffer_inline_offset ODP_ALIGNED_CACHE = {
+	.uarea_addr = offsetof(odp_buffer_hdr_t, uarea_addr)
+};
 
-void _odp_buffer_type_set(odp_buffer_t buf, int type)
-{
-	odp_buffer_hdr_t *hdr = _odp_buf_hdr(buf);
-
-	hdr->event_hdr.type = type;
-}
-
-int odp_buffer_is_valid(odp_buffer_t buf)
-{
-	if (odp_event_is_valid(odp_buffer_to_event(buf)) == 0)
-		return 0;
-
-	if (odp_event_type(odp_buffer_to_event(buf)) != ODP_EVENT_BUFFER)
-		return 0;
-
-	return 1;
-}
-
-void *odp_buffer_user_area(odp_buffer_t buf)
-{
-	odp_buffer_hdr_t *hdr = _odp_buf_hdr(buf);
-
-	return hdr->uarea_addr;
-}
+#include <odp/visibility_end.h>
 
 void odp_buffer_print(odp_buffer_t buf)
 {
@@ -57,21 +38,24 @@ void odp_buffer_print(odp_buffer_t buf)
 	char str[max_len];
 
 	if (!odp_buffer_is_valid(buf)) {
-		ODP_ERR("Buffer is not valid.\n");
+		_ODP_ERR("Buffer is not valid.\n");
 		return;
 	}
 
 	hdr = _odp_buf_hdr(buf);
 	pool = _odp_pool_entry(hdr->event_hdr.pool);
 
-	len += snprintf(&str[len], n - len, "Buffer\n------\n");
-	len += snprintf(&str[len], n - len, "  pool index    %u\n", pool->pool_idx);
-	len += snprintf(&str[len], n - len, "  buffer index  %u\n", hdr->event_hdr.index);
-	len += snprintf(&str[len], n - len, "  addr          %p\n", odp_buffer_addr(buf));
-	len += snprintf(&str[len], n - len, "  size          %u\n", odp_buffer_size(buf));
+	len += _odp_snprint(&str[len], n - len, "Buffer\n------\n");
+	len += _odp_snprint(&str[len], n - len, "  handle         0x%" PRIx64 "\n",
+			    odp_buffer_to_u64(buf));
+	len += _odp_snprint(&str[len], n - len, "  pool index     %u\n", pool->pool_idx);
+	len += _odp_snprint(&str[len], n - len, "  buffer index   %u\n", hdr->event_hdr.index);
+	len += _odp_snprint(&str[len], n - len, "  addr           %p\n", odp_buffer_addr(buf));
+	len += _odp_snprint(&str[len], n - len, "  size           %u\n", odp_buffer_size(buf));
+	len += _odp_snprint(&str[len], n - len, "  user area      %p\n", hdr->uarea_addr);
 	str[len] = 0;
 
-	ODP_PRINT("\n%s\n", str);
+	_ODP_PRINT("%s\n", str);
 }
 
 uint64_t odp_buffer_to_u64(odp_buffer_t hdl)

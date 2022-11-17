@@ -132,24 +132,24 @@ typedef struct pmr_term_value {
 Class Of Service
 */
 typedef struct ODP_ALIGNED_CACHE cos_s {
-	odp_cos_action_t action;	/* Action */
-	odp_queue_t queue;		/* Associated Queue */
-	odp_pool_t pool;		/* Associated Buffer pool */
-	odp_pktin_vector_config_t vector;	/* Packet vector config */
+	uint32_t valid;			/* validity Flag */
+	odp_atomic_u32_t num_rule;	/* num of PMRs attached with this CoS */
 	struct pmr_s *pmr[CLS_PMR_PER_COS_MAX];	/* Chained PMR */
 	struct cos_s *linked_cos[CLS_PMR_PER_COS_MAX]; /* Chained CoS with PMR*/
-	uint32_t valid;			/* validity Flag */
+	odp_bool_t stats_enable;
+	odp_cos_action_t action;	/* Action */
+	odp_queue_t queue;		/* Associated Queue */
+	uint32_t num_queue;
+	odp_pool_t pool;		/* Associated Buffer pool */
+	uint8_t index;
+	bool queue_group;
+	odp_cls_hash_proto_t hash_proto;
+	odp_pktin_vector_config_t vector;	/* Packet vector config */
 	odp_cls_drop_t drop_policy;	/* Associated Drop Policy */
 	size_t headroom;		/* Headroom for this CoS */
 	odp_spinlock_t lock;		/* cos lock */
-	odp_atomic_u32_t num_rule;	/* num of PMRs attached with this CoS */
-	bool queue_group;
-	odp_cls_hash_proto_t hash_proto;
-	uint32_t num_queue;
 	odp_queue_param_t queue_param;
 	char name[ODP_COS_NAME_LEN];	/* name */
-	uint8_t index;
-	odp_bool_t stats_enable;
 	struct {
 		odp_atomic_u64_t discards;
 		odp_atomic_u64_t packets;
@@ -159,13 +159,12 @@ typedef struct ODP_ALIGNED_CACHE cos_s {
 /* Pattern Matching Rule */
 typedef struct ODP_ALIGNED_CACHE pmr_s {
 	uint32_t valid;			/* Validity Flag */
-	odp_atomic_u32_t count;		/* num of packets matching this rule */
 	uint32_t num_pmr;		/* num of PMR Term Values*/
 	uint16_t mark;
-	odp_spinlock_t lock;		/* pmr lock*/
-	cos_t *src_cos;			/* source CoS where PMR is attached */
 	pmr_term_value_t  pmr_term_value[CLS_PMRTERM_MAX];
 			/* List of associated PMR Terms */
+	odp_spinlock_t lock;		/* pmr lock*/
+	cos_t *src_cos;			/* source CoS where PMR is attached */
 } pmr_t;
 
 typedef struct ODP_ALIGNED_CACHE {

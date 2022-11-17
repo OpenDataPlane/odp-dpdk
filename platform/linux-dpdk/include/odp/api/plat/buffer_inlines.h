@@ -7,12 +7,14 @@
 #ifndef ODP_PLAT_BUFFER_INLINES_H_
 #define ODP_PLAT_BUFFER_INLINES_H_
 
-#include <odp/api/event_types.h>
+#include <odp/api/event.h>
 #include <odp/api/hints.h>
 #include <odp/api/pool_types.h>
 
 #include <odp/api/abi/buffer.h>
 
+#include <odp/api/plat/buffer_inline_types.h>
+#include <odp/api/plat/debug_inlines.h>
 #include <odp/api/plat/event_inline_types.h>
 
 #include <rte_mbuf.h>
@@ -28,6 +30,7 @@
 /** @cond _ODP_HIDE_FROM_DOXYGEN_ */
 
 extern const _odp_event_inline_offset_t _odp_event_inline_offset;
+extern const _odp_buffer_inline_offset_t _odp_buffer_inline_offset;
 
 #ifndef _ODP_NO_INLINE
 	/* Inline functions by default */
@@ -37,14 +40,18 @@ extern const _odp_event_inline_offset_t _odp_event_inline_offset;
 	#define odp_buffer_addr __odp_buffer_addr
 	#define odp_buffer_size __odp_buffer_size
 	#define odp_buffer_pool __odp_buffer_pool
+	#define odp_buffer_user_area __odp_buffer_user_area
 	#define odp_buffer_free __odp_buffer_free
 	#define odp_buffer_free_multi __odp_buffer_free_multi
+	#define odp_buffer_is_valid __odp_buffer_is_valid
 #else
 	#define _ODP_INLINE
 #endif
 
 _ODP_INLINE odp_buffer_t odp_buffer_from_event(odp_event_t ev)
 {
+	_ODP_ASSERT(odp_event_type(ev) == ODP_EVENT_BUFFER);
+
 	return (odp_buffer_t)ev;
 }
 
@@ -66,6 +73,11 @@ _ODP_INLINE uint32_t odp_buffer_size(odp_buffer_t buf)
 _ODP_INLINE odp_pool_t odp_buffer_pool(odp_buffer_t buf)
 {
 	return (odp_pool_t)(uintptr_t)_odp_event_hdr_field(buf, void *, pool);
+}
+
+_ODP_INLINE void *odp_buffer_user_area(odp_buffer_t buf)
+{
+	return _odp_buffer_get(buf, void *, uarea_addr);
 }
 
 _ODP_INLINE void odp_buffer_free(odp_buffer_t buf)
@@ -101,6 +113,17 @@ _ODP_INLINE void odp_buffer_free_multi(const odp_buffer_t buf[], int num)
 		}
 	}
 	rte_mempool_put_bulk(mp_pending, (void **)mbuf_tbl, num_pending);
+}
+
+_ODP_INLINE int odp_buffer_is_valid(odp_buffer_t buf)
+{
+	if (odp_event_is_valid(odp_buffer_to_event(buf)) == 0)
+		return 0;
+
+	if (odp_event_type(odp_buffer_to_event(buf)) != ODP_EVENT_BUFFER)
+		return 0;
+
+	return 1;
 }
 
 /** @endcond */

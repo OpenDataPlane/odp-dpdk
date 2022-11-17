@@ -328,7 +328,7 @@ int _odp_crypto_init_global(void)
 	odp_shm_t shm;
 
 	if (odp_global_ro.disable.crypto) {
-		ODP_PRINT("\nODP crypto is DISABLED\n");
+		_ODP_PRINT("\nODP crypto is DISABLED\n");
 		return 0;
 	}
 
@@ -342,11 +342,11 @@ int _odp_crypto_init_global(void)
 	if (shm != ODP_SHM_INVALID) {
 		global = odp_shm_addr(shm);
 		if (global == NULL) {
-			ODP_ERR("Failed to find the reserved shm block");
+			_ODP_ERR("Failed to find the reserved shm block");
 			return -1;
 		}
 	} else {
-		ODP_ERR("Shared memory reserve failed.\n");
+		_ODP_ERR("Shared memory reserve failed.\n");
 		return -1;
 	}
 
@@ -368,7 +368,7 @@ int _odp_crypto_init_global(void)
 
 	cdev_count = rte_cryptodev_count();
 	if (cdev_count == 0) {
-		ODP_PRINT("No crypto devices available\n");
+		_ODP_PRINT("No crypto devices available\n");
 		return 0;
 	}
 
@@ -389,7 +389,7 @@ int _odp_crypto_init_global(void)
 		if (nb_queue_pairs > dev_info.max_nb_queue_pairs) {
 			nb_queue_pairs = dev_info.max_nb_queue_pairs;
 			queue_pairs_shared = true;
-			ODP_PRINT("Using shared queue pairs for crypto device %"
+			_ODP_PRINT("Using shared queue pairs for crypto device %"
 				  PRIu16 " (driver: %s)\n",
 				  cdev_id, dev_info.driver_name);
 		}
@@ -429,20 +429,18 @@ int _odp_crypto_init_global(void)
 								   0,
 								   socket_id);
 			if (mp == NULL) {
-				ODP_ERR("Cannot create session pool on socket %d\n",
-					socket_id);
+				_ODP_ERR("Cannot create session pool on socket %d\n", socket_id);
 				return -1;
 			}
 
-			ODP_PRINT("Allocated session pool on socket %d\n",
-				  socket_id);
+			_ODP_PRINT("Allocated session pool on socket %d\n", socket_id);
 			global->session_mempool[socket_id] = mp;
 		}
 		mp = global->session_mempool[socket_id];
 
 		rc = rte_cryptodev_configure(cdev_id, &conf);
 		if (rc < 0) {
-			ODP_ERR("Failed to configure cryptodev %u", cdev_id);
+			_ODP_ERR("Failed to configure cryptodev %u", cdev_id);
 			return -1;
 		}
 
@@ -456,16 +454,15 @@ int _odp_crypto_init_global(void)
 							    &qp_conf,
 							    socket_id);
 			if (rc < 0) {
-				ODP_ERR("Fail to setup queue pair %u on dev %u",
-					queue_pair, cdev_id);
+				_ODP_ERR("Fail to setup queue pair %u on dev %u",
+					 queue_pair, cdev_id);
 				return -1;
 			}
 		}
 
 		rc = rte_cryptodev_start(cdev_id);
 		if (rc < 0) {
-			ODP_ERR("Failed to start device %u: error %d\n",
-				cdev_id, rc);
+			_ODP_ERR("Failed to start device %u: error %d\n", cdev_id, rc);
 			return -1;
 		}
 
@@ -495,7 +492,7 @@ int _odp_crypto_init_global(void)
 					  rte_socket_id());
 
 	if (global->crypto_op_pool == NULL) {
-		ODP_ERR("Cannot create crypto op pool\n");
+		_ODP_ERR("Cannot create crypto op pool\n");
 		return -1;
 	}
 
@@ -619,7 +616,7 @@ int odp_crypto_capability(odp_crypto_capability_t *capability)
 	uint8_t cdev_id, cdev_count;
 
 	if (odp_global_ro.disable.crypto) {
-		ODP_ERR("Crypto is disabled\n");
+		_ODP_ERR("Crypto is disabled\n");
 		return -1;
 	}
 
@@ -631,7 +628,7 @@ int odp_crypto_capability(odp_crypto_capability_t *capability)
 
 	cdev_count = rte_cryptodev_count();
 	if (cdev_count == 0) {
-		ODP_ERR("No crypto devices available\n");
+		_ODP_ERR("No crypto devices available\n");
 		return 0;
 	}
 
@@ -746,7 +743,7 @@ static int cipher_aead_capability(odp_cipher_alg_t cipher,
 
 	cdev_count = rte_cryptodev_count();
 	if (cdev_count == 0) {
-		ODP_ERR("No crypto devices available\n");
+		_ODP_ERR("No crypto devices available\n");
 		return -1;
 	}
 
@@ -798,7 +795,7 @@ static int cipher_capability(odp_cipher_alg_t cipher,
 
 	cdev_count = rte_cryptodev_count();
 	if (cdev_count == 0) {
-		ODP_ERR("No crypto devices available\n");
+		_ODP_ERR("No crypto devices available\n");
 		return -1;
 	}
 
@@ -958,7 +955,7 @@ static int auth_aead_capability(odp_auth_alg_t auth,
 
 	cdev_count = rte_cryptodev_count();
 	if (cdev_count == 0) {
-		ODP_ERR("No crypto devices available\n");
+		_ODP_ERR("No crypto devices available\n");
 		return -1;
 	}
 
@@ -1045,7 +1042,7 @@ static int auth_capability(odp_auth_alg_t auth,
 
 	cdev_count = rte_cryptodev_count();
 	if (cdev_count == 0) {
-		ODP_ERR("No crypto devices available\n");
+		_ODP_ERR("No crypto devices available\n");
 		return -1;
 	}
 
@@ -1129,7 +1126,7 @@ static int get_crypto_aead_dev(struct rte_crypto_sym_xform *aead_xform,
 		/* Check if key size is supported by the algorithm. */
 		if (is_valid_size(aead_xform->aead.key.length,
 				  &cap->sym.aead.key_size) != 0) {
-			ODP_ERR("Unsupported aead key length\n");
+			_ODP_ERR("Unsupported aead key length\n");
 			continue;
 		}
 
@@ -1137,14 +1134,14 @@ static int get_crypto_aead_dev(struct rte_crypto_sym_xform *aead_xform,
 		if (aead_xform->aead.iv.length > MAX_IV_LENGTH ||
 		    is_valid_size(aead_xform->aead.iv.length,
 				  &cap->sym.aead.iv_size) != 0) {
-			ODP_ERR("Unsupported iv length\n");
+			_ODP_ERR("Unsupported iv length\n");
 			continue;
 		}
 
 		/* Check if digest size is supported by the algorithm. */
 		if (is_valid_size(aead_xform->aead.digest_length,
 				  &cap->sym.aead.digest_size) != 0) {
-			ODP_ERR("Unsupported digest length\n");
+			_ODP_ERR("Unsupported digest length\n");
 			continue;
 		}
 
@@ -1183,7 +1180,7 @@ static int get_crypto_dev(struct rte_crypto_sym_xform *cipher_xform,
 		/* Check if key size is supported by the algorithm. */
 		if (is_valid_size(cipher_xform->cipher.key.length,
 				  &cap->sym.cipher.key_size) != 0) {
-			ODP_ERR("Unsupported cipher key length\n");
+			_ODP_ERR("Unsupported cipher key length\n");
 			continue;
 		}
 
@@ -1191,7 +1188,7 @@ static int get_crypto_dev(struct rte_crypto_sym_xform *cipher_xform,
 		if (cipher_xform->cipher.iv.length > MAX_IV_LENGTH ||
 		    is_valid_size(cipher_xform->cipher.iv.length,
 				  &cap->sym.cipher.iv_size) != 0) {
-			ODP_ERR("Unsupported iv length\n");
+			_ODP_ERR("Unsupported iv length\n");
 			continue;
 		}
 
@@ -1227,14 +1224,14 @@ check_auth:
 		/* Check if key size is supported by the algorithm. */
 		if (is_valid_size(auth_xform->auth.key.length,
 				  &cap->sym.auth.key_size) != 0) {
-			ODP_ERR("Unsupported auth key length\n");
+			_ODP_ERR("Unsupported auth key length\n");
 			continue;
 		}
 
 		/* Check if digest size is supported by the algorithm. */
 		if (is_valid_size(auth_xform->auth.digest_length,
 				  &cap->sym.auth.digest_size) != 0) {
-			ODP_ERR("Unsupported digest length\n");
+			_ODP_ERR("Unsupported digest length\n");
 			continue;
 		}
 
@@ -1242,7 +1239,7 @@ check_auth:
 		if (auth_xform->auth.iv.length > MAX_IV_LENGTH ||
 		    is_valid_size(auth_xform->auth.iv.length,
 				  &cap->sym.auth.iv_size) != 0) {
-			ODP_ERR("Unsupported iv length\n");
+			_ODP_ERR("Unsupported iv length\n");
 			continue;
 		}
 
@@ -1316,7 +1313,7 @@ static int crypto_fill_auth_xform(struct rte_crypto_sym_xform *auth_xform,
 
 	auth_xform->auth.digest_length = param->auth_digest_len;
 	if (auth_xform->auth.digest_length > PACKET_DIGEST_MAX) {
-		ODP_ERR("Requested too long digest\n");
+		_ODP_ERR("Requested too long digest\n");
 		return -1;
 	}
 
@@ -1349,20 +1346,20 @@ static int crypto_fill_aead_xform(struct rte_crypto_sym_xform *aead_xform,
 
 	aead_xform->aead.aad_length = param->auth_aad_len;
 	if (aead_xform->aead.aad_length > PACKET_AAD_MAX) {
-		ODP_ERR("Requested too long AAD\n");
+		_ODP_ERR("Requested too long AAD\n");
 		return -1;
 	}
 
 	if (aead_xform->aead.algo == RTE_CRYPTO_AEAD_AES_CCM &&
 	    aead_xform->aead.aad_length + AES_CCM_AAD_OFFSET >
 	    PACKET_AAD_MAX) {
-		ODP_ERR("Requested too long AAD for CCM\n");
+		_ODP_ERR("Requested too long AAD for CCM\n");
 		return -1;
 	}
 
 	aead_xform->aead.digest_length = param->auth_digest_len;
 	if (aead_xform->aead.digest_length > PACKET_DIGEST_MAX) {
-		ODP_ERR("Requested too long digest\n");
+		_ODP_ERR("Requested too long digest\n");
 		return -1;
 	}
 
@@ -1390,7 +1387,7 @@ int odp_crypto_session_create(const odp_crypto_session_param_t *param,
 	crypto_session_entry_t *session = NULL;
 
 	if (odp_global_ro.disable.crypto) {
-		ODP_ERR("Crypto is disabled\n");
+		_ODP_ERR("Crypto is disabled\n");
 		/* Dummy output to avoid compiler warning about uninitialized
 		 * variables */
 		*status = ODP_CRYPTO_SES_ERR_ENOMEM;
@@ -1399,7 +1396,7 @@ int odp_crypto_session_create(const odp_crypto_session_param_t *param,
 	}
 
 	if (rte_cryptodev_count() == 0) {
-		ODP_ERR("No crypto devices available\n");
+		_ODP_ERR("No crypto devices available\n");
 		*status = ODP_CRYPTO_SES_ERR_ENOMEM;
 		goto err;
 	}
@@ -1407,7 +1404,7 @@ int odp_crypto_session_create(const odp_crypto_session_param_t *param,
 	/* Allocate memory for this session */
 	session = alloc_session();
 	if (session == NULL) {
-		ODP_ERR("Failed to allocate a session session");
+		_ODP_ERR("Failed to allocate a session session");
 		*status = ODP_CRYPTO_SES_ERR_ENOMEM;
 		goto err;
 	}
@@ -1468,7 +1465,7 @@ int odp_crypto_session_create(const odp_crypto_session_param_t *param,
 				    &cdev_id);
 	}
 	if (rc) {
-		ODP_ERR("Couldn't find a crypto device");
+		_ODP_ERR("Couldn't find a crypto device");
 		*status = ODP_CRYPTO_SES_ERR_ENOMEM;
 		goto err;
 	}
@@ -1563,7 +1560,7 @@ int _odp_crypto_term_global(void)
 	for (session = global->free; session != NULL; session = session->next)
 		count++;
 	if (count != MAX_SESSIONS) {
-		ODP_ERR("crypto sessions still active\n");
+		_ODP_ERR("crypto sessions still active\n");
 		rc = -1;
 	}
 
@@ -1572,7 +1569,7 @@ int _odp_crypto_term_global(void)
 
 	ret = odp_shm_free(global->shm);
 	if (ret < 0) {
-		ODP_ERR("shm free failed for crypto_pool\n");
+		_ODP_ERR("shm free failed for crypto_pool\n");
 		rc = -1;
 	}
 
@@ -1584,7 +1581,7 @@ odp_crypto_compl_t odp_crypto_compl_from_event(odp_event_t ev)
 {
 	/* This check not mandated by the API specification */
 	if (odp_event_type(ev) != ODP_EVENT_CRYPTO_COMPL)
-		ODP_ABORT("Event not a crypto completion");
+		_ODP_ABORT("Event not a crypto completion");
 	return (odp_crypto_compl_t)ev;
 }
 
@@ -1600,7 +1597,7 @@ void odp_crypto_compl_result(odp_crypto_compl_t completion_event,
 	(void)result;
 
 	/* We won't get such events anyway, so there can be no result */
-	ODP_ASSERT(0);
+	_ODP_ASSERT(0);
 }
 
 void odp_crypto_compl_free(odp_crypto_compl_t completion_event)
@@ -1629,8 +1626,8 @@ uint64_t odp_crypto_session_to_u64(odp_crypto_session_t hdl)
 odp_packet_t odp_crypto_packet_from_event(odp_event_t ev)
 {
 	/* This check not mandated by the API specification */
-	ODP_ASSERT(odp_event_type(ev) == ODP_EVENT_PACKET);
-	ODP_ASSERT(odp_event_subtype(ev) == ODP_EVENT_PACKET_CRYPTO);
+	_ODP_ASSERT(odp_event_type(ev) == ODP_EVENT_PACKET);
+	_ODP_ASSERT(odp_event_subtype(ev) == ODP_EVENT_PACKET_CRYPTO);
 
 	return odp_packet_from_event(ev);
 }
@@ -1653,8 +1650,7 @@ int odp_crypto_result(odp_crypto_packet_result_t *result,
 {
 	odp_crypto_packet_result_t *op_result;
 
-	ODP_ASSERT(odp_event_subtype(odp_packet_to_event(packet)) ==
-		   ODP_EVENT_PACKET_CRYPTO);
+	_ODP_ASSERT(odp_event_subtype(odp_packet_to_event(packet)) == ODP_EVENT_PACKET_CRYPTO);
 
 	op_result = get_op_result_from_packet(packet);
 
@@ -1728,9 +1724,9 @@ static void crypto_fill_aead_param(const crypto_session_entry_t *session,
 	else if (session->p.cipher_iv.data)
 		memcpy(iv_ptr, session->cipher_iv_data, iv_len);
 	else
-		ODP_ASSERT(iv_len == 0);
+		_ODP_ASSERT(iv_len == 0);
 #else
-	ODP_ASSERT(iv_len == 0 || param->cipher_iv_ptr != NULL);
+	_ODP_ASSERT(iv_len == 0 || param->cipher_iv_ptr != NULL);
 	memcpy(iv_ptr, param->cipher_iv_ptr, iv_len);
 #endif
 
@@ -1764,7 +1760,7 @@ static void crypto_fill_sym_param(const crypto_session_entry_t *session,
 		iv_ptr = rte_crypto_op_ctod_offset(op, uint8_t *, IV_OFFSET);
 		memcpy(iv_ptr, session->cipher_iv_data, cipher_iv_len);
 	} else {
-		ODP_ASSERT(cipher_iv_len == 0);
+		_ODP_ASSERT(cipher_iv_len == 0);
 	}
 
 	if (param->auth_iv_ptr) {
@@ -1776,11 +1772,11 @@ static void crypto_fill_sym_param(const crypto_session_entry_t *session,
 						   IV_OFFSET + MAX_IV_LENGTH);
 		memcpy(iv_ptr, session->auth_iv_data, auth_iv_len);
 	} else {
-		ODP_ASSERT(auth_iv_len == 0);
+		_ODP_ASSERT(auth_iv_len == 0);
 	}
 #else
-	ODP_ASSERT(cipher_iv_len == 0 || param->cipher_iv_ptr != NULL);
-	ODP_ASSERT(auth_iv_len == 0 || param->auth_iv_ptr != NULL);
+	_ODP_ASSERT(cipher_iv_len == 0 || param->cipher_iv_ptr != NULL);
+	_ODP_ASSERT(auth_iv_len == 0 || param->auth_iv_ptr != NULL);
 	iv_ptr = rte_crypto_op_ctod_offset(op, uint8_t *, IV_OFFSET);
 	memcpy(iv_ptr, param->cipher_iv_ptr, cipher_iv_len);
 
@@ -1836,7 +1832,7 @@ static int linearize_pkt(const crypto_session_entry_t *session, odp_packet_t pkt
 	odp_packet_move_data(pkt, 0, shift, len);
 	/* We rely on our trunc implementation to not change the handle */
 	rc = odp_packet_trunc_tail(&pkt, shift, NULL, NULL);
-	ODP_ASSERT(rc == 0);
+	_ODP_ASSERT(rc == 0);
 
 	return odp_packet_num_segs(pkt) != 1;
 }
@@ -1849,13 +1845,13 @@ static int copy_data_and_metadata(odp_packet_t dst, odp_packet_t src)
 	md_copy = _odp_packet_copy_md_possible(odp_packet_pool(dst),
 					       odp_packet_pool(src));
 	if (odp_unlikely(md_copy < 0)) {
-		ODP_ERR("Unable to copy packet metadata\n");
+		_ODP_ERR("Unable to copy packet metadata\n");
 		return -1;
 	}
 
 	rc = odp_packet_copy_from_pkt(dst, 0, src, 0, odp_packet_len(src));
 	if (odp_unlikely(rc < 0)) {
-		ODP_ERR("Unable to copy packet data\n");
+		_ODP_ERR("Unable to copy packet data\n");
 		return -1;
 	}
 
@@ -1875,7 +1871,7 @@ static odp_packet_t get_output_packet(const crypto_session_entry_t *session,
 	if (pkt_out == ODP_PACKET_INVALID) {
 		odp_pool_t pool = session->p.output_pool;
 
-		ODP_ASSERT(pool != ODP_POOL_INVALID);
+		_ODP_ASSERT(pool != ODP_POOL_INVALID);
 		if (pool == odp_packet_pool(pkt_in)) {
 			pkt_out = pkt_in;
 		} else {
@@ -1910,11 +1906,11 @@ static int op_alloc(crypto_op_t *op[],
 						  (struct rte_crypto_op **)op,
 						  num_pkts) == 0)) {
 		/* This should not happen since we made op pool big enough */
-		ODP_DBG("falling back to single crypto op alloc\n");
+		_ODP_DBG("falling back to single crypto op alloc\n");
 		op[0] = (crypto_op_t *)rte_crypto_op_alloc(global->crypto_op_pool,
 							   RTE_CRYPTO_OP_TYPE_SYMMETRIC);
 		if (odp_unlikely(op[0] == NULL)) {
-			ODP_ERR("Failed to allocate crypto operation\n");
+			_ODP_ERR("Failed to allocate crypto operation\n");
 			return 0;
 		}
 		num_pkts = 1;
@@ -1924,7 +1920,7 @@ static int op_alloc(crypto_op_t *op[],
 		odp_packet_t pkt;
 
 		session = (crypto_session_entry_t *)(intptr_t)param[n].session;
-		ODP_ASSERT(session != NULL);
+		_ODP_ASSERT(session != NULL);
 
 		pkt = get_output_packet(session, pkt_in[n], pkt_out[n]);
 		if (odp_unlikely(pkt == ODP_PACKET_INVALID)) {
@@ -2014,7 +2010,7 @@ static void dev_enq_deq(uint8_t cdev_id, int thread_id, crypto_op_t *op[], int n
 		 */
 		for (int n = rc; n < num_op; n++)
 			op[n]->state.status = S_ERROR;
-		ODP_ERR("Failed to enqueue crypto operations\n");
+		_ODP_ERR("Failed to enqueue crypto operations\n");
 		num_op = rc;
 		if (num_op == 0)
 			return;
@@ -2035,7 +2031,7 @@ static void dev_enq_deq(uint8_t cdev_id, int thread_id, crypto_op_t *op[], int n
 		if (odp_unlikely(rc == 0)) {
 			odp_time_wait_ns(DEQ_RETRY_DELAY_NS);
 			if (++retry_count == MAX_DEQ_RETRIES) {
-				ODP_ERR("Failed to dequeue crypto operations\n");
+				_ODP_ERR("Failed to dequeue crypto operations\n");
 				/*
 				 * We cannot give up and return to the caller
 				 * since some packets and crypto operations
@@ -2049,8 +2045,8 @@ static void dev_enq_deq(uint8_t cdev_id, int thread_id, crypto_op_t *op[], int n
 		odp_spinlock_unlock(&global->lock);
 
 	for (int n = 0; n < num_dequeued; n++) {
-		ODP_ASSERT((crypto_op_t *)deq_op[n] == op[n]);
-		ODP_ASSERT((odp_packet_t)deq_op[n]->sym->m_src == op[n]->state.pkt);
+		_ODP_ASSERT((crypto_op_t *)deq_op[n] == op[n]);
+		_ODP_ASSERT((odp_packet_t)deq_op[n]->sym->m_src == op[n]->state.pkt);
 	}
 }
 
@@ -2249,7 +2245,7 @@ int odp_crypto_op(const odp_packet_t pkt_in[],
 
 	for (i = 0; i < num_pkt; i++) {
 		session = (crypto_session_entry_t *)(intptr_t)param[i].session;
-		ODP_ASSERT(ODP_CRYPTO_SYNC == session->p.op_mode);
+		_ODP_ASSERT(ODP_CRYPTO_SYNC == session->p.op_mode);
 	}
 	return odp_crypto_int(pkt_in, pkt_out, param, num_pkt);
 }
@@ -2269,8 +2265,8 @@ int odp_crypto_op_enq(const odp_packet_t pkt_in[],
 
 	for (i = 0; i < num_pkt; i++) {
 		session = (crypto_session_entry_t *)(intptr_t)param[i].session;
-		ODP_ASSERT(ODP_CRYPTO_ASYNC == session->p.op_mode);
-		ODP_ASSERT(ODP_QUEUE_INVALID != session->p.compl_queue);
+		_ODP_ASSERT(ODP_CRYPTO_ASYNC == session->p.op_mode);
+		_ODP_ASSERT(ODP_QUEUE_INVALID != session->p.compl_queue);
 
 		out_pkts[i] = pkt_out[i];
 	}

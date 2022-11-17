@@ -25,6 +25,7 @@
 #include <odp_packet_internal.h>
 #include <odp_packet_io_internal.h>
 #include <odp_pool_internal.h>
+#include <odp_print_internal.h>
 
 /* Inlined API functions */
 #include <odp/api/plat/byteorder_inlines.h>
@@ -65,7 +66,8 @@ const _odp_packet_inline_offset_t _odp_packet_inline ODP_ALIGNED_CACHE = {
 	.timestamp      = offsetof(odp_packet_hdr_t, timestamp),
 	.input_flags    = offsetof(odp_packet_hdr_t, p.input_flags),
 	.flags          = offsetof(odp_packet_hdr_t, p.flags),
-	.subtype        = offsetof(odp_packet_hdr_t, subtype)
+	.subtype        = offsetof(odp_packet_hdr_t, subtype),
+	.cls_mark       = offsetof(odp_packet_hdr_t, cls_mark)
 
 };
 
@@ -290,7 +292,7 @@ static inline void link_segments(odp_packet_hdr_t *pkt_hdr[], int num)
 			ref_cnt = &pkt_hdr[cur]->ref_cnt;
 			prev_ref = odp_atomic_fetch_inc_u32(ref_cnt);
 
-			ODP_ASSERT(prev_ref == 0);
+			_ODP_ASSERT(prev_ref == 0);
 		}
 
 		cur++;
@@ -325,7 +327,7 @@ static inline void init_segments(odp_packet_hdr_t *pkt_hdr[], int num)
 		uint32_t prev_ref =
 			odp_atomic_fetch_inc_u32(&hdr->ref_cnt);
 
-		ODP_ASSERT(prev_ref == 0);
+		_ODP_ASSERT(prev_ref == 0);
 	}
 
 	/* Link segments */
@@ -693,7 +695,7 @@ void odp_packet_free(odp_packet_t pkt)
 	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
 	int num_seg = pkt_hdr->seg_count;
 
-	ODP_ASSERT(segment_ref(pkt_hdr) > 0);
+	_ODP_ASSERT(segment_ref(pkt_hdr) > 0);
 
 	if (odp_likely(num_seg == 1))
 		packet_free_multi(&pkt_hdr, 1);
@@ -711,7 +713,7 @@ void odp_packet_free_multi(const odp_packet_t pkt[], int num)
 		odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt[i]);
 		int num_seg = pkt_hdr->seg_count;
 
-		ODP_ASSERT(segment_ref(pkt_hdr) > 0);
+		_ODP_ASSERT(segment_ref(pkt_hdr) > 0);
 
 		if (odp_unlikely(num_seg > 1)) {
 			free_all_segments(pkt_hdr, num_seg);
@@ -904,7 +906,7 @@ void *odp_packet_push_tail(odp_packet_t pkt, uint32_t len)
 	if (len > pkt_hdr->tailroom)
 		return NULL;
 
-	ODP_ASSERT(odp_packet_has_ref(pkt) == 0);
+	_ODP_ASSERT(odp_packet_has_ref(pkt) == 0);
 
 	old_tail = packet_tail(pkt_hdr);
 	push_tail(pkt_hdr, len);
@@ -921,7 +923,7 @@ int odp_packet_extend_tail(odp_packet_t *pkt, uint32_t len,
 	uint32_t tail_off  = frame_len;
 	int ret = 0;
 
-	ODP_ASSERT(odp_packet_has_ref(*pkt) == 0);
+	_ODP_ASSERT(odp_packet_has_ref(*pkt) == 0);
 
 	if (len > tailroom) {
 		pool_t *pool = _odp_pool_entry(pkt_hdr->event_hdr.pool);
@@ -958,7 +960,7 @@ void *odp_packet_pull_tail(odp_packet_t pkt, uint32_t len)
 	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
 	odp_packet_hdr_t *last_seg = packet_last_seg(pkt_hdr);
 
-	ODP_ASSERT(odp_packet_has_ref(pkt) == 0);
+	_ODP_ASSERT(odp_packet_has_ref(pkt) == 0);
 
 	if (len >= last_seg->seg_len)
 		return NULL;
@@ -979,7 +981,7 @@ int odp_packet_trunc_tail(odp_packet_t *pkt, uint32_t len,
 	if (len >= pkt_hdr->frame_len)
 		return -1;
 
-	ODP_ASSERT(odp_packet_has_ref(*pkt) == 0);
+	_ODP_ASSERT(odp_packet_has_ref(*pkt) == 0);
 
 	last     = pkt_hdr->seg_count - 1;
 	last_seg = packet_last_seg(pkt_hdr);
@@ -1026,53 +1028,6 @@ void *odp_packet_offset(odp_packet_t pkt, uint32_t offset, uint32_t *len,
  *
  */
 
-void odp_packet_user_ptr_set(odp_packet_t pkt, const void *ptr)
-{
-	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
-
-	if (odp_unlikely(ptr == NULL)) {
-		pkt_hdr->p.flags.user_ptr_set = 0;
-		return;
-	}
-
-	pkt_hdr->user_ptr = ptr;
-	pkt_hdr->p.flags.user_ptr_set = 1;
-}
-
-int odp_packet_l2_offset_set(odp_packet_t pkt, uint32_t offset)
-{
-	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
-
-	if (offset >= pkt_hdr->frame_len)
-		return -1;
-
-	packet_hdr_has_l2_set(pkt_hdr, 1);
-	pkt_hdr->p.l2_offset = offset;
-	return 0;
-}
-
-int odp_packet_l3_offset_set(odp_packet_t pkt, uint32_t offset)
-{
-	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
-
-	if (offset >= pkt_hdr->frame_len)
-		return -1;
-
-	pkt_hdr->p.l3_offset = offset;
-	return 0;
-}
-
-int odp_packet_l4_offset_set(odp_packet_t pkt, uint32_t offset)
-{
-	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
-
-	if (offset >= pkt_hdr->frame_len)
-		return -1;
-
-	pkt_hdr->p.l4_offset = offset;
-	return 0;
-}
-
 uint16_t odp_packet_ones_comp(odp_packet_t pkt, odp_packet_data_range_t *range)
 {
 	(void)pkt;
@@ -1081,60 +1036,11 @@ uint16_t odp_packet_ones_comp(odp_packet_t pkt, odp_packet_data_range_t *range)
 	return 0;
 }
 
-void odp_packet_l3_chksum_insert(odp_packet_t pkt, int insert)
-{
-	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
-
-	pkt_hdr->p.flags.l3_chksum_set = 1;
-	pkt_hdr->p.flags.l3_chksum = insert;
-}
-
-void odp_packet_l4_chksum_insert(odp_packet_t pkt, int insert)
-{
-	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
-
-	pkt_hdr->p.flags.l4_chksum_set = 1;
-	pkt_hdr->p.flags.l4_chksum = insert;
-}
-
-odp_packet_chksum_status_t odp_packet_l3_chksum_status(odp_packet_t pkt)
-{
-	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
-
-	if (!pkt_hdr->p.input_flags.l3_chksum_done)
-		return ODP_PACKET_CHKSUM_UNKNOWN;
-
-	if (pkt_hdr->p.flags.l3_chksum_err)
-		return ODP_PACKET_CHKSUM_BAD;
-
-	return ODP_PACKET_CHKSUM_OK;
-}
-
-odp_packet_chksum_status_t odp_packet_l4_chksum_status(odp_packet_t pkt)
-{
-	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
-
-	if (!pkt_hdr->p.input_flags.l4_chksum_done)
-		return ODP_PACKET_CHKSUM_UNKNOWN;
-
-	if (pkt_hdr->p.flags.l4_chksum_err)
-		return ODP_PACKET_CHKSUM_BAD;
-
-	return ODP_PACKET_CHKSUM_OK;
-}
-
 void odp_packet_flow_hash_set(odp_packet_t pkt, uint32_t flow_hash)
 {
 	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
 
 	packet_set_flow_hash(pkt_hdr, flow_hash);
-}
-
-void odp_packet_ts_set(odp_packet_t pkt, odp_time_t timestamp)
-{
-	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
-
-	packet_set_ts(pkt_hdr, &timestamp);
 }
 
 /*
@@ -1231,7 +1137,7 @@ int odp_packet_align(odp_packet_t *pkt, uint32_t offset, uint32_t len,
 	if (align > ODP_CACHE_LINE_SIZE)
 		return -1;
 
-	ODP_ASSERT(odp_packet_has_ref(*pkt) == 0);
+	_ODP_ASSERT(odp_packet_has_ref(*pkt) == 0);
 
 	if (seglen >= len) {
 		misalign = align <= 1 ? 0 :
@@ -1270,10 +1176,10 @@ int odp_packet_concat(odp_packet_t *dst, odp_packet_t src)
 	uint32_t dst_len = dst_hdr->frame_len;
 	uint32_t src_len = src_hdr->frame_len;
 
-	ODP_ASSERT(odp_packet_has_ref(*dst) == 0);
+	_ODP_ASSERT(odp_packet_has_ref(*dst) == 0);
 
 	if (odp_unlikely(dst_len + src_len > dst_pool->max_len)) {
-		ODP_ERR("concat would result oversized packet\n");
+		_ODP_ERR("concat would result oversized packet\n");
 		return -1;
 	}
 
@@ -1311,7 +1217,7 @@ int odp_packet_split(odp_packet_t *pkt, uint32_t len, odp_packet_t *tail)
 	if (len >= pktlen || tail == NULL)
 		return -1;
 
-	ODP_ASSERT(odp_packet_has_ref(*pkt) == 0);
+	_ODP_ASSERT(odp_packet_has_ref(*pkt) == 0);
 
 	*tail = odp_packet_copy_part(*pkt, len, pktlen - len,
 				     odp_packet_pool(*pkt));
@@ -1338,7 +1244,7 @@ odp_packet_t odp_packet_copy(odp_packet_t pkt, odp_pool_t pool)
 
 	md_copy = _odp_packet_copy_md_possible(pool, odp_packet_pool(pkt));
 	if (odp_unlikely(md_copy < 0)) {
-		ODP_ERR("Unable to copy packet metadata\n");
+		_ODP_ERR("Unable to copy packet metadata\n");
 		return ODP_PACKET_INVALID;
 	}
 
@@ -1472,7 +1378,7 @@ int _odp_packet_cmp_data(odp_packet_t pkt, uint32_t offset,
 	int ret;
 	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
 
-	ODP_ASSERT(offset + len <= pkt_hdr->frame_len);
+	_ODP_ASSERT(offset + len <= pkt_hdr->frame_len);
 
 	while (len > 0) {
 		mapaddr = packet_map(pkt_hdr, offset, &seglen, NULL);
@@ -1499,31 +1405,31 @@ static int packet_print_input_flags(odp_packet_hdr_t *hdr, char *str, int max)
 	int len = 0;
 
 	if (hdr->p.input_flags.l2)
-		len += snprintf(&str[len], max - len, "l2 ");
+		len += _odp_snprint(&str[len], max - len, "l2 ");
 	if (hdr->p.input_flags.l3)
-		len += snprintf(&str[len], max - len, "l3 ");
+		len += _odp_snprint(&str[len], max - len, "l3 ");
 	if (hdr->p.input_flags.l4)
-		len += snprintf(&str[len], max - len, "l4 ");
+		len += _odp_snprint(&str[len], max - len, "l4 ");
 	if (hdr->p.input_flags.eth)
-		len += snprintf(&str[len], max - len, "eth ");
+		len += _odp_snprint(&str[len], max - len, "eth ");
 	if (hdr->p.input_flags.vlan)
-		len += snprintf(&str[len], max - len, "vlan ");
+		len += _odp_snprint(&str[len], max - len, "vlan ");
 	if (hdr->p.input_flags.arp)
-		len += snprintf(&str[len], max - len, "arp ");
+		len += _odp_snprint(&str[len], max - len, "arp ");
 	if (hdr->p.input_flags.ipv4)
-		len += snprintf(&str[len], max - len, "ipv4 ");
+		len += _odp_snprint(&str[len], max - len, "ipv4 ");
 	if (hdr->p.input_flags.ipv6)
-		len += snprintf(&str[len], max - len, "ipv6 ");
+		len += _odp_snprint(&str[len], max - len, "ipv6 ");
 	if (hdr->p.input_flags.ipsec)
-		len += snprintf(&str[len], max - len, "ipsec ");
+		len += _odp_snprint(&str[len], max - len, "ipsec ");
 	if (hdr->p.input_flags.udp)
-		len += snprintf(&str[len], max - len, "udp ");
+		len += _odp_snprint(&str[len], max - len, "udp ");
 	if (hdr->p.input_flags.tcp)
-		len += snprintf(&str[len], max - len, "tcp ");
+		len += _odp_snprint(&str[len], max - len, "tcp ");
 	if (hdr->p.input_flags.sctp)
-		len += snprintf(&str[len], max - len, "sctp ");
+		len += _odp_snprint(&str[len], max - len, "sctp ");
 	if (hdr->p.input_flags.icmp)
-		len += snprintf(&str[len], max - len, "icmp ");
+		len += _odp_snprint(&str[len], max - len, "icmp ");
 
 	return len;
 }
@@ -1537,40 +1443,45 @@ void odp_packet_print(odp_packet_t pkt)
 	int n = max_len - 1;
 	odp_packet_hdr_t *hdr = packet_hdr(pkt);
 
-	len += snprintf(&str[len], n - len, "Packet\n------\n");
-	len += snprintf(&str[len], n - len, "  pool index   %u\n", hdr->event_hdr.index.pool);
-	len += snprintf(&str[len], n - len, "  buf index    %u\n", hdr->event_hdr.index.event);
-	len += snprintf(&str[len], n - len, "  ev subtype   %i\n", hdr->subtype);
-	len += snprintf(&str[len], n - len, "  input_flags  0x%" PRIx64 "\n",
-			hdr->p.input_flags.all);
+	len += _odp_snprint(&str[len], n - len, "Packet info\n");
+	len += _odp_snprint(&str[len], n - len, "-----------\n");
+	len += _odp_snprint(&str[len], n - len, "  handle         0x%" PRIx64 "\n",
+			    odp_packet_to_u64(pkt));
+	len += _odp_snprint(&str[len], n - len, "  pool index     %u\n", hdr->event_hdr.index.pool);
+	len += _odp_snprint(&str[len], n - len, "  buf index      %u\n",
+			    hdr->event_hdr.index.event);
+	len += _odp_snprint(&str[len], n - len, "  ev subtype     %i\n", hdr->subtype);
+	len += _odp_snprint(&str[len], n - len, "  input_flags    0x%" PRIx64 "\n",
+			    hdr->p.input_flags.all);
 	if (hdr->p.input_flags.all) {
-		len += snprintf(&str[len], n - len, "               ");
+		len += _odp_snprint(&str[len], n - len, "                 ");
 		len += packet_print_input_flags(hdr, &str[len], n - len);
-		len += snprintf(&str[len], n - len, "\n");
+		len += _odp_snprint(&str[len], n - len, "\n");
 	}
-	len += snprintf(&str[len], n - len, "  flags        0x%" PRIx32 "\n",
-			hdr->p.flags.all_flags);
-	len += snprintf(&str[len], n - len, "  cls_mark     %" PRIu64 "\n",
-			odp_packet_cls_mark(pkt));
-	len += snprintf(&str[len], n - len,
-			"  l2_offset    %" PRIu32 "\n", hdr->p.l2_offset);
-	len += snprintf(&str[len], n - len,
-			"  l3_offset    %" PRIu32 "\n", hdr->p.l3_offset);
-	len += snprintf(&str[len], n - len,
-			"  l4_offset    %" PRIu32 "\n", hdr->p.l4_offset);
-	len += snprintf(&str[len], n - len,
-			"  frame_len    %" PRIu32 "\n", hdr->frame_len);
-	len += snprintf(&str[len], n - len,
-			"  input        %" PRIu64 "\n",
-			odp_pktio_to_u64(hdr->input));
-	len += snprintf(&str[len], n - len,
-			"  headroom     %" PRIu32 "\n",
-			odp_packet_headroom(pkt));
-	len += snprintf(&str[len], n - len,
-			"  tailroom     %" PRIu32 "\n",
-			odp_packet_tailroom(pkt));
-	len += snprintf(&str[len], n - len,
-			"  num_segs     %i\n", odp_packet_num_segs(pkt));
+	len += _odp_snprint(&str[len], n - len,
+			    "  flags          0x%" PRIx32 "\n", hdr->p.flags.all_flags);
+	len += _odp_snprint(&str[len], n - len,
+			    "  cls_mark       %" PRIu64 "\n", odp_packet_cls_mark(pkt));
+	len += _odp_snprint(&str[len], n - len,
+			    "  user ptr       %p\n", hdr->user_ptr);
+	len += _odp_snprint(&str[len], n - len,
+			    "  user area      %p\n", hdr->uarea_addr);
+	len += _odp_snprint(&str[len], n - len,
+			    "  l2_offset      %" PRIu32 "\n", hdr->p.l2_offset);
+	len += _odp_snprint(&str[len], n - len,
+			    "  l3_offset      %" PRIu32 "\n", hdr->p.l3_offset);
+	len += _odp_snprint(&str[len], n - len,
+			    "  l4_offset      %" PRIu32 "\n", hdr->p.l4_offset);
+	len += _odp_snprint(&str[len], n - len,
+			    "  frame_len      %" PRIu32 "\n", hdr->frame_len);
+	len += _odp_snprint(&str[len], n - len,
+			    "  input          %" PRIu64 "\n", odp_pktio_to_u64(hdr->input));
+	len += _odp_snprint(&str[len], n - len,
+			    "  headroom       %" PRIu32 "\n", odp_packet_headroom(pkt));
+	len += _odp_snprint(&str[len], n - len,
+			    "  tailroom       %" PRIu32 "\n", odp_packet_tailroom(pkt));
+	len += _odp_snprint(&str[len], n - len,
+			    "  num_segs       %i\n", odp_packet_num_segs(pkt));
 
 	seg = odp_packet_first_seg(pkt);
 
@@ -1579,25 +1490,22 @@ void odp_packet_print(odp_packet_t pkt)
 		char seg_str[max_len];
 		int str_len;
 
-		str_len = snprintf(&seg_str[0], max_len,
-				   "    [%d] seg_len %-4" PRIu32 "  seg_data %p "
-				   " ref_cnt %u\n",
-				   seg_idx,
-				   odp_packet_seg_data_len(pkt, seg),
-				   odp_packet_seg_data(pkt, seg),
-				   segment_ref(seg_hdr));
+		str_len = _odp_snprint(&seg_str[0], max_len,
+				       "    [%d] seg_len %-4" PRIu32 "  seg_data %p  ref_cnt %u\n",
+				       seg_idx, odp_packet_seg_data_len(pkt, seg),
+				       odp_packet_seg_data(pkt, seg), segment_ref(seg_hdr));
 
 		/* Prevent print buffer overflow */
 		if (n - len - str_len < 10) {
-			len += snprintf(&str[len], n - len, "    ...\n");
+			len += _odp_snprint(&str[len], n - len, "    ...\n");
 			break;
 		}
-		len += snprintf(&str[len], n - len, "%s", seg_str);
+		len += _odp_snprint(&str[len], n - len, "%s", seg_str);
 
 		seg = odp_packet_next_seg(pkt, seg);
 	}
 
-	ODP_PRINT("%s\n", str);
+	_ODP_PRINT("%s\n", str);
 }
 
 void odp_packet_print_data(odp_packet_t pkt, uint32_t offset,
@@ -1613,26 +1521,28 @@ void odp_packet_print_data(odp_packet_t pkt, uint32_t offset,
 	uint32_t data_len = odp_packet_len(pkt);
 	pool_t *pool = _odp_pool_entry(hdr->event_hdr.pool);
 
-	len += snprintf(&str[len], n - len, "Packet\n------\n");
-	len += snprintf(&str[len], n - len,
-			"  pool index    %" PRIu32 "\n", pool->pool_idx);
-	len += snprintf(&str[len], n - len,
-			"  buf index     %" PRIu32 "\n",
-			hdr->event_hdr.index.event);
-	len += snprintf(&str[len], n - len,
-			"  seg_count     %" PRIu16 "\n", hdr->seg_count);
-	len += snprintf(&str[len], n - len,
-			"  data len      %" PRIu32 "\n", data_len);
-	len += snprintf(&str[len], n - len,
-			"  data ptr      %p\n", odp_packet_data(pkt));
-	len += snprintf(&str[len], n - len,
-			"  print offset  %" PRIu32 "\n", offset);
-	len += snprintf(&str[len], n - len,
-			"  print length  %" PRIu32 "\n", byte_len);
+	len += _odp_snprint(&str[len], n - len, "Packet data\n");
+	len += _odp_snprint(&str[len], n - len, "-----------\n");
+	len += _odp_snprint(&str[len], n - len,
+			    "  handle         0x%" PRIx64 "\n", odp_packet_to_u64(pkt));
+	len += _odp_snprint(&str[len], n - len,
+			    "  pool index     %" PRIu32 "\n", pool->pool_idx);
+	len += _odp_snprint(&str[len], n - len,
+			    "  buf index      %" PRIu32 "\n", hdr->event_hdr.index.event);
+	len += _odp_snprint(&str[len], n - len,
+			    "  seg_count      %" PRIu16 "\n", hdr->seg_count);
+	len += _odp_snprint(&str[len], n - len,
+			    "  data len       %" PRIu32 "\n", data_len);
+	len += _odp_snprint(&str[len], n - len,
+			    "  data ptr       %p\n", odp_packet_data(pkt));
+	len += _odp_snprint(&str[len], n - len,
+			    "  print offset   %" PRIu32 "\n", offset);
+	len += _odp_snprint(&str[len], n - len,
+			    "  print length   %" PRIu32 "\n", byte_len);
 
 	if (offset + byte_len > data_len) {
-		len += snprintf(&str[len], n - len, " BAD OFFSET OR LEN\n");
-		ODP_PRINT("%s\n", str);
+		len += _odp_snprint(&str[len], n - len, " BAD OFFSET OR LEN\n");
+		_ODP_PRINT("%s\n", str);
 		return;
 	}
 
@@ -1648,18 +1558,18 @@ void odp_packet_print_data(odp_packet_t pkt, uint32_t offset,
 
 		odp_packet_copy_to_mem(pkt, offset, copy_len, data);
 
-		len += snprintf(&str[len], n - len, " ");
+		len += _odp_snprint(&str[len], n - len, " ");
 
 		for (i = 0; i < copy_len; i++)
-			len += snprintf(&str[len], n - len, " %02x", data[i]);
+			len += _odp_snprint(&str[len], n - len, " %02x", data[i]);
 
-		len += snprintf(&str[len], n - len, "\n");
+		len += _odp_snprint(&str[len], n - len, "\n");
 
 		byte_len -= copy_len;
 		offset   += copy_len;
 	}
 
-	ODP_PRINT("%s\n", str);
+	_ODP_PRINT("%s\n", str);
 }
 
 int odp_packet_is_valid(odp_packet_t pkt)
@@ -1957,7 +1867,7 @@ int _odp_packet_l4_chksum(odp_packet_hdr_t *pkt_hdr,
 		if (sum != 0) {
 			pkt_hdr->p.flags.l4_chksum_err = 1;
 			pkt_hdr->p.flags.udp_err = 1;
-			ODP_DBG("UDP chksum fail (%x)!\n", sum);
+			_ODP_DBG("UDP chksum fail (%x)!\n", sum);
 			if (opt.bit.drop_udp_err)
 				return -1;
 		}
@@ -1977,7 +1887,7 @@ int _odp_packet_l4_chksum(odp_packet_hdr_t *pkt_hdr,
 		if (sum != 0) {
 			pkt_hdr->p.flags.l4_chksum_err = 1;
 			pkt_hdr->p.flags.tcp_err = 1;
-			ODP_DBG("TCP chksum fail (%x)!\n", sum);
+			_ODP_DBG("TCP chksum fail (%x)!\n", sum);
 			if (opt.bit.drop_tcp_err)
 				return -1;
 		}
@@ -2009,8 +1919,7 @@ int _odp_packet_l4_chksum(odp_packet_hdr_t *pkt_hdr,
 		if (sum != sctp->chksum) {
 			pkt_hdr->p.flags.l4_chksum_err = 1;
 			pkt_hdr->p.flags.sctp_err = 1;
-			ODP_DBG("SCTP chksum fail (%x/%x)!\n", sum,
-				sctp->chksum);
+			_ODP_DBG("SCTP chksum fail (%x/%x)!\n", sum, sctp->chksum);
 			if (opt.bit.drop_sctp_err)
 				return -1;
 		}
@@ -2025,6 +1934,7 @@ int odp_packet_parse(odp_packet_t pkt, uint32_t offset,
 	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
 	const uint8_t *data;
 	uint32_t seg_len;
+	uint32_t seg_end;
 	uint32_t packet_len = pkt_hdr->frame_len;
 	odp_proto_t proto = param->proto;
 	odp_proto_layer_t layer = param->last_layer;
@@ -2057,6 +1967,8 @@ int odp_packet_parse(odp_packet_t pkt, uint32_t offset,
 		data = buf;
 	}
 
+	seg_end = offset + seg_len; /* one past the maximum offset */
+
 	/* Reset parser flags, keep other flags */
 	packet_parse_reset(pkt_hdr, 0);
 
@@ -2080,7 +1992,7 @@ int odp_packet_parse(odp_packet_t pkt, uint32_t offset,
 	opt.bit.sctp_chksum = param->chksums.chksum.sctp;
 
 	ret = _odp_packet_parse_common_l3_l4(&pkt_hdr->p, data, offset,
-					     packet_len, seg_len, layer,
+					     packet_len, seg_end, layer,
 					     ethtype, &l4_part_sum, opt);
 
 	if (ret)
@@ -2190,14 +2102,14 @@ odp_packet_t odp_packet_ref(odp_packet_t pkt, uint32_t offset)
 	new = odp_packet_copy(pkt, odp_packet_pool(pkt));
 
 	if (new == ODP_PACKET_INVALID) {
-		ODP_ERR("copy failed\n");
+		_ODP_ERR("copy failed\n");
 		return ODP_PACKET_INVALID;
 	}
 
 	ret = odp_packet_trunc_head(&new, offset, NULL, NULL);
 
 	if (ret < 0) {
-		ODP_ERR("trunk_head failed\n");
+		_ODP_ERR("trunk_head failed\n");
 		odp_packet_free(new);
 		return ODP_PACKET_INVALID;
 	}
@@ -2214,14 +2126,14 @@ odp_packet_t odp_packet_ref_pkt(odp_packet_t pkt, uint32_t offset,
 	ref = odp_packet_ref(pkt, offset);
 
 	if (ref == ODP_PACKET_INVALID) {
-		ODP_DBG("reference create failed\n");
+		_ODP_DBG("reference create failed\n");
 		return ODP_PACKET_INVALID;
 	}
 
 	ret = odp_packet_concat(&hdr, ref);
 
 	if (ret < 0) {
-		ODP_DBG("concat failed\n");
+		_ODP_DBG("concat failed\n");
 		odp_packet_free(ref);
 		return ODP_PACKET_INVALID;
 	}
@@ -2244,73 +2156,6 @@ int odp_packet_has_ref(odp_packet_t pkt)
 	}
 
 	return 0;
-}
-
-odp_proto_l2_type_t odp_packet_l2_type(odp_packet_t pkt)
-{
-	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
-
-	if (pkt_hdr->p.input_flags.eth)
-		return ODP_PROTO_L2_TYPE_ETH;
-
-	return ODP_PROTO_L2_TYPE_NONE;
-}
-
-odp_proto_l3_type_t odp_packet_l3_type(odp_packet_t pkt)
-{
-	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
-
-	if (pkt_hdr->p.input_flags.ipv4)
-		return ODP_PROTO_L3_TYPE_IPV4;
-	else if (pkt_hdr->p.input_flags.ipv6)
-		return ODP_PROTO_L3_TYPE_IPV6;
-	else if (pkt_hdr->p.input_flags.arp)
-		return ODP_PROTO_L3_TYPE_ARP;
-
-	return ODP_PROTO_L3_TYPE_NONE;
-}
-
-odp_proto_l4_type_t odp_packet_l4_type(odp_packet_t pkt)
-{
-	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
-
-	if (pkt_hdr->p.input_flags.tcp)
-		return ODP_PROTO_L4_TYPE_TCP;
-	else if (pkt_hdr->p.input_flags.udp)
-		return ODP_PROTO_L4_TYPE_UDP;
-	else if (pkt_hdr->p.input_flags.sctp)
-		return ODP_PROTO_L4_TYPE_SCTP;
-	else if (pkt_hdr->p.input_flags.ipsec_ah)
-		return ODP_PROTO_L4_TYPE_AH;
-	else if (pkt_hdr->p.input_flags.ipsec_esp)
-		return ODP_PROTO_L4_TYPE_ESP;
-	else if (pkt_hdr->p.input_flags.icmp &&
-		 pkt_hdr->p.input_flags.ipv4)
-		return ODP_PROTO_L4_TYPE_ICMPV4;
-	else if (pkt_hdr->p.input_flags.icmp &&
-		 pkt_hdr->p.input_flags.ipv6)
-		return ODP_PROTO_L4_TYPE_ICMPV6;
-	else if (pkt_hdr->p.input_flags.no_next_hdr)
-		return ODP_PROTO_L4_TYPE_NO_NEXT;
-
-	return ODP_PROTO_L4_TYPE_NONE;
-}
-
-uint64_t odp_packet_cls_mark(odp_packet_t pkt)
-{
-	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
-
-	if (pkt_hdr->p.input_flags.cls_mark)
-		return pkt_hdr->cls_mark;
-
-	return 0;
-}
-
-void odp_packet_ts_request(odp_packet_t pkt, int enable)
-{
-	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
-
-	pkt_hdr->p.flags.ts_set = !!enable;
 }
 
 void odp_packet_lso_request_clr(odp_packet_t pkt)
@@ -2382,7 +2227,7 @@ int odp_packet_has_tx_compl_request(odp_packet_t pkt)
 void odp_packet_tx_compl_free(odp_packet_tx_compl_t tx_compl)
 {
 	if (odp_unlikely(tx_compl == ODP_PACKET_TX_COMPL_INVALID)) {
-		ODP_ERR("Bad TX completion event handle\n");
+		_ODP_ERR("Bad TX completion event handle\n");
 		return;
 	}
 
@@ -2392,7 +2237,7 @@ void odp_packet_tx_compl_free(odp_packet_tx_compl_t tx_compl)
 void *odp_packet_tx_compl_user_ptr(odp_packet_tx_compl_t tx_compl)
 {
 	if (odp_unlikely(tx_compl == ODP_PACKET_TX_COMPL_INVALID)) {
-		ODP_ERR("Bad TX completion event handle\n");
+		_ODP_ERR("Bad TX completion event handle\n");
 		return NULL;
 	}
 
@@ -2434,17 +2279,17 @@ uint32_t odp_packet_disassemble(odp_packet_t pkt, odp_packet_buf_t pkt_buf[], ui
 	uint32_t num_segs = odp_packet_num_segs(pkt);
 
 	if (odp_unlikely(pool->type != ODP_POOL_PACKET)) {
-		ODP_ERR("Not a packet pool\n");
+		_ODP_ERR("Not a packet pool\n");
 		return 0;
 	}
 
 	if (odp_unlikely(pool->pool_ext == 0)) {
-		ODP_ERR("Not an external memory pool\n");
+		_ODP_ERR("Not an external memory pool\n");
 		return 0;
 	}
 
 	if (odp_unlikely(num < num_segs)) {
-		ODP_ERR("Not enough buffer handles %u. Packet has %u segments.\n", num, num_segs);
+		_ODP_ERR("Not enough buffer handles %u. Packet has %u segments.\n", num, num_segs);
 		return 0;
 	}
 
@@ -2468,17 +2313,17 @@ odp_packet_t odp_packet_reassemble(odp_pool_t pool_hdl, odp_packet_buf_t pkt_buf
 	pool_t *pool = _odp_pool_entry(pool_hdl);
 
 	if (odp_unlikely(pool->type != ODP_POOL_PACKET)) {
-		ODP_ERR("Not a packet pool\n");
+		_ODP_ERR("Not a packet pool\n");
 		return ODP_PACKET_INVALID;
 	}
 
 	if (odp_unlikely(pool->pool_ext == 0)) {
-		ODP_ERR("Not an external memory pool\n");
+		_ODP_ERR("Not an external memory pool\n");
 		return ODP_PACKET_INVALID;
 	}
 
 	if (odp_unlikely(num == 0)) {
-		ODP_ERR("Bad number of buffers: %u\n", num);
+		_ODP_ERR("Bad number of buffers: %u\n", num);
 		return ODP_PACKET_INVALID;
 	}
 

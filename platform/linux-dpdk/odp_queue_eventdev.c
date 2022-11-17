@@ -79,7 +79,7 @@ static uint8_t event_queue_ids(odp_schedule_sync_t sync, uint8_t *first_id)
 	if (sync == ODP_SCHED_SYNC_ORDERED)
 		return _odp_eventdev_gbl->event_queue.num_ordered;
 
-	ODP_ABORT("Invalid schedule sync type\n");
+	_ODP_ABORT("Invalid schedule sync type\n");
 	return 0;
 }
 
@@ -88,38 +88,38 @@ static int read_config_file(eventdev_global_t *eventdev)
 	const char *str;
 	int val = 0;
 
-	ODP_PRINT("\nScheduler config\n----------------\n");
+	_ODP_PRINT("\nScheduler config\n----------------\n");
 
 	str = "sched_eventdev.num_atomic_queues";
 	if (!_odp_libconfig_lookup_int(str, &val)) {
-		ODP_ERR("Config option '%s' not found.\n", str);
+		_ODP_ERR("Config option '%s' not found.\n", str);
 		return -1;
 	}
-	ODP_PRINT("%s: %i\n", str, val);
+	_ODP_PRINT("%s: %i\n", str, val);
 	eventdev->event_queue.num_atomic = val;
 
 	str = "sched_eventdev.num_ordered_queues";
 	if (!_odp_libconfig_lookup_int(str, &val)) {
-		ODP_ERR("Config option '%s' not found.\n", str);
+		_ODP_ERR("Config option '%s' not found.\n", str);
 		return -1;
 	}
-	ODP_PRINT("%s: %i\n", str, val);
+	_ODP_PRINT("%s: %i\n", str, val);
 	eventdev->event_queue.num_ordered = val;
 
 	str = "sched_eventdev.num_parallel_queues";
 	if (!_odp_libconfig_lookup_int(str, &val)) {
-		ODP_ERR("Config option '%s' not found.\n", str);
+		_ODP_ERR("Config option '%s' not found.\n", str);
 		return -1;
 	}
-	ODP_PRINT("%s: %i\n\n", str, val);
+	_ODP_PRINT("%s: %i\n\n", str, val);
 	eventdev->event_queue.num_parallel = val;
 
 	str = "sched_eventdev.num_ports";
 	if (!_odp_libconfig_lookup_int(str, &val)) {
-		ODP_ERR("Config option '%s' not found.\n", str);
+		_ODP_ERR("Config option '%s' not found.\n", str);
 		return -1;
 	}
-	ODP_PRINT("%s: %i\n\n", str, val);
+	_ODP_PRINT("%s: %i\n\n", str, val);
 	eventdev->num_event_ports = val;
 
 	return 0;
@@ -141,34 +141,34 @@ static int queue_capa(odp_queue_capability_t *capa, int sched ODP_UNUSED)
 
 static void print_dev_info(const struct rte_event_dev_info *info)
 {
-	ODP_PRINT("\nEvent device info\n"
-		  "-----------------\n"
-		  "driver name: %s\n"
-		  "min_dequeue_timeout_ns: %" PRIu32 "\n"
-		  "max_dequeue_timeout_ns: %" PRIu32 "\n"
-		  "dequeue_timeout_ns: %" PRIu32 "\n"
-		  "max_event_queues: %" PRIu8 "\n"
-		  "max_event_queue_flows: %" PRIu32 "\n"
-		  "max_event_queue_priority_levels: %" PRIu8 "\n"
-		  "max_event_priority_levels: %" PRIu8 "\n"
-		  "max_event_ports: %" PRIu8 "\n"
-		  "max_event_port_dequeue_depth: %" PRIu8 "\n"
-		  "max_event_port_enqueue_depth: %" PRIu32 "\n"
-		  "max_num_events: %" PRId32 "\n"
-		  "event_dev_cap: %" PRIu32 "\n",
-		  info->driver_name,
-		  info->min_dequeue_timeout_ns,
-		  info->max_dequeue_timeout_ns,
-		  info->dequeue_timeout_ns,
-		  info->max_event_queues,
-		  info->max_event_queue_flows,
-		  info->max_event_queue_priority_levels,
-		  info->max_event_priority_levels,
-		  info->max_event_ports,
-		  info->max_event_port_dequeue_depth,
-		  info->max_event_port_enqueue_depth,
-		  info->max_num_events,
-		  info->event_dev_cap);
+	_ODP_PRINT("\nEvent device info\n"
+		   "-----------------\n"
+		   "driver name: %s\n"
+		   "min_dequeue_timeout_ns: %" PRIu32 "\n"
+		   "max_dequeue_timeout_ns: %" PRIu32 "\n"
+		   "dequeue_timeout_ns: %" PRIu32 "\n"
+		   "max_event_queues: %" PRIu8 "\n"
+		   "max_event_queue_flows: %" PRIu32 "\n"
+		   "max_event_queue_priority_levels: %" PRIu8 "\n"
+		   "max_event_priority_levels: %" PRIu8 "\n"
+		   "max_event_ports: %" PRIu8 "\n"
+		   "max_event_port_dequeue_depth: %" PRIu8 "\n"
+		   "max_event_port_enqueue_depth: %" PRIu32 "\n"
+		   "max_num_events: %" PRId32 "\n"
+		   "event_dev_cap: %" PRIu32 "\n",
+		   info->driver_name,
+		   info->min_dequeue_timeout_ns,
+		   info->max_dequeue_timeout_ns,
+		   info->dequeue_timeout_ns,
+		   info->max_event_queues,
+		   info->max_event_queue_flows,
+		   info->max_event_queue_priority_levels,
+		   info->max_event_priority_levels,
+		   info->max_event_ports,
+		   info->max_event_port_dequeue_depth,
+		   info->max_event_port_enqueue_depth,
+		   info->max_num_events,
+		   info->event_dev_cap);
 }
 
 int _odp_service_setup(uint32_t service_id)
@@ -180,7 +180,7 @@ int _odp_service_setup(uint32_t service_id)
 	int32_t min_num_serv = INT32_MAX;
 
 	if (!rte_service_lcore_count()) {
-		ODP_ERR("No service cores available\n");
+		_ODP_ERR("No service cores available\n");
 		return -1;
 	}
 
@@ -195,7 +195,7 @@ int _odp_service_setup(uint32_t service_id)
 		}
 	}
 	if (rte_service_map_lcore_set(service_id, lcore, 1)) {
-		ODP_ERR("Unable to map service to core\n");
+		_ODP_ERR("Unable to map service to core\n");
 		return -1;
 	}
 	return 0;
@@ -239,7 +239,7 @@ static int setup_queues(uint8_t dev_id, uint8_t first_queue_id,
 		queue->sync = sync;
 
 		if (rte_event_queue_default_conf_get(dev_id, i, &queue_conf)) {
-			ODP_ERR("rte_event_queue_default_conf_get failed\n");
+			_ODP_ERR("rte_event_queue_default_conf_get failed\n");
 			return -1;
 		}
 		queue_conf.schedule_type = event_schedule_type(sync);
@@ -250,7 +250,7 @@ static int setup_queues(uint8_t dev_id, uint8_t first_queue_id,
 			queue_conf.nb_atomic_flows = num_flows;
 
 		if (rte_event_queue_setup(dev_id, i, &queue_conf)) {
-			ODP_ERR("rte_event_queue_setup failed\n");
+			_ODP_ERR("rte_event_queue_setup failed\n");
 			return -1;
 		}
 	}
@@ -314,7 +314,7 @@ int _odp_dummy_link_queues(uint8_t dev_id, uint8_t dummy_linked_queues[], int nu
 
 		ret = rte_event_port_link(dev_id, 0, &queue_id, &priority, 1);
 		if (ret != 1) {
-			ODP_ERR("rte_event_port_link failed: %d\n", ret);
+			_ODP_ERR("rte_event_port_link failed: %d\n", ret);
 			return -1;
 		}
 		dummy_linked_queues[num_linked++] = queue_id;
@@ -330,7 +330,7 @@ int _odp_dummy_unlink_queues(uint8_t dev_id, uint8_t dummy_linked_queues[], int 
 	for (i = 0; i < num; i++) {
 		if (rte_event_port_unlink(dev_id, 0, &dummy_linked_queues[i],
 					  1) < 0) {
-			ODP_ERR("rte_event_port_unlink failed\n");
+			_ODP_ERR("rte_event_port_unlink failed\n");
 			return -1;
 		}
 	}
@@ -345,7 +345,7 @@ static int configure_ports(uint8_t dev_id,
 
 	for (i = 0; i < dev_conf->nb_event_ports; i++) {
 		if (rte_event_port_default_conf_get(dev_id, i, &port_conf)) {
-			ODP_ERR("rte_event_port_default_conf_get failed\n");
+			_ODP_ERR("rte_event_port_default_conf_get failed\n");
 			return -1;
 		}
 
@@ -354,7 +354,7 @@ static int configure_ports(uint8_t dev_id,
 		port_conf.enqueue_depth = dev_conf->nb_event_port_enqueue_depth;
 
 		if (rte_event_port_setup(dev_id, i, &port_conf)) {
-			ODP_ERR("rte_event_port_setup failed\n");
+			_ODP_ERR("rte_event_port_setup failed\n");
 			return -1;
 		}
 	}
@@ -374,7 +374,7 @@ static int init_event_dev(void)
 	int i;
 
 	if (rte_event_dev_count() < 1) {
-		ODP_ERR("No eventdev devices found\n");
+		_ODP_ERR("No eventdev devices found\n");
 		return -1;
 	}
 
@@ -392,7 +392,7 @@ static int init_event_dev(void)
 		_odp_eventdev_gbl->port[i].linked = 0;
 
 	if (rte_event_dev_info_get(dev_id, &info)) {
-		ODP_ERR("rte_event_dev_info_get failed\n");
+		_ODP_ERR("rte_event_dev_info_get failed\n");
 		return -1;
 	}
 	print_dev_info(&info);
@@ -400,7 +400,7 @@ static int init_event_dev(void)
 	_odp_eventdev_gbl->num_prio = RTE_MIN(NUM_PRIO,
 					      info.max_event_queue_priority_levels);
 	if (!(info.event_dev_cap & RTE_EVENT_DEV_CAP_QUEUE_QOS)) {
-		ODP_PRINT("  Only one QoS level supported!\n");
+		_ODP_PRINT("  Only one QoS level supported!\n");
 		_odp_eventdev_gbl->num_prio = 1;
 	}
 
@@ -433,19 +433,19 @@ static int init_event_dev(void)
 
 	ret = rte_event_dev_configure(dev_id, &config);
 	if (ret < 0) {
-		ODP_ERR("rte_event_dev_configure failed\n");
+		_ODP_ERR("rte_event_dev_configure failed\n");
 		return -1;
 	}
 	_odp_eventdev_gbl->config = config;
 	_odp_eventdev_gbl->num_event_ports = config.nb_event_ports;
 
 	if (configure_ports(dev_id, &config)) {
-		ODP_ERR("Configuring eventdev ports failed\n");
+		_ODP_ERR("Configuring eventdev ports failed\n");
 		return -1;
 	}
 
 	if (configure_queues(dev_id, num_flows)) {
-		ODP_ERR("Configuring eventdev queues failed\n");
+		_ODP_ERR("Configuring eventdev queues failed\n");
 		return -1;
 	}
 
@@ -459,17 +459,17 @@ static int init_event_dev(void)
 
 		ret = rte_event_dev_service_id_get(dev_id, &service_id);
 		if (ret) {
-			ODP_ERR("Unable to retrieve service ID\n");
+			_ODP_ERR("Unable to retrieve service ID\n");
 			return -1;
 		}
 		if (_odp_service_setup(service_id)) {
-			ODP_ERR("Failed to setup service core\n");
+			_ODP_ERR("Failed to setup service core\n");
 			return -1;
 		}
 	}
 
 	if (rte_event_dev_start(dev_id)) {
-		ODP_ERR("rte_event_dev_start failed\n");
+		_ODP_ERR("rte_event_dev_start failed\n");
 		return -1;
 	}
 
@@ -506,7 +506,7 @@ static int queue_init_global(void)
 	odp_shm_t shm;
 	odp_queue_capability_t capa;
 
-	ODP_DBG("Queue init global\n");
+	_ODP_DBG("Queue init global\n");
 
 	/* Fill in queue entry field offsets for inline functions */
 	memset(&_odp_queue_inline_offset, 0,
@@ -543,11 +543,11 @@ static int queue_init_global(void)
 
 	queue_capa(&capa, 0);
 
-	ODP_DBG("  queue_entry_t size %zu\n", sizeof(queue_entry_t));
-	ODP_DBG("  max num queues     %u\n", capa.max_queues);
-	ODP_DBG("  max plain queue size     %u\n", capa.plain.max_size);
-	ODP_DBG("  max num lockfree   %u\n", capa.plain.lockfree.max_num);
-	ODP_DBG("  max lockfree size  %u\n\n", capa.plain.lockfree.max_size);
+	_ODP_DBG("  queue_entry_t size %zu\n", sizeof(queue_entry_t));
+	_ODP_DBG("  max num queues     %u\n", capa.max_queues);
+	_ODP_DBG("  max plain queue size     %u\n", capa.plain.max_size);
+	_ODP_DBG("  max num lockfree   %u\n", capa.plain.lockfree.max_num);
+	_ODP_DBG("  max lockfree size  %u\n\n", capa.plain.lockfree.max_size);
 
 	return 0;
 }
@@ -558,7 +558,7 @@ static int queue_init_local(void)
 
 	memset(&_odp_eventdev_local, 0, sizeof(eventdev_local_t));
 
-	ODP_ASSERT(thread_id <= UINT8_MAX);
+	_ODP_ASSERT(thread_id <= UINT8_MAX);
 	_odp_eventdev_local.port_id = thread_id;
 	_odp_eventdev_local.paused = 0;
 	_odp_eventdev_local.started = 0;
@@ -581,7 +581,7 @@ static int queue_term_global(void)
 		queue = qentry_from_index(i);
 		LOCK(queue);
 		if (queue->status != QUEUE_STATUS_FREE) {
-			ODP_ERR("Not destroyed queue: %s\n", queue->name);
+			_ODP_ERR("Not destroyed queue: %s\n", queue->name);
 			ret = -1;
 		}
 		UNLOCK(queue);
@@ -596,12 +596,12 @@ static int queue_term_global(void)
 	sleep(1);
 
 	if (rte_event_dev_close(_odp_eventdev_gbl->dev_id)) {
-		ODP_ERR("Failed to close event device\n");
+		_ODP_ERR("Failed to close event device\n");
 		ret = -1;
 	}
 
 	if (odp_shm_free(_odp_eventdev_gbl->shm)) {
-		ODP_ERR("Shm free failed for evendev\n");
+		_ODP_ERR("Shm free failed for evendev\n");
 		ret = -1;
 	}
 
@@ -661,7 +661,7 @@ static odp_queue_t queue_create(const char *name,
 	if (type == ODP_QUEUE_TYPE_SCHED) {
 		if (param->sched.prio < odp_schedule_min_prio() ||
 		    param->sched.prio > odp_schedule_max_prio()) {
-			ODP_ERR("Bad queue priority: %i\n", param->sched.prio);
+			_ODP_ERR("Bad queue priority: %i\n", param->sched.prio);
 			return ODP_QUEUE_INVALID;
 		}
 		if (param->size > _odp_eventdev_gbl->sched_config.max_queue_size)
@@ -702,7 +702,7 @@ static odp_queue_t queue_create(const char *name,
 		if (queue->status == QUEUE_STATUS_FREE) {
 			if (queue_init(queue, name, param)) {
 				UNLOCK(queue);
-				ODP_ERR("Queue init failed\n");
+				_ODP_ERR("Queue init failed\n");
 				return ODP_QUEUE_INVALID;
 			}
 
@@ -718,7 +718,7 @@ static odp_queue_t queue_create(const char *name,
 	}
 
 	if (handle == ODP_QUEUE_INVALID) {
-		ODP_ERR("No free queues left\n");
+		_ODP_ERR("No free queues left\n");
 		return ODP_QUEUE_INVALID;
 	}
 
@@ -726,7 +726,7 @@ static odp_queue_t queue_create(const char *name,
 		if (_odp_sched_fn->create_queue(queue->index,
 						&queue->param.sched)) {
 			queue->status = QUEUE_STATUS_FREE;
-			ODP_ERR("schedule queue init failed\n");
+			_ODP_ERR("schedule queue init failed\n");
 			return ODP_QUEUE_INVALID;
 		}
 	}
@@ -746,13 +746,13 @@ static int queue_destroy(odp_queue_t handle)
 	LOCK(queue);
 	if (queue->status == QUEUE_STATUS_FREE) {
 		UNLOCK(queue);
-		ODP_ERR("queue \"%s\" already free\n", queue->name);
+		_ODP_ERR("queue \"%s\" already free\n", queue->name);
 		return -1;
 	}
 	if (queue->type == ODP_QUEUE_TYPE_PLAIN) {
 		if (ring_mpmc_is_empty(queue->ring_mpmc) == 0) {
 			UNLOCK(queue);
-			ODP_ERR("queue \"%s\" not empty\n", queue->name);
+			_ODP_ERR("queue \"%s\" not empty\n", queue->name);
 			return -1;
 		}
 		ring_mpmc_free(queue->ring_mpmc);
@@ -767,7 +767,7 @@ static int queue_destroy(odp_queue_t handle)
 		_odp_sched_fn->destroy_queue(queue->index);
 		break;
 	default:
-		ODP_ABORT("Unexpected queue status\n");
+		_ODP_ABORT("Unexpected queue status\n");
 	}
 
 	UNLOCK(queue);
@@ -877,8 +877,7 @@ static int error_enqueue(odp_queue_t handle, _odp_event_hdr_t *event_hdr)
 {
 	(void)event_hdr;
 
-	ODP_ERR("Enqueue not supported (0x%" PRIx64 ")\n",
-		odp_queue_to_u64(handle));
+	_ODP_ERR("Enqueue not supported (0x%" PRIx64 ")\n", odp_queue_to_u64(handle));
 
 	return -1;
 }
@@ -890,16 +889,14 @@ static int error_enqueue_multi(odp_queue_t handle,
 	(void)event_hdr;
 	(void)num;
 
-	ODP_ERR("Enqueue multi not supported (0x%" PRIx64 ")\n",
-		odp_queue_to_u64(handle));
+	_ODP_ERR("Enqueue multi not supported (0x%" PRIx64 ")\n", odp_queue_to_u64(handle));
 
 	return -1;
 }
 
 static _odp_event_hdr_t *error_dequeue(odp_queue_t handle)
 {
-	ODP_ERR("Dequeue not supported (0x%" PRIx64 ")\n",
-		odp_queue_to_u64(handle));
+	_ODP_ERR("Dequeue not supported (0x%" PRIx64 ")\n", odp_queue_to_u64(handle));
 
 	return NULL;
 }
@@ -910,8 +907,7 @@ static int error_dequeue_multi(odp_queue_t handle,
 	(void)event_hdr;
 	(void)num;
 
-	ODP_ERR("Dequeue multi not supported (0x%" PRIx64 ")\n",
-		odp_queue_to_u64(handle));
+	_ODP_ERR("Dequeue multi not supported (0x%" PRIx64 ")\n", odp_queue_to_u64(handle));
 
 	return -1;
 }
@@ -935,15 +931,14 @@ static int queue_info(odp_queue_t handle, odp_queue_info_t *info)
 	int status;
 
 	if (odp_unlikely(info == NULL)) {
-		ODP_ERR("Unable to store info, NULL ptr given\n");
+		_ODP_ERR("Unable to store info, NULL ptr given\n");
 		return -1;
 	}
 
 	queue_id = queue_to_index(handle);
 
 	if (odp_unlikely(queue_id >= CONFIG_MAX_QUEUES)) {
-		ODP_ERR("Invalid queue handle: 0x%" PRIx64 "\n",
-			odp_queue_to_u64(handle));
+		_ODP_ERR("Invalid queue handle: 0x%" PRIx64 "\n", odp_queue_to_u64(handle));
 		return -1;
 	}
 
@@ -954,7 +949,7 @@ static int queue_info(odp_queue_t handle, odp_queue_info_t *info)
 
 	if (odp_unlikely(status == QUEUE_STATUS_FREE)) {
 		UNLOCK(queue);
-		ODP_ERR("Invalid queue status:%d\n", status);
+		_ODP_ERR("Invalid queue status:%d\n", status);
 		return -1;
 	}
 
@@ -976,8 +971,7 @@ static void queue_print(odp_queue_t handle)
 	queue_id = queue_to_index(handle);
 
 	if (odp_unlikely(queue_id >= CONFIG_MAX_QUEUES)) {
-		ODP_ERR("Invalid queue handle: 0x%" PRIx64 "\n",
-			odp_queue_to_u64(handle));
+		_ODP_ERR("Invalid queue handle: 0x%" PRIx64 "\n", odp_queue_to_u64(handle));
 		return;
 	}
 
@@ -988,66 +982,66 @@ static void queue_print(odp_queue_t handle)
 
 	if (odp_unlikely(status == QUEUE_STATUS_FREE)) {
 		UNLOCK(queue);
-		ODP_ERR("Invalid queue status:%d\n", status);
+		_ODP_ERR("Invalid queue status:%d\n", status);
 		return;
 	}
-	ODP_PRINT("\nQueue info\n");
-	ODP_PRINT("----------\n");
-	ODP_PRINT("  handle          %p\n", (void *)handle);
-	ODP_PRINT("  index           %" PRIu32 "\n", queue->index);
-	ODP_PRINT("  name            %s\n", queue->name);
-	ODP_PRINT("  enq mode        %s\n",
-		  queue->param.enq_mode == ODP_QUEUE_OP_MT ? "ODP_QUEUE_OP_MT" :
-		  (queue->param.enq_mode == ODP_QUEUE_OP_MT_UNSAFE ? "ODP_QUEUE_OP_MT_UNSAFE" :
-		   (queue->param.enq_mode == ODP_QUEUE_OP_DISABLED ? "ODP_QUEUE_OP_DISABLED" :
-		    "unknown")));
-	ODP_PRINT("  deq mode        %s\n",
-		  queue->param.deq_mode == ODP_QUEUE_OP_MT ? "ODP_QUEUE_OP_MT" :
-		  (queue->param.deq_mode == ODP_QUEUE_OP_MT_UNSAFE ? "ODP_QUEUE_OP_MT_UNSAFE" :
-		   (queue->param.deq_mode == ODP_QUEUE_OP_DISABLED ? "ODP_QUEUE_OP_DISABLED" :
-		    "unknown")));
-	ODP_PRINT("  non-blocking    %s\n",
-		  queue->param.nonblocking == ODP_BLOCKING ? "ODP_BLOCKING" :
-		  (queue->param.nonblocking == ODP_NONBLOCKING_LF ? "ODP_NONBLOCKING_LF" :
-		   (queue->param.nonblocking == ODP_NONBLOCKING_WF ? "ODP_NONBLOCKING_WF" :
-		    "unknown")));
-	ODP_PRINT("  type            %s\n",
-		  queue->type == ODP_QUEUE_TYPE_PLAIN ? "ODP_QUEUE_TYPE_PLAIN" :
-		  (queue->type == ODP_QUEUE_TYPE_SCHED ? "ODP_QUEUE_TYPE_SCHED" : "unknown"));
+	_ODP_PRINT("\nQueue info\n");
+	_ODP_PRINT("----------\n");
+	_ODP_PRINT("  handle          %p\n", (void *)handle);
+	_ODP_PRINT("  index           %" PRIu32 "\n", queue->index);
+	_ODP_PRINT("  name            %s\n", queue->name);
+	_ODP_PRINT("  enq mode        %s\n",
+		   queue->param.enq_mode == ODP_QUEUE_OP_MT ? "ODP_QUEUE_OP_MT" :
+		   (queue->param.enq_mode == ODP_QUEUE_OP_MT_UNSAFE ? "ODP_QUEUE_OP_MT_UNSAFE" :
+		    (queue->param.enq_mode == ODP_QUEUE_OP_DISABLED ? "ODP_QUEUE_OP_DISABLED" :
+		     "unknown")));
+	_ODP_PRINT("  deq mode        %s\n",
+		   queue->param.deq_mode == ODP_QUEUE_OP_MT ? "ODP_QUEUE_OP_MT" :
+		   (queue->param.deq_mode == ODP_QUEUE_OP_MT_UNSAFE ? "ODP_QUEUE_OP_MT_UNSAFE" :
+		    (queue->param.deq_mode == ODP_QUEUE_OP_DISABLED ? "ODP_QUEUE_OP_DISABLED" :
+		     "unknown")));
+	_ODP_PRINT("  non-blocking    %s\n",
+		   queue->param.nonblocking == ODP_BLOCKING ? "ODP_BLOCKING" :
+		   (queue->param.nonblocking == ODP_NONBLOCKING_LF ? "ODP_NONBLOCKING_LF" :
+		    (queue->param.nonblocking == ODP_NONBLOCKING_WF ? "ODP_NONBLOCKING_WF" :
+		     "unknown")));
+	_ODP_PRINT("  type            %s\n",
+		   queue->type == ODP_QUEUE_TYPE_PLAIN ? "ODP_QUEUE_TYPE_PLAIN" :
+		   (queue->type == ODP_QUEUE_TYPE_SCHED ? "ODP_QUEUE_TYPE_SCHED" : "unknown"));
 	if (queue->type == ODP_QUEUE_TYPE_SCHED) {
-		ODP_PRINT("    sync          %s\n",
-			  queue->param.sched.sync == ODP_SCHED_SYNC_PARALLEL ?
-			  "ODP_SCHED_SYNC_PARALLEL" :
-			  (queue->param.sched.sync == ODP_SCHED_SYNC_ATOMIC ?
-			   "ODP_SCHED_SYNC_ATOMIC" :
-			   (queue->param.sched.sync == ODP_SCHED_SYNC_ORDERED ?
-			    "ODP_SCHED_SYNC_ORDERED" : "unknown")));
-		ODP_PRINT("    priority      %d\n", queue->param.sched.prio);
-		ODP_PRINT("    group         %d\n", queue->param.sched.group);
+		_ODP_PRINT("    sync          %s\n",
+			   queue->param.sched.sync == ODP_SCHED_SYNC_PARALLEL ?
+			   "ODP_SCHED_SYNC_PARALLEL" :
+			   (queue->param.sched.sync == ODP_SCHED_SYNC_ATOMIC ?
+			    "ODP_SCHED_SYNC_ATOMIC" :
+			    (queue->param.sched.sync == ODP_SCHED_SYNC_ORDERED ?
+			     "ODP_SCHED_SYNC_ORDERED" : "unknown")));
+		_ODP_PRINT("    priority      %d\n", queue->param.sched.prio);
+		_ODP_PRINT("    group         %d\n", queue->param.sched.group);
 	}
 	if (queue->pktin.pktio != ODP_PKTIO_INVALID) {
 		if (!odp_pktio_info(queue->pktin.pktio, &pktio_info))
-			ODP_PRINT("  pktin           %s\n", pktio_info.name);
+			_ODP_PRINT("  pktin           %s\n", pktio_info.name);
 	}
 	if (queue->pktout.pktio != ODP_PKTIO_INVALID) {
 		if (!odp_pktio_info(queue->pktout.pktio, &pktio_info))
-			ODP_PRINT("  pktout          %s\n", pktio_info.name);
+			_ODP_PRINT("  pktout          %s\n", pktio_info.name);
 	}
-	ODP_PRINT("  timers          %" PRIu64 "\n",
-		  odp_atomic_load_u64(&queue->num_timers));
-	ODP_PRINT("  status          %s\n",
-		  queue->status == QUEUE_STATUS_READY ? "ready" :
-		  (queue->status == QUEUE_STATUS_SCHED ? "scheduled" : "clearunknown"));
-	ODP_PRINT("  param.size      %" PRIu32 "\n", queue->param.size);
+	_ODP_PRINT("  timers          %" PRIu64 "\n",
+		   odp_atomic_load_u64(&queue->num_timers));
+	_ODP_PRINT("  status          %s\n",
+		   queue->status == QUEUE_STATUS_READY ? "ready" :
+		   (queue->status == QUEUE_STATUS_SCHED ? "scheduled" : "clearunknown"));
+	_ODP_PRINT("  param.size      %" PRIu32 "\n", queue->param.size);
 	if (queue->type == ODP_QUEUE_TYPE_PLAIN) {
-		ODP_PRINT("  implementation  ring_mpmc\n");
-		ODP_PRINT("  length          %" PRIu32 "/%" PRIu32 "\n",
-			  ring_mpmc_length(queue->ring_mpmc),
-			  ring_mpmc_max_length(queue->ring_mpmc));
+		_ODP_PRINT("  implementation  ring_mpmc\n");
+		_ODP_PRINT("  length          %" PRIu32 "/%" PRIu32 "\n",
+			   ring_mpmc_length(queue->ring_mpmc),
+			   ring_mpmc_max_length(queue->ring_mpmc));
 	} else {
-		ODP_PRINT("  implementation  eventdev\n");
+		_ODP_PRINT("  implementation  eventdev\n");
 	}
-	ODP_PRINT("\n");
+	_ODP_PRINT("\n");
 
 	UNLOCK(queue);
 }
@@ -1071,7 +1065,7 @@ static inline int _sched_queue_enq_multi(odp_queue_t handle,
 
 	if (odp_unlikely(queue->status != QUEUE_STATUS_SCHED)) {
 		UNLOCK(queue);
-		ODP_ERR("Bad queue status\n");
+		_ODP_ERR("Bad queue status\n");
 		return -1;
 	}
 
@@ -1082,8 +1076,8 @@ static inline int _sched_queue_enq_multi(odp_queue_t handle,
 	UNLOCK(queue);
 
 	if (odp_unlikely(port_id >= _odp_eventdev_gbl->num_event_ports)) {
-		ODP_ERR("Max %" PRIu8 " scheduled workers supported\n",
-			_odp_eventdev_gbl->num_event_ports);
+		_ODP_ERR("Max %" PRIu8 " scheduled workers supported\n",
+			 _odp_eventdev_gbl->num_event_ports);
 		return 0;
 	}
 
@@ -1161,7 +1155,7 @@ static int queue_init(queue_entry_t *queue, const char *name,
 
 	if (queue_type == ODP_QUEUE_TYPE_PLAIN &&
 	    queue_size > _odp_eventdev_gbl->plain_config.max_queue_size) {
-		ODP_ERR("Too large queue size %u\n", queue_size);
+		_ODP_ERR("Too large queue size %u\n", queue_size);
 		return -1;
 	}
 
@@ -1188,7 +1182,7 @@ static int queue_init(queue_entry_t *queue, const char *name,
 
 		queue->ring_mpmc = ring_mpmc_create(queue->name, queue_size);
 		if (queue->ring_mpmc == NULL) {
-			ODP_ERR("Creating MPMC ring failed\n");
+			_ODP_ERR("Creating MPMC ring failed\n");
 			return -1;
 		}
 	} else {
