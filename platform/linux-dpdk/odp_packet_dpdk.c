@@ -82,7 +82,7 @@
 /** DPDK runtime configuration options */
 typedef struct {
 	int multicast_enable;
-	int num_rx_desc;
+	int num_rx_desc_default;
 	int num_tx_desc_default;
 	int rx_drop_en;
 } dpdk_opt_t;
@@ -114,6 +114,8 @@ typedef struct ODP_ALIGNED_CACHE {
 	uint32_t mtu_max;
 	/* DPDK MTU has been modified */
 	uint8_t mtu_set;
+	/* Number of RX descriptors per queue */
+	uint16_t num_rx_desc[ODP_PKTIN_MAX_QUEUES];
 	/* Number of TX descriptors per queue */
 	uint16_t num_tx_desc[ODP_PKTOUT_MAX_QUEUES];
 
@@ -174,7 +176,7 @@ static int init_options(pktio_entry_t *pktio_entry,
 	dpdk_opt_t *opt = &pkt_priv(pktio_entry)->opt;
 
 	if (!lookup_opt("num_rx_desc", dev_info->driver_name,
-			&opt->num_rx_desc))
+			&opt->num_rx_desc_default))
 		return -1;
 
 	if (!lookup_opt("num_tx_desc", dev_info->driver_name,
@@ -194,7 +196,7 @@ static int init_options(pktio_entry_t *pktio_entry,
 	_ODP_DBG("DPDK interface (%s): %" PRIu16 "\n", dev_info->driver_name,
 		 pkt_priv(pktio_entry)->port_id);
 	_ODP_DBG("  multicast:   %d\n", opt->multicast_enable);
-	_ODP_DBG("  num_rx_desc: %d\n", opt->num_rx_desc);
+	_ODP_DBG("  num_rx_desc: %d\n", opt->num_rx_desc_default);
 	_ODP_DBG("  num_tx_desc: %d\n", opt->num_tx_desc_default);
 	_ODP_DBG("  rx_drop_en:  %d\n", opt->rx_drop_en);
 
@@ -395,6 +397,7 @@ static void prepare_rss_conf(pktio_entry_t *pktio_entry,
 static int dpdk_input_queues_config(pktio_entry_t *pktio_entry,
 				    const odp_pktin_queue_param_t *p)
 {
+	pkt_dpdk_t *pkt_dpdk = pkt_priv(pktio_entry);
 	odp_pktin_mode_t mode = pktio_entry->param.in_mode;
 	uint8_t lockless;
 
@@ -403,13 +406,32 @@ static int dpdk_input_queues_config(pktio_entry_t *pktio_entry,
 	/**
 	 * Scheduler synchronizes input queue polls. Only single thread
 	 * at a time polls a queue */
-	if (mode == ODP_PKTIN_MODE_SCHED ||
-	    p->op_mode == ODP_PKTIO_OP_MT_UNSAFE)
+	if (mode == ODP_PKTIN_MODE_SCHED || p->op_mode == ODP_PKTIO_OP_MT_UNSAFE)
 		lockless = 1;
 	else
 		lockless = 0;
 
-	pkt_priv(pktio_entry)->flags.lockless_rx = lockless;
+	pkt_dpdk->flags.lockless_rx = lockless;
+
+	/* Configure RX descriptors */
+	for (uint32_t i = 0; i  < p->num_queues; i++) {
+		uint16_t num_rx_desc = pkt_dpdk->opt.num_rx_desc_default;
+		int ret;
+
+		if (mode == ODP_PKTIN_MODE_DIRECT && p->queue_size[i] != 0)
+			num_rx_desc = p->queue_size[i];
+
+		/* Adjust descriptor count */
+		ret = rte_eth_dev_adjust_nb_rx_tx_desc(pkt_dpdk->port_id, &num_rx_desc, NULL);
+		if (ret && ret != -ENOTSUP) {
+			_ODP_ERR("DPDK: rte_eth_dev_adjust_nb_rx_tx_desc() failed: %d\n", ret);
+			return -1;
+		}
+		pkt_dpdk->num_rx_desc[i] = num_rx_desc;
+
+		_ODP_DBG("Port %" PRIu16 " RX queue %" PRIu32 " using %" PRIu16 " descriptors\n",
+			 pkt_dpdk->port_id, i, num_rx_desc);
+	}
 
 	return 0;
 }
@@ -417,10 +439,8 @@ static int dpdk_input_queues_config(pktio_entry_t *pktio_entry,
 static int dpdk_output_queues_config(pktio_entry_t *pktio_entry,
 				     const odp_pktout_queue_param_t *p)
 {
-	struct rte_eth_dev_info dev_info;
 	pkt_dpdk_t *pkt_dpdk = pkt_priv(pktio_entry);
 	uint8_t lockless;
-	int ret;
 
 	if (p->op_mode == ODP_PKTIO_OP_MT_UNSAFE)
 		lockless = 1;
@@ -429,15 +449,10 @@ static int dpdk_output_queues_config(pktio_entry_t *pktio_entry,
 
 	pkt_dpdk->flags.lockless_tx = lockless;
 
-	ret  = rte_eth_dev_info_get(pkt_dpdk->port_id, &dev_info);
-	if (ret) {
-		_ODP_ERR("DPDK: rte_eth_dev_info_get() failed: %d\n", ret);
-		return -1;
-	}
-
 	/* Configure TX descriptors */
 	for (uint32_t i = 0; i  < p->num_queues; i++) {
 		uint16_t num_tx_desc = pkt_dpdk->opt.num_tx_desc_default;
+		int ret;
 
 		if (p->queue_size[i] != 0)
 			num_tx_desc = p->queue_size[i];
@@ -450,8 +465,8 @@ static int dpdk_output_queues_config(pktio_entry_t *pktio_entry,
 		}
 		pkt_dpdk->num_tx_desc[i] = num_tx_desc;
 
-		_ODP_DBG("TX queue %" PRIu32 " using %" PRIu16 " descriptors\n", i, num_tx_desc);
-	}
+		_ODP_DBG("Port %" PRIu16 " TX queue %" PRIu32 " using %" PRIu16 " descriptors\n",
+			 pkt_dpdk->port_id, i, num_tx_desc);	}
 	return 0;
 }
 
@@ -509,6 +524,8 @@ static int dpdk_init_capability(pktio_entry_t *pktio_entry,
 	memset(capa, 0, sizeof(odp_pktio_capability_t));
 
 	capa->max_input_queues = RTE_MIN(dev_info->max_rx_queues, ODP_PKTIN_MAX_QUEUES);
+	capa->min_input_queue_size = dev_info->rx_desc_lim.nb_min;
+	capa->max_input_queue_size = dev_info->rx_desc_lim.nb_max;
 
 	/* ixgbe devices support only 16 RX queues in RSS mode */
 	if (!strncmp(dev_info->driver_name, IXGBE_DRV_NAME,
@@ -760,24 +777,14 @@ static int dpdk_setup_eth_rx(const pktio_entry_t *pktio_entry,
 	uint32_t i;
 	int ret;
 	uint16_t port_id = pkt_dpdk->port_id;
-	uint16_t num_rx_desc = pkt_dpdk->opt.num_rx_desc;
 	pool_t *pool = _odp_pool_entry(pktio_entry->pool);
 
 	rxconf = dev_info->default_rxconf;
 
 	rxconf.rx_drop_en = pkt_dpdk->opt.rx_drop_en;
 
-	/* Adjust descriptor count */
-	ret = rte_eth_dev_adjust_nb_rx_tx_desc(port_id, &num_rx_desc, NULL);
-	if (ret && ret != -ENOTSUP) {
-		_ODP_ERR("DPDK: rte_eth_dev_adjust_nb_rx_tx_desc() failed: %d\n", ret);
-		return -1;
-	}
-
-	_ODP_DBG("RX queues using %" PRIu16 " descriptors\n", num_rx_desc);
-
 	for (i = 0; i < pktio_entry->num_in_queue; i++) {
-		ret = rte_eth_rx_queue_setup(port_id, i, num_rx_desc,
+		ret = rte_eth_rx_queue_setup(port_id, i, pkt_dpdk->num_rx_desc[i],
 					     rte_eth_dev_socket_id(port_id),
 					     &rxconf, pool->rte_mempool);
 		if (ret < 0) {
