@@ -29,9 +29,6 @@
 
 /** @cond _ODP_HIDE_FROM_DOXYGEN_ */
 
-extern const _odp_event_inline_offset_t _odp_event_inline_offset;
-extern const _odp_buffer_inline_offset_t _odp_buffer_inline_offset;
-
 #ifndef _ODP_NO_INLINE
 	/* Inline functions by default */
 	#define _ODP_INLINE static inline

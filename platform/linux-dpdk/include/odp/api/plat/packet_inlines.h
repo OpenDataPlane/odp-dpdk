@@ -130,10 +130,6 @@ extern "C" {
 	#define _ODP_INLINE
 #endif
 
-extern const _odp_packet_inline_offset_t _odp_packet_inline;
-
-extern const _odp_pool_inline_offset_t _odp_pool_inline;
-
 _ODP_INLINE void *odp_packet_offset(odp_packet_t pkt, uint32_t offset,
 				    uint32_t *len, odp_packet_seg_t *seg)
 {
