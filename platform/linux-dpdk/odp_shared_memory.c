@@ -430,6 +430,39 @@ int odp_shm_info(odp_shm_t shm, odp_shm_info_t *info)
 	info->size = shm_size(block->mz);
 	info->page_size = block->mz->hugepage_sz;
 	info->flags = shm_zone(block->mz)->flags;
+	info->num_seg = 1;
+
+	odp_spinlock_unlock(&shm_tbl->lock);
+
+	return 0;
+}
+
+int odp_shm_segment_info(odp_shm_t shm, uint32_t index, uint32_t num,
+			 odp_shm_segment_info_t seg_info[])
+{
+	shm_block_t *block;
+	int idx = handle_to_idx(shm);
+	phys_addr_t pa;
+
+	if (index != 0 || num != 1) {
+		_ODP_ERR("Only single segment supported (%u, %u)\n", index, num);
+		return -1;
+	}
+
+	odp_spinlock_lock(&shm_tbl->lock);
+
+	if (!handle_is_valid(shm)) {
+		odp_spinlock_unlock(&shm_tbl->lock);
+		return -1;
+	}
+
+	block = &shm_tbl->block[idx];
+	pa = rte_mem_virt2phy(block->mz->addr);
+
+	seg_info[0].addr = (uintptr_t)block->mz->addr;
+	seg_info[0].iova = block->mz->iova != RTE_BAD_IOVA ? block->mz->iova : ODP_SHM_IOVA_INVALID;
+	seg_info[0].pa   = pa != RTE_BAD_IOVA ? pa : ODP_SHM_PA_INVALID;
+	seg_info[0].len  = shm_size(block->mz);
 
 	odp_spinlock_unlock(&shm_tbl->lock);
 
