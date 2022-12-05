@@ -36,7 +36,6 @@ extern "C" {
 #include <linux/if_ether.h>
 #include <sys/select.h>
 
-#define PKTIO_MAX_QUEUES ODP_PKTOUT_MAX_QUEUES
 #define PKTIO_LSO_PROFILES 16
 /* Assume at least Ethernet header per each segment */
 #define PKTIO_LSO_MIN_PAYLOAD_OFFSET 14
@@ -140,12 +139,12 @@ typedef struct ODP_ALIGNED_CACHE {
 		odp_queue_t        queue;
 		odp_pktin_queue_t  pktin;
 		odp_pktin_vector_config_t vector;
-	} in_queue[PKTIO_MAX_QUEUES];
+	} in_queue[ODP_PKTIN_MAX_QUEUES];
 
 	struct {
 		odp_queue_t        queue;
 		odp_pktout_queue_t pktout;
-	} out_queue[PKTIO_MAX_QUEUES];
+	} out_queue[ODP_PKTOUT_MAX_QUEUES];
 
 } pktio_entry_t;
 
