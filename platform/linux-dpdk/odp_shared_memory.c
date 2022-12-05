@@ -68,13 +68,15 @@ typedef struct {
  * Memory block descriptor
  */
 typedef struct {
+	/* DPDK memzone. If != NULL, the shm block is interpreted as reserved. */
+	const struct rte_memzone *mz;
+	/* User requested SHM size */
+	uint64_t size;
 	/* Memory block type */
 	shm_type_t type;
 	/* Memory block name */
 	char name[ODP_SHM_NAME_LEN];
-	/* DPDK memzone. If this pointer != NULL, the shm block is interpreted
-	 * as reserved. */
-	const struct rte_memzone *mz;
+
 } shm_block_t;
 
 /**
@@ -121,19 +123,11 @@ static void name_to_mz_name(const char *name, char *mz_name)
 }
 
 /**
- * Convert DPDK memzone length into ODP shm block size
- */
-static uint64_t shm_size(const struct rte_memzone *mz)
-{
-	return mz->len - sizeof(shm_zone_t);
-}
-
-/**
  * Return a pointer to shm zone descriptor stored at the end of DPDK memzone
  */
 static shm_zone_t *shm_zone(const struct rte_memzone *mz)
 {
-	return (shm_zone_t *)(uintptr_t)((uint8_t *)mz->addr + shm_size(mz));
+	return (shm_zone_t *)(uintptr_t)((uint8_t *)mz->addr + mz->len - sizeof(shm_zone_t));
 }
 
 static int find_free_block(void)
@@ -294,6 +288,8 @@ odp_shm_t odp_shm_reserve(const char *name, uint64_t size, uint64_t align,
 	snprintf(block->name, ODP_SHM_NAME_LEN, "%s", name);
 	block->name[ODP_SHM_NAME_LEN - 1] = 0;
 	block->type = SHM_TYPE_LOCAL;
+	block->size = size;
+
 	/* Note: ODP_SHM_SW_ONLY/ODP_SHM_PROC/ODP_SHM_SINGLE_VA flags are
 	 * currently ignored. */
 	shm_zone(mz)->flags = flags;
@@ -427,7 +423,7 @@ int odp_shm_info(odp_shm_t shm, odp_shm_info_t *info)
 
 	info->name = block->name;
 	info->addr = block->mz->addr;
-	info->size = shm_size(block->mz);
+	info->size = block->size;
 	info->page_size = block->mz->hugepage_sz;
 	info->flags = shm_zone(block->mz)->flags;
 	info->num_seg = 1;
@@ -462,7 +458,7 @@ int odp_shm_segment_info(odp_shm_t shm, uint32_t index, uint32_t num,
 	seg_info[0].addr = (uintptr_t)block->mz->addr;
 	seg_info[0].iova = block->mz->iova != RTE_BAD_IOVA ? block->mz->iova : ODP_SHM_IOVA_INVALID;
 	seg_info[0].pa   = pa != RTE_BAD_IOVA ? pa : ODP_SHM_PA_INVALID;
-	seg_info[0].len  = shm_size(block->mz);
+	seg_info[0].len  = block->size;
 
 	odp_spinlock_unlock(&shm_tbl->lock);
 
@@ -484,7 +480,7 @@ void odp_shm_print_all(void)
 			continue;
 		_ODP_PRINT("  %s: addr: %p, len: %" PRIu64 " page size: %" PRIu64 "\n",
 			   block->name, block->mz->addr,
-			   shm_size(block->mz), block->mz->hugepage_sz);
+			   block->size, block->mz->hugepage_sz);
 	}
 
 	odp_spinlock_unlock(&shm_tbl->lock);
@@ -509,9 +505,9 @@ void odp_shm_print(odp_shm_t shm)
 	_ODP_PRINT(" type:       %s\n",   block->type == SHM_TYPE_LOCAL ? "local" : "remote");
 	_ODP_PRINT(" flags:      0x%x\n", shm_zone(block->mz)->flags);
 	_ODP_PRINT(" start:      %p\n",   block->mz->addr);
-	_ODP_PRINT(" len:        %" PRIu64 "\n",  shm_size(block->mz));
+	_ODP_PRINT(" len:        %" PRIu64 "\n", block->size);
 	_ODP_PRINT(" page size:  %" PRIu64 "\n", block->mz->hugepage_sz);
-	_ODP_PRINT(" NUMA ID:    %" PRIi32 "\n",  block->mz->socket_id);
+	_ODP_PRINT(" NUMA ID:    %" PRIi32 "\n", block->mz->socket_id);
 	_ODP_PRINT("\n");
 
 	odp_spinlock_unlock(&shm_tbl->lock);
