@@ -1605,6 +1605,7 @@ static void test_defaults(uint8_t fill)
 	CU_ASSERT_EQUAL(qp_in.hash_enable, 0);
 	CU_ASSERT_EQUAL(qp_in.hash_proto.all_bits, 0);
 	CU_ASSERT_EQUAL(qp_in.num_queues, 1);
+	CU_ASSERT_EQUAL(qp_in.queue_size[0], 0);
 	CU_ASSERT_EQUAL(qp_in.queue_param.enq_mode, ODP_QUEUE_OP_MT);
 	CU_ASSERT_EQUAL(qp_in.queue_param.sched.prio, odp_schedule_default_prio());
 	CU_ASSERT_EQUAL(qp_in.queue_param.sched.sync, ODP_SCHED_SYNC_PARALLEL);
@@ -1749,6 +1750,8 @@ static void pktio_test_pktio_config(void)
 	CU_ASSERT(!config.reassembly.en_ipv6);
 	CU_ASSERT(config.reassembly.max_wait_time == 0);
 	CU_ASSERT(config.reassembly.max_num_frags == 2);
+	CU_ASSERT(config.flow_control.pause_rx == ODP_PKTIO_LINK_PAUSE_OFF);
+	CU_ASSERT(config.flow_control.pause_tx == ODP_PKTIO_LINK_PAUSE_OFF);
 
 	/* Indicate packet refs might be used */
 	config.pktout.bit.no_packet_refs = 0;
@@ -1822,11 +1825,13 @@ static void pktio_test_link_info(void)
 			  link_info.duplex == ODP_PKTIO_LINK_DUPLEX_HALF ||
 			  link_info.duplex == ODP_PKTIO_LINK_DUPLEX_FULL);
 		CU_ASSERT(link_info.pause_rx == ODP_PKTIO_LINK_PAUSE_UNKNOWN ||
+			  link_info.pause_rx == ODP_PKTIO_LINK_PAUSE_OFF ||
 			  link_info.pause_rx == ODP_PKTIO_LINK_PAUSE_ON ||
-			  link_info.pause_rx == ODP_PKTIO_LINK_PAUSE_OFF);
+			  link_info.pause_rx == ODP_PKTIO_LINK_PFC_ON);
 		CU_ASSERT(link_info.pause_tx == ODP_PKTIO_LINK_PAUSE_UNKNOWN ||
+			  link_info.pause_tx == ODP_PKTIO_LINK_PAUSE_OFF ||
 			  link_info.pause_tx == ODP_PKTIO_LINK_PAUSE_ON ||
-			  link_info.pause_tx == ODP_PKTIO_LINK_PAUSE_OFF);
+			  link_info.pause_tx == ODP_PKTIO_LINK_PFC_ON);
 		CU_ASSERT(link_info.status == ODP_PKTIO_LINK_STATUS_UNKNOWN ||
 			  link_info.status == ODP_PKTIO_LINK_STATUS_UP ||
 			  link_info.status == ODP_PKTIO_LINK_STATUS_DOWN);
@@ -1836,6 +1841,242 @@ static void pktio_test_link_info(void)
 
 		CU_ASSERT(odp_pktio_close(pktio) == 0);
 	}
+}
+
+static int pktio_check_flow_control(int pfc, int rx)
+{
+	odp_pktio_t pktio;
+	odp_pktio_capability_t capa;
+	odp_pktio_param_t pktio_param;
+	int ret;
+
+	odp_pktio_param_init(&pktio_param);
+	pktio_param.in_mode = ODP_PKTIN_MODE_SCHED;
+
+	pktio = odp_pktio_open(iface_name[0], pool[0], &pktio_param);
+	if (pktio == ODP_PKTIO_INVALID)
+		return ODP_TEST_INACTIVE;
+
+	ret = odp_pktio_capability(pktio, &capa);
+	(void)odp_pktio_close(pktio);
+
+	if (ret < 0)
+		return ODP_TEST_INACTIVE;
+
+	if (pfc == 0 && rx == 1 && capa.flow_control.pause_rx == 1)
+		return ODP_TEST_ACTIVE;
+
+	if (pfc == 1 && rx == 1 && capa.flow_control.pfc_rx == 1)
+		return ODP_TEST_ACTIVE;
+
+	if (pfc == 0 && rx == 0 && capa.flow_control.pause_tx == 1)
+		return ODP_TEST_ACTIVE;
+
+	if (pfc == 1 && rx == 0 && capa.flow_control.pfc_tx == 1)
+		return ODP_TEST_ACTIVE;
+
+	return ODP_TEST_INACTIVE;
+}
+
+static int pktio_check_pause_rx(void)
+{
+	return pktio_check_flow_control(0, 1);
+}
+
+static int pktio_check_pause_tx(void)
+{
+	return pktio_check_flow_control(0, 0);
+}
+
+static int pktio_check_pause_both(void)
+{
+	int rx = pktio_check_pause_rx();
+	int tx = pktio_check_pause_tx();
+
+	if (rx == ODP_TEST_ACTIVE && tx == ODP_TEST_ACTIVE)
+		return ODP_TEST_ACTIVE;
+
+	return ODP_TEST_INACTIVE;
+}
+
+static int pktio_check_pfc_rx(void)
+{
+	return pktio_check_flow_control(1, 1);
+}
+
+static int pktio_check_pfc_tx(void)
+{
+	return pktio_check_flow_control(1, 0);
+}
+
+static int pktio_check_pfc_both(void)
+{
+	int rx = pktio_check_pfc_rx();
+	int tx = pktio_check_pfc_tx();
+
+	if (rx == ODP_TEST_ACTIVE && tx == ODP_TEST_ACTIVE)
+		return ODP_TEST_ACTIVE;
+
+	return ODP_TEST_INACTIVE;
+}
+
+static odp_cos_t set_default_cos(odp_pktio_t pktio, odp_queue_t queue)
+{
+	odp_cls_cos_param_t cos_param;
+	odp_cos_t cos;
+	int ret;
+
+	odp_cls_cos_param_init(&cos_param);
+	cos_param.queue = queue;
+	cos_param.pool  = pool[0];
+
+	cos = odp_cls_cos_create("Default CoS", &cos_param);
+	CU_ASSERT_FATAL(cos != ODP_COS_INVALID);
+
+	ret = odp_pktio_default_cos_set(pktio, cos);
+	CU_ASSERT_FATAL(ret == 0);
+
+	return cos;
+}
+
+static odp_cos_t create_pfc_cos(odp_cos_t default_cos, odp_queue_t queue, odp_pmr_t *pmr_out)
+{
+	odp_cls_cos_param_t cos_param;
+	odp_cos_t cos;
+	odp_pmr_param_t pmr_param;
+	odp_pmr_t pmr;
+	uint8_t pcp = 1;
+	uint8_t mask = 0x7;
+
+	/* Setup a CoS to control generation of PFC frame generation. PFC for the VLAN
+	 * priority level is generated when queue/pool resource usage gets above 80%. */
+	odp_cls_cos_param_init(&cos_param);
+	cos_param.queue = queue;
+	cos_param.pool = pool[0];
+	cos_param.bp.enable = 1;
+	cos_param.bp.threshold.type = ODP_THRESHOLD_PERCENT;
+	cos_param.bp.threshold.percent.max = 80;
+	cos_param.bp.pfc_level = pcp;
+
+	cos = odp_cls_cos_create("PFC CoS", &cos_param);
+	CU_ASSERT_FATAL(cos != ODP_COS_INVALID);
+
+	odp_cls_pmr_param_init(&pmr_param);
+	pmr_param.term        = ODP_PMR_VLAN_PCP_0;
+	pmr_param.match.value = &pcp;
+	pmr_param.match.mask  = &mask;
+	pmr_param.val_sz      = 1;
+
+	pmr = odp_cls_pmr_create(&pmr_param, 1, default_cos, cos);
+	CU_ASSERT_FATAL(pmr != ODP_PMR_INVALID);
+
+	*pmr_out = pmr;
+
+	return cos;
+}
+
+static void pktio_config_flow_control(int pfc, int rx, int tx)
+{
+	odp_pktio_t pktio;
+	odp_pktio_config_t config;
+	int ret;
+	odp_cos_t default_cos = ODP_COS_INVALID;
+	odp_cos_t cos = ODP_COS_INVALID;
+	odp_pmr_t pmr = ODP_PMR_INVALID;
+	odp_queue_t queue = ODP_QUEUE_INVALID;
+	odp_pktio_link_pause_t mode = ODP_PKTIO_LINK_PAUSE_ON;
+
+	pktio = create_pktio(0, ODP_PKTIN_MODE_SCHED, ODP_PKTOUT_MODE_DIRECT);
+	CU_ASSERT_FATAL(pktio != ODP_PKTIO_INVALID);
+
+	odp_pktio_config_init(&config);
+
+	if (pfc)
+		mode = ODP_PKTIO_LINK_PFC_ON;
+
+	if (rx)
+		config.flow_control.pause_rx = mode;
+
+	if (tx)
+		config.flow_control.pause_tx = mode;
+
+	ret = odp_pktio_config(pktio, &config);
+	CU_ASSERT_FATAL(ret == 0);
+
+	if (pfc && tx) {
+		/* Enable classifier for PFC backpressure configuration. Overrides previous
+		 * pktin queue config. */
+		odp_pktin_queue_param_t pktin_param;
+
+		odp_pktin_queue_param_init(&pktin_param);
+
+		pktin_param.classifier_enable = 1;
+
+		ret = odp_pktin_queue_config(pktio, &pktin_param);
+		CU_ASSERT_FATAL(ret == 0);
+	}
+
+	ret = odp_pktio_start(pktio);
+	CU_ASSERT(ret == 0);
+
+	if (pfc && tx) {
+		odp_queue_param_t qparam;
+
+		odp_queue_param_init(&qparam);
+		qparam.type = ODP_QUEUE_TYPE_SCHED;
+
+		queue = odp_queue_create("CoS queue", &qparam);
+		CU_ASSERT_FATAL(queue != ODP_QUEUE_INVALID);
+
+		default_cos = set_default_cos(pktio, queue);
+
+		cos = create_pfc_cos(default_cos, queue, &pmr);
+	}
+
+	if (pmr != ODP_PMR_INVALID)
+		odp_cls_pmr_destroy(pmr);
+
+	if (cos != ODP_COS_INVALID)
+		odp_cos_destroy(cos);
+
+	if (default_cos != ODP_COS_INVALID)
+		odp_cos_destroy(default_cos);
+
+	if (queue != ODP_QUEUE_INVALID)
+		odp_queue_destroy(queue);
+
+	CU_ASSERT(odp_pktio_stop(pktio) == 0);
+	CU_ASSERT(odp_pktio_close(pktio) == 0);
+}
+
+static void pktio_test_enable_pause_rx(void)
+{
+	pktio_config_flow_control(0, 1, 0);
+}
+
+static void pktio_test_enable_pause_tx(void)
+{
+	pktio_config_flow_control(0, 0, 1);
+}
+
+static void pktio_test_enable_pause_both(void)
+{
+	pktio_config_flow_control(0, 1, 1);
+}
+
+static void pktio_test_enable_pfc_rx(void)
+{
+	pktio_config_flow_control(1, 1, 0);
+}
+
+static void pktio_test_enable_pfc_tx(void)
+{
+	pktio_config_flow_control(1, 0, 1);
+}
+
+static void pktio_test_enable_pfc_both(void)
+{
+	pktio_config_flow_control(1, 1, 1);
 }
 
 static void pktio_test_pktin_queue_config_direct(void)
@@ -1959,28 +2200,33 @@ static void pktio_test_pktin_queue_config_queue(void)
 	odp_pktio_capability_t capa;
 	odp_pktin_queue_param_t queue_param;
 	odp_pktin_queue_t pktin_queues[MAX_QUEUES];
-	odp_queue_t in_queues[MAX_QUEUES];
 	int num_queues;
 
-	pktio = create_pktio(0, ODP_PKTIN_MODE_QUEUE, ODP_PKTOUT_MODE_DIRECT);
+	pktio = create_pktio(0, ODP_PKTIN_MODE_DIRECT, ODP_PKTOUT_MODE_DIRECT);
 	CU_ASSERT_FATAL(pktio != ODP_PKTIO_INVALID);
 
 	CU_ASSERT_FATAL(odp_pktio_capability(pktio, &capa) == 0 &&
 			capa.max_input_queues > 0);
 	num_queues = capa.max_input_queues;
+	CU_ASSERT_FATAL(num_queues <= ODP_PKTIN_MAX_QUEUES);
+
+	CU_ASSERT(capa.min_input_queue_size <= capa.max_input_queue_size);
 
 	odp_pktin_queue_param_init(&queue_param);
 
 	queue_param.hash_enable = (num_queues > 1) ? 1 : 0;
 	queue_param.hash_proto.proto.ipv4_udp = 1;
 	queue_param.num_queues  = num_queues;
+	for (int i = 0; i < num_queues; i++)
+		queue_param.queue_size[i] = capa.max_input_queue_size;
+
 	CU_ASSERT_FATAL(odp_pktin_queue_config(pktio, &queue_param) == 0);
 
-	CU_ASSERT(odp_pktin_event_queue(pktio, in_queues, MAX_QUEUES)
-		  == num_queues);
-	CU_ASSERT(odp_pktin_queue(pktio, pktin_queues, MAX_QUEUES) < 0);
+	CU_ASSERT(odp_pktin_queue(pktio, pktin_queues, MAX_QUEUES) == num_queues);
 
 	queue_param.num_queues = 1;
+	queue_param.queue_size[0] = capa.min_input_queue_size;
+
 	CU_ASSERT_FATAL(odp_pktin_queue_config(pktio, &queue_param) == 0);
 
 	queue_param.num_queues = capa.max_input_queues + 1;
@@ -4927,6 +5173,12 @@ odp_testinfo_t pktio_suite_unsegmented[] = {
 				  pktio_check_pktout_compl_plain_queue),
 	ODP_TEST_INFO_CONDITIONAL(pktio_test_pktout_compl_sched_queue,
 				  pktio_check_pktout_compl_sched_queue),
+	ODP_TEST_INFO_CONDITIONAL(pktio_test_enable_pause_rx, pktio_check_pause_rx),
+	ODP_TEST_INFO_CONDITIONAL(pktio_test_enable_pause_tx, pktio_check_pause_tx),
+	ODP_TEST_INFO_CONDITIONAL(pktio_test_enable_pause_both, pktio_check_pause_both),
+	ODP_TEST_INFO_CONDITIONAL(pktio_test_enable_pfc_rx, pktio_check_pfc_rx),
+	ODP_TEST_INFO_CONDITIONAL(pktio_test_enable_pfc_tx, pktio_check_pfc_tx),
+	ODP_TEST_INFO_CONDITIONAL(pktio_test_enable_pfc_both, pktio_check_pfc_both),
 	ODP_TEST_INFO_NULL
 };
 

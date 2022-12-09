@@ -259,7 +259,7 @@ static void init_out_queues(pktio_entry_t *entry)
 {
 	int i;
 
-	for (i = 0; i < PKTIO_MAX_QUEUES; i++) {
+	for (i = 0; i < ODP_PKTOUT_MAX_QUEUES; i++) {
 		entry->out_queue[i].queue  = ODP_QUEUE_INVALID;
 		entry->out_queue[i].pktout = PKTOUT_INVALID;
 	}
@@ -279,7 +279,7 @@ static void init_pktio_entry(pktio_entry_t *entry)
 	odp_atomic_init_u64(&entry->stats_extra.out_discards, 0);
 	odp_atomic_init_u64(&entry->tx_ts, 0);
 
-	for (i = 0; i < PKTIO_MAX_QUEUES; i++) {
+	for (i = 0; i < ODP_PKTIN_MAX_QUEUES; i++) {
 		entry->in_queue[i].queue = ODP_QUEUE_INVALID;
 		entry->in_queue[i].pktin = PKTIN_INVALID;
 	}
@@ -599,6 +599,12 @@ int odp_pktio_config(odp_pktio_t hdl, const odp_pktio_config_t *config)
 
 	if (config->enable_loop && !capa.config.enable_loop) {
 		_ODP_ERR("Loopback mode not supported\n");
+		return -1;
+	}
+
+	if (config->flow_control.pause_rx != ODP_PKTIO_LINK_PAUSE_OFF ||
+	    config->flow_control.pause_tx != ODP_PKTIO_LINK_PAUSE_OFF) {
+		_ODP_ERR("Link flow control is not supported\n");
 		return -1;
 	}
 
@@ -1509,6 +1515,8 @@ void odp_pktio_config_init(odp_pktio_config_t *config)
 
 	config->parser.layer = ODP_PROTO_LAYER_ALL;
 	config->reassembly.max_num_frags = 2;
+	config->flow_control.pause_rx = ODP_PKTIO_LINK_PAUSE_OFF;
+	config->flow_control.pause_tx = ODP_PKTIO_LINK_PAUSE_OFF;
 }
 
 int odp_pktio_info(odp_pktio_t hdl, odp_pktio_info_t *info)
@@ -1813,6 +1821,10 @@ int odp_pktio_capability(odp_pktio_t pktio, odp_pktio_capability_t *capa)
 	capa->reassembly.ip = false;
 	capa->reassembly.ipv4 = false;
 	capa->reassembly.ipv6 = false;
+	capa->flow_control.pause_rx = 0;
+	capa->flow_control.pfc_rx = 0;
+	capa->flow_control.pause_tx = 0;
+	capa->flow_control.pfc_tx = 0;
 
 	return ret;
 }
@@ -2172,12 +2184,12 @@ int odp_pktin_queue_config(odp_pktio_t pktio,
 
 	entry = get_pktio_entry(pktio);
 	if (entry == NULL) {
-		_ODP_DBG("pktio entry %" PRIuPTR " does not exist\n", (uintptr_t)pktio);
+		_ODP_ERR("pktio entry %" PRIuPTR " does not exist\n", (uintptr_t)pktio);
 		return -1;
 	}
 
 	if (entry->state == PKTIO_STATE_STARTED) {
-		_ODP_DBG("pktio %s: not stopped\n", entry->name);
+		_ODP_ERR("pktio %s: not stopped\n", entry->name);
 		return -1;
 	}
 
@@ -2188,7 +2200,7 @@ int odp_pktin_queue_config(odp_pktio_t pktio,
 		return 0;
 
 	if (!param->classifier_enable && param->num_queues == 0) {
-		_ODP_DBG("invalid num_queues for operation mode\n");
+		_ODP_ERR("invalid num_queues for operation mode\n");
 		return -1;
 	}
 
@@ -2196,15 +2208,37 @@ int odp_pktin_queue_config(odp_pktio_t pktio,
 
 	rc = odp_pktio_capability(pktio, &capa);
 	if (rc) {
-		_ODP_DBG("pktio %s: unable to read capabilities\n", entry->name);
+		_ODP_ERR("pktio %s: unable to read capabilities\n", entry->name);
 		return -1;
 	}
 
 	entry->enabled.cls = !!param->classifier_enable;
 
 	if (num_queues > capa.max_input_queues) {
-		_ODP_DBG("pktio %s: too many input queues\n", entry->name);
+		_ODP_ERR("pktio %s: too many input queues\n", entry->name);
 		return -1;
+	}
+
+	/* Check input queue sizes in direct mode */
+	for (i = 0; i < num_queues && mode == ODP_PKTIN_MODE_DIRECT; i++) {
+		uint32_t queue_size = param->queue_size[i];
+
+		if (queue_size == 0)
+			continue;
+
+		if (capa.max_input_queue_size == 0) {
+			_ODP_ERR("pktio %s: configuring input queue size not supported\n",
+				 entry->name);
+			return -1;
+		}
+		if (queue_size < capa.min_input_queue_size) {
+			_ODP_ERR("pktio %s: input queue size too small\n", entry->name);
+			return -1;
+		}
+		if (queue_size > capa.max_input_queue_size) {
+			_ODP_ERR("pktio %s: input queue size too large\n", entry->name);
+			return -1;
+		}
 	}
 
 	/* Validate packet vector parameters */
@@ -2282,7 +2316,7 @@ int odp_pktin_queue_config(odp_pktio_t pktio,
 			queue = odp_queue_create(name, &queue_param);
 
 			if (queue == ODP_QUEUE_INVALID) {
-				_ODP_DBG("pktio %s: event queue create failed\n", entry->name);
+				_ODP_ERR("pktio %s: event queue create failed\n", entry->name);
 				destroy_in_queues(entry, i + 1);
 				return -1;
 			}
@@ -2660,13 +2694,6 @@ int odp_pktout_queue(odp_pktio_t pktio, odp_pktout_queue_t queues[], int num)
 	return num_queues;
 }
 
-static inline void _odp_dump_pcapng_pkts(pktio_entry_t *entry, int qidx,
-					 const odp_packet_t packets[], int num)
-{
-	if (odp_unlikely(entry->pcapng.state[qidx] == PCAPNG_WR_PKT))
-		_odp_pcapng_write_pkts(entry, qidx, packets, num);
-}
-
 int odp_pktin_recv(odp_pktin_queue_t queue, odp_packet_t packets[], int num)
 {
 	pktio_entry_t *entry;
@@ -2684,7 +2711,7 @@ int odp_pktin_recv(odp_pktin_queue_t queue, odp_packet_t packets[], int num)
 
 	ret = entry->ops->recv(entry, queue.index, packets, num);
 	if (_ODP_PCAPNG)
-		_odp_dump_pcapng_pkts(entry, queue.index, packets, ret);
+		_odp_pcapng_dump_pkts(entry, queue.index, packets, ret);
 
 	return ret;
 }
@@ -2715,7 +2742,7 @@ int odp_pktin_recv_tmo(odp_pktin_queue_t queue, odp_packet_t packets[], int num,
 		ret = entry->ops->recv_tmo(entry, queue.index, packets, num,
 					      wait);
 		if (_ODP_PCAPNG)
-			_odp_dump_pcapng_pkts(entry, queue.index, packets, ret);
+			_odp_pcapng_dump_pkts(entry, queue.index, packets, ret);
 
 		return ret;
 	}
@@ -2723,7 +2750,7 @@ int odp_pktin_recv_tmo(odp_pktin_queue_t queue, odp_packet_t packets[], int num,
 	while (1) {
 		ret = entry->ops->recv(entry, queue.index, packets, num);
 		if (_ODP_PCAPNG)
-			_odp_dump_pcapng_pkts(entry, queue.index, packets, ret);
+			_odp_pcapng_dump_pkts(entry, queue.index, packets, ret);
 
 		if (ret != 0 || wait == 0)
 			return ret;
@@ -2791,8 +2818,7 @@ int odp_pktin_recv_mq_tmo(const odp_pktin_queue_t queues[], uint32_t num_q, uint
 
 			entry = get_pktio_entry(queues[lfrom].pktio);
 			if (entry)
-				_odp_dump_pcapng_pkts(entry, lfrom, packets,
-						      ret);
+				_odp_pcapng_dump_pkts(entry, lfrom, packets, ret);
 		}
 
 		return ret;
@@ -2910,7 +2936,7 @@ int odp_pktout_send(odp_pktout_queue_t queue, const odp_packet_t packets[],
 		return 0;
 
 	if (_ODP_PCAPNG)
-		_odp_dump_pcapng_pkts(entry, queue.index, packets, num);
+		_odp_pcapng_dump_pkts(entry, queue.index, packets, num);
 
 	if (odp_unlikely(_odp_pktio_tx_compl_enabled(entry))) {
 		for (int i = 0; i < num; i++)

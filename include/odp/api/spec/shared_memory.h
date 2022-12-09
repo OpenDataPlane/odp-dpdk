@@ -40,7 +40,15 @@ extern "C" {
  * Maximum shared memory block name length in chars including null char
  */
 
- /* Shared memory flags */
+/**
+ * @def ODP_SHM_IOVA_INVALID
+ * Invalid IOVA address
+ */
+
+/**
+ * @def ODP_SHM_PA_INVALID
+ * Invalid physical address
+ */
 
 /**
  * Application SW only, no HW access
@@ -123,7 +131,41 @@ typedef struct odp_shm_info_t {
 
 	/** ODP_SHM_* flags */
 	uint32_t    flags;
+
+	/**
+	 * Number of memory segments
+	 *
+	 * Number of segments in physical (or IOVA) address space that map memory to
+	 * the SHM block. More information about each segment can be retrieved with
+	 * odp_shm_segment_info(). Number of segments is always at least one, also when
+	 * physical (or IOVA) segmentation information is not available. */
+	uint32_t num_seg;
+
 } odp_shm_info_t;
+
+/**
+ * SHM memory segment info
+ */
+typedef struct odp_shm_segment_info_t {
+	/** Segment start address (virtual) */
+	uintptr_t addr;
+
+	/** Segment start address in IO virtual address (IOVA) space
+	 *
+	 *  Value is ODP_SHM_IOVA_INVALID when IOVA address is not available.
+	 */
+	uint64_t iova;
+
+	/** Segment start address in physical address space
+	 *
+	 *  Value is ODP_SHM_PA_INVALID when physical address is not available.
+	 */
+	uint64_t pa;
+
+	/** Segment length in bytes */
+	uint64_t len;
+
+} odp_shm_segment_info_t;
 
 /**
  * Shared memory capabilities
@@ -173,22 +215,25 @@ int odp_shm_capability(odp_shm_capability_t *capa);
  * Reserve a contiguous block of shared memory
  *
  * Reserve a contiguous block of shared memory that fulfills size, alignment
- * and shareability (ODP_SHM_* flags) requirements. In general, a name is
- * optional and does not need to be unique. However, if the block will be
+ * and shareability (ODP_SHM_* flags) requirements. By default (without flags), the memory
+ * block can be shared between all threads of the ODP instance. Memory address (odp_shm_addr())
+ * shareability depends on application memory model and #ODP_SHM_SINGLE_VA flag usage.
+ *
+ * Name is optional and does not need to be unique. However, if the block will be
  * searched with odp_shm_lookup() or odp_shm_import(), a unique name is needed
  * for correct match.
  *
- * @param name   Name of the block or NULL. Maximum string length is
- *               ODP_SHM_NAME_LEN.
+ * @param name   Name of the block or NULL. Maximum string length is ODP_SHM_NAME_LEN.
  * @param size   Block size in bytes
  * @param align  Block alignment in bytes
  * @param flags  Shared memory parameter flags (ODP_SHM_*). Default value is 0.
  *
  * @return Handle of the reserved block
  * @retval ODP_SHM_INVALID on failure
+ *
+ * @see odp_mem_model_t
  */
-odp_shm_t odp_shm_reserve(const char *name, uint64_t size, uint64_t align,
-			  uint32_t flags);
+odp_shm_t odp_shm_reserve(const char *name, uint64_t size, uint64_t align, uint32_t flags);
 
 /**
  * Free a contiguous block of shared memory
@@ -249,9 +294,7 @@ void *odp_shm_addr(odp_shm_t shm);
 /**
  * Shared memory block info
  *
- * Get information about the specified shared memory block. This is the only
- * shared memory API function which accepts invalid shm handles (any bit value)
- * without causing undefined behavior.
+ * Get information about the specified shared memory block.
  *
  * @param      shm   Block handle
  * @param[out] info  Block info pointer for output
@@ -260,6 +303,27 @@ void *odp_shm_addr(odp_shm_t shm);
  * @retval <0 on failure
  */
 int odp_shm_info(odp_shm_t shm, odp_shm_info_t *info);
+
+/**
+ * SHM block segmentation information
+ *
+ * Retrieve information about each memory segment of an SHM block. SHM info call outputs the number
+ * of memory segments (@see odp_shm_info_t.num_seg). A single segment info call may be used
+ * to request information for all the segments, or for a subset of those. Use 'index' and 'num'
+ * parameters to specify the segments. Segment indexing starts from zero and continues to
+ * odp_shm_info_t.num_seg - 1. Segment infos are written in virtual memory address order and
+ * without address overlaps. Segment info array must have at least 'num' elements.
+ *
+ * @param      shm    SHM block handle
+ * @param      index  Index of the first segment to retrieve information
+ * @param      num    Number of segments to retrieve information
+ * @param[out] info   Segment info array for output
+ *
+ * @retval 0 on success
+ * @retval <0 on failure
+ */
+int odp_shm_segment_info(odp_shm_t shm, uint32_t index, uint32_t num,
+			 odp_shm_segment_info_t info[]);
 
 /**
  * Print all shared memory blocks
