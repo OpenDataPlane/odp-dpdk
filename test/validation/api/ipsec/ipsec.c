@@ -16,11 +16,24 @@
 #include "test_vectors.h"
 #include "reass_test_vectors.h"
 
+#define EVENT_BUFFER_SIZE 3
+
+struct buffered_event_s {
+	odp_queue_t from;
+	odp_event_t event;
+};
+
+static struct buffered_event_s sched_ev_buffer[EVENT_BUFFER_SIZE];
 struct suite_context_s suite_context;
 static odp_ipsec_capability_t capa;
+static int sched_ev_buffer_tail;
+odp_bool_t sa_expiry_notified;
+
 
 #define PKT_POOL_NUM  64
 #define EVENT_WAIT_TIME ODP_TIME_SEC_IN_NS
+#define STATUS_EVENT_WAIT_TIME ODP_TIME_MSEC_IN_NS
+#define SCHED_EVENT_RETRY_COUNT 2
 
 #define PACKET_USER_PTR	((void *)0x1212fefe)
 #define IPSEC_SA_CTX	((void *)0xfefefafa)
@@ -101,11 +114,68 @@ static int pktio_start(odp_pktio_t pktio, odp_bool_t in, odp_bool_t out)
 	return 1;
 }
 
-static odp_event_t sched_queue_deq(uint64_t wait_ns)
+static int sched_event_buffer_add(odp_queue_t from, odp_event_t event)
+{
+	if (sched_ev_buffer_tail + 1 == EVENT_BUFFER_SIZE)
+		return -ENOMEM;
+
+	sched_ev_buffer[sched_ev_buffer_tail].from = from;
+	sched_ev_buffer[sched_ev_buffer_tail].event = event;
+	sched_ev_buffer_tail++;
+
+	return 0;
+}
+
+static odp_event_t sched_event_buffer_get(odp_queue_t from)
+{
+	odp_event_t ev;
+	int i, j;
+
+	if (odp_queue_type(from) == ODP_QUEUE_TYPE_PLAIN)
+		return ODP_EVENT_INVALID;
+
+	/* Look for a matching entry */
+	for (i = 0; i < sched_ev_buffer_tail; i++)
+		if (sched_ev_buffer[i].from == from)
+			break;
+
+	/* Remove entry from buffer */
+	if (i != sched_ev_buffer_tail) {
+		ev = sched_ev_buffer[i].event;
+
+		for (j = 1; i + j < sched_ev_buffer_tail; j++)
+			sched_ev_buffer[i + j - 1] = sched_ev_buffer[i + j];
+
+		sched_ev_buffer_tail--;
+	} else {
+		ev = ODP_EVENT_INVALID;
+	}
+
+	return ev;
+}
+
+static odp_event_t sched_queue_deq(odp_queue_t queue, uint64_t wait_ns)
 {
 	uint64_t wait = odp_schedule_wait_time(wait_ns);
+	odp_event_t ev = ODP_EVENT_INVALID;
+	odp_queue_t from;
+	int retry = 0;
 
-	return odp_schedule(NULL, wait);
+	/* Check if buffered events are available */
+	ev = sched_event_buffer_get(queue);
+	if (ODP_EVENT_INVALID != ev)
+		return ev;
+
+	do {
+		ev = odp_schedule(&from, wait);
+
+		if ((ev != ODP_EVENT_INVALID) && (from != queue)) {
+			CU_ASSERT_FATAL(0 == sched_event_buffer_add(from, ev));
+			ev = ODP_EVENT_INVALID;
+		}
+	} while (ev == ODP_EVENT_INVALID && (++retry < SCHED_EVENT_RETRY_COUNT));
+
+	return ev;
 }
 
 static odp_event_t plain_queue_deq(odp_queue_t queue, uint64_t wait_ns)
@@ -131,7 +201,7 @@ static odp_event_t recv_event(odp_queue_t queue, uint64_t wait_ns)
 	if (odp_queue_type(queue) == ODP_QUEUE_TYPE_PLAIN)
 		event = plain_queue_deq(queue, wait_ns);
 	else
-		event = sched_queue_deq(wait_ns);
+		event = sched_queue_deq(queue, wait_ns);
 
 	return event;
 }
@@ -368,6 +438,50 @@ void ipsec_sa_param_fill(odp_ipsec_sa_param_t *param,
 	param->lifetime.hard_limit.bytes = 1000 * 1000;
 	param->lifetime.soft_limit.packets = 9000 * 1000;
 	param->lifetime.hard_limit.packets = 10000 * 1000;
+}
+
+static void ipsec_status_event_handle(odp_event_t ev_status,
+				      odp_ipsec_sa_t sa,
+				      enum ipsec_test_sa_expiry sa_expiry)
+{
+	odp_ipsec_status_t status = {
+		.id = 0,
+		.sa = ODP_IPSEC_SA_INVALID,
+		.result = 0,
+		.warn.all = 0,
+	};
+
+	CU_ASSERT_FATAL(ODP_EVENT_INVALID != ev_status);
+	CU_ASSERT_EQUAL(1, odp_event_is_valid(ev_status));
+	CU_ASSERT_EQUAL_FATAL(ODP_EVENT_IPSEC_STATUS, odp_event_type(ev_status));
+
+	CU_ASSERT_EQUAL(0, odp_ipsec_status(&status, ev_status));
+	CU_ASSERT_EQUAL(ODP_IPSEC_STATUS_WARN, status.id);
+	CU_ASSERT_EQUAL(sa, status.sa);
+	CU_ASSERT_EQUAL(0, status.result);
+
+	if (IPSEC_TEST_EXPIRY_IGNORED != sa_expiry) {
+		if (IPSEC_TEST_EXPIRY_SOFT_PKT == sa_expiry) {
+			CU_ASSERT_EQUAL(1, status.warn.soft_exp_packets);
+			sa_expiry_notified = true;
+		} else if (IPSEC_TEST_EXPIRY_SOFT_BYTE == sa_expiry) {
+			CU_ASSERT_EQUAL(1, status.warn.soft_exp_bytes);
+			sa_expiry_notified = true;
+		}
+	}
+
+	odp_event_free(ev_status);
+}
+
+void ipsec_status_event_get(odp_ipsec_sa_t sa,
+			    enum ipsec_test_sa_expiry sa_expiry)
+{
+	uint64_t wait_time = (sa_expiry == IPSEC_TEST_EXPIRY_IGNORED) ? 0 : STATUS_EVENT_WAIT_TIME;
+	odp_event_t ev;
+
+	ev = recv_event(suite_context.queue, wait_time);
+	if (ODP_EVENT_INVALID != ev)
+		ipsec_status_event_handle(ev, sa, sa_expiry);
 }
 
 void ipsec_sa_destroy(odp_ipsec_sa_t sa)
@@ -698,6 +812,45 @@ static int ipsec_process_in(const ipsec_test_part *part,
 	return num_out;
 }
 
+static int ipsec_check_sa_expiry(enum ipsec_test_sa_expiry sa_expiry,
+				 odp_ipsec_packet_result_t *result)
+{
+	if (sa_expiry == IPSEC_TEST_EXPIRY_IGNORED)
+		return 0;
+
+	if (!sa_expiry_notified) {
+		if (sa_expiry == IPSEC_TEST_EXPIRY_SOFT_PKT) {
+			if (result->status.warn.soft_exp_packets)
+				sa_expiry_notified = true;
+		} else if (sa_expiry == IPSEC_TEST_EXPIRY_SOFT_BYTE) {
+			if (result->status.warn.soft_exp_bytes)
+				sa_expiry_notified = true;
+		} else if (sa_expiry == IPSEC_TEST_EXPIRY_HARD_PKT) {
+			if (result->status.error.hard_exp_packets)
+				sa_expiry_notified = true;
+
+			return -1;
+		} else if (sa_expiry == IPSEC_TEST_EXPIRY_HARD_BYTE) {
+			if (result->status.error.hard_exp_bytes)
+				sa_expiry_notified = true;
+
+			return -1;
+		}
+	} else {
+		if (sa_expiry == IPSEC_TEST_EXPIRY_HARD_PKT) {
+			CU_ASSERT(result->status.error.hard_exp_packets);
+
+			return -1;
+		} else if (sa_expiry == IPSEC_TEST_EXPIRY_HARD_BYTE) {
+			CU_ASSERT(result->status.error.hard_exp_bytes);
+
+			return -1;
+		}
+	}
+
+	return 0;
+}
+
 static int ipsec_send_out_one(const ipsec_test_part *part,
 			      odp_ipsec_sa_t sa,
 			      odp_packet_t *pkto)
@@ -824,18 +977,39 @@ static int ipsec_send_out_one(const ipsec_test_part *part,
 
 				pkto[i] = odp_packet_from_event(ev);
 				CU_ASSERT_FATAL(pkto[i] != ODP_PACKET_INVALID);
+
+				if (part->out[i].sa_expiry != IPSEC_TEST_EXPIRY_NONE)
+					ipsec_status_event_get(sa, part->out[i].sa_expiry);
+
 				i++;
 				continue;
 			}
 
 			ev = recv_event(suite_context.queue, 0);
 			if (ODP_EVENT_INVALID != ev) {
+				odp_event_type_t ev_type;
+
 				CU_ASSERT(odp_event_is_valid(ev) == 1);
+				ev_type = odp_event_types(ev, &subtype);
+
+				if ((ODP_EVENT_IPSEC_STATUS == ev_type) &&
+				    part->out[i].sa_expiry != IPSEC_TEST_EXPIRY_NONE) {
+					ipsec_status_event_handle(ev, sa, part->out[i].sa_expiry);
+					continue;
+				}
+
 				CU_ASSERT_EQUAL(ODP_EVENT_PACKET,
-						odp_event_types(ev, &subtype));
+						ev_type);
 				CU_ASSERT_EQUAL(ODP_EVENT_PACKET_IPSEC,
 						subtype);
-				CU_ASSERT(part->out[i].status.error.all);
+
+				/* In the case of SA hard expiry tests, hard expiry error bits are
+				 * expected to be set. The exact error bits expected to be set based
+				 * on sa_expiry is checked eventually in ipsec_check_sa_expiry()
+				 * from the caller of this function.
+				 */
+				if (part->out[i].sa_expiry == IPSEC_TEST_EXPIRY_NONE)
+					CU_ASSERT(part->out[i].status.error.all);
 
 				pkto[i] = odp_ipsec_packet_from_event(ev);
 				CU_ASSERT_FATAL(pkto[i] != ODP_PACKET_INVALID);
@@ -924,6 +1098,8 @@ static void verify_in(const ipsec_test_part *part,
 					ODP_IPSEC_OP_MODE_INLINE,
 					result.flag.inline_mode);
 			CU_ASSERT_EQUAL(sa, result.sa);
+			CU_ASSERT_EQUAL(part->out[i].status.warn.all,
+					result.status.warn.all);
 			if (ODP_IPSEC_SA_INVALID != sa)
 				CU_ASSERT_EQUAL(IPSEC_SA_CTX,
 						odp_ipsec_sa_context(sa));
@@ -999,6 +1175,11 @@ int ipsec_check_out(const ipsec_test_part *part, odp_ipsec_sa_t sa,
 		} else {
 			/* IPsec packet */
 			CU_ASSERT_EQUAL(0, odp_ipsec_result(&result, pkto[i]));
+
+			if (part->out[i].sa_expiry != IPSEC_TEST_EXPIRY_NONE)
+				if (ipsec_check_sa_expiry(part->out[i].sa_expiry, &result) != 0)
+					return num_out;
+
 			CU_ASSERT_EQUAL(part->out[i].status.error.all,
 					result.status.error.all);
 			if (0 == result.status.error.all)

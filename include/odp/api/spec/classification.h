@@ -405,6 +405,15 @@ typedef struct odp_bp_param_t {
 	 */
 	odp_threshold_t threshold;
 
+	/**
+	 * PFC priority level
+	 *
+	 * When enabled (#ODP_PKTIO_LINK_PFC_ON), PFC frames are generated when the above
+	 * threshold is exceeded. The generated frames request the receiver to temporary halt
+	 * transmission of traffic on this priority level (0 .. 7).
+	 */
+	uint8_t pfc_level;
+
 } odp_bp_param_t;
 
 /**
@@ -571,14 +580,20 @@ typedef struct odp_cls_capability_t {
 
 } odp_cls_capability_t;
 
+#if ODP_DEPRECATED_API
+
 /**
  * class of service packet drop policies
+ *
+ * @deprecated Drop policy will be removed from the API.
  */
 typedef enum {
 	ODP_COS_DROP_POOL,      /**< Follow buffer pool drop policy */
 	ODP_COS_DROP_NEVER,     /**< Never drop, ignoring buffer pool policy */
 
 } odp_cls_drop_t;
+
+#endif
 
 /**
  * Enumeration of actions for CoS.
@@ -659,8 +674,10 @@ typedef struct odp_cls_cos_param {
 	/** Pool associated with CoS */
 	odp_pool_t pool;
 
+#if ODP_DEPRECATED_API
 	/** Drop policy associated with CoS */
 	odp_cls_drop_t drop_policy;
+#endif
 
 	/** Random Early Detection configuration */
 	odp_red_param_t red;
@@ -784,6 +801,8 @@ uint32_t odp_cls_cos_num_queue(odp_cos_t cos);
  */
 uint32_t odp_cls_cos_queues(odp_cos_t cos, odp_queue_t queue[], uint32_t num);
 
+#if ODP_DEPRECATED_API
+
 /**
  * Assign packet drop policy for specific class-of-service
  *
@@ -806,9 +825,12 @@ int odp_cos_drop_set(odp_cos_t cos, odp_cls_drop_t drop_policy);
 */
 odp_cls_drop_t odp_cos_drop(odp_cos_t cos);
 
+#endif
+
 /**
- * Request to override per-port class of service
- * based on Layer-2 priority field if present.
+ * Request to override per-port class of service based on Layer-2 priority field if present.
+ *
+ * @deprecated Use #ODP_PMR_VLAN_PCP_0 instead.
  *
  * @param pktio_in     Ingress port identifier.
  * @param num_qos      Number of QoS levels, typically 8.
@@ -819,10 +841,8 @@ odp_cls_drop_t odp_cos_drop(odp_cos_t cos);
  * @retval  0 on success
  * @retval <0 on failure
  */
-int odp_cos_with_l2_priority(odp_pktio_t pktio_in,
-			     uint8_t num_qos,
-			     uint8_t qos_table[],
-			     odp_cos_t cos_table[]);
+int ODP_DEPRECATE(odp_cos_with_l2_priority)(odp_pktio_t pktio_in, uint8_t num_qos,
+					    uint8_t qos_table[], odp_cos_t cos_table[]);
 
 /**
  * Request to override per-port class of service based on Layer-3 priority field if present.
@@ -902,39 +922,32 @@ void odp_cls_pmr_param_init(odp_pmr_param_t *param);
 void odp_cls_pmr_create_opt_init(odp_pmr_create_opt_t *opt);
 
 /**
- * Create a packet matching rule
+ * Create Packet Matching Rule (PMR)
  *
- * Create a packet match rule between source and destination class of service.
- * This packet matching rule is applied on all packets arriving at the source
- * class of service and packets satisfying this PMR are sent to the destination
- * class of service.
+ * Creates a PMR between source and destination Class of Service (CoS). A packet arriving to
+ * a CoS is matched against all the PMRs that define it as their source CoS. A PMR match moves
+ * the packet from the source to the destination CoS. If multiple PMRs of a CoS match with
+ * the packet, it is implementation specific which PMR is selected.
  *
- * A composite PMR rule is created when the number of terms in the match rule
- * is more than one. The composite rule is considered as matching only if
- * the packet satisfies all the terms in Packet Match Rule.
- * The underlying platform may not support all or any specific combination
- * of value match rules, and the application should take care
- * of inspecting the return value when installing such rules, and perform
- * appropriate fallback action.
+ * A composite PMR is created when PMR parameters define more than one term. A composite PMR is
+ * considered to match only if a packet matches with all its terms. It is implementation specific
+ * which term combinations are supported as composite PMRs. When creating a composite PMR,
+ * application should check the return value and perform appropriate fallback actions if the create
+ * call returns failure.
  *
- * Use odp_cls_pmr_param_init() to initialize parameters into their default
- * values.
+ * Use odp_cls_pmr_param_init() to initialize parameters into their default values.
+ *
+ * PMRs created with this function are equivant to PMRs created through odp_cls_pmr_create_opt()
+ * with the same PMR terms and with all additional options set to their default values (e.g.
+ * CLS mark is set to zero in all matching packets).
  *
  * @param terms        Array of odp_pmr_param_t entries, one entry per term
- *                     desired.
- * @param num_terms    Number of terms in the match rule.
+ * @param num_terms    Number of terms in the PMR.
  * @param src_cos      source CoS handle
  * @param dst_cos      destination CoS handle
  *
- * @return Handle to the Packet Match Rule.
+ * @return PMR handle on success
  * @retval ODP_PMR_INVALID on failure
- *
- * @note Matching PMR rule created through this function sets the CLS mark metadata
- * of the packet to zero.
- *
- * @note Rules created through this function are equivalent to rules created through
- * odp_cls_pmr_create_opt() with the same PMR terms and with the additional option
- * fields set to their default values.
  */
 odp_pmr_t odp_cls_pmr_create(const odp_pmr_param_t *terms, int num_terms,
 			     odp_cos_t src_cos, odp_cos_t dst_cos);

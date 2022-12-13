@@ -9,8 +9,9 @@
 #include <odp/api/ipsec.h>
 #include <odp/api/chksum.h>
 
-#include <odp/api/plat/packet_inlines.h>
 #include <odp/api/plat/byteorder_inlines.h>
+#include <odp/api/plat/ipsec_inlines.h>
+#include <odp/api/plat/packet_inlines.h>
 #include <odp/api/plat/queue_inlines.h>
 
 #include <odp_global_data.h>
@@ -550,7 +551,13 @@ static int ipsec_in_iv(odp_packet_t pkt,
 		       ipsec_sa_t *ipsec_sa,
 		       uint16_t iv_offset)
 {
-	memcpy(state->iv, ipsec_sa->salt, ipsec_sa->salt_length);
+	if (ipsec_sa->salt_length > 0) {
+		/* It is faster to just copy MAX_SALT_LEN bytes than the exact length */
+		ODP_STATIC_ASSERT(IPSEC_MAX_SALT_LEN <= IPSEC_MAX_IV_LEN,
+				  "IPSEC_MAX_SALT_LEN too large");
+		memcpy(state->iv, ipsec_sa->salt, IPSEC_MAX_SALT_LEN);
+	}
+	_ODP_ASSERT(ipsec_sa->salt_length + ipsec_sa->esp_iv_len <= IPSEC_MAX_IV_LEN);
 	if (odp_packet_copy_to_mem(pkt,
 				   iv_offset,
 				   ipsec_sa->esp_iv_len,
@@ -558,6 +565,7 @@ static int ipsec_in_iv(odp_packet_t pkt,
 		return -1;
 
 	if (ipsec_sa->aes_ctr_iv) {
+		ODP_STATIC_ASSERT(IPSEC_MAX_IV_LEN >= 16, "IPSEC_MAX_IV_LEN too small");
 		state->iv[12] = 0;
 		state->iv[13] = 0;
 		state->iv[14] = 0;
@@ -1396,6 +1404,9 @@ static int ipsec_random_data(uint8_t *data, uint32_t len)
 	return 0;
 }
 
+/*
+ * Generate cipher IV for outbound processing.
+ */
 static int ipsec_out_iv(ipsec_state_t *state,
 			ipsec_sa_t *ipsec_sa,
 			uint64_t seq_no)
@@ -1404,21 +1415,42 @@ static int ipsec_out_iv(ipsec_state_t *state,
 		/* Both GCM and CTR use 8-bit counters */
 		_ODP_ASSERT(sizeof(seq_no) == ipsec_sa->esp_iv_len);
 
-		/* Check for overrun */
-		if (seq_no == 0)
-			return -1;
+		/* It is faster to just copy MAX_SALT_LEN bytes than the exact length */
+		ODP_STATIC_ASSERT(IPSEC_MAX_SALT_LEN <= IPSEC_MAX_IV_LEN,
+				  "IPSEC_MAX_SALT_LEN too large");
+		memcpy(state->iv, ipsec_sa->salt, IPSEC_MAX_SALT_LEN);
 
-		memcpy(state->iv, ipsec_sa->salt, ipsec_sa->salt_length);
-		memcpy(state->iv + ipsec_sa->salt_length, &seq_no,
-		       ipsec_sa->esp_iv_len);
+		_ODP_ASSERT(ipsec_sa->salt_length + sizeof(seq_no) <= IPSEC_MAX_IV_LEN);
+		memcpy(state->iv + ipsec_sa->salt_length, &seq_no, sizeof(seq_no));
 
 		if (ipsec_sa->aes_ctr_iv) {
+			ODP_STATIC_ASSERT(IPSEC_MAX_IV_LEN >= 16, "IPSEC_MAX_IV_LEN too small");
 			state->iv[12] = 0;
 			state->iv[13] = 0;
 			state->iv[14] = 0;
 			state->iv[15] = 1;
 		}
-	} else if (ipsec_sa->esp_iv_len) {
+	} else if (ipsec_sa->use_cbc_iv) {
+		/*
+		 * For CBC mode ciphers with 16 byte IV we generate the cipher
+		 * IV by concatenating a per-session random salt value and
+		 * 64-bit sequence number. The ESP IV will be generated at
+		 * ciphering time by CBC-encrypting a zero block using the
+		 * cipher IV.
+		 *
+		 * This way each packet of an SA will have an unpredictable
+		 * IV and different SAs (e.g. manually keyed SAs across
+		 * restarts) will have different IV sequences (so one cannot
+		 * predict IVs of an SA by observing the IVs of another SA
+		 * with the same key).
+		 */
+		_ODP_ASSERT(CBC_SALT_LEN + sizeof(seq_no) == ipsec_sa->esp_iv_len);
+		ODP_STATIC_ASSERT(CBC_SALT_LEN + sizeof(seq_no) <= IPSEC_MAX_IV_LEN,
+				  "IPSEC_MAX_IV_LEN too small for CBC IV construction");
+		memcpy(state->iv, ipsec_sa->cbc_salt, CBC_SALT_LEN);
+		memcpy(state->iv + CBC_SALT_LEN, &seq_no, sizeof(seq_no));
+	} else if (odp_unlikely(ipsec_sa->esp_iv_len)) {
+		_ODP_ASSERT(ipsec_sa->esp_iv_len <= IPSEC_MAX_IV_LEN);
 		if (ipsec_random_data(state->iv, ipsec_sa->esp_iv_len))
 			return -1;
 	}
@@ -1559,10 +1591,13 @@ static int ipsec_out_esp(odp_packet_t *pkt,
 	odp_packet_copy_from_mem(*pkt,
 				 ipsec_offset, _ODP_ESPHDR_LEN,
 				 &esp);
-	odp_packet_copy_from_mem(*pkt,
-				 ipsec_offset + _ODP_ESPHDR_LEN,
-				 ipsec_sa->esp_iv_len,
-				 state->iv + ipsec_sa->salt_length);
+	if (!ipsec_sa->use_cbc_iv) {
+		/* copy the relevant part of cipher IV to ESP IV */
+		odp_packet_copy_from_mem(*pkt,
+					 ipsec_offset + _ODP_ESPHDR_LEN,
+					 ipsec_sa->esp_iv_len,
+					 state->iv + ipsec_sa->salt_length);
+	}
 	/* 0xa5 is a good value to fill data instead of generating random data
 	 * to create TFC padding */
 	_odp_packet_set_data(*pkt, esptrl_offset - esptrl.pad_len - tfc_len,
@@ -1613,6 +1648,21 @@ static int ipsec_out_esp(odp_packet_t *pkt,
 				   ipsec_sa->icv_len;
 
 	state->stats_length = param->cipher_range.length;
+
+	if (ipsec_sa->use_cbc_iv) {
+		/*
+		 * Encrypt zeroed ESP IV field using the special cipher IV
+		 * to create the final unpredictable ESP IV
+		 */
+		_ODP_ASSERT(ipsec_sa->esp_iv_len == CBC_IV_LEN);
+		param->cipher_range.offset -= CBC_IV_LEN;
+		param->cipher_range.length += CBC_IV_LEN;
+		_odp_packet_set_data(*pkt,
+				     ipsec_offset + _ODP_ESPHDR_LEN,
+				     0,
+				     CBC_IV_LEN);
+	}
+
 	param->session = ipsec_sa->session;
 
 	return 0;
@@ -2477,6 +2527,25 @@ static void ipsec_out_inline_finalize(odp_packet_t pkt_in[],
 		ipsec_inline_op_t *op = &ops[i];
 		odp_packet_t *pkt = &pkt_in[i];
 
+		if (op->op.status.warn.soft_exp_packets || op->op.status.warn.soft_exp_bytes) {
+			if (!odp_atomic_load_u32(&op->op.sa->soft_expiry_notified)) {
+				int rc;
+
+				/*
+				 * Another thread may have sent the notification by now but we do
+				 * not care since sending duplicate expiry notifications is allowed.
+				 */
+				rc = _odp_ipsec_status_send(op->op.sa->queue,
+							    ODP_IPSEC_STATUS_WARN,
+							    op->op.sa->ipsec_sa_hdl,
+							    0, op->op.status.warn);
+				if (rc == 0)
+					odp_atomic_store_u32(&op->op.sa->soft_expiry_notified, 1);
+				else
+					_ODP_DBG("IPsec status event submission failed\n");
+			}
+		}
+
 		if (odp_unlikely(op->op.status.error.all))
 			goto handle_err;
 
@@ -2533,34 +2602,6 @@ int odp_ipsec_test_sa_update(odp_ipsec_sa_t sa,
 	}
 
 	return 0;
-}
-
-int odp_ipsec_result(odp_ipsec_packet_result_t *result, odp_packet_t packet)
-{
-	odp_ipsec_packet_result_t *res;
-
-	_ODP_ASSERT(result != NULL);
-
-	res = ipsec_pkt_result(packet);
-
-	/* FIXME: maybe postprocess here, setting alg error in case of crypto
-	 * error instead of processing packet fully in ipsec_in/out_single */
-
-	*result = *res;
-
-	return 0;
-}
-
-odp_packet_t odp_ipsec_packet_from_event(odp_event_t ev)
-{
-	_ODP_ASSERT(odp_event_type(ev) == ODP_EVENT_PACKET);
-	_ODP_ASSERT(odp_event_subtype(ev) == ODP_EVENT_PACKET_IPSEC);
-	return odp_packet_from_event(ev);
-}
-
-odp_event_t odp_ipsec_packet_to_event(odp_packet_t pkt)
-{
-	return odp_packet_to_event(pkt);
 }
 
 int odp_ipsec_stats(odp_ipsec_sa_t sa, odp_ipsec_stats_t *stats)

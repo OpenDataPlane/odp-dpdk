@@ -36,7 +36,6 @@ extern "C" {
 #include <linux/if_ether.h>
 #include <sys/select.h>
 
-#define PKTIO_MAX_QUEUES ODP_PKTOUT_MAX_QUEUES
 #define PKTIO_LSO_PROFILES 16
 /* Assume at least Ethernet header per each segment */
 #define PKTIO_LSO_MIN_PAYLOAD_OFFSET 14
@@ -55,9 +54,9 @@ ODP_STATIC_ASSERT(PKTIO_LSO_PROFILES < UINT8_MAX, "PKTIO_LSO_PROFILES_ERROR");
 struct pktio_if_ops;
 
 #if ODP_CACHE_LINE_SIZE == 128
-#define PKTIO_PRIVATE_SIZE 1408
+#define PKTIO_PRIVATE_SIZE 1536
 #else
-#define PKTIO_PRIVATE_SIZE 1216
+#define PKTIO_PRIVATE_SIZE 1344
 #endif
 
 typedef struct ODP_ALIGNED_CACHE {
@@ -140,21 +139,13 @@ typedef struct ODP_ALIGNED_CACHE {
 		odp_queue_t        queue;
 		odp_pktin_queue_t  pktin;
 		odp_pktin_vector_config_t vector;
-	} in_queue[PKTIO_MAX_QUEUES];
+	} in_queue[ODP_PKTIN_MAX_QUEUES];
 
 	struct {
 		odp_queue_t        queue;
 		odp_pktout_queue_t pktout;
-	} out_queue[PKTIO_MAX_QUEUES];
+	} out_queue[ODP_PKTOUT_MAX_QUEUES];
 
-	/* inotify instance for pcapng fifos */
-	struct {
-		enum {
-			PCAPNG_WR_STOP = 0,
-			PCAPNG_WR_PKT,
-		} state[PKTIO_MAX_QUEUES];
-		int fd[PKTIO_MAX_QUEUES];
-	} pcapng;
 } pktio_entry_t;
 
 typedef struct {

@@ -39,6 +39,7 @@ odpapiplatinclude_HEADERS = \
 		  include/odp/api/plat/event_inline_types.h \
 		  include/odp/api/plat/event_vector_inline_types.h \
 		  include/odp/api/plat/hash_inlines.h \
+		  include/odp/api/plat/ipsec_inlines.h \
 		  include/odp/api/plat/packet_flag_inlines.h \
 		  include/odp/api/plat/packet_inline_types.h \
 		  include/odp/api/plat/packet_inlines.h \
@@ -82,6 +83,7 @@ odpapiabiarchinclude_HEADERS += \
 		  include-abi/odp/api/abi/hash.h \
 		  include-abi/odp/api/abi/init.h \
 		  include-abi/odp/api/abi/ipsec.h \
+		  include-abi/odp/api/abi/ipsec_types.h \
 		  include-abi/odp/api/abi/packet.h \
 		  include-abi/odp/api/abi/packet_types.h \
 		  include-abi/odp/api/abi/packet_flags.h \
@@ -288,6 +290,7 @@ __LIB__libodp_linux_la_SOURCES += \
 			   odp_cpu_api.c \
 			   odp_event_api.c \
 			   odp_hash_api.c \
+			   odp_ipsec_api.c \
 			   odp_packet_api.c \
 			   odp_packet_flags_api.c \
 			   odp_packet_io_api.c \

@@ -22,8 +22,6 @@ extern "C" {
 
 /** @cond _ODP_HIDE_FROM_DOXYGEN_ */
 
-extern const _odp_packet_inline_offset_t _odp_packet_inline;
-
 static inline uint64_t _odp_packet_input_flags(odp_packet_t pkt)
 {
 	return _odp_pkt_get(pkt, uint64_t, input_flags);

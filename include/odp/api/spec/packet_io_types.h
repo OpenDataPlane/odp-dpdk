@@ -73,6 +73,12 @@ extern "C" {
  */
 
 /**
+ * @def ODP_PKTIN_MAX_QUEUES
+ * Maximum number of packet input queues supported by the API. Use
+ * odp_pktio_capability() to check the maximum number of queues per interface.
+ */
+
+/**
  * @def ODP_PKTOUT_MAX_QUEUES
  * Maximum number of packet output queues supported by the API. Use
  * odp_pktio_capability() to check the maximum number of queues per interface.
@@ -258,6 +264,16 @@ typedef struct odp_pktin_queue_param_t {
 	  * The maximum value is defined by pktio capability 'max_input_queues'.
 	  * Queue type is defined by the input mode. The default value is 1. */
 	uint32_t num_queues;
+
+	/** Input queue size array
+	  *
+	  * An array containing queue sizes for each 'num_queues' input queues
+	  * in ODP_PKTIN_MODE_DIRECT mode. The value of zero means
+	  * implementation specific default size. Nonzero values must be between
+	  * 'min_input_queue_size' and 'max_input_queue_size' capabilities. The
+	  * implementation may round-up given values. The default value is zero.
+	  */
+	uint32_t queue_size[ODP_PKTIN_MAX_QUEUES];
 
 	/** Queue parameters
 	  *
@@ -546,6 +562,19 @@ typedef struct odp_pktio_parser_config_t {
 
 } odp_pktio_parser_config_t;
 
+/** Ethernet flow control modes */
+typedef enum odp_pktio_link_pause_t {
+	/** Flow control mode is unknown */
+	ODP_PKTIO_LINK_PAUSE_UNKNOWN = -1,
+	/** No flow control */
+	ODP_PKTIO_LINK_PAUSE_OFF = 0,
+	/** Pause frame flow control enabled */
+	ODP_PKTIO_LINK_PAUSE_ON = 1,
+	/** Priority-based Flow Control (PFC) enabled */
+	ODP_PKTIO_LINK_PFC_ON = 2
+
+} odp_pktio_link_pause_t;
+
 /**
  * Packet IO configuration options
  *
@@ -629,6 +658,47 @@ typedef struct odp_pktio_config_t {
 
 	/** Packet input reassembly configuration */
 	odp_reass_config_t reassembly;
+
+	/** Link flow control configuration */
+	struct {
+		/** Reception of flow control frames
+		 *
+		 *  Configures interface operation when an Ethernet flow control frame is received:
+		 *    * ODP_PKTIO_LINK_PAUSE_OFF:  Flow control is disabled
+		 *    * ODP_PKTIO_LINK_PAUSE_ON:   Enable traditional Ethernet pause frame handling.
+		 *                                 When a pause frame is received, all packet output
+		 *                                 is halted temporarily.
+		 *    * ODP_PKTIO_LINK_PFC_ON:     Enable Priority-based Flow Control (PFC)
+		 *                                 handling. When a PFC frame is received, packet
+		 *                                 output of certain (VLAN) class of service levels
+		 *                                 are halted temporarily.
+		 *
+		 *  The default value is ODP_PKTIO_LINK_PAUSE_OFF.
+		 */
+		odp_pktio_link_pause_t pause_rx;
+
+		/** Transmission of flow control frames
+		 *
+		 *  Configures Ethernet flow control frame generation on the interface:
+		 *    * ODP_PKTIO_LINK_PAUSE_OFF:  Flow control is disabled
+		 *    * ODP_PKTIO_LINK_PAUSE_ON:   Enable traditional Ethernet pause frame
+		 *                                 generation. Pause frames are generated to request
+		 *                                 the remote end of the link to halt all
+		 *                                 transmissions temporarily.
+		 *    * ODP_PKTIO_LINK_PFC_ON:     Enable Priority-based Flow Control (PFC) frame
+		 *                                 generation. PFC frames are generated to request
+		 *                                 the remote end of the link to halt transmission
+		 *                                 of certain (VLAN) class of service levels
+		 *                                 temporarily.
+		 *
+		 *  When PFC is enabled, classifier API is used to configure CoS nodes with back
+		 *  pressure threshold and PFC priority level parameters (odp_bp_param_t).
+		 *
+		 *  The default value is ODP_PKTIO_LINK_PAUSE_OFF.
+		 */
+		odp_pktio_link_pause_t pause_tx;
+
+	} flow_control;
 
 } odp_pktio_config_t;
 
@@ -819,8 +889,20 @@ typedef struct odp_pktin_vector_capability_t {
  * ODP_PKTOUT_MODE_DIRECT mode.
  */
 typedef struct odp_pktio_capability_t {
-	/** Maximum number of input queues */
+	/** Maximum number of input queues
+	 *
+	 * Value does not exceed ODP_PKTIN_MAX_QUEUES. */
 	uint32_t max_input_queues;
+
+	/** Minimum input queue size
+	 *
+	 *  Zero if configuring queue size is not supported. */
+	uint32_t min_input_queue_size;
+
+	/** Maximum input queue size
+	 *
+	 *  Zero if configuring queue size is not supported. */
+	uint32_t max_input_queue_size;
 
 	/** Maximum number of output queues
 	 *
@@ -917,6 +999,22 @@ typedef struct odp_pktio_capability_t {
 	/** Statistics counters capabilities */
 	odp_pktio_stats_capability_t stats;
 
+	/** Supported flow control modes */
+	struct {
+		/** Reception of traditional Ethernet pause frames */
+		uint32_t pause_rx: 1;
+
+		/** Reception of PFC frames */
+		uint32_t pfc_rx: 1;
+
+		/** Generation of traditional Ethernet pause frames */
+		uint32_t pause_tx: 1;
+
+		/** Generation of PFC frames */
+		uint32_t pfc_tx: 1;
+
+	} flow_control;
+
 } odp_pktio_capability_t;
 
 /**
@@ -964,9 +1062,13 @@ typedef struct odp_lso_profile_param_t {
 
 /** Link status */
 typedef enum odp_pktio_link_status_t {
+	/** Link status is unknown */
 	ODP_PKTIO_LINK_STATUS_UNKNOWN = -1,
+	/** Link status is down */
 	ODP_PKTIO_LINK_STATUS_DOWN = 0,
+	/** Link status is up */
 	ODP_PKTIO_LINK_STATUS_UP = 1
+
 } odp_pktio_link_status_t;
 
 /**
@@ -1034,21 +1136,19 @@ typedef enum odp_pktio_link_autoneg_t {
 	ODP_PKTIO_LINK_AUTONEG_OFF = 0,
 	/** Autonegotiation enabled */
 	ODP_PKTIO_LINK_AUTONEG_ON  = 1
+
 } odp_pktio_link_autoneg_t;
 
 /** Duplex mode */
 typedef enum odp_pktio_link_duplex_t {
+	/** Link duplex mode is unknown */
 	ODP_PKTIO_LINK_DUPLEX_UNKNOWN = -1,
+	/** Half duplex mode */
 	ODP_PKTIO_LINK_DUPLEX_HALF = 0,
+	/** Full duplex mode */
 	ODP_PKTIO_LINK_DUPLEX_FULL = 1
-} odp_pktio_link_duplex_t;
 
-/** Ethernet pause frame (flow control) mode */
-typedef enum odp_pktio_link_pause_t {
-	ODP_PKTIO_LINK_PAUSE_UNKNOWN = -1,
-	ODP_PKTIO_LINK_PAUSE_OFF = 0,
-	ODP_PKTIO_LINK_PAUSE_ON  = 1
-} odp_pktio_link_pause_t;
+} odp_pktio_link_duplex_t;
 
 /**
  * Packet IO link information

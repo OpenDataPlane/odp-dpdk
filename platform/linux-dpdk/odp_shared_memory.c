@@ -68,13 +68,15 @@ typedef struct {
  * Memory block descriptor
  */
 typedef struct {
+	/* DPDK memzone. If != NULL, the shm block is interpreted as reserved. */
+	const struct rte_memzone *mz;
+	/* User requested SHM size */
+	uint64_t size;
 	/* Memory block type */
 	shm_type_t type;
 	/* Memory block name */
 	char name[ODP_SHM_NAME_LEN];
-	/* DPDK memzone. If this pointer != NULL, the shm block is interpreted
-	 * as reserved. */
-	const struct rte_memzone *mz;
+
 } shm_block_t;
 
 /**
@@ -121,19 +123,20 @@ static void name_to_mz_name(const char *name, char *mz_name)
 }
 
 /**
- * Convert DPDK memzone length into ODP shm block size
- */
-static uint64_t shm_size(const struct rte_memzone *mz)
-{
-	return mz->len - sizeof(shm_zone_t);
-}
-
-/**
  * Return a pointer to shm zone descriptor stored at the end of DPDK memzone
  */
 static shm_zone_t *shm_zone(const struct rte_memzone *mz)
 {
-	return (shm_zone_t *)(uintptr_t)((uint8_t *)mz->addr + shm_size(mz));
+	return (shm_zone_t *)(uintptr_t)((uint8_t *)mz->addr + mz->len - sizeof(shm_zone_t));
+}
+
+static shm_block_t *mz_to_shm_block(const struct rte_memzone *mz)
+{
+	for (int i = 0; i < SHM_MAX_NB_BLOCKS; i++) {
+		if (shm_tbl->block[i].mz == mz)
+			return &shm_tbl->block[i];
+	}
+	return NULL;
 }
 
 static int find_free_block(void)
@@ -294,6 +297,8 @@ odp_shm_t odp_shm_reserve(const char *name, uint64_t size, uint64_t align,
 	snprintf(block->name, ODP_SHM_NAME_LEN, "%s", name);
 	block->name[ODP_SHM_NAME_LEN - 1] = 0;
 	block->type = SHM_TYPE_LOCAL;
+	block->size = size;
+
 	/* Note: ODP_SHM_SW_ONLY/ODP_SHM_PROC/ODP_SHM_SINGLE_VA flags are
 	 * currently ignored. */
 	shm_zone(mz)->flags = flags;
@@ -427,13 +432,112 @@ int odp_shm_info(odp_shm_t shm, odp_shm_info_t *info)
 
 	info->name = block->name;
 	info->addr = block->mz->addr;
-	info->size = shm_size(block->mz);
+	info->size = block->size;
 	info->page_size = block->mz->hugepage_sz;
 	info->flags = shm_zone(block->mz)->flags;
+	info->num_seg = 1;
 
 	odp_spinlock_unlock(&shm_tbl->lock);
 
 	return 0;
+}
+
+int odp_shm_segment_info(odp_shm_t shm, uint32_t index, uint32_t num,
+			 odp_shm_segment_info_t seg_info[])
+{
+	shm_block_t *block;
+	int idx = handle_to_idx(shm);
+	phys_addr_t pa;
+
+	if (index != 0 || num != 1) {
+		_ODP_ERR("Only single segment supported (%u, %u)\n", index, num);
+		return -1;
+	}
+
+	odp_spinlock_lock(&shm_tbl->lock);
+
+	if (!handle_is_valid(shm)) {
+		odp_spinlock_unlock(&shm_tbl->lock);
+		return -1;
+	}
+
+	block = &shm_tbl->block[idx];
+	pa = rte_mem_virt2phy(block->mz->addr);
+
+	seg_info[0].addr = (uintptr_t)block->mz->addr;
+	seg_info[0].iova = block->mz->iova != RTE_BAD_IOVA ? block->mz->iova : ODP_SHM_IOVA_INVALID;
+	seg_info[0].pa   = pa != RTE_BAD_IOVA ? pa : ODP_SHM_PA_INVALID;
+	seg_info[0].len  = block->size;
+
+	odp_spinlock_unlock(&shm_tbl->lock);
+
+	return 0;
+}
+
+typedef struct {
+	odp_system_meminfo_t *info;
+	odp_system_memblock_t *memblock;
+	int32_t blocks;
+	int32_t max_num;
+
+} memzone_walker_data_t;
+
+static void walk_memzone(const struct rte_memzone *mz, void *arg)
+{
+	memzone_walker_data_t *data = arg;
+	shm_block_t *block = mz_to_shm_block(mz);
+	odp_system_memblock_t *memblock;
+	int32_t cur = data->blocks;
+	const char *name;
+	int name_len;
+
+	data->info->total_mapped += mz->len;
+	data->blocks++;
+
+	if (block != NULL) {
+		name = block->name;
+		data->info->total_used += block->size;
+		data->info->total_overhead += mz->len - block->size;
+	} else { /* DPDK internal reservations */
+		name = mz->name;
+		data->info->total_used += mz->len;
+	}
+
+	if (cur >= data->max_num)
+		return;
+	memblock = &data->memblock[cur];
+
+	name_len = strlen(name);
+	if (name_len >= ODP_SYSTEM_MEMBLOCK_NAME_LEN)
+		name_len = ODP_SYSTEM_MEMBLOCK_NAME_LEN - 1;
+
+	memcpy(memblock->name, name, name_len);
+	memblock->name[name_len] = 0;
+
+	memblock->addr = (uintptr_t)mz->addr;
+	memblock->used = mz->len;
+	memblock->overhead = block != NULL ? mz->len - block->size : 0;
+	memblock->page_size = mz->hugepage_sz;
+}
+
+int32_t odp_system_meminfo(odp_system_meminfo_t *info, odp_system_memblock_t memblock[],
+			   int32_t max_num)
+{
+	memzone_walker_data_t walker_data;
+
+	memset(info, 0, sizeof(odp_system_meminfo_t));
+	memset(&walker_data, 0, sizeof(memzone_walker_data_t));
+	walker_data.max_num = max_num;
+	walker_data.info = info;
+	walker_data.memblock = memblock;
+
+	odp_spinlock_lock(&shm_tbl->lock);
+
+	rte_memzone_walk(walk_memzone, (void *)&walker_data);
+
+	odp_spinlock_unlock(&shm_tbl->lock);
+
+	return walker_data.blocks;
 }
 
 void odp_shm_print_all(void)
@@ -451,7 +555,7 @@ void odp_shm_print_all(void)
 			continue;
 		_ODP_PRINT("  %s: addr: %p, len: %" PRIu64 " page size: %" PRIu64 "\n",
 			   block->name, block->mz->addr,
-			   shm_size(block->mz), block->mz->hugepage_sz);
+			   block->size, block->mz->hugepage_sz);
 	}
 
 	odp_spinlock_unlock(&shm_tbl->lock);
@@ -476,9 +580,9 @@ void odp_shm_print(odp_shm_t shm)
 	_ODP_PRINT(" type:       %s\n",   block->type == SHM_TYPE_LOCAL ? "local" : "remote");
 	_ODP_PRINT(" flags:      0x%x\n", shm_zone(block->mz)->flags);
 	_ODP_PRINT(" start:      %p\n",   block->mz->addr);
-	_ODP_PRINT(" len:        %" PRIu64 "\n",  shm_size(block->mz));
+	_ODP_PRINT(" len:        %" PRIu64 "\n", block->size);
 	_ODP_PRINT(" page size:  %" PRIu64 "\n", block->mz->hugepage_sz);
-	_ODP_PRINT(" NUMA ID:    %" PRIi32 "\n",  block->mz->socket_id);
+	_ODP_PRINT(" NUMA ID:    %" PRIi32 "\n", block->mz->socket_id);
 	_ODP_PRINT("\n");
 
 	odp_spinlock_unlock(&shm_tbl->lock);

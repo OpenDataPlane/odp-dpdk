@@ -34,6 +34,8 @@ typedef struct _odp_event_inline_offset_t {
 
 } _odp_event_inline_offset_t;
 
+extern const _odp_event_inline_offset_t _odp_event_inline_offset;
+
 /** @endcond */
 
 #ifdef __cplusplus
