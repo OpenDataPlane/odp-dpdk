@@ -1,4 +1,4 @@
-/* Copyright (c) 2019-2022, Nokia
+/* Copyright (c) 2019-2023, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -15,6 +15,7 @@
 #include <odp/api/plat/buffer_inline_types.h>
 #include <odp/api/plat/debug_inlines.h>
 #include <odp/api/plat/event_inline_types.h>
+#include <odp/api/plat/event_validation_external.h>
 
 #include <rte_mbuf.h>
 #include <rte_mempool.h>
@@ -94,6 +95,8 @@ _ODP_INLINE void odp_buffer_free(odp_buffer_t buf)
 {
 	struct rte_mbuf *mbuf = (struct rte_mbuf *)buf;
 
+	_odp_buffer_validate(buf, _ODP_EV_BUFFER_FREE);
+
 	rte_mempool_put(mbuf->pool, mbuf);
 }
 
@@ -105,6 +108,8 @@ _ODP_INLINE void odp_buffer_free_multi(const odp_buffer_t buf[], int num)
 
 	if (odp_unlikely(num <= 0))
 		return;
+
+	_odp_buffer_validate_multi(buf, num, _ODP_EV_BUFFER_FREE_MULTI);
 
 	mbuf_tbl[0] = (struct rte_mbuf *)buf[0];
 	mp_pending = mbuf_tbl[0]->pool;
@@ -131,6 +136,9 @@ _ODP_INLINE int odp_buffer_is_valid(odp_buffer_t buf)
 		return 0;
 
 	if (odp_event_type(odp_buffer_to_event(buf)) != ODP_EVENT_BUFFER)
+		return 0;
+
+	if (odp_unlikely(_odp_buffer_validate(buf, _ODP_EV_BUFFER_IS_VALID)))
 		return 0;
 
 	return 1;

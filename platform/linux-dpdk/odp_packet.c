@@ -24,6 +24,7 @@
 #include <odp_chksum_internal.h>
 #include <odp_debug_internal.h>
 #include <odp_event_internal.h>
+#include <odp_event_validation_internal.h>
 #include <odp_macros_internal.h>
 #include <odp_packet_internal.h>
 #include <odp_packet_io_internal.h>
@@ -1143,6 +1144,9 @@ int odp_packet_is_valid(odp_packet_t pkt)
 		return 0;
 
 	if (odp_event_type(ev) != ODP_EVENT_PACKET)
+		return 0;
+
+	if (odp_unlikely(_odp_packet_validate(pkt, _ODP_EV_PACKET_IS_VALID)))
 		return 0;
 
 	switch (odp_event_subtype(ev)) {

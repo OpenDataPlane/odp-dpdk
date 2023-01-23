@@ -5,11 +5,13 @@ ODP_VISIBILITY
 ODP_ATOMIC
 
 m4_include([platform/linux-dpdk/m4/odp_cpu.m4])
+m4_include([platform/linux-dpdk/m4/odp_event_validation.m4])
 m4_include([platform/linux-dpdk/m4/odp_libconfig.m4])
 m4_include([platform/linux-dpdk/m4/odp_openssl.m4])
 m4_include([platform/linux-dpdk/m4/odp_pcapng.m4])
 m4_include([platform/linux-dpdk/m4/odp_scheduler.m4])
 
+ODP_EVENT_VALIDATION
 ODP_PTHREAD
 ODP_SCHEDULER
 ODP_TIMER
@@ -68,6 +70,7 @@ AS_VAR_APPEND([PLAT_DEP_LIBS], ["${ATOMIC_LIBS} ${LIBCONFIG_LIBS} ${OPENSSL_LIBS
 # Add text to the end of configure with platform specific settings.
 # Make sure it's aligned same as other lines in configure.ac.
 AS_VAR_APPEND([PLAT_CFG_TEXT], ["
+	event_validation:       ${enable_event_validation}
 	openssl:                ${with_openssl}
 	openssl_rand:           ${openssl_rand}
 	pcap:			${have_pmd_pcap}
