@@ -1,5 +1,5 @@
 /* Copyright (c) 2013-2018, Linaro Limited
- * Copyright (c) 2019-2022, Nokia
+ * Copyright (c) 2019-2023, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -53,11 +53,7 @@ ODP_STATIC_ASSERT(PKTIO_LSO_PROFILES < UINT8_MAX, "PKTIO_LSO_PROFILES_ERROR");
 /* Forward declaration */
 struct pktio_if_ops;
 
-#if ODP_CACHE_LINE_SIZE == 128
-#define PKTIO_PRIVATE_SIZE 1536
-#else
-#define PKTIO_PRIVATE_SIZE 1344
-#endif
+#define PKTIO_PRIVATE_SIZE 9216
 
 typedef struct ODP_ALIGNED_CACHE {
 	const struct pktio_if_ops *ops; /**< Implementation specific methods */
