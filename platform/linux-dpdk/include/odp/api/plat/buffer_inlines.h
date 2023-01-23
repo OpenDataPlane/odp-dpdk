@@ -7,11 +7,10 @@
 #ifndef ODP_PLAT_BUFFER_INLINES_H_
 #define ODP_PLAT_BUFFER_INLINES_H_
 
+#include <odp/api/buffer_types.h>
 #include <odp/api/event.h>
 #include <odp/api/hints.h>
 #include <odp/api/pool_types.h>
-
-#include <odp/api/abi/buffer.h>
 
 #include <odp/api/plat/buffer_inline_types.h>
 #include <odp/api/plat/debug_inlines.h>
