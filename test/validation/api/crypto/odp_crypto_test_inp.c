@@ -1,17 +1,20 @@
 /* Copyright (c) 2014-2018, Linaro Limited
- * Copyright (c) 2021-2022, Nokia
+ * Copyright (c) 2021-2023, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:	BSD-3-Clause
  */
 
+#include <string.h>
 #include <odp_api.h>
 #include <odp/helper/odph_api.h>
 #include <odp_cunit_common.h>
+#include <packet_common.h>
 #include "test_vectors.h"
 
 #define PKT_POOL_NUM  64
 #define PKT_POOL_LEN  (1 * 1024)
+#define UAREA_SIZE 8
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof(a[0]))
 
@@ -35,6 +38,7 @@ static void test_defaults(uint8_t fill)
 	odp_crypto_session_param_init(&param);
 
 	CU_ASSERT_EQUAL(param.op, ODP_CRYPTO_OP_ENCODE);
+	CU_ASSERT_EQUAL(param.op_type, ODP_CRYPTO_OP_TYPE_LEGACY);
 	CU_ASSERT_EQUAL(param.auth_cipher_text, false);
 #if ODP_DEPRECATED_API
 	CU_ASSERT_EQUAL(param.pref_mode, ODP_CRYPTO_SYNC);
@@ -45,66 +49,12 @@ static void test_defaults(uint8_t fill)
 	CU_ASSERT_EQUAL(param.auth_alg, ODP_AUTH_ALG_NULL);
 	CU_ASSERT_EQUAL(param.auth_iv_len, 0);
 	CU_ASSERT_EQUAL(param.auth_aad_len, 0);
-
-#if ODP_DEPRECATED_API
-	CU_ASSERT_EQUAL(param.cipher_iv.data, NULL);
-	CU_ASSERT_EQUAL(param.cipher_iv.length, 0);
-	CU_ASSERT_EQUAL(param.auth_iv.data, NULL);
-	CU_ASSERT_EQUAL(param.auth_iv.length, 0);
-#endif
 }
 
 static void test_default_values(void)
 {
 	test_defaults(0);
 	test_defaults(0xff);
-}
-
-static int packet_cmp_mem_bits(odp_packet_t pkt, uint32_t offset,
-			       uint8_t *s, uint32_t len)
-{
-	int rc = -1;
-	uint32_t len_bytes = ((len + 7) / 8);
-	uint8_t leftover_bits = len % 8;
-	uint8_t buf[len_bytes];
-
-	odp_packet_copy_to_mem(pkt, offset, len_bytes, buf);
-
-	/* Compare till the last full byte */
-	rc = memcmp(buf, s, leftover_bits ? len_bytes - 1 : len_bytes);
-
-	if (rc == 0 && leftover_bits) {
-		/* Do masked comparison for the leftover bits */
-		uint8_t mask = 0xff << (8 - leftover_bits);
-
-		rc = !((mask & buf[len_bytes - 1]) ==
-		       (mask & s[len_bytes - 1]));
-	}
-
-	return rc;
-}
-
-static int packet_cmp_mem_bytes(odp_packet_t pkt, uint32_t offset,
-				uint8_t *s, uint32_t len)
-{
-	uint8_t buf[len];
-
-	odp_packet_copy_to_mem(pkt, offset, len, buf);
-
-	return memcmp(buf, s, len);
-}
-
-static int packet_cmp_mem(odp_packet_t pkt, uint32_t offset,
-			  uint8_t *s, uint32_t len, odp_bool_t bit_mode)
-{
-	int rc = -1;
-
-	if (bit_mode)
-		rc = packet_cmp_mem_bits(pkt, offset, s, len);
-	else
-		rc = packet_cmp_mem_bytes(pkt, offset, s, len);
-
-	return rc;
 }
 
 static const char *auth_alg_name(odp_auth_alg_t auth)
@@ -283,9 +233,12 @@ static int alg_op(odp_packet_t pkt,
 }
 #endif
 
-static int alg_packet_op(odp_packet_t pkt,
+static int alg_packet_op(odp_packet_t pkt_in,
+			 odp_packet_t *pkt_out,
 			 odp_bool_t *ok,
 			 odp_crypto_session_t session,
+			 odp_crypto_op_type_t op_type,
+			 int32_t oop_shift,
 			 uint8_t *cipher_iv_ptr,
 			 uint8_t *auth_iv_ptr,
 			 odp_packet_data_range_t *cipher_range,
@@ -298,7 +251,13 @@ static int alg_packet_op(odp_packet_t pkt,
 	odp_crypto_packet_result_t result;
 	odp_crypto_packet_op_param_t op_params;
 	odp_event_subtype_t subtype;
-	odp_packet_t out_pkt = pkt;
+	odp_packet_t orig_pkt_out;
+
+	if (op_type == ODP_CRYPTO_OP_TYPE_LEGACY)
+		*pkt_out = pkt_in;
+	else if (op_type == ODP_CRYPTO_OP_TYPE_BASIC)
+		*pkt_out = ODP_PACKET_INVALID;
+	orig_pkt_out = *pkt_out;
 
 	/* Prepare input/output params */
 	memset(&op_params, 0, sizeof(op_params));
@@ -306,6 +265,7 @@ static int alg_packet_op(odp_packet_t pkt,
 
 	op_params.cipher_range = *cipher_range;
 	op_params.auth_range = *auth_range;
+	op_params.dst_offset_shift = oop_shift;
 	if (cipher_iv_ptr)
 		op_params.cipher_iv_ptr = cipher_iv_ptr;
 	if (auth_iv_ptr)
@@ -316,13 +276,18 @@ static int alg_packet_op(odp_packet_t pkt,
 	op_params.hash_result_offset = hash_result_offset;
 
 	if (suite_context.op_mode == ODP_CRYPTO_SYNC) {
-		rc = odp_crypto_op(&pkt, &out_pkt, &op_params, 1);
+		rc = odp_crypto_op(&pkt_in, pkt_out, &op_params, 1);
 		if (rc <= 0) {
 			CU_FAIL("Failed odp_crypto_packet_op()");
 			return rc;
 		}
 	} else {
-		rc = odp_crypto_op_enq(&pkt, &pkt, &op_params, 1);
+		odp_packet_t *out_param = pkt_out;
+
+		if (op_type == ODP_CRYPTO_OP_TYPE_BASIC)
+			out_param = NULL;
+
+		rc = odp_crypto_op_enq(&pkt_in, out_param, &op_params, 1);
 		if (rc <= 0) {
 			CU_FAIL("Failed odp_crypto_op_enq()");
 			return rc;
@@ -339,33 +304,42 @@ static int alg_packet_op(odp_packet_t pkt,
 		CU_ASSERT(ODP_EVENT_PACKET == odp_event_types(event, &subtype));
 		CU_ASSERT(ODP_EVENT_PACKET_CRYPTO == subtype);
 
-		pkt = odp_crypto_packet_from_event(event);
+		*pkt_out = odp_crypto_packet_from_event(event);
 	}
 
-	CU_ASSERT(out_pkt == pkt);
+	if (op_type != ODP_CRYPTO_OP_TYPE_BASIC)
+		CU_ASSERT(*pkt_out == orig_pkt_out);
 	CU_ASSERT(ODP_EVENT_PACKET ==
-		  odp_event_type(odp_packet_to_event(pkt)));
+		  odp_event_type(odp_packet_to_event(*pkt_out)));
 	CU_ASSERT(ODP_EVENT_PACKET_CRYPTO ==
-		  odp_event_subtype(odp_packet_to_event(pkt)));
+		  odp_event_subtype(odp_packet_to_event(*pkt_out)));
 	CU_ASSERT(ODP_EVENT_PACKET ==
-		  odp_event_types(odp_packet_to_event(pkt), &subtype));
+		  odp_event_types(odp_packet_to_event(*pkt_out), &subtype));
 	CU_ASSERT(ODP_EVENT_PACKET_CRYPTO == subtype);
-	CU_ASSERT(odp_packet_subtype(pkt) == ODP_EVENT_PACKET_CRYPTO);
+	CU_ASSERT(odp_packet_subtype(*pkt_out) == ODP_EVENT_PACKET_CRYPTO);
 
-	rc = odp_crypto_result(&result, pkt);
+	rc = odp_crypto_result(&result, *pkt_out);
 	if (rc < 0) {
 		CU_FAIL("Failed odp_crypto_packet_result()");
 		return rc;
 	}
+	CU_ASSERT(rc == 0);
+
+	if (op_type == ODP_CRYPTO_OP_TYPE_OOP &&
+	    suite_context.op_mode == ODP_CRYPTO_ASYNC)
+		CU_ASSERT(result.pkt_in == pkt_in);
 
 	*ok = result.ok;
 
 	return 0;
 }
 
-static int crypto_op(odp_packet_t pkt,
+static int crypto_op(odp_packet_t pkt_in,
+		     odp_packet_t *pkt_out,
 		     odp_bool_t *ok,
 		     odp_crypto_session_t session,
+		     odp_crypto_op_type_t op_type,
+		     int32_t oop_shift,
 		     uint8_t *cipher_iv,
 		     uint8_t *auth_iv,
 		     odp_packet_data_range_t *cipher_range,
@@ -375,23 +349,26 @@ static int crypto_op(odp_packet_t pkt,
 {
 	int rc;
 
-	if (!suite_context.packet)
+	if (!suite_context.packet) {
 #if ODP_DEPRECATED_API
-		rc = alg_op(pkt, ok, session,
+		rc = alg_op(pkt_in, ok, session,
 			    cipher_iv, auth_iv,
 			    cipher_range, auth_range,
 			    aad, hash_result_offset);
+		*pkt_out = pkt_in;
 #else
 		rc = -1;
 #endif
-	else
-		rc = alg_packet_op(pkt, ok, session,
+	} else {
+		rc = alg_packet_op(pkt_in, pkt_out, ok, session,
+				   op_type, oop_shift,
 				   cipher_iv, auth_iv,
 				   cipher_range, auth_range,
 				   aad, hash_result_offset);
+	}
 
 	if (rc < 0)
-		odp_packet_free(pkt);
+		odp_packet_free(pkt_in);
 
 	return rc;
 }
@@ -434,12 +411,8 @@ static void fill_with_pattern(uint8_t *buf, uint32_t len)
 		buf[n] = n;
 }
 
-/*
- * Generate or verify header and trailer bytes
- */
-static void do_header_and_trailer(odp_packet_t pkt,
-				  uint32_t header_len, uint32_t trailer_len,
-				  odp_bool_t check)
+static void write_header_and_trailer(odp_packet_t pkt,
+				     uint32_t header_len, uint32_t trailer_len)
 {
 	uint32_t trailer_offset = odp_packet_len(pkt) - trailer_len;
 	uint32_t max_len = header_len > trailer_len ? header_len : trailer_len;
@@ -448,172 +421,470 @@ static void do_header_and_trailer(odp_packet_t pkt,
 
 	fill_with_pattern(buffer, sizeof(buffer));
 
-	if (check) {
-		CU_ASSERT(!packet_cmp_mem_bytes(pkt, 0,
-						buffer, header_len));
-		CU_ASSERT(!packet_cmp_mem_bytes(pkt, trailer_offset,
-						buffer, trailer_len));
-	} else {
-		rc = odp_packet_copy_from_mem(pkt, 0,
-					      header_len, buffer);
-		CU_ASSERT(rc == 0);
-		rc = odp_packet_copy_from_mem(pkt, trailer_offset,
-					      trailer_len, buffer);
-		CU_ASSERT(rc == 0);
-	}
+	rc = odp_packet_copy_from_mem(pkt, 0, header_len, buffer);
+	CU_ASSERT(rc == 0);
+	rc = odp_packet_copy_from_mem(pkt, trailer_offset, trailer_len, buffer);
+	CU_ASSERT(rc == 0);
 }
-
-typedef enum crypto_test {
-	NORMAL_TEST = 0,   /**< Plain execution */
-	REPEAT_TEST,       /**< Rerun without reinitializing the session */
-	WRONG_DIGEST_TEST, /**< Check against wrong digest */
-	MAX_TEST,          /**< Final mark */
-} crypto_test;
 
 typedef struct alg_test_param_t {
 	odp_crypto_session_t session;
 	odp_crypto_op_t op;
+	odp_crypto_op_type_t op_type;
+	int32_t oop_shift;
 	odp_cipher_alg_t cipher_alg;
 	odp_auth_alg_t auth_alg;
 	crypto_test_reference_t *ref;
 	uint32_t digest_offset;
-	odp_bool_t override_iv;
 	odp_bool_t is_bit_mode_cipher;
 	odp_bool_t is_bit_mode_auth;
 	odp_bool_t adjust_segmentation;
+	odp_bool_t wrong_digest;
 	uint32_t first_seg_len;
 	uint32_t header_len;
 	uint32_t trailer_len;
 } alg_test_param_t;
 
-static void alg_test_execute(const alg_test_param_t *param)
+static void prepare_crypto_ranges(const alg_test_param_t *param,
+				  odp_packet_data_range_t *cipher_range,
+				  odp_packet_data_range_t *auth_range)
 {
-	odp_bool_t ok = false;
-	int iteration;
-	crypto_test_reference_t *ref = param->ref;
-	uint32_t reflength = ref_length_in_bytes(ref);
 	odp_packet_data_range_t zero_range = {.offset = 0, .length = 0};
-	odp_packet_data_range_t cipher_range;
-	odp_packet_data_range_t auth_range;
-	uint8_t *cipher_iv = param->override_iv ? ref->cipher_iv : NULL;
-	uint8_t *auth_iv   = param->override_iv ? ref->auth_iv : NULL;
 
-	cipher_range.offset = param->header_len;
-	cipher_range.length = reflength;
-	auth_range.offset = param->header_len;
-	auth_range.length = reflength;
+	cipher_range->offset = param->header_len;
+	cipher_range->length = ref_length_in_bytes(param->ref);
+	auth_range->offset = param->header_len;
+	auth_range->length = ref_length_in_bytes(param->ref);
 	if (param->is_bit_mode_cipher) {
-		cipher_range.offset *= 8;
-		cipher_range.length = ref_length_in_bits(ref);
+		cipher_range->offset *= 8;
+		cipher_range->length = ref_length_in_bits(param->ref);
 	}
 	if (param->is_bit_mode_auth) {
-		auth_range.offset *= 8;
-		auth_range.length = ref_length_in_bits(ref);
+		auth_range->offset *= 8;
+		auth_range->length = ref_length_in_bits(param->ref);
 	}
 	/*
 	 * We did not check the bit mode of the null algorithms, so let's
 	 * not pass potentially invalid ranges to them.
 	 */
 	if (param->cipher_alg == ODP_CIPHER_ALG_NULL)
-		cipher_range = zero_range;
+		*cipher_range = zero_range;
 	if (param->auth_alg == ODP_AUTH_ALG_NULL)
-		auth_range = zero_range;
-	for (iteration = NORMAL_TEST; iteration < MAX_TEST; iteration++) {
-		odp_packet_t pkt;
-		uint32_t digest_offset = param->digest_offset;
-		uint32_t pkt_len;
+		*auth_range = zero_range;
+}
 
-		/*
-		 * Test detection of wrong digest value in input packet
-		 * only when decoding and using non-null auth algorithm.
-		 */
-		if (iteration == WRONG_DIGEST_TEST &&
-		    (param->auth_alg == ODP_AUTH_ALG_NULL ||
-		     param->op == ODP_CRYPTO_OP_ENCODE))
-			continue;
+static int prepare_input_packet(const alg_test_param_t *param,
+				odp_packet_t *pkt_in)
+{
+	crypto_test_reference_t *ref = param->ref;
+	uint32_t reflength = ref_length_in_bytes(ref);
+	odp_packet_t pkt;
+	uint32_t digest_offset = param->digest_offset;
+	uint32_t pkt_len;
 
-		pkt_len = param->header_len + reflength + param->trailer_len;
-		if (param->digest_offset == param->header_len + reflength)
-			pkt_len += ref->digest_length;
+	pkt_len = param->header_len + reflength + param->trailer_len;
+	if (param->digest_offset == param->header_len + reflength)
+		pkt_len += ref->digest_length;
 
-		pkt = odp_packet_alloc(suite_context.pool, pkt_len);
+	pkt = odp_packet_alloc(suite_context.pool, pkt_len);
 
-		CU_ASSERT(pkt != ODP_PACKET_INVALID);
-		if (pkt == ODP_PACKET_INVALID)
-			continue;
+	CU_ASSERT(pkt != ODP_PACKET_INVALID);
+	if (pkt == ODP_PACKET_INVALID)
+		return -1;
 
-		if (param->adjust_segmentation)
-			adjust_segments(&pkt, param->first_seg_len);
+	if (param->adjust_segmentation)
+		adjust_segments(&pkt, param->first_seg_len);
 
-		do_header_and_trailer(pkt, param->header_len, param->trailer_len, false);
+	write_header_and_trailer(pkt, param->header_len, param->trailer_len);
 
-		if (param->op == ODP_CRYPTO_OP_ENCODE) {
-			odp_packet_copy_from_mem(pkt, param->header_len,
-						 reflength, ref->plaintext);
-		} else {
-			odp_packet_copy_from_mem(pkt, param->header_len,
-						 reflength, ref->ciphertext);
-			odp_packet_copy_from_mem(pkt, digest_offset,
-						 ref->digest_length,
-						 ref->digest);
-			if (iteration == WRONG_DIGEST_TEST) {
-				uint8_t byte = ~ref->digest[0];
+	if (param->op == ODP_CRYPTO_OP_ENCODE) {
+		odp_packet_copy_from_mem(pkt, param->header_len,
+					 reflength, ref->plaintext);
+	} else {
+		odp_packet_copy_from_mem(pkt, param->header_len,
+					 reflength, ref->ciphertext);
+		odp_packet_copy_from_mem(pkt, digest_offset,
+					 ref->digest_length,
+					 ref->digest);
+		if (param->wrong_digest) {
+			uint8_t byte = ~ref->digest[0];
 
-				odp_packet_copy_from_mem(pkt, digest_offset,
-							 1, &byte);
-			}
+			odp_packet_copy_from_mem(pkt, digest_offset, 1, &byte);
 		}
+	}
+	*pkt_in = pkt;
+	return 0;
+}
 
-		if (crypto_op(pkt, &ok, param->session,
-			      cipher_iv, auth_iv,
-			      &cipher_range, &auth_range,
-			      ref->aad, digest_offset))
-			break;
+static void prepare_oop_output_packet(const alg_test_param_t *param,
+				      odp_packet_t *pkt_out,
+				      uint32_t pkt_len)
+{
+	uint32_t reflength = ref_length_in_bytes(param->ref);
+	const uint32_t oop_extra_len = 5;
+	uint32_t trl_len;
+	uint32_t hdr_len;
+	uint32_t oop_len;
 
-		if (iteration == WRONG_DIGEST_TEST) {
-			CU_ASSERT(!ok);
-			odp_packet_free(pkt);
-			continue;
-		}
+	oop_len = pkt_len + param->oop_shift + oop_extra_len;
+	*pkt_out = odp_packet_alloc(suite_context.pool, oop_len);
+	CU_ASSERT_FATAL(*pkt_out != ODP_PACKET_INVALID);
 
-		CU_ASSERT(ok);
+	uint8_t buf[oop_len];
 
-		do_header_and_trailer(pkt, param->header_len, param->trailer_len, true);
+	memset(buf, 0x55, sizeof(buf));
+	odp_packet_copy_from_mem(*pkt_out, 0, sizeof(buf), buf);
 
-		if (param->op == ODP_CRYPTO_OP_ENCODE) {
-			CU_ASSERT(!packet_cmp_mem(pkt, param->header_len,
-						  ref->ciphertext,
-						  ref->length,
-						  ref->is_length_in_bits));
-			CU_ASSERT(!packet_cmp_mem_bytes(pkt, digest_offset,
-							ref->digest,
-							ref->digest_length));
-		} else {
-			/*
-			 * Hash result in the packet is left to undefined
-			 * values. Restore it from the plaintext packet
-			 * to make the subsequent comparison work even
-			 * if the hash result is within the auth_range.
-			 */
-			odp_packet_copy_from_mem(pkt, digest_offset,
-						 ref->digest_length,
-						 ref->plaintext +
-						 digest_offset - param->header_len);
+	hdr_len = param->header_len + param->oop_shift;
+	trl_len = oop_len - hdr_len - reflength;
 
-			CU_ASSERT(!packet_cmp_mem(pkt, param->header_len,
-						  ref->plaintext,
-						  ref->length,
-						  ref->is_length_in_bits));
-		}
-		odp_packet_free(pkt);
+	write_header_and_trailer(*pkt_out, hdr_len, trl_len);
+
+	/* have different metadata than in the input packet */
+	memset(odp_packet_user_area(*pkt_out), 0xab,
+	       odp_packet_user_area_size(*pkt_out));
+}
+
+static int is_packet_data_equal(odp_packet_t pkt_1, odp_packet_t pkt_2)
+{
+	uint32_t len = odp_packet_len(pkt_1);
+	uint8_t buf_1[len];
+	uint8_t buf_2[len];
+
+	if (len != odp_packet_len(pkt_2) ||
+	    odp_packet_copy_to_mem(pkt_1, 0, len, buf_1) ||
+	    odp_packet_copy_to_mem(pkt_2, 0, len, buf_2))
+		return 0;
+
+	return !memcmp(buf_1, buf_2, len);
+}
+
+static int is_in_range(uint32_t offs, uint32_t range_offs, uint32_t range_len)
+{
+	return offs >= range_offs && offs < range_offs + range_len;
+}
+
+#define MAX_IGNORED_RANGES 3
+
+/*
+ * Output packet parts that we ignore since they have undefined values
+ */
+typedef struct ignore_t {
+	uint32_t byte_offset;	/* offset to a byte which has bits to be ignored */
+	uint32_t byte_mask;	/* mask of ignored bits in the byte */
+	struct {
+		uint32_t offset;
+		uint32_t length;
+	} ranges[MAX_IGNORED_RANGES]; /* byte ranges to be ignored */
+	uint32_t num_ranges;
+} ignore_t;
+
+static void add_ignored_range(ignore_t *ign, uint32_t offs, uint32_t len)
+{
+	if (len == 0)
+		return;
+	CU_ASSERT_FATAL(ign->num_ranges < MAX_IGNORED_RANGES);
+	ign->ranges[ign->num_ranges].offset = offs;
+	ign->ranges[ign->num_ranges].length = len;
+	ign->num_ranges++;
+}
+
+static void clear_ignored_data(const ignore_t *ign, uint8_t *data, uint32_t data_len)
+{
+	CU_ASSERT_FATAL(ign->byte_offset < data_len);
+	data[ign->byte_offset] &= ~ign->byte_mask;
+
+	for (uint32_t n = 0; n < ign->num_ranges; n++) {
+		uint32_t offset = ign->ranges[n].offset;
+		uint32_t length = ign->ranges[n].length;
+
+		CU_ASSERT(offset + length <= data_len);
+		memset(data + offset, 0, length);
 	}
 }
 
-typedef enum {
-	PACKET_IV,
-	OLD_PACKET_IV,
-	OLD_SESSION_IV,
-} iv_test_mode_t;
+static void prepare_ignore_info(const alg_test_param_t *param,
+				uint32_t shift,
+				uint32_t cipher_offset,
+				uint32_t cipher_len,
+				uint32_t auth_offset,
+				uint32_t auth_len,
+				ignore_t *ignore)
+{
+	memset(ignore, 0, sizeof(*ignore));
+
+	/*
+	 * Leftover bits in the last byte of the cipher range of bit mode
+	 * ciphers have undefined values.
+	 */
+	if (param->is_bit_mode_cipher &&
+	    param->cipher_alg != ODP_CIPHER_ALG_NULL) {
+		uint8_t leftover_bits = param->ref->length % 8;
+
+		ignore->byte_offset = cipher_offset + cipher_len - 1 + shift;
+		ignore->byte_mask = ~(0xff << (8 - leftover_bits));
+	}
+
+	/*
+	 * In decode sessions the bytes in the hash location have
+	 * undefined values.
+	 */
+	if (param->auth_alg != ODP_AUTH_ALG_NULL &&
+	    param->op == ODP_CRYPTO_OP_DECODE) {
+		uint32_t offs = param->digest_offset;
+
+		if (param->op_type != ODP_CRYPTO_OP_TYPE_OOP ||
+		    is_in_range(offs, cipher_offset, cipher_len) ||
+		    is_in_range(offs, auth_offset, auth_len)) {
+			add_ignored_range(ignore,
+					  param->digest_offset + shift,
+					  param->ref->digest_length);
+		}
+	}
+
+	/* Decrypted bytes are undefined if authentication fails. */
+	if (param->op == ODP_CRYPTO_OP_DECODE &&
+	    param->wrong_digest) {
+		add_ignored_range(ignore, cipher_offset + shift, cipher_len);
+		/* In OOP case, auth range may not get copied */
+		if (param->op_type == ODP_CRYPTO_OP_TYPE_OOP)
+			add_ignored_range(ignore, auth_offset + shift, auth_len);
+	}
+}
+
+/* Add room for bytes that are not included in ref->length */
+#define MAX_EXP_DATA_LEN (MAX_DATA_LEN + 200)
+
+/*
+ * Expected packet data
+ */
+typedef struct expected_t {
+	uint8_t data[MAX_EXP_DATA_LEN];
+	uint32_t len;
+	ignore_t ignore;
+} expected_t;
+
+static void prepare_expected_data(const alg_test_param_t *param,
+				  const odp_packet_data_range_t *cipher_range,
+				  const odp_packet_data_range_t *auth_range,
+				  odp_packet_t pkt_in,
+				  odp_packet_t pkt_out,
+				  expected_t *ex)
+{
+	uint32_t digest_offset = param->digest_offset;
+	uint32_t cipher_offset = cipher_range->offset;
+	uint32_t cipher_len = cipher_range->length;
+	uint32_t auth_offset = auth_range->offset;
+	uint32_t auth_len = auth_range->length;
+	const int32_t shift = param->op_type == ODP_CRYPTO_OP_TYPE_OOP ? param->oop_shift : 0;
+	const odp_packet_t base_pkt = param->op_type == ODP_CRYPTO_OP_TYPE_OOP ? pkt_out : pkt_in;
+	int rc;
+
+	if (param->op == ODP_CRYPTO_OP_ENCODE)
+		digest_offset += shift;
+
+	if (param->is_bit_mode_cipher) {
+		cipher_offset /= 8;
+		cipher_len = (cipher_len + 7) / 8;
+	}
+	if (param->is_bit_mode_auth) {
+		auth_offset /= 8;
+		auth_len = (auth_len + 7) / 8;
+	}
+	if (param->cipher_alg == ODP_CIPHER_ALG_NULL)
+		cipher_len = 0;
+	if (param->auth_alg == ODP_AUTH_ALG_NULL ||
+	    param->auth_alg == ODP_AUTH_ALG_AES_GCM ||
+	    param->auth_alg == ODP_AUTH_ALG_AES_CCM ||
+	    param->auth_alg == ODP_AUTH_ALG_CHACHA20_POLY1305) {
+		/* auth range is ignored with null and AEAD algorithms */
+		auth_len = 0;
+	}
+
+	/* copy all data from base packet */
+	ex->len = odp_packet_len(base_pkt);
+	CU_ASSERT_FATAL(ex->len <= sizeof(ex->data));
+	rc = odp_packet_copy_to_mem(base_pkt, 0, ex->len, ex->data);
+	CU_ASSERT(rc == 0);
+
+	if (param->op_type == ODP_CRYPTO_OP_TYPE_OOP && auth_len > 0) {
+		/* copy auth range from input packet */
+		rc = odp_packet_copy_to_mem(pkt_in, auth_offset, auth_len,
+					    ex->data + auth_offset + shift);
+		CU_ASSERT(rc == 0);
+	}
+
+	if (param->op == ODP_CRYPTO_OP_ENCODE) {
+		/* copy hash first */
+		memcpy(ex->data + digest_offset,
+		       param->ref->digest,
+		       param->ref->digest_length);
+		/*
+		 * Copy ciphertext, possibly overwriting hash.
+		 * The other order (hash overwriting some cipher
+		 * text) does not work in any real use case anyway.
+		 */
+		memcpy(ex->data + cipher_offset + shift,
+		       param->ref->ciphertext,
+		       cipher_len);
+	} else {
+		memcpy(ex->data + cipher_offset + shift,
+		       param->ref->plaintext,
+		       cipher_len);
+	}
+
+	prepare_ignore_info(param, shift,
+			    cipher_offset, cipher_len,
+			    auth_offset, auth_len,
+			    &ex->ignore);
+}
+
+static void print_data(const char *title, uint8_t *data, uint32_t len)
+{
+	static uint64_t limit;
+
+	if (limit++ > 20)
+		return;
+
+	printf("%s\n", title);
+	for (uint32_t n = 0; n < len ; n++) {
+		printf(" %02x", data[n]);
+		if ((n + 1) % 16 == 0)
+			printf("\n");
+	}
+	printf("\n");
+}
+
+static void check_output_packet_data(odp_packet_t pkt, expected_t *ex)
+{
+	int rc;
+	uint8_t pkt_data[ex->len];
+
+	CU_ASSERT(odp_packet_len(pkt) == ex->len);
+	rc = odp_packet_copy_to_mem(pkt, 0, ex->len, pkt_data);
+	CU_ASSERT(rc == 0);
+
+	clear_ignored_data(&ex->ignore, pkt_data, sizeof(pkt_data));
+	clear_ignored_data(&ex->ignore, ex->data, sizeof(ex->data));
+
+	if (memcmp(pkt_data, ex->data, ex->len)) {
+		CU_FAIL("packet data does not match expected data");
+		print_data("packet:", pkt_data, ex->len);
+		print_data("expected:", ex->data, ex->len);
+	}
+}
+
+static void alg_test_execute(const alg_test_param_t *param)
+{
+	odp_bool_t ok = false;
+	odp_packet_data_range_t cipher_range;
+	odp_packet_data_range_t auth_range;
+	odp_packet_t pkt;
+	odp_packet_t pkt_copy = ODP_PACKET_INVALID;
+	odp_packet_t pkt_out = ODP_PACKET_INVALID;
+	uint32_t digest_offset = param->digest_offset;
+	test_packet_md_t md_in, md_out, md_out_orig;
+	expected_t expected;
+
+	/*
+	 * Test detection of wrong digest value in input packet
+	 * only when decoding and using non-null auth algorithm.
+	 */
+	if (param->wrong_digest &&
+	    (param->auth_alg == ODP_AUTH_ALG_NULL ||
+	     param->op == ODP_CRYPTO_OP_ENCODE))
+		return;
+
+	prepare_crypto_ranges(param, &cipher_range, &auth_range);
+	if (prepare_input_packet(param, &pkt))
+		return;
+
+	if (param->op_type == ODP_CRYPTO_OP_TYPE_OOP) {
+		prepare_oop_output_packet(param, &pkt_out, odp_packet_len(pkt));
+
+		pkt_copy = odp_packet_copy(pkt, suite_context.pool);
+		CU_ASSERT_FATAL(pkt_copy != ODP_PACKET_INVALID);
+		test_packet_get_md(pkt_out, &md_out_orig);
+	}
+
+	prepare_expected_data(param, &cipher_range, &auth_range,
+			      pkt, pkt_out, &expected);
+
+	if (param->op_type == ODP_CRYPTO_OP_TYPE_OOP &&
+	    param->op == ODP_CRYPTO_OP_ENCODE) {
+		/*
+		 * In this type of sessions digest offset is an offset to the output
+		 * packet, so apply the shift.
+		 */
+		digest_offset += param->oop_shift;
+	}
+
+	test_packet_set_md(pkt);
+	test_packet_get_md(pkt, &md_in);
+
+	if (crypto_op(pkt, &pkt_out, &ok, param->session,
+		      param->op_type, param->oop_shift,
+		      param->ref->cipher_iv,
+		      param->ref->auth_iv,
+		      &cipher_range, &auth_range,
+		      param->ref->aad, digest_offset))
+		return;
+
+	/*
+	 * API is not explicit about whether a failed crypto op
+	 * sets the has_error packet flag or leaves it unchanged.
+	 * Let's allow both behaviours.
+	 */
+	test_packet_get_md(pkt_out, &md_out);
+	if (param->wrong_digest)
+		md_out.has_error = 0;
+
+	if (param->op_type == ODP_CRYPTO_OP_TYPE_OOP) {
+		test_packet_md_t md;
+
+		/* check that input packet has not changed */
+		CU_ASSERT(is_packet_data_equal(pkt, pkt_copy));
+		odp_packet_free(pkt_copy);
+		test_packet_get_md(pkt, &md);
+		CU_ASSERT(test_packet_is_md_equal(&md, &md_in));
+		odp_packet_free(pkt);
+
+		/* check that metadata of output packet has not changed */
+		CU_ASSERT(test_packet_is_md_equal(&md_out, &md_out_orig));
+	} else {
+		CU_ASSERT(test_packet_is_md_equal(&md_out, &md_in));
+	}
+
+	if (param->wrong_digest) {
+		CU_ASSERT(!ok);
+	} else {
+		CU_ASSERT(ok);
+	}
+	check_output_packet_data(pkt_out, &expected);
+	odp_packet_free(pkt_out);
+}
+
+static void alg_test_op(alg_test_param_t *param)
+{
+	int32_t oop_shifts[] = {0, 3, 130, -10};
+
+	for (uint32_t n = 0; n < ARRAY_SIZE(oop_shifts); n++) {
+		if (oop_shifts[n] != 0 &&
+		    param->op_type != ODP_CRYPTO_OP_TYPE_OOP)
+			continue;
+		if ((int32_t)param->header_len + oop_shifts[n] < 0)
+			continue;
+		param->oop_shift = oop_shifts[n];
+
+		param->wrong_digest = false;
+		alg_test_execute(param);
+		alg_test_execute(param); /* rerun with the same parameters */
+		param->wrong_digest = true;
+		alg_test_execute(param);
+	}
+}
+
+static int oop_warning_shown;
 
 typedef enum {
 	HASH_NO_OVERLAP,
@@ -621,10 +892,10 @@ typedef enum {
 } hash_test_mode_t;
 
 static odp_crypto_session_t session_create(odp_crypto_op_t op,
+					   odp_crypto_op_type_t op_type,
 					   odp_cipher_alg_t cipher_alg,
 					   odp_auth_alg_t auth_alg,
 					   crypto_test_reference_t *ref,
-					   iv_test_mode_t iv_mode,
 					   hash_test_mode_t hash_mode)
 {
 	odp_crypto_session_t session = ODP_CRYPTO_SESSION_INVALID;
@@ -641,23 +912,6 @@ static odp_crypto_session_t session_create(odp_crypto_op_t op,
 		.data = auth_key_data,
 		.length = ref->auth_key_length
 	};
-#if ODP_DEPRECATED_API
-	uint8_t cipher_iv_data[ref->cipher_iv_length];
-	uint8_t auth_iv_data[ref->auth_iv_length];
-	odp_crypto_iv_t cipher_iv = {
-		.length = ref->cipher_iv_length
-	};
-	odp_crypto_iv_t auth_iv = {
-		.length = ref->auth_iv_length
-	};
-
-	if (iv_mode == OLD_SESSION_IV) {
-		memcpy(cipher_iv_data, ref->cipher_iv, ref->cipher_iv_length);
-		memcpy(auth_iv_data, ref->auth_iv, ref->auth_iv_length);
-		cipher_iv.data = cipher_iv_data;
-		auth_iv.data = auth_iv_data;
-	}
-#endif
 
 	memcpy(cipher_key_data, ref->cipher_key, ref->cipher_key_length);
 	memcpy(auth_key_data, ref->auth_key, ref->auth_key_length);
@@ -665,6 +919,7 @@ static odp_crypto_session_t session_create(odp_crypto_op_t op,
 	/* Create a crypto session */
 	odp_crypto_session_param_init(&ses_params);
 	ses_params.op = op;
+	ses_params.op_type = op_type;
 	ses_params.auth_cipher_text = false;
 	ses_params.op_mode = suite_context.op_mode;
 #if ODP_DEPRECATED_API
@@ -675,15 +930,8 @@ static odp_crypto_session_t session_create(odp_crypto_op_t op,
 	ses_params.compl_queue = suite_context.queue;
 	ses_params.output_pool = suite_context.pool;
 	ses_params.cipher_key = cipher_key;
-	if (iv_mode == PACKET_IV) {
-		ses_params.cipher_iv_len = ref->cipher_iv_length;
-		ses_params.auth_iv_len = ref->auth_iv_length;
-	} else {
-#if ODP_DEPRECATED_API
-		ses_params.cipher_iv = cipher_iv;
-		ses_params.auth_iv = auth_iv;
-#endif
-	}
+	ses_params.cipher_iv_len = ref->cipher_iv_length;
+	ses_params.auth_iv_len = ref->auth_iv_length;
 	ses_params.auth_key = auth_key;
 	ses_params.auth_digest_len = ref->digest_length;
 	ses_params.auth_aad_len = ref->aad_length;
@@ -701,14 +949,21 @@ static odp_crypto_session_t session_create(odp_crypto_op_t op,
 		       auth_alg_name(auth_alg));
 		return ODP_CRYPTO_SESSION_INVALID;
 	}
+
+	/* For now, allow out-of-place sessions not to be supported. */
+	if (rc < 0 && status == ODP_CRYPTO_SES_ERR_PARAMS &&
+	    op_type == ODP_CRYPTO_OP_TYPE_OOP) {
+		if (!oop_warning_shown)
+			printf("\n    Skipping ODP_CRYPTO_OP_TYPE_OOP tests\n");
+		oop_warning_shown = 1;
+		return ODP_CRYPTO_SESSION_INVALID;
+	}
+
 	/*
 	 * We do not allow ODP_CRYPTO_SES_ERR_ALG_ORDER since we do
 	 * not combine individual non-null crypto and auth algorithms
 	 * with each other in the tests. Both orders should work when
 	 * only one algorithm is used (i.e. the other one is null).
-	 *
-	 * We do not allow ODP_CRYPTO_SES_ERR_PARAMS until needed for
-	 * some ODP implementation.
 	 */
 	CU_ASSERT_FATAL(!rc);
 	CU_ASSERT(status == ODP_CRYPTO_SES_ERR_NONE);
@@ -721,23 +976,19 @@ static odp_crypto_session_t session_create(odp_crypto_op_t op,
 	 */
 	memset(cipher_key_data, 0, sizeof(cipher_key_data));
 	memset(auth_key_data, 0, sizeof(auth_key_data));
-#if ODP_DEPRECATED_API
-	memset(cipher_iv_data, 0, sizeof(cipher_iv_data));
-	memset(auth_iv_data, 0, sizeof(auth_iv_data));
-#endif
 	memset(&ses_params, 0, sizeof(ses_params));
 
 	return session;
 }
 
-static void alg_test(odp_crypto_op_t op,
-		     odp_cipher_alg_t cipher_alg,
-		     odp_auth_alg_t auth_alg,
-		     crypto_test_reference_t *ref,
-		     uint32_t digest_offset,
-		     iv_test_mode_t iv_mode,
-		     odp_bool_t is_bit_mode_cipher,
-		     odp_bool_t is_bit_mode_auth)
+static void alg_test_ses(odp_crypto_op_t op,
+			 odp_crypto_op_type_t op_type,
+			 odp_cipher_alg_t cipher_alg,
+			 odp_auth_alg_t auth_alg,
+			 crypto_test_reference_t *ref,
+			 uint32_t digest_offset,
+			 odp_bool_t is_bit_mode_cipher,
+			 odp_bool_t is_bit_mode_auth)
 {
 	unsigned int initial_num_failures = CU_get_number_of_failures();
 	const uint32_t reflength = ref_length_in_bytes(ref);
@@ -749,22 +1000,22 @@ static void alg_test(odp_crypto_op_t op,
 	uint32_t max_shift;
 	alg_test_param_t test_param;
 
-	session = session_create(op, cipher_alg, auth_alg, ref, iv_mode, hash_mode);
+	session = session_create(op, op_type, cipher_alg, auth_alg, ref, hash_mode);
 	if (session == ODP_CRYPTO_SESSION_INVALID)
 		return;
 
 	memset(&test_param, 0, sizeof(test_param));
 	test_param.session = session;
 	test_param.op = op;
+	test_param.op_type = op_type;
 	test_param.cipher_alg = cipher_alg;
 	test_param.auth_alg = auth_alg;
 	test_param.ref = ref;
-	test_param.override_iv = (iv_mode != OLD_SESSION_IV);
 	test_param.is_bit_mode_cipher = is_bit_mode_cipher;
 	test_param.is_bit_mode_auth = is_bit_mode_auth;
 	test_param.digest_offset = digest_offset;
 
-	alg_test_execute(&test_param);
+	alg_test_op(&test_param);
 
 	max_shift = reflength + ref->digest_length;
 
@@ -785,17 +1036,46 @@ static void alg_test(odp_crypto_op_t op,
 		test_param.header_len = 0;
 		test_param.trailer_len = 0;
 		test_param.digest_offset = digest_offset;
-		alg_test_execute(&test_param);
+		alg_test_op(&test_param);
 
 		/* Test partial packet crypto with odd alignment. */
-		test_param.header_len = 3;
+		test_param.header_len = 13;
 		test_param.trailer_len = 32;
 		test_param.digest_offset = test_param.header_len + digest_offset;
-		alg_test_execute(&test_param);
+		alg_test_op(&test_param);
 	}
 
 	rc = odp_crypto_session_destroy(session);
 	CU_ASSERT(!rc);
+}
+
+static void alg_test(odp_crypto_op_t op,
+		     odp_cipher_alg_t cipher_alg,
+		     odp_auth_alg_t auth_alg,
+		     crypto_test_reference_t *ref,
+		     uint32_t digest_offset,
+		     odp_bool_t is_bit_mode_cipher,
+		     odp_bool_t is_bit_mode_auth)
+{
+	odp_crypto_op_type_t op_types[] = {
+		ODP_CRYPTO_OP_TYPE_LEGACY,
+		ODP_CRYPTO_OP_TYPE_BASIC,
+		ODP_CRYPTO_OP_TYPE_OOP,
+	};
+
+	for (unsigned int n = 0; n < ARRAY_SIZE(op_types); n++) {
+		if (!suite_context.packet &&
+		    op_types[n] != ODP_CRYPTO_OP_TYPE_LEGACY)
+			continue;
+		alg_test_ses(op,
+			     op_types[n],
+			     cipher_alg,
+			     auth_alg,
+			     ref,
+			     digest_offset,
+			     is_bit_mode_cipher,
+			     is_bit_mode_auth);
+	}
 }
 
 static odp_bool_t aad_len_ok(const odp_crypto_auth_capability_t *capa, uint32_t len)
@@ -842,6 +1122,8 @@ static void check_alg(odp_crypto_op_t op,
 
 	memset(cipher_tested, 0, sizeof(cipher_tested));
 	memset(auth_tested, 0, sizeof(auth_tested));
+
+	oop_warning_shown = 0; /* allow OOP-unsupported warning again */
 
 	for (idx = 0; idx < count; idx++) {
 		int cipher_idx = -1, auth_idx = -1;
@@ -908,18 +1190,8 @@ static void check_alg(odp_crypto_op_t op,
 			continue;
 		}
 
-		/* test with per-packet IV */
 		alg_test(op, cipher_alg, auth_alg, &ref[idx], digest_offs,
-			 PACKET_IV, is_bit_mode_cipher, is_bit_mode_auth);
-#if ODP_DEPRECATED_API
-		/* test with per-packet IV using the old API*/
-		alg_test(op, cipher_alg, auth_alg, &ref[idx], digest_offs,
-			 OLD_PACKET_IV, is_bit_mode_cipher, is_bit_mode_auth);
-
-		/* test with per-session IV */
-		alg_test(op, cipher_alg, auth_alg, &ref[idx], digest_offs,
-			 OLD_SESSION_IV, is_bit_mode_cipher, is_bit_mode_auth);
-#endif
+			 is_bit_mode_cipher, is_bit_mode_auth);
 
 		cipher_tested[cipher_idx] = true;
 		auth_tested[auth_idx] = true;
@@ -1223,12 +1495,15 @@ static int create_hash_test_reference(odp_auth_alg_t auth,
 	rc = odp_packet_copy_from_mem(pkt, 0, auth_bytes, ref->plaintext);
 	CU_ASSERT(rc == 0);
 
-	session = session_create(ODP_CRYPTO_OP_ENCODE, ODP_CIPHER_ALG_NULL,
-				 auth, ref, PACKET_IV, HASH_NO_OVERLAP);
+	session = session_create(ODP_CRYPTO_OP_ENCODE,
+				 ODP_CRYPTO_OP_TYPE_LEGACY,
+				 ODP_CIPHER_ALG_NULL,
+				 auth, ref, HASH_NO_OVERLAP);
 	if (session == ODP_CRYPTO_SESSION_INVALID)
 		return -1;
 
-	rc = crypto_op(pkt, &ok, session, ref->cipher_iv, ref->auth_iv,
+	rc = crypto_op(pkt, &pkt, &ok, session, ODP_CRYPTO_OP_TYPE_LEGACY, 0,
+		       ref->cipher_iv, ref->auth_iv,
 		       &cipher_range, &auth_range, ref->aad, enc_digest_offset);
 	CU_ASSERT(rc == 0);
 	CU_ASSERT(ok);
@@ -1243,11 +1518,11 @@ static int create_hash_test_reference(odp_auth_alg_t auth,
 	/* copy the calculated digest in the ciphertext packet in ref */
 	rc = odp_packet_copy_to_mem(pkt, enc_digest_offset, ref->digest_length,
 				    &ref->ciphertext[digest_offset]);
+	CU_ASSERT(rc == 0);
 
 	/* copy the calculated digest the digest field in ref */
 	rc = odp_packet_copy_to_mem(pkt, enc_digest_offset, ref->digest_length,
 				    &ref->digest);
-
 	CU_ASSERT(rc == 0);
 
 	odp_packet_free(pkt);
@@ -1280,7 +1555,6 @@ static void test_auth_hash_in_auth_range(odp_auth_alg_t auth,
 		 auth,
 		 &ref,
 		 digest_offset,
-		 PACKET_IV,
 		 false,
 		 capa->bit_mode);
 
@@ -1303,7 +1577,6 @@ static void test_auth_hash_in_auth_range(odp_auth_alg_t auth,
 		 auth,
 		 &ref,
 		 digest_offset,
-		 PACKET_IV,
 		 false,
 		 capa->bit_mode);
 }
@@ -2501,6 +2774,15 @@ static int crypto_init(odp_instance_t *inst)
 	params.pkt.len     = PKT_POOL_LEN;
 	params.pkt.num     = PKT_POOL_NUM;
 	params.type        = ODP_POOL_PACKET;
+
+	/*
+	 * Let's have a user area so that we can check that its
+	 * content gets copied along with other metadata when needed.
+	 */
+	if (pool_capa.pkt.max_uarea_size >= UAREA_SIZE)
+		params.pkt.uarea_size = UAREA_SIZE;
+	else
+		printf("Warning: could not request packet user area\n");
 
 	if (pool_capa.pkt.max_seg_len &&
 	    PKT_POOL_LEN > pool_capa.pkt.max_seg_len) {

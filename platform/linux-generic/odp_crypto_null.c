@@ -1,5 +1,5 @@
 /* Copyright (c) 2014-2018, Linaro Limited
- * Copyright (c) 2021-2022, Nokia
+ * Copyright (c) 2021-2023, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -201,7 +201,13 @@ odp_crypto_session_create(const odp_crypto_session_param_t *param,
 		_ODP_ERR("Crypto is disabled\n");
 		/* Dummy output to avoid compiler warning about uninitialized
 		 * variables */
-		*status = ODP_CRYPTO_SES_CREATE_ERR_ENOMEM;
+		*status = ODP_CRYPTO_SES_ERR_ENOMEM;
+		*session_out = ODP_CRYPTO_SESSION_INVALID;
+		return -1;
+	}
+
+	if (param->op_type == ODP_CRYPTO_OP_TYPE_OOP) {
+		*status = ODP_CRYPTO_SES_ERR_PARAMS;
 		*session_out = ODP_CRYPTO_SESSION_INVALID;
 		return -1;
 	}
@@ -209,7 +215,7 @@ odp_crypto_session_create(const odp_crypto_session_param_t *param,
 	/* Allocate memory for this session */
 	session = alloc_session();
 	if (NULL == session) {
-		*status = ODP_CRYPTO_SES_CREATE_ERR_ENOMEM;
+		*status = ODP_CRYPTO_SES_ERR_ENOMEM;
 		goto err;
 	}
 
@@ -227,7 +233,7 @@ odp_crypto_session_create(const odp_crypto_session_param_t *param,
 
 	/* Check result */
 	if (rc) {
-		*status = ODP_CRYPTO_SES_CREATE_ERR_INV_CIPHER;
+		*status = ODP_CRYPTO_SES_ERR_CIPHER;
 		goto err;
 	}
 
@@ -242,13 +248,13 @@ odp_crypto_session_create(const odp_crypto_session_param_t *param,
 
 	/* Check result */
 	if (rc) {
-		*status = ODP_CRYPTO_SES_CREATE_ERR_INV_AUTH;
+		*status = ODP_CRYPTO_SES_ERR_AUTH;
 		goto err;
 	}
 
 	/* We're happy */
 	*session_out = (intptr_t)session;
-	*status = ODP_CRYPTO_SES_CREATE_ERR_NONE;
+	*status = ODP_CRYPTO_SES_ERR_NONE;
 	return 0;
 
 err:
@@ -280,6 +286,10 @@ odp_crypto_operation(odp_crypto_op_param_t *param,
 	odp_crypto_packet_result_t packet_result;
 	odp_crypto_op_result_t local_result;
 	int rc;
+
+	if (((odp_crypto_generic_session_t *)(intptr_t)param->session)->p.op_type !=
+	    ODP_CRYPTO_OP_TYPE_LEGACY)
+		return -1;
 
 	packet_param.session = param->session;
 	packet_param.cipher_iv_ptr = param->cipher_iv_ptr;
@@ -449,43 +459,6 @@ uint64_t odp_crypto_session_to_u64(odp_crypto_session_t hdl)
 	return (uint64_t)hdl;
 }
 
-odp_packet_t odp_crypto_packet_from_event(odp_event_t ev)
-{
-	/* This check not mandated by the API specification */
-	_ODP_ASSERT(odp_event_type(ev) == ODP_EVENT_PACKET);
-	_ODP_ASSERT(odp_event_subtype(ev) == ODP_EVENT_PACKET_CRYPTO);
-
-	return odp_packet_from_event(ev);
-}
-
-odp_event_t odp_crypto_packet_to_event(odp_packet_t pkt)
-{
-	return odp_packet_to_event(pkt);
-}
-
-static
-odp_crypto_packet_result_t *get_op_result_from_packet(odp_packet_t pkt)
-{
-	odp_packet_hdr_t *hdr = packet_hdr(pkt);
-
-	return &hdr->crypto_op_result;
-}
-
-int odp_crypto_result(odp_crypto_packet_result_t *result,
-		      odp_packet_t packet)
-{
-	odp_crypto_packet_result_t *op_result;
-
-	_ODP_ASSERT(odp_event_subtype(odp_packet_to_event(packet)) ==
-		   ODP_EVENT_PACKET_CRYPTO);
-
-	op_result = get_op_result_from_packet(packet);
-
-	memcpy(result, op_result, sizeof(*result));
-
-	return 0;
-}
-
 static int copy_data_and_metadata(odp_packet_t dst, odp_packet_t src)
 {
 	int md_copy;
@@ -513,6 +486,9 @@ static odp_packet_t get_output_packet(const odp_crypto_generic_session_t *sessio
 				      odp_packet_t pkt_out)
 {
 	int rc;
+
+	if (odp_likely(session->p.op_type == ODP_CRYPTO_OP_TYPE_BASIC))
+		return pkt_in;
 
 	if (odp_likely(pkt_in == pkt_out))
 		return pkt_out;
@@ -555,7 +531,7 @@ int crypto_int(odp_packet_t pkt_in,
 
 	/* Fill in result */
 	packet_subtype_set(out_pkt, ODP_EVENT_PACKET_CRYPTO);
-	op_result = get_op_result_from_packet(out_pkt);
+	op_result = &packet_hdr(out_pkt)->crypto_op_result;
 	op_result->cipher_status.alg_err = ODP_CRYPTO_ALG_ERR_NONE;
 	op_result->cipher_status.hw_err = ODP_CRYPTO_HW_ERR_NONE;
 	op_result->auth_status.alg_err = ODP_CRYPTO_ALG_ERR_NONE;
@@ -603,7 +579,9 @@ int odp_crypto_op_enq(const odp_packet_t pkt_in[],
 		_ODP_ASSERT(ODP_CRYPTO_ASYNC == session->p.op_mode);
 		_ODP_ASSERT(ODP_QUEUE_INVALID != session->p.compl_queue);
 
-		pkt = pkt_out[i];
+		if (session->p.op_type != ODP_CRYPTO_OP_TYPE_BASIC)
+			pkt = pkt_out[i];
+
 		rc = crypto_int(pkt_in[i], &pkt, &param[i]);
 		if (rc < 0)
 			break;

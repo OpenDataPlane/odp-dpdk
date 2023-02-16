@@ -1,6 +1,6 @@
 /* Copyright (c) 2014-2018, Linaro Limited
  * Copyright (c) 2021, ARM Limited
- * Copyright (c) 2022, Nokia
+ * Copyright (c) 2022-2023, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -38,6 +38,10 @@
 #define ARM_CRYPTO_MAX_DATA_LENGTH	      65536
 #define ARM_CRYPTO_MAX_DIGEST_LENGTH          16
 
+#define AES_GCM_IV_LEN 12
+ODP_STATIC_ASSERT(AES_GCM_IV_LEN <= ARM_CRYPTO_MAX_IV_LENGTH,
+		  "AES_GCM_IV_LEN exceeds ARM_CRYPTO_MAX_IV_LENGTH");
+
 /*
  * ARM crypto library may read up to 15 bytes past the end of input
  * data and AAD and write up to 15 bytes past the end of output data.
@@ -70,9 +74,9 @@ static const odp_crypto_cipher_capability_t cipher_capa_null[] = {
 
 #ifdef __ARM_FEATURE_AES
 static const odp_crypto_cipher_capability_t cipher_capa_aes_gcm[] = {
-{.key_len = 16, .iv_len = 12},
-{.key_len = 24, .iv_len = 12},
-{.key_len = 32, .iv_len = 12} };
+{.key_len = 16, .iv_len = AES_GCM_IV_LEN},
+{.key_len = 24, .iv_len = AES_GCM_IV_LEN},
+{.key_len = 32, .iv_len = AES_GCM_IV_LEN} };
 #endif
 
 /*
@@ -111,18 +115,11 @@ struct odp_crypto_generic_session_t {
 	odp_crypto_session_param_t p;
 
 	struct {
-#if ODP_DEPRECATED_API
-		/* Copy of session IV data */
-		uint8_t iv_data[ARM_CRYPTO_MAX_IV_LENGTH];
-#endif
 		uint8_t key_data[ARM_CRYPTO_MAX_CIPHER_KEY_LENGTH];
 	} cipher;
 
 	struct {
 		uint8_t  key[ARM_CRYPTO_MAX_AUTH_KEY_LENGTH];
-#if ODP_DEPRECATED_API
-		uint8_t  iv_data[ARM_CRYPTO_MAX_IV_LENGTH];
-#endif
 	} auth;
 
 	crypto_func_t func;
@@ -176,21 +173,13 @@ void free_session(odp_crypto_generic_session_t *session)
 	odp_spinlock_unlock(&global->lock);
 }
 
-static
-odp_crypto_packet_result_t *get_op_result_from_packet(odp_packet_t pkt)
-{
-	odp_packet_hdr_t *hdr = packet_hdr(pkt);
-
-	return &hdr->crypto_op_result;
-}
-
 static inline void set_crypto_op_result(odp_packet_t pkt,
 					odp_crypto_alg_err_t cipher_err,
 					odp_crypto_alg_err_t auth_err)
 {
 	odp_crypto_packet_result_t *op_result;
 
-	op_result = get_op_result_from_packet(pkt);
+	op_result = &packet_hdr(pkt)->crypto_op_result;
 	op_result->cipher_status.alg_err = cipher_err;
 	op_result->cipher_status.hw_err = ODP_CRYPTO_HW_ERR_NONE;
 	op_result->auth_status.alg_err = auth_err;
@@ -235,8 +224,8 @@ void aes_gcm_encrypt(odp_packet_t pkt,
 			.d = {0, 0}
 		}
 	};
-	uint8_t *iv_ptr;
-	uint64_t iv_bit_length = session->p.cipher_iv_len * 8;
+	uint8_t iv_data[ARM_CRYPTO_MAX_IV_LENGTH];
+	uint64_t iv_bit_length = AES_GCM_IV_LEN * 8;
 	uint64_t plaintext_bit_length = param->cipher_range.length * 8;
 	uint64_t aad_bit_length = session->p.auth_aad_len * 8;
 	uint32_t in_pos = param->cipher_range.offset;
@@ -252,21 +241,13 @@ void aes_gcm_encrypt(odp_packet_t pkt,
 		goto err;
 	}
 
-#if ODP_DEPRECATED_API
-	if (param->cipher_iv_ptr)
-		iv_ptr = param->cipher_iv_ptr;
-	else if (session->p.cipher_iv.data)
-		iv_ptr = session->cipher.iv_data;
-	else
-		goto err;
-#else
-	iv_ptr = param->cipher_iv_ptr;
-	_ODP_ASSERT(session->p.cipher_iv_len == 0 || iv_ptr != NULL);
-#endif
+	/* The crypto lib may read 16 bytes. Copy to a big enough buffer */
+	_ODP_ASSERT(param->cipher_iv_ptr != NULL);
+	memcpy(iv_data, param->cipher_iv_ptr, AES_GCM_IV_LEN);
 
 	cs.constants = &session->cc;
 
-	rc = armv8_aes_gcm_set_counter(iv_ptr, iv_bit_length, &cs);
+	rc = armv8_aes_gcm_set_counter(iv_data, iv_bit_length, &cs);
 	if (odp_unlikely(rc)) {
 		_ODP_DBG("ARM Crypto: Failure while setting nonce\n");
 		goto err;
@@ -335,9 +316,9 @@ void aes_gcm_decrypt(odp_packet_t pkt,
 			.d = {0, 0}
 		}
 	};
-	uint8_t *iv_ptr;
+	uint8_t iv_data[ARM_CRYPTO_MAX_IV_LENGTH];
 	uint8_t tag[AES_GCM_TAG_LEN];
-	uint64_t iv_bit_length = session->p.cipher_iv_len * 8;
+	uint64_t iv_bit_length = AES_GCM_IV_LEN * 8;
 	uint64_t plaintext_bit_length = param->cipher_range.length * 8;
 	uint64_t aad_bit_length = session->p.auth_aad_len * 8;
 	uint32_t in_pos = param->cipher_range.offset;
@@ -352,21 +333,13 @@ void aes_gcm_decrypt(odp_packet_t pkt,
 		goto err;
 	}
 
-#if ODP_DEPRECATED_API
-	if (param->cipher_iv_ptr)
-		iv_ptr = param->cipher_iv_ptr;
-	else if (session->p.cipher_iv.data)
-		iv_ptr = session->cipher.iv_data;
-	else
-		goto err;
-#else
-	iv_ptr = param->cipher_iv_ptr;
-	_ODP_ASSERT(session->p.cipher_iv_len == 0 || iv_ptr != NULL);
-#endif
+	/* The crypto lib may read 16 bytes. Copy to a big enough buffer */
+	_ODP_ASSERT(param->cipher_iv_ptr != NULL);
+	memcpy(iv_data, param->cipher_iv_ptr, AES_GCM_IV_LEN);
 
 	cs.constants = &session->cc;
 
-	rc = armv8_aes_gcm_set_counter(iv_ptr, iv_bit_length, &cs);
+	rc = armv8_aes_gcm_set_counter(iv_data, iv_bit_length, &cs);
 	if (odp_unlikely(rc)) {
 		_ODP_DBG("ARM Crypto: Failure while setting nonce\n");
 		goto err;
@@ -433,7 +406,7 @@ static int process_aes_gcm_param(odp_crypto_generic_session_t *session)
 		return -1;
 
 	/* Verify IV len is correct */
-	if (12 != session->p.cipher_iv_len)
+	if (session->p.cipher_iv_len != AES_GCM_IV_LEN)
 		return -1;
 
 	if (ARM_CRYPTO_MAX_CIPHER_KEY_LENGTH < session->p.cipher_key.length)
@@ -555,6 +528,12 @@ odp_crypto_session_create(const odp_crypto_session_param_t *param,
 		return -1;
 	}
 
+	if (param->op_type == ODP_CRYPTO_OP_TYPE_OOP) {
+		*status = ODP_CRYPTO_SES_ERR_PARAMS;
+		*session_out = ODP_CRYPTO_SESSION_INVALID;
+		return -1;
+	}
+
 	/* Allocate memory for this session */
 	session = alloc_session();
 	if (NULL == session) {
@@ -576,17 +555,6 @@ odp_crypto_session_create(const odp_crypto_session_param_t *param,
 		*status = ODP_CRYPTO_SES_ERR_CIPHER;
 		goto err;
 	}
-
-#if ODP_DEPRECATED_API
-	/* Copy IV data */
-	if (session->p.cipher_iv.data)
-		memcpy(session->cipher.iv_data, session->p.cipher_iv.data,
-		       session->p.cipher_iv.length);
-
-	if (session->p.auth_iv.data)
-		memcpy(session->auth.iv_data, session->p.auth_iv.data,
-		       session->p.auth_iv.length);
-#endif
 
 	/* Process based on cipher */
 	switch (param->cipher_alg) {
@@ -704,6 +672,10 @@ odp_crypto_operation(odp_crypto_op_param_t *param,
 	odp_crypto_packet_result_t packet_result;
 	odp_crypto_op_result_t local_result;
 	int rc;
+
+	if (((odp_crypto_generic_session_t *)(intptr_t)param->session)->p.op_type !=
+	    ODP_CRYPTO_OP_TYPE_LEGACY)
+		return -1;
 
 	packet_param.session = param->session;
 	packet_param.cipher_iv_ptr = param->cipher_iv_ptr;
@@ -877,35 +849,6 @@ uint64_t odp_crypto_session_to_u64(odp_crypto_session_t hdl)
 	return (uint64_t)hdl;
 }
 
-odp_packet_t odp_crypto_packet_from_event(odp_event_t ev)
-{
-	/* This check not mandated by the API specification */
-	_ODP_ASSERT(odp_event_type(ev) == ODP_EVENT_PACKET);
-	_ODP_ASSERT(odp_event_subtype(ev) == ODP_EVENT_PACKET_CRYPTO);
-
-	return odp_packet_from_event(ev);
-}
-
-odp_event_t odp_crypto_packet_to_event(odp_packet_t pkt)
-{
-	return odp_packet_to_event(pkt);
-}
-
-int odp_crypto_result(odp_crypto_packet_result_t *result,
-		      odp_packet_t packet)
-{
-	odp_crypto_packet_result_t *op_result;
-
-	_ODP_ASSERT(odp_event_subtype(odp_packet_to_event(packet)) ==
-		   ODP_EVENT_PACKET_CRYPTO);
-
-	op_result = get_op_result_from_packet(packet);
-
-	memcpy(result, op_result, sizeof(*result));
-
-	return 0;
-}
-
 static int copy_data_and_metadata(odp_packet_t dst, odp_packet_t src)
 {
 	int md_copy;
@@ -933,6 +876,9 @@ static odp_packet_t get_output_packet(const odp_crypto_generic_session_t *sessio
 				      odp_packet_t pkt_out)
 {
 	int rc;
+
+	if (odp_likely(session->p.op_type == ODP_CRYPTO_OP_TYPE_BASIC))
+		return pkt_in;
 
 	if (odp_likely(pkt_in == pkt_out))
 		return pkt_out;
@@ -1018,7 +964,9 @@ int odp_crypto_op_enq(const odp_packet_t pkt_in[],
 		_ODP_ASSERT(ODP_CRYPTO_ASYNC == session->p.op_mode);
 		_ODP_ASSERT(ODP_QUEUE_INVALID != session->p.compl_queue);
 
-		pkt = pkt_out[i];
+		if (session->p.op_type != ODP_CRYPTO_OP_TYPE_BASIC)
+			pkt = pkt_out[i];
+
 		rc = crypto_int(pkt_in[i], &pkt, &param[i]);
 		if (rc < 0)
 			break;

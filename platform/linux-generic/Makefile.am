@@ -34,9 +34,11 @@ odpapiplatinclude_HEADERS = \
 		  include/odp/api/plat/buffer_inline_types.h \
 		  include/odp/api/plat/byteorder_inlines.h \
 		  include/odp/api/plat/cpu_inlines.h \
+		  include/odp/api/plat/crypto_inlines.h \
 		  include/odp/api/plat/debug_inlines.h \
 		  include/odp/api/plat/event_inlines.h \
 		  include/odp/api/plat/event_inline_types.h \
+		  include/odp/api/plat/event_validation_external.h \
 		  include/odp/api/plat/event_vector_inline_types.h \
 		  include/odp/api/plat/hash_inlines.h \
 		  include/odp/api/plat/ipsec_inlines.h \
@@ -70,11 +72,13 @@ odpapiabiarchinclude_HEADERS += \
 		  include-abi/odp/api/abi/atomic.h \
 		  include-abi/odp/api/abi/barrier.h \
 		  include-abi/odp/api/abi/buffer.h \
+		  include-abi/odp/api/abi/buffer_types.h \
 		  include-abi/odp/api/abi/byteorder.h \
 		  include-abi/odp/api/abi/classification.h \
 		  include-abi/odp/api/abi/comp.h \
 		  include-abi/odp/api/abi/cpumask.h \
 		  include-abi/odp/api/abi/crypto.h \
+		  include-abi/odp/api/abi/crypto_types.h \
 		  include-abi/odp/api/abi/debug.h \
 		  include-abi/odp/api/abi/dma_types.h \
 		  include-abi/odp/api/abi/errno.h \
@@ -129,6 +133,7 @@ noinst_HEADERS = \
 		  include/odp_debug_internal.h \
 		  include/odp_errno_define.h \
 		  include/odp_event_internal.h \
+		  include/odp_event_validation_internal.h \
 		  include/odp_fdserver_internal.h \
 		  include/odp_forward_typedefs_internal.h \
 		  include/odp_global_data.h \
@@ -164,6 +169,8 @@ noinst_HEADERS = \
 		  include/odp_ring_common.h \
 		  include/odp_ring_internal.h \
 		  include/odp_ring_mpmc_internal.h \
+		  include/odp_ring_mpmc_u32_internal.h \
+		  include/odp_ring_mpmc_u64_internal.h \
 		  include/odp_ring_ptr_internal.h \
 		  include/odp_ring_spsc_internal.h \
 		  include/odp_ring_st_internal.h \
@@ -205,6 +212,7 @@ __LIB__libodp_linux_la_SOURCES = \
 			   odp_dma.c \
 			   odp_errno.c \
 			   odp_event.c \
+			   odp_event_validation.c \
 			   odp_fdserver.c \
 			   odp_hash_crc_gen.c \
 			   odp_impl.c \
@@ -278,8 +286,13 @@ if WITH_ARMV8_CRYPTO
 __LIB__libodp_linux_la_SOURCES += \
 			   arch/aarch64/odp_crypto_armv8.c
 else
+if WITH_IPSECMB_CRYPTO
+__LIB__libodp_linux_la_SOURCES += \
+			   odp_crypto_ipsecmb.c
+else
 __LIB__libodp_linux_la_SOURCES += \
 			   odp_crypto_null.c
+endif
 endif
 endif
 if ODP_ABI_COMPAT
@@ -288,6 +301,7 @@ __LIB__libodp_linux_la_SOURCES += \
 			   odp_buffer_api.c \
 			   odp_byteorder_api.c \
 			   odp_cpu_api.c \
+			   odp_crypto_api.c \
 			   odp_event_api.c \
 			   odp_hash_api.c \
 			   odp_ipsec_api.c \
@@ -438,6 +452,7 @@ __LIB__libodp_linux_la_LIBADD += $(DPDK_LIBS_LIBODP)
 __LIB__libodp_linux_la_LIBADD += $(PTHREAD_LIBS)
 __LIB__libodp_linux_la_LIBADD += $(TIMER_LIBS)
 __LIB__libodp_linux_la_LIBADD += $(LIBXDP_LIBS)
+__LIB__libodp_linux_la_LIBADD += $(IPSEC_MB_LIBS)
 
 if ODP_PKTIO_PCAP
 __LIB__libodp_linux_la_LIBADD += $(PCAP_LIBS)

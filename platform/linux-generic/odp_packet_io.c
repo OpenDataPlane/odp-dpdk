@@ -1613,16 +1613,6 @@ odp_time_t odp_pktio_time(odp_pktio_t hdl, odp_time_t *global_ts)
 	return ts;
 }
 
-uint64_t ODP_DEPRECATE(odp_pktin_ts_res)(odp_pktio_t hdl)
-{
-	return odp_pktio_ts_res(hdl);
-}
-
-odp_time_t ODP_DEPRECATE(odp_pktin_ts_from_ns)(odp_pktio_t hdl, uint64_t ns)
-{
-	return odp_pktio_ts_from_ns(hdl, ns);
-}
-
 void odp_pktio_print(odp_pktio_t hdl)
 {
 	pktio_entry_t *entry;
@@ -2166,8 +2156,7 @@ void odp_pktio_extra_stats_print(odp_pktio_t pktio)
 	_ODP_PRINT("\n");
 }
 
-int odp_pktin_queue_config(odp_pktio_t pktio,
-			   const odp_pktin_queue_param_t *param)
+int odp_pktin_queue_config(odp_pktio_t pktio, const odp_pktin_queue_param_t *param)
 {
 	pktio_entry_t *entry;
 	odp_pktin_mode_t mode;
@@ -2175,7 +2164,7 @@ int odp_pktin_queue_config(odp_pktio_t pktio,
 	uint32_t num_queues, i;
 	int rc;
 	odp_queue_t queue;
-	odp_pktin_queue_param_t default_param;
+	odp_pktin_queue_param_t default_param, local_param;
 
 	if (param == NULL) {
 		odp_pktin_queue_param_init(&default_param);
@@ -2204,7 +2193,19 @@ int odp_pktin_queue_config(odp_pktio_t pktio,
 		return -1;
 	}
 
-	num_queues = param->classifier_enable ? 1 : param->num_queues;
+	if (param->classifier_enable) {
+		num_queues = 1;
+
+		if (param->num_queues != num_queues) {
+			/* When classifier is enabled, ensure that only one input queue will be
+			 * configured by driver. */
+			memcpy(&local_param, param, sizeof(odp_pktin_queue_param_t));
+			local_param.num_queues = num_queues;
+			param = &local_param;
+		}
+	} else {
+		num_queues = param->num_queues;
+	}
 
 	rc = odp_pktio_capability(pktio, &capa);
 	if (rc) {

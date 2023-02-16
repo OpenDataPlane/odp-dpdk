@@ -13,6 +13,7 @@ odpapiinclude_HEADERS = \
 	odp/api/atomic.h \
 	odp/api/barrier.h \
 	odp/api/buffer.h \
+	odp/api/buffer_types.h \
 	odp/api/byteorder.h \
 	odp/api/chksum.h \
 	odp/api/classification.h \
@@ -20,6 +21,7 @@ odpapiinclude_HEADERS = \
 	odp/api/cpu.h \
 	odp/api/cpumask.h \
 	odp/api/crypto.h \
+	odp/api/crypto_types.h \
 	odp/api/debug.h \
 	odp/api/deprecated.h \
 	odp/api/dma.h \
@@ -77,6 +79,7 @@ odpapispecinclude_HEADERS = \
 		  odp/api/spec/atomic.h \
 		  odp/api/spec/barrier.h \
 		  odp/api/spec/buffer.h \
+		  odp/api/spec/buffer_types.h \
 		  odp/api/spec/byteorder.h \
 		  odp/api/spec/chksum.h \
 		  odp/api/spec/classification.h \
@@ -84,6 +87,7 @@ odpapispecinclude_HEADERS = \
 		  odp/api/spec/cpu.h \
 		  odp/api/spec/cpumask.h \
 		  odp/api/spec/crypto.h \
+		  odp/api/spec/crypto_types.h \
 		  odp/api/spec/debug.h \
 		  odp/api/spec/dma.h \
 		  odp/api/spec/dma_types.h \
@@ -144,12 +148,14 @@ odpapiabidefaultinclude_HEADERS = \
 	odp/api/abi-default/atomic.h \
 	odp/api/abi-default/barrier.h \
 	odp/api/abi-default/buffer.h \
+	odp/api/abi-default/buffer_types.h \
 	odp/api/abi-default/byteorder.h \
 	odp/api/abi-default/classification.h \
 	odp/api/abi-default/comp.h \
 	odp/api/abi-default/cpu.h \
 	odp/api/abi-default/cpumask.h \
 	odp/api/abi-default/crypto.h \
+	odp/api/abi-default/crypto_types.h \
 	odp/api/abi-default/debug.h \
 	odp/api/abi-default/dma_types.h \
 	odp/api/abi-default/errno.h \
@@ -202,12 +208,14 @@ odpapiabiarchinclude_HEADERS = \
 	odp/arch/arm32-linux/odp/api/abi/atomic.h \
 	odp/arch/arm32-linux/odp/api/abi/barrier.h \
 	odp/arch/arm32-linux/odp/api/abi/buffer.h \
+	odp/arch/arm32-linux/odp/api/abi/buffer_types.h \
 	odp/arch/arm32-linux/odp/api/abi/byteorder.h \
 	odp/arch/arm32-linux/odp/api/abi/classification.h \
 	odp/arch/arm32-linux/odp/api/abi/comp.h \
 	odp/arch/arm32-linux/odp/api/abi/cpu.h \
 	odp/arch/arm32-linux/odp/api/abi/cpumask.h \
 	odp/arch/arm32-linux/odp/api/abi/crypto.h \
+	odp/arch/arm32-linux/odp/api/abi/crypto_types.h \
 	odp/arch/arm32-linux/odp/api/abi/debug.h \
 	odp/arch/arm32-linux/odp/api/abi/dma_types.h \
 	odp/arch/arm32-linux/odp/api/abi/errno.h \
@@ -256,12 +264,14 @@ odpapiabiarchinclude_HEADERS = \
 	odp/arch/arm64-linux/odp/api/abi/atomic.h \
 	odp/arch/arm64-linux/odp/api/abi/barrier.h \
 	odp/arch/arm64-linux/odp/api/abi/buffer.h \
+	odp/arch/arm64-linux/odp/api/abi/buffer_types.h \
 	odp/arch/arm64-linux/odp/api/abi/byteorder.h \
 	odp/arch/arm64-linux/odp/api/abi/classification.h \
 	odp/arch/arm64-linux/odp/api/abi/comp.h \
 	odp/arch/arm64-linux/odp/api/abi/cpu.h \
 	odp/arch/arm64-linux/odp/api/abi/cpumask.h \
 	odp/arch/arm64-linux/odp/api/abi/crypto.h \
+	odp/arch/arm64-linux/odp/api/abi/crypto_types.h \
 	odp/arch/arm64-linux/odp/api/abi/debug.h \
 	odp/arch/arm64-linux/odp/api/abi/dma_types.h \
 	odp/arch/arm64-linux/odp/api/abi/errno.h \
@@ -310,12 +320,14 @@ odpapiabiarchinclude_HEADERS = \
 	odp/arch/default-linux/odp/api/abi/atomic.h \
 	odp/arch/default-linux/odp/api/abi/barrier.h \
 	odp/arch/default-linux/odp/api/abi/buffer.h \
+	odp/arch/default-linux/odp/api/abi/buffer_types.h \
 	odp/arch/default-linux/odp/api/abi/byteorder.h \
 	odp/arch/default-linux/odp/api/abi/classification.h \
 	odp/arch/default-linux/odp/api/abi/comp.h \
 	odp/arch/default-linux/odp/api/abi/cpu.h \
 	odp/arch/default-linux/odp/api/abi/cpumask.h \
 	odp/arch/default-linux/odp/api/abi/crypto.h \
+	odp/arch/default-linux/odp/api/abi/crypto_types.h \
 	odp/arch/default-linux/odp/api/abi/debug.h \
 	odp/arch/default-linux/odp/api/abi/dma_types.h \
 	odp/arch/default-linux/odp/api/abi/errno.h \
@@ -364,12 +376,14 @@ odpapiabiarchinclude_HEADERS = \
 	odp/arch/power64-linux/odp/api/abi/atomic.h \
 	odp/arch/power64-linux/odp/api/abi/barrier.h \
 	odp/arch/power64-linux/odp/api/abi/buffer.h \
+	odp/arch/power64-linux/odp/api/abi/buffer_types.h \
 	odp/arch/power64-linux/odp/api/abi/byteorder.h \
 	odp/arch/power64-linux/odp/api/abi/classification.h \
 	odp/arch/power64-linux/odp/api/abi/comp.h \
 	odp/arch/power64-linux/odp/api/abi/cpu.h \
 	odp/arch/power64-linux/odp/api/abi/cpumask.h \
 	odp/arch/power64-linux/odp/api/abi/crypto.h \
+	odp/arch/power64-linux/odp/api/abi/crypto_types.h \
 	odp/arch/power64-linux/odp/api/abi/debug.h \
 	odp/arch/power64-linux/odp/api/abi/dma_types.h \
 	odp/arch/power64-linux/odp/api/abi/errno.h \
@@ -418,12 +432,14 @@ odpapiabiarchinclude_HEADERS = \
 	odp/arch/x86_32-linux/odp/api/abi/atomic.h \
 	odp/arch/x86_32-linux/odp/api/abi/barrier.h \
 	odp/arch/x86_32-linux/odp/api/abi/buffer.h \
+	odp/arch/x86_32-linux/odp/api/abi/buffer_types.h \
 	odp/arch/x86_32-linux/odp/api/abi/byteorder.h \
 	odp/arch/x86_32-linux/odp/api/abi/classification.h \
 	odp/arch/x86_32-linux/odp/api/abi/comp.h \
 	odp/arch/x86_32-linux/odp/api/abi/cpu.h \
 	odp/arch/x86_32-linux/odp/api/abi/cpumask.h \
 	odp/arch/x86_32-linux/odp/api/abi/crypto.h \
+	odp/arch/x86_32-linux/odp/api/abi/crypto_types.h \
 	odp/arch/x86_32-linux/odp/api/abi/debug.h \
 	odp/arch/x86_32-linux/odp/api/abi/dma_types.h \
 	odp/arch/x86_32-linux/odp/api/abi/errno.h \
@@ -472,12 +488,14 @@ odpapiabiarchinclude_HEADERS = \
 	odp/arch/x86_64-linux/odp/api/abi/atomic.h \
 	odp/arch/x86_64-linux/odp/api/abi/barrier.h \
 	odp/arch/x86_64-linux/odp/api/abi/buffer.h \
+	odp/arch/x86_64-linux/odp/api/abi/buffer_types.h \
 	odp/arch/x86_64-linux/odp/api/abi/byteorder.h \
 	odp/arch/x86_64-linux/odp/api/abi/classification.h \
 	odp/arch/x86_64-linux/odp/api/abi/comp.h \
 	odp/arch/x86_64-linux/odp/api/abi/cpu.h \
 	odp/arch/x86_64-linux/odp/api/abi/cpumask.h \
 	odp/arch/x86_64-linux/odp/api/abi/crypto.h \
+	odp/arch/x86_64-linux/odp/api/abi/crypto_types.h \
 	odp/arch/x86_64-linux/odp/api/abi/debug.h \
 	odp/arch/x86_64-linux/odp/api/abi/dma_types.h \
 	odp/arch/x86_64-linux/odp/api/abi/errno.h \
