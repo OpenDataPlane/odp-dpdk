@@ -1,5 +1,5 @@
 /* Copyright (c) 2017-2018, Linaro Limited
- * Copyright (c) 2021-2022, Nokia
+ * Copyright (c) 2021-2023, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -8,7 +8,6 @@
 #include <odp_posix_extensions.h>
 
 #include <odp/api/debug.h>
-#include <odp/api/deprecated.h>
 #include <odp/api/shared_memory.h>
 #include <odp/api/spinlock.h>
 
@@ -32,14 +31,7 @@
 #include <rte_memzone.h>
 
 /* Supported ODP_SHM_* flags */
-#if ODP_DEPRECATED_API
-	#define DEPRECATED_SHM_FLAGS (ODP_SHM_SW_ONLY)
-#else
-	#define DEPRECATED_SHM_FLAGS 0
-#endif
-
-#define SUPPORTED_SHM_FLAGS (ODP_SHM_EXPORT | ODP_SHM_HP | \
-			     ODP_SHM_SINGLE_VA | DEPRECATED_SHM_FLAGS)
+#define SUPPORTED_SHM_FLAGS (ODP_SHM_EXPORT | ODP_SHM_HP | ODP_SHM_SINGLE_VA)
 
 #define SHM_MAX_ALIGN (0x80000000)
 #define SHM_BLOCK_NAME "%" PRIu64 "-%d-%s"
@@ -299,8 +291,7 @@ odp_shm_t odp_shm_reserve(const char *name, uint64_t size, uint64_t align,
 	block->type = SHM_TYPE_LOCAL;
 	block->size = size;
 
-	/* Note: ODP_SHM_SW_ONLY/ODP_SHM_PROC/ODP_SHM_SINGLE_VA flags are
-	 * currently ignored. */
+	/* Note: ODP_SHM_PROC/ODP_SHM_SINGLE_VA flags are currently ignored. */
 	shm_zone(mz)->flags = flags;
 
 	odp_spinlock_unlock(&shm_tbl->lock);
