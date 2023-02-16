@@ -1395,6 +1395,13 @@ int odp_crypto_session_create(const odp_crypto_session_param_t *param,
 		return -1;
 	}
 
+	/* ODP_CRYPTO_OP_TYPE_OOP not supported */
+	if (param->op_type == ODP_CRYPTO_OP_TYPE_OOP) {
+		*status = ODP_CRYPTO_SES_ERR_PARAMS;
+		*session_out = ODP_CRYPTO_SESSION_INVALID;
+		return -1;
+	}
+
 	if (rte_cryptodev_count() == 0) {
 		_ODP_ERR("No crypto devices available\n");
 		*status = ODP_CRYPTO_SES_ERR_ENOMEM;
