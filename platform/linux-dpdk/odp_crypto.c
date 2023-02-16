@@ -83,10 +83,7 @@ typedef struct crypto_session_entry_s {
 		unsigned int chained_bufs_ok:1;
 	} flags;
 	uint8_t cdev_id;
-#if ODP_DEPRECATED_API
-	uint8_t cipher_iv_data[MAX_IV_LENGTH];
-	uint8_t auth_iv_data[MAX_IV_LENGTH];
-#endif
+
 } crypto_session_entry_t;
 
 typedef struct crypto_global_s {
@@ -1503,16 +1500,7 @@ int odp_crypto_session_create(const odp_crypto_session_param_t *param,
 out_null:
 	session->rte_session  = rte_session;
 	session->cdev_id = cdev_id;
-#if ODP_DEPRECATED_API
-	if (param->cipher_iv.data)
-		memcpy(session->cipher_iv_data,
-		       param->cipher_iv.data,
-		       param->cipher_iv.length);
-	if (param->auth_iv.data)
-		memcpy(session->auth_iv_data,
-		       param->auth_iv.data,
-		       param->auth_iv.length);
-#endif
+
 	/* We're happy */
 	*session_out = (intptr_t)session;
 	*status = ODP_CRYPTO_SES_ERR_NONE;
@@ -1689,17 +1677,8 @@ static void crypto_fill_aead_param(const crypto_session_entry_t *session,
 		iv_ptr++;
 	}
 
-#if ODP_DEPRECATED_API
-	if (param->cipher_iv_ptr)
-		memcpy(iv_ptr, param->cipher_iv_ptr, iv_len);
-	else if (session->p.cipher_iv.data)
-		memcpy(iv_ptr, session->cipher_iv_data, iv_len);
-	else
-		_ODP_ASSERT(iv_len == 0);
-#else
 	_ODP_ASSERT(iv_len == 0 || param->cipher_iv_ptr != NULL);
 	memcpy(iv_ptr, param->cipher_iv_ptr, iv_len);
-#endif
 
 	op->sym->aead.data.offset = param->cipher_range.offset;
 	op->sym->aead.data.length = param->cipher_range.length;
@@ -1723,29 +1702,6 @@ static void crypto_fill_sym_param(const crypto_session_entry_t *session,
 					      &op->sym->auth.digest.phys_addr);
 	}
 
-#if ODP_DEPRECATED_API
-	if (param->cipher_iv_ptr) {
-		iv_ptr = rte_crypto_op_ctod_offset(op, uint8_t *, IV_OFFSET);
-		memcpy(iv_ptr, param->cipher_iv_ptr, cipher_iv_len);
-	} else if (session->p.cipher_iv.data) {
-		iv_ptr = rte_crypto_op_ctod_offset(op, uint8_t *, IV_OFFSET);
-		memcpy(iv_ptr, session->cipher_iv_data, cipher_iv_len);
-	} else {
-		_ODP_ASSERT(cipher_iv_len == 0);
-	}
-
-	if (param->auth_iv_ptr) {
-		iv_ptr = rte_crypto_op_ctod_offset(op, uint8_t *,
-						   IV_OFFSET + MAX_IV_LENGTH);
-		memcpy(iv_ptr, param->auth_iv_ptr, auth_iv_len);
-	} else if (session->p.auth_iv.data) {
-		iv_ptr = rte_crypto_op_ctod_offset(op, uint8_t *,
-						   IV_OFFSET + MAX_IV_LENGTH);
-		memcpy(iv_ptr, session->auth_iv_data, auth_iv_len);
-	} else {
-		_ODP_ASSERT(auth_iv_len == 0);
-	}
-#else
 	_ODP_ASSERT(cipher_iv_len == 0 || param->cipher_iv_ptr != NULL);
 	_ODP_ASSERT(auth_iv_len == 0 || param->auth_iv_ptr != NULL);
 	iv_ptr = rte_crypto_op_ctod_offset(op, uint8_t *, IV_OFFSET);
@@ -1755,7 +1711,6 @@ static void crypto_fill_sym_param(const crypto_session_entry_t *session,
 		iv_ptr = rte_crypto_op_ctod_offset(op, uint8_t *, IV_OFFSET + MAX_IV_LENGTH);
 		memcpy(iv_ptr, param->auth_iv_ptr, auth_iv_len);
 	}
-#endif
 
 	op->sym->cipher.data.offset = param->cipher_range.offset;
 	op->sym->cipher.data.length = param->cipher_range.length;
