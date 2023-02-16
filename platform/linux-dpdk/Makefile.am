@@ -159,6 +159,8 @@ noinst_HEADERS = \
 		  ${top_srcdir}/platform/linux-generic/include/odp_ring_common.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_ring_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_ring_mpmc_internal.h \
+		  ${top_srcdir}/platform/linux-generic/include/odp_ring_mpmc_u32_internal.h \
+		  ${top_srcdir}/platform/linux-generic/include/odp_ring_mpmc_u64_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_ring_ptr_internal.h \
 		  include/odp_ptr_ring_mpmc_internal.h \
 		  include/odp_ptr_ring_spsc_internal.h \
