@@ -1836,6 +1836,9 @@ static odp_packet_t get_output_packet(const crypto_session_entry_t *session,
 {
 	int rc;
 
+	if (odp_likely(session->p.op_type == ODP_CRYPTO_OP_TYPE_BASIC))
+		return pkt_in;
+
 	if (odp_likely(pkt_in == pkt_out))
 		return pkt_out;
 
@@ -2159,6 +2162,10 @@ int odp_crypto_operation(odp_crypto_op_param_t *param,
 	odp_crypto_op_result_t local_result;
 	int rc;
 
+	if (((crypto_session_entry_t *)(intptr_t)param->session)->p.op_type !=
+	    ODP_CRYPTO_OP_TYPE_LEGACY)
+		return -1;
+
 	packet_param.session = param->session;
 	packet_param.cipher_iv_ptr = param->cipher_iv_ptr;
 	packet_param.auth_iv_ptr = param->auth_iv_ptr;
@@ -2239,7 +2246,8 @@ int odp_crypto_op_enq(const odp_packet_t pkt_in[],
 		_ODP_ASSERT(ODP_CRYPTO_ASYNC == session->p.op_mode);
 		_ODP_ASSERT(ODP_QUEUE_INVALID != session->p.compl_queue);
 
-		out_pkts[i] = pkt_out[i];
+		if (session->p.op_type != ODP_CRYPTO_OP_TYPE_BASIC)
+			out_pkts[i] = pkt_out[i];
 	}
 
 	num_pkt = odp_crypto_int(pkt_in, out_pkts, param, num_pkt);
