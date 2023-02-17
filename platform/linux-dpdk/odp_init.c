@@ -19,6 +19,7 @@
 #include <odp_schedule_if.h>
 #include <odp_shm_internal.h>
 
+#include <ctype.h>
 #include <string.h>
 #include <stdio.h>
 #include <unistd.h>
