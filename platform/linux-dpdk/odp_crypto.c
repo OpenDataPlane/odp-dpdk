@@ -35,6 +35,7 @@
 #include <rte_crypto.h>
 #include <rte_cryptodev.h>
 #include <rte_malloc.h>
+#include <rte_version.h>
 
 #include <string.h>
 #include <math.h>
@@ -446,7 +447,9 @@ int _odp_crypto_init_global(void)
 		for (queue_pair = 0; queue_pair < nb_queue_pairs;
 							queue_pair++) {
 			qp_conf.mp_session = mp;
+#if RTE_VERSION < RTE_VERSION_NUM(22, 11, 0, 0)
 			qp_conf.mp_session_private = mp;
+#endif
 			rc = rte_cryptodev_queue_pair_setup(cdev_id, queue_pair,
 							    &qp_conf,
 							    socket_id);
@@ -1478,6 +1481,7 @@ int odp_crypto_session_create(const odp_crypto_session_param_t *param,
 	sess_mp = global->session_mempool[socket_id];
 
 	/* Setup session */
+#if RTE_VERSION < RTE_VERSION_NUM(22, 11, 0, 0)
 	rte_session = rte_cryptodev_sym_session_create(sess_mp);
 	if (rte_session == NULL) {
 		*status = ODP_CRYPTO_SES_ERR_ENOMEM;
@@ -1491,6 +1495,13 @@ int odp_crypto_session_create(const odp_crypto_session_param_t *param,
 		*status = ODP_CRYPTO_SES_ERR_ENOMEM;
 		goto err;
 	}
+#else
+	rte_session = rte_cryptodev_sym_session_create(cdev_id, first_xform, sess_mp);
+	if (rte_session == NULL) {
+		*status = ODP_CRYPTO_SES_ERR_ENOMEM;
+		goto err;
+	}
+#endif
 
 	session->flags.chained_bufs_ok = chained_bufs_ok(param, cdev_id);
 	if (global->enabled_crypto_dev_qpairs_shared[cdev_id])
@@ -1527,12 +1538,17 @@ int odp_crypto_session_destroy(odp_crypto_session_t _session)
 	rte_session = session->rte_session;
 
 	if (rte_session != NULL) {
+#if RTE_VERSION < RTE_VERSION_NUM(22, 11, 0, 0)
 		if (rte_cryptodev_sym_session_clear(session->cdev_id,
 						    rte_session) < 0)
 			return -1;
 
 		if (rte_cryptodev_sym_session_free(rte_session) < 0)
 			return -1;
+#else
+		if (rte_cryptodev_sym_session_free(session->cdev_id, rte_session) < 0)
+			return -1;
+#endif
 	}
 
 	/* remove the crypto_session_entry_t */
