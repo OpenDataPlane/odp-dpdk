@@ -1,5 +1,5 @@
 Copyright (c) 2018-2019, Linaro Limited
-Copyright (c) 2019-2022, Nokia
+Copyright (c) 2019-2023, Nokia
 All rights reserved.
 
 SPDX-License-Identifier:        BSD-3-Clause
@@ -36,8 +36,8 @@ cmds below for Ubuntu, where it has been compiled and tested.
 On Ubuntu install pcap development library:
     sudo apt-get install libpcap-dev
 
-Right now ODP-DPDK supports DPDK v19.11 (recommended version), v20.11, and
-v21.11.
+Right now ODP-DPDK supports DPDK v19.11 (recommended version), v20.11, v21.11,
+and v22.11.
 
 Compile DPDK 19.11
 ------------------
