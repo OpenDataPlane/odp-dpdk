@@ -1,4 +1,5 @@
 /* Copyright (c) 2014-2018, Linaro Limited
+ * Copyright (c) 2023, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -22,7 +23,13 @@ extern "C" {
 #include <odp/api/packet_types.h>
 
 /** @addtogroup odp_packet
- *  Operations on packet metadata flags.
+ *  @par Operations on packet metadata flags
+ *
+ * If user sets multiple conflicting packet metadata flags
+ * using odp_packet_has_XX_set() functions, only the last set flag value is
+ * guaranteed to hold. The values of other conflicting flags are implementation
+ * specific. The conflicting flag combinations are defined in function
+ * documentations.
  *  @{
  */
 
@@ -172,6 +179,8 @@ int odp_packet_has_jumbo(odp_packet_t pkt);
 /**
  * Check for VLAN
  *
+ * Check if packet contains normal or QinQ VLAN header.
+ *
  * @param pkt          Packet handle
  *
  * @retval non-zero    Packet contains a VLAN header
@@ -181,6 +190,8 @@ int odp_packet_has_vlan(odp_packet_t pkt);
 
 /**
  * Check for VLAN QinQ (stacked VLAN)
+ *
+ * Check if packet contains QinQ VLAN header.
  *
  * @param pkt          Packet handle
  *
@@ -401,6 +412,9 @@ void odp_packet_has_jumbo_set(odp_packet_t pkt, int val);
 /**
  * Set flag for VLAN
  *
+ * Set when packet contains normal VLAN header. Only one VLAN flag
+ * (VLAN/VLAN QinQ) can be set simultaneously.
+ *
  * @param pkt Packet handle
  * @param val Value
  */
@@ -408,6 +422,9 @@ void odp_packet_has_vlan_set(odp_packet_t pkt, int val);
 
 /**
  * Set flag for VLAN QinQ (stacked VLAN)
+ *
+ * Set when packet contains QinQ VLAN header. Only one VLAN flag
+ * (VLAN/VLAN QinQ) can be set simultaneously.
  *
  * @param pkt Packet handle
  * @param val Value
@@ -417,6 +434,8 @@ void odp_packet_has_vlan_qinq_set(odp_packet_t pkt, int val);
 /**
  * Set flag for ARP
  *
+ * Only one of ARP/IPv4/IPv6 flags can be set simultaneously.
+ *
  * @param pkt Packet handle
  * @param val Value
  */
@@ -424,6 +443,8 @@ void odp_packet_has_arp_set(odp_packet_t pkt, int val);
 
 /**
  * Set flag for IPv4
+ *
+ * Only one of ARP/IPv4/IPv6 flags can be set simultaneously.
  *
  * @param pkt Packet handle
  * @param val Value
@@ -433,6 +454,8 @@ void odp_packet_has_ipv4_set(odp_packet_t pkt, int val);
 /**
  * Set flag for IPv6
  *
+ * Only one of ARP/IPv4/IPv6 flags can be set simultaneously.
+ *
  * @param pkt Packet handle
  * @param val Value
  */
@@ -441,6 +464,8 @@ void odp_packet_has_ipv6_set(odp_packet_t pkt, int val);
 /**
  * Set flag for IP broadcast address
  *
+ * Only one of IP broadcast/multicast flags can be set simultaneously.
+ *
  * @param pkt Packet handle
  * @param val Value
  */
@@ -448,6 +473,8 @@ void odp_packet_has_ip_bcast_set(odp_packet_t pkt, int val);
 
 /**
  * Set flag for IP multicast address
+ *
+ * Only one of IP broadcast/multicast flags can be set simultaneously.
  *
  * @param pkt Packet handle
  * @param val Value
@@ -481,6 +508,8 @@ void odp_packet_has_ipsec_set(odp_packet_t pkt, int val);
 /**
  * Set flag for UDP
  *
+ * Only one of TCP/UDP/SCTP/ICMP flags can be set simultaneously.
+ *
  * @param pkt Packet handle
  * @param val Value
  */
@@ -488,6 +517,8 @@ void odp_packet_has_udp_set(odp_packet_t pkt, int val);
 
 /**
  * Set flag for TCP
+ *
+ * Only one of TCP/UDP/SCTP/ICMP flags can be set simultaneously.
  *
  * @param pkt Packet handle
  * @param val Value
@@ -497,6 +528,8 @@ void odp_packet_has_tcp_set(odp_packet_t pkt, int val);
 /**
  * Set flag for SCTP
  *
+ * Only one of TCP/UDP/SCTP/ICMP flags can be set simultaneously.
+ *
  * @param pkt Packet handle
  * @param val Value
  */
@@ -504,6 +537,8 @@ void odp_packet_has_sctp_set(odp_packet_t pkt, int val);
 
 /**
  * Set flag for ICMP
+ *
+ * Only one of TCP/UDP/SCTP/ICMP flags can be set simultaneously.
  *
  * @param pkt Packet handle
  * @param val Value

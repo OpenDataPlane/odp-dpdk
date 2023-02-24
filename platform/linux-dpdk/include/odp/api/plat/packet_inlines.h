@@ -1,5 +1,5 @@
 /* Copyright (c) 2016-2018, Linaro Limited
- * Copyright (c) 2019-2022, Nokia
+ * Copyright (c) 2019-2023, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier: BSD-3-Clause
@@ -25,6 +25,7 @@ extern "C" {
 #include <odp/api/time.h>
 
 #include <odp/api/plat/debug_inlines.h>
+#include <odp/api/plat/event_validation_external.h>
 #include <odp/api/plat/packet_io_inlines.h>
 #include <odp/api/plat/packet_inline_types.h>
 #include <odp/api/plat/pool_inline_types.h>
@@ -663,17 +664,23 @@ _ODP_INLINE odp_event_t odp_packet_tx_compl_to_event(odp_packet_tx_compl_t tx_co
 
 _ODP_INLINE void odp_packet_free(odp_packet_t pkt)
 {
+	_odp_packet_validate(pkt, _ODP_EV_PACKET_FREE);
+
 	rte_pktmbuf_free((struct rte_mbuf *)pkt);
 }
 
 _ODP_INLINE void odp_packet_free_multi(const odp_packet_t pkt[], int num)
 {
+	_odp_packet_validate_multi(pkt, num, _ODP_EV_PACKET_FREE_MULTI);
+
 	rte_pktmbuf_free_bulk((struct rte_mbuf **)(uintptr_t)pkt, (unsigned int)num);
 }
 
 _ODP_INLINE void odp_packet_free_sp(const odp_packet_t pkt[], int num)
 {
-	odp_packet_free_multi(pkt, num);
+	_odp_packet_validate_multi(pkt, num, _ODP_EV_PACKET_FREE_SP);
+
+	rte_pktmbuf_free_bulk((struct rte_mbuf **)(uintptr_t)pkt, (unsigned int)num);
 }
 
 _ODP_INLINE void *odp_packet_seg_data(odp_packet_t pkt ODP_UNUSED,

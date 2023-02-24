@@ -1,5 +1,5 @@
 /* Copyright (c) 2018, Linaro Limited
- * Copyright (c) 2022, Nokia
+ * Copyright (c) 2022-2023, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier: BSD-3-Clause
@@ -44,6 +44,7 @@ typedef struct _odp_packet_inline_offset_t {
 	uint16_t subtype;
 	uint16_t cls_mark;
 	uint16_t ipsec_ctx;
+	uint16_t crypto_op;
 	uint16_t buf_addr;
 	uint16_t data;
 	uint16_t pkt_len;

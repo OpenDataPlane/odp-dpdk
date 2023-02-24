@@ -1,5 +1,5 @@
 /* Copyright (c) 2018, Linaro Limited
- * Copyright (c) 2019-2022, Nokia
+ * Copyright (c) 2019-2023, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -7,6 +7,7 @@
 
 #include <odp_posix_extensions.h>
 
+#include <odp/api/deprecated.h>
 #include <odp/api/queue.h>
 #include <odp/api/shared_memory.h>
 #include <odp/api/std.h>
@@ -1015,14 +1016,14 @@ retry:
 	return ODP_TIMER_SUCCESS;
 }
 
-int odp_timer_set_abs(odp_timer_t timer_hdl, uint64_t abs_tick,
-		      odp_event_t *tmo_ev)
+int ODP_DEPRECATE(odp_timer_set_abs)(odp_timer_t timer_hdl, uint64_t abs_tick,
+				     odp_event_t *tmo_ev)
 {
 	return timer_set(timer_hdl, abs_tick, tmo_ev, 1);
 }
 
-int odp_timer_set_rel(odp_timer_t timer_hdl, uint64_t rel_tick,
-		      odp_event_t *tmo_ev)
+int ODP_DEPRECATE(odp_timer_set_rel)(odp_timer_t timer_hdl, uint64_t rel_tick,
+				     odp_event_t *tmo_ev)
 {
 	return timer_set(timer_hdl, rel_tick, tmo_ev, 0);
 }

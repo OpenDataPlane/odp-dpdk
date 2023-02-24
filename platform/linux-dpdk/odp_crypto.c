@@ -1,5 +1,5 @@
 /* Copyright (c) 2017-2018, Linaro Limited
- * Copyright (c) 2018-2022, Nokia
+ * Copyright (c) 2018-2023, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -83,10 +83,7 @@ typedef struct crypto_session_entry_s {
 		unsigned int chained_bufs_ok:1;
 	} flags;
 	uint8_t cdev_id;
-#if ODP_DEPRECATED_API
-	uint8_t cipher_iv_data[MAX_IV_LENGTH];
-	uint8_t auth_iv_data[MAX_IV_LENGTH];
-#endif
+
 } crypto_session_entry_t;
 
 typedef struct crypto_global_s {
@@ -1395,6 +1392,13 @@ int odp_crypto_session_create(const odp_crypto_session_param_t *param,
 		return -1;
 	}
 
+	/* ODP_CRYPTO_OP_TYPE_OOP not supported */
+	if (param->op_type == ODP_CRYPTO_OP_TYPE_OOP) {
+		*status = ODP_CRYPTO_SES_ERR_PARAMS;
+		*session_out = ODP_CRYPTO_SESSION_INVALID;
+		return -1;
+	}
+
 	if (rte_cryptodev_count() == 0) {
 		_ODP_ERR("No crypto devices available\n");
 		*status = ODP_CRYPTO_SES_ERR_ENOMEM;
@@ -1496,16 +1500,7 @@ int odp_crypto_session_create(const odp_crypto_session_param_t *param,
 out_null:
 	session->rte_session  = rte_session;
 	session->cdev_id = cdev_id;
-#if ODP_DEPRECATED_API
-	if (param->cipher_iv.data)
-		memcpy(session->cipher_iv_data,
-		       param->cipher_iv.data,
-		       param->cipher_iv.length);
-	if (param->auth_iv.data)
-		memcpy(session->auth_iv_data,
-		       param->auth_iv.data,
-		       param->auth_iv.length);
-#endif
+
 	/* We're happy */
 	*session_out = (intptr_t)session;
 	*status = ODP_CRYPTO_SES_ERR_NONE;
@@ -1623,42 +1618,6 @@ uint64_t odp_crypto_session_to_u64(odp_crypto_session_t hdl)
 	return (uint64_t)hdl;
 }
 
-odp_packet_t odp_crypto_packet_from_event(odp_event_t ev)
-{
-	/* This check not mandated by the API specification */
-	_ODP_ASSERT(odp_event_type(ev) == ODP_EVENT_PACKET);
-	_ODP_ASSERT(odp_event_subtype(ev) == ODP_EVENT_PACKET_CRYPTO);
-
-	return odp_packet_from_event(ev);
-}
-
-odp_event_t odp_crypto_packet_to_event(odp_packet_t pkt)
-{
-	return odp_packet_to_event(pkt);
-}
-
-static
-odp_crypto_packet_result_t *get_op_result_from_packet(odp_packet_t pkt)
-{
-	odp_packet_hdr_t *hdr = packet_hdr(pkt);
-
-	return &hdr->crypto_op_result;
-}
-
-int odp_crypto_result(odp_crypto_packet_result_t *result,
-		      odp_packet_t packet)
-{
-	odp_crypto_packet_result_t *op_result;
-
-	_ODP_ASSERT(odp_event_subtype(odp_packet_to_event(packet)) == ODP_EVENT_PACKET_CRYPTO);
-
-	op_result = get_op_result_from_packet(packet);
-
-	memcpy(result, op_result, sizeof(*result));
-
-	return 0;
-}
-
 static uint8_t *crypto_prepare_digest(const crypto_session_entry_t *session,
 				      odp_packet_t pkt,
 				      const odp_crypto_packet_op_param_t *param,
@@ -1718,17 +1677,8 @@ static void crypto_fill_aead_param(const crypto_session_entry_t *session,
 		iv_ptr++;
 	}
 
-#if ODP_DEPRECATED_API
-	if (param->cipher_iv_ptr)
-		memcpy(iv_ptr, param->cipher_iv_ptr, iv_len);
-	else if (session->p.cipher_iv.data)
-		memcpy(iv_ptr, session->cipher_iv_data, iv_len);
-	else
-		_ODP_ASSERT(iv_len == 0);
-#else
 	_ODP_ASSERT(iv_len == 0 || param->cipher_iv_ptr != NULL);
 	memcpy(iv_ptr, param->cipher_iv_ptr, iv_len);
-#endif
 
 	op->sym->aead.data.offset = param->cipher_range.offset;
 	op->sym->aead.data.length = param->cipher_range.length;
@@ -1752,29 +1702,6 @@ static void crypto_fill_sym_param(const crypto_session_entry_t *session,
 					      &op->sym->auth.digest.phys_addr);
 	}
 
-#if ODP_DEPRECATED_API
-	if (param->cipher_iv_ptr) {
-		iv_ptr = rte_crypto_op_ctod_offset(op, uint8_t *, IV_OFFSET);
-		memcpy(iv_ptr, param->cipher_iv_ptr, cipher_iv_len);
-	} else if (session->p.cipher_iv.data) {
-		iv_ptr = rte_crypto_op_ctod_offset(op, uint8_t *, IV_OFFSET);
-		memcpy(iv_ptr, session->cipher_iv_data, cipher_iv_len);
-	} else {
-		_ODP_ASSERT(cipher_iv_len == 0);
-	}
-
-	if (param->auth_iv_ptr) {
-		iv_ptr = rte_crypto_op_ctod_offset(op, uint8_t *,
-						   IV_OFFSET + MAX_IV_LENGTH);
-		memcpy(iv_ptr, param->auth_iv_ptr, auth_iv_len);
-	} else if (session->p.auth_iv.data) {
-		iv_ptr = rte_crypto_op_ctod_offset(op, uint8_t *,
-						   IV_OFFSET + MAX_IV_LENGTH);
-		memcpy(iv_ptr, session->auth_iv_data, auth_iv_len);
-	} else {
-		_ODP_ASSERT(auth_iv_len == 0);
-	}
-#else
 	_ODP_ASSERT(cipher_iv_len == 0 || param->cipher_iv_ptr != NULL);
 	_ODP_ASSERT(auth_iv_len == 0 || param->auth_iv_ptr != NULL);
 	iv_ptr = rte_crypto_op_ctod_offset(op, uint8_t *, IV_OFFSET);
@@ -1784,7 +1711,6 @@ static void crypto_fill_sym_param(const crypto_session_entry_t *session,
 		iv_ptr = rte_crypto_op_ctod_offset(op, uint8_t *, IV_OFFSET + MAX_IV_LENGTH);
 		memcpy(iv_ptr, param->auth_iv_ptr, auth_iv_len);
 	}
-#endif
 
 	op->sym->cipher.data.offset = param->cipher_range.offset;
 	op->sym->cipher.data.length = param->cipher_range.length;
@@ -1864,6 +1790,9 @@ static odp_packet_t get_output_packet(const crypto_session_entry_t *session,
 				      odp_packet_t pkt_out)
 {
 	int rc;
+
+	if (odp_likely(session->p.op_type == ODP_CRYPTO_OP_TYPE_BASIC))
+		return pkt_in;
 
 	if (odp_likely(pkt_in == pkt_out))
 		return pkt_out;
@@ -2145,7 +2074,7 @@ static void op_finish(crypto_op_t *op)
 
 	/* Fill in result */
 	packet_subtype_set(pkt, ODP_EVENT_PACKET_CRYPTO);
-	op_result = get_op_result_from_packet(pkt);
+	op_result = &packet_hdr(pkt)->crypto_op_result;
 	op_result->cipher_status.alg_err = rc_cipher;
 	op_result->cipher_status.hw_err = ODP_CRYPTO_HW_ERR_NONE;
 	op_result->auth_status.alg_err = rc_auth;
@@ -2187,6 +2116,10 @@ int odp_crypto_operation(odp_crypto_op_param_t *param,
 	odp_crypto_packet_result_t packet_result;
 	odp_crypto_op_result_t local_result;
 	int rc;
+
+	if (((crypto_session_entry_t *)(intptr_t)param->session)->p.op_type !=
+	    ODP_CRYPTO_OP_TYPE_LEGACY)
+		return -1;
 
 	packet_param.session = param->session;
 	packet_param.cipher_iv_ptr = param->cipher_iv_ptr;
@@ -2268,7 +2201,8 @@ int odp_crypto_op_enq(const odp_packet_t pkt_in[],
 		_ODP_ASSERT(ODP_CRYPTO_ASYNC == session->p.op_mode);
 		_ODP_ASSERT(ODP_QUEUE_INVALID != session->p.compl_queue);
 
-		out_pkts[i] = pkt_out[i];
+		if (session->p.op_type != ODP_CRYPTO_OP_TYPE_BASIC)
+			out_pkts[i] = pkt_out[i];
 	}
 
 	num_pkt = odp_crypto_int(pkt_in, out_pkts, param, num_pkt);

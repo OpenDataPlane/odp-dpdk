@@ -32,9 +32,11 @@ odpapiplatinclude_HEADERS = \
 		  include/odp/api/plat/buffer_inline_types.h \
 		  include/odp/api/plat/byteorder_inlines.h \
 		  include/odp/api/plat/cpu_inlines.h \
+		  include/odp/api/plat/crypto_inlines.h \
 		  include/odp/api/plat/debug_inlines.h \
 		  include/odp/api/plat/event_inlines.h \
 		  include/odp/api/plat/event_inline_types.h \
+		  include/odp/api/plat/event_validation_external.h \
 		  include/odp/api/plat/event_vector_inline_types.h \
 		  include/odp/api/plat/hash_inlines.h \
 		  include/odp/api/plat/ipsec_inlines.h \
@@ -68,11 +70,13 @@ odpapiabiarchinclude_HEADERS += \
 		  include-abi/odp/api/abi/atomic.h \
 		  include-abi/odp/api/abi/barrier.h \
 		  include-abi/odp/api/abi/buffer.h \
+		  include-abi/odp/api/abi/buffer_types.h \
 		  include-abi/odp/api/abi/byteorder.h \
 		  include-abi/odp/api/abi/classification.h \
 		  include-abi/odp/api/abi/comp.h \
 		  include-abi/odp/api/abi/cpumask.h \
 		  include-abi/odp/api/abi/crypto.h \
+		  include-abi/odp/api/abi/crypto_types.h \
 		  include-abi/odp/api/abi/debug.h \
 		  include-abi/odp/api/abi/dma_types.h \
 		  include-abi/odp/api/abi/errno.h \
@@ -141,6 +145,7 @@ noinst_HEADERS = \
 		  ${top_srcdir}/platform/linux-generic/include/odp_print_internal.h \
 		  include/odp_errno_define.h \
 		  include/odp_event_internal.h \
+		  ${top_srcdir}/platform/linux-generic/include/odp_event_validation_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_packet_dpdk.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_pcapng.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_pkt_queue_internal.h \
@@ -154,6 +159,8 @@ noinst_HEADERS = \
 		  ${top_srcdir}/platform/linux-generic/include/odp_ring_common.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_ring_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_ring_mpmc_internal.h \
+		  ${top_srcdir}/platform/linux-generic/include/odp_ring_mpmc_u32_internal.h \
+		  ${top_srcdir}/platform/linux-generic/include/odp_ring_mpmc_u64_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_ring_ptr_internal.h \
 		  include/odp_ptr_ring_mpmc_internal.h \
 		  include/odp_ptr_ring_spsc_internal.h \
@@ -197,6 +204,7 @@ __LIB__libodp_dpdk_la_SOURCES = \
 			   odp_crypto.c \
 			   odp_errno.c \
 			   odp_event.c \
+			   ../linux-generic/odp_event_validation.c \
 			   ../linux-generic/odp_hash_crc_gen.c \
 			   odp_init.c \
 			   ../linux-generic/odp_impl.c \
@@ -249,6 +257,7 @@ __LIB__libodp_dpdk_la_SOURCES += \
 			   ../linux-generic/odp_buffer_api.c \
 			   ../linux-generic/odp_byteorder_api.c \
 			   ../linux-generic/odp_cpu_api.c \
+			   ../linux-generic/odp_crypto_api.c \
 			   ../linux-generic/odp_event_api.c \
 			   ../linux-generic/odp_hash_api.c \
 			   ../linux-generic/odp_ipsec_api.c \

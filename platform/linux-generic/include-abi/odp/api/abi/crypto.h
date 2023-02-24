@@ -1,4 +1,5 @@
 /* Copyright (c) 2015-2018, Linaro Limited
+ * Copyright (c) 2022, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -18,18 +19,8 @@
 extern "C" {
 #endif
 
-/** @ingroup odp_crypto
- *  @{
- */
-
-#define ODP_CRYPTO_SESSION_INVALID (0xffffffffffffffffULL)
-
-typedef uint64_t odp_crypto_session_t;
-typedef ODP_HANDLE_T(odp_crypto_compl_t);
-
-/**
- * @}
- */
+/* Inlined API functions */
+#include <odp/api/plat/crypto_inlines.h>
 
 #ifdef __cplusplus
 }

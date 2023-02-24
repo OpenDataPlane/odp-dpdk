@@ -1,5 +1,5 @@
 /* Copyright (c) 2013-2018, Linaro Limited
- * Copyright (c) 2019-2022, Nokia
+ * Copyright (c) 2019-2023, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -16,6 +16,8 @@
 #include <odp_buffer_internal.h>
 #include <odp_config_internal.h>
 #include <odp_debug_internal.h>
+#include <odp_event_internal.h>
+#include <odp_event_validation_internal.h>
 #include <odp_event_vector_internal.h>
 #include <odp_init_internal.h>
 #include <odp_libconfig_internal.h>
@@ -380,6 +382,12 @@ odp_dpdk_mbuf_ctor(struct rte_mempool *mp,
 		pkt_hdr->uarea_addr = uarea;
 	}
 
+	/* Initialize data endmark */
+	if (mb_ctor_arg->type == ODP_POOL_BUFFER || mb_ctor_arg->type == ODP_POOL_PACKET) {
+		mb->buf_len -= _ODP_EV_ENDMARK_SIZE;
+		_odp_event_endmark_set(_odp_event_from_mbuf(mb));
+	}
+
 	/* Initialize event vector metadata */
 	if (mb_ctor_arg->type == ODP_POOL_VECTOR) {
 		odp_event_vector_hdr_t *vect_hdr = (void *)raw_mbuf;
@@ -679,6 +687,7 @@ odp_pool_t _odp_pool_create(const char *name, const odp_pool_param_t *params,
 	uint32_t buf_align, blk_size, headroom, tailroom, min_seg_len;
 	uint32_t max_len, min_align;
 	uint32_t uarea_size = 0;
+	uint32_t trailer_size = 0;
 	int8_t event_type;
 	char pool_name[ODP_POOL_NAME_LEN];
 	char rte_name[RTE_MEMPOOL_NAMESIZE];
@@ -709,7 +718,8 @@ odp_pool_t _odp_pool_create(const char *name, const odp_pool_param_t *params,
 		switch (type) {
 		case ODP_POOL_BUFFER:
 			buf_align = params->buf.align;
-			blk_size = params->buf.size;
+			trailer_size = _ODP_EV_ENDMARK_SIZE;
+			blk_size = params->buf.size + trailer_size;
 			cache_size = params->buf.cache_size;
 			uarea_size = params->buf.uarea_size;
 
@@ -734,6 +744,7 @@ odp_pool_t _odp_pool_create(const char *name, const odp_pool_param_t *params,
 		case ODP_POOL_PACKET:
 			headroom = RTE_PKTMBUF_HEADROOM;
 			tailroom = CONFIG_PACKET_TAILROOM;
+			trailer_size = _ODP_EV_ENDMARK_SIZE;
 			min_seg_len = CONFIG_PACKET_SEG_LEN_MIN;
 			min_align = ODP_CONFIG_BUFFER_ALIGN_MIN;
 			cache_size = params->pkt.cache_size;
@@ -743,16 +754,16 @@ odp_pool_t _odp_pool_create(const char *name, const odp_pool_param_t *params,
 				blk_size = params->pkt.seg_len;
 			if (params->pkt.len > blk_size)
 				blk_size = params->pkt.len;
-			/* Make sure at least one max len packet fits in the
-			 * pool.
-			 */
+
+			/* Make sure at least one max len packet fits in the pool */
 			max_len = 0;
 			if (params->pkt.max_len != 0)
 				max_len = params->pkt.max_len;
 			if ((max_len + blk_size) / blk_size > params->pkt.num)
 				blk_size = (max_len + params->pkt.num) /
 					params->pkt.num;
-			blk_size = _ODP_ROUNDUP_ALIGN(headroom + blk_size + tailroom, min_align);
+			blk_size = _ODP_ROUNDUP_ALIGN(headroom + blk_size + tailroom + trailer_size,
+						      min_align);
 
 			/* Segment size minus headroom might be rounded down by the driver (e.g.
 			 * ixgbe) to the nearest multiple of 1024. Round it up here to make sure the
@@ -827,7 +838,7 @@ odp_pool_t _odp_pool_create(const char *name, const odp_pool_param_t *params,
 			mp = rte_pktmbuf_pool_create(rte_name, num, cache_size,
 						     priv_size, data_room_size,
 						     rte_socket_id());
-			pool->seg_len = data_room_size;
+			pool->seg_len = data_room_size - trailer_size;
 		} else {
 			unsigned int priv_size;
 
@@ -855,6 +866,7 @@ odp_pool_t _odp_pool_create(const char *name, const odp_pool_param_t *params,
 		pool->type = type;
 		pool->type_2 = type_2;
 		pool->params = *params;
+		pool->trailer_size = trailer_size;
 
 		if (reserve_uarea(pool, uarea_size, num)) {
 			_ODP_ERR("User area SHM reserve failed\n");
@@ -1157,7 +1169,7 @@ int odp_pool_ext_capability(odp_pool_type_t type,
 	capa->pkt.max_num_buf = _odp_pool_glb->config.pkt_max_num;
 	capa->pkt.max_buf_size = MAX_SIZE;
 	capa->pkt.odp_header_size = SIZEOF_OBJHDR + sizeof(odp_packet_hdr_t);
-	capa->pkt.odp_trailer_size = 0;
+	capa->pkt.odp_trailer_size = _ODP_EV_ENDMARK_SIZE;
 	capa->pkt.min_mem_align = ODP_CACHE_LINE_SIZE;
 	capa->pkt.min_buf_align = ODP_CACHE_LINE_SIZE;
 	capa->pkt.min_head_align = EXT_MIN_HEAD_ALIGN;
@@ -1326,12 +1338,13 @@ odp_pool_t odp_pool_ext_create(const char *name,
 
 		pool->ext_param = *params;
 		pool->ext_head_offset = hdr_size;
+		pool->trailer_size = _ODP_EV_ENDMARK_SIZE;
 		pool->num = num;
 		pool->num_populated = 0;
 		pool->params.pkt.uarea_size = params->pkt.uarea_size;
 		pool->params.type = params->type;
 		pool->pool_ext = 1;
-		pool->seg_len = blk_size;
+		pool->seg_len = blk_size - pool->trailer_size;
 		pool->type = params->type;
 		strcpy(pool->name, pool_name);
 
@@ -1449,7 +1462,7 @@ int odp_pool_ext_populate(odp_pool_t pool_hdl, void *buf[], uint32_t buf_size,
 
 		mb_ctor_arg.seg_buf_offset = sizeof(odp_packet_hdr_t) +
 					     params->pkt.app_header_size;
-		mb_ctor_arg.seg_buf_size = pool->seg_len;
+		mb_ctor_arg.seg_buf_size = pool->seg_len + pool->trailer_size;
 		mb_ctor_arg.type = params->type;
 		mb_ctor_arg.event_type = pool->type;
 		mb_ctor_arg.pool = pool;

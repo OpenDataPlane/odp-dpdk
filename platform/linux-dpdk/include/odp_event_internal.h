@@ -1,4 +1,4 @@
-/* Copyright (c) 2021-2022, Nokia
+/* Copyright (c) 2021-2023, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -78,6 +78,13 @@ static inline struct rte_mbuf *_odp_event_to_mbuf(odp_event_t event)
 static inline void _odp_event_type_set(odp_event_t event, int ev)
 {
 	_odp_event_hdr(event)->event_type = ev;
+}
+
+static inline uint64_t *_odp_event_endmark_get_ptr(odp_event_t event)
+{
+	struct rte_mbuf *mbuf = _odp_event_to_mbuf(event);
+
+	return (uint64_t *)((uint8_t *)mbuf->buf_addr + mbuf->buf_len);
 }
 
 #ifdef __cplusplus
