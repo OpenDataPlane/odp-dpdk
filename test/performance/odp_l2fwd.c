@@ -2312,6 +2312,12 @@ int main(int argc, char *argv[])
 			}
 			gbl_args->dst_eth_addr[i] = new_addr;
 		}
+
+		ret = odp_pktio_start(gbl_args->pktios[i].pktio);
+		if (ret) {
+			ODPH_ERR("Pktio start failed: %s\n", gbl_args->appl.if_names[i]);
+			exit(EXIT_FAILURE);
+		}
 	}
 
 	gbl_args->pktios[i].pktio = ODP_PKTIO_INVALID;
@@ -2402,18 +2408,6 @@ int main(int argc, char *argv[])
 
 	if (gbl_args->appl.verbose)
 		odp_shm_print_all();
-
-	/* Start packet receive and transmit */
-	for (i = 0; i < if_count; ++i) {
-		odp_pktio_t pktio;
-
-		pktio = gbl_args->pktios[i].pktio;
-		ret   = odp_pktio_start(pktio);
-		if (ret) {
-			ODPH_ERR("Pktio start failed: %s\n", gbl_args->appl.if_names[i]);
-			exit(EXIT_FAILURE);
-		}
-	}
 
 	ret = print_speed_stats(num_workers, stats, gbl_args->appl.time,
 				gbl_args->appl.accuracy);

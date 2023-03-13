@@ -1535,6 +1535,9 @@ int main(int argc, char *argv[])
 	if (start_timers(test_global))
 		goto quit;
 
+	if (start_pktios(test_global))
+		goto quit;
+
 	odp_barrier_init(&test_global->worker_start,
 			 test_global->opt.num_worker + 1);
 
@@ -1543,11 +1546,6 @@ int main(int argc, char *argv[])
 	/* Synchronize pktio configuration with workers. Worker are now ready
 	 * to process packets. */
 	odp_barrier_wait(&test_global->worker_start);
-
-	if (start_pktios(test_global)) {
-		test_global->stop_workers = 1;
-		odp_mb_full();
-	}
 
 	t1 = odp_time_local();
 
