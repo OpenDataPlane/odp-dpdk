@@ -1266,6 +1266,10 @@ static int chained_bufs_ok(const odp_crypto_session_param_t *param,
 	 */
 
 	if (dev_info.driver_name &&
+	    !strcmp(dev_info.driver_name, "crypto_aesni_mb"))
+		chained_bufs_ok = 0;
+
+	if (dev_info.driver_name &&
 	    !strcmp(dev_info.driver_name, "crypto_aesni_gcm") &&
 	    param->auth_alg == ODP_AUTH_ALG_AES_GMAC)
 		chained_bufs_ok = 0;
