@@ -1,6 +1,10 @@
 #!/bin/bash
 set -e
 
+echo 1000 | tee /proc/sys/vm/nr_hugepages
+mkdir -p /mnt/huge
+mount -t hugetlbfs nodev /mnt/huge
+
 cd "$(dirname "$0")"/../..
 ./bootstrap
 ./configure \
@@ -13,10 +17,6 @@ make clean
 make -j $(nproc)
 
 make install
-
-echo 1000 | tee /proc/sys/vm/nr_hugepages
-mkdir -p /mnt/huge
-mount -t hugetlbfs nodev /mnt/huge
 
 make installcheck
 
