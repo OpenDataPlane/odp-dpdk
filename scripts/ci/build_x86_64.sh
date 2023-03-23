@@ -6,4 +6,7 @@ if [ "${CC#clang}" != "${CC}" ] ; then
 	sed -i 's/ODP_CHECK_CFLAG(\[\-Wcast-align\])/#ODP_CHECK_CFLAG(\[\-Wcast-align\])/g' /odp/configure.ac
 fi
 
+# Required by CentOS and Rocky Linux to find DPDK install
+export PKG_CONFIG_PATH=$PKG_CONFIG_PATH:/usr/local/lib64/pkgconfig
+
 exec "$(dirname "$0")"/build.sh
