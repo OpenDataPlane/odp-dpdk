@@ -5,6 +5,10 @@ if [ "${CC#clang}" != "${CC}" ] ; then
 	export CXX="clang++"
 fi
 
+echo 1000 | tee /proc/sys/vm/nr_hugepages
+mkdir -p /mnt/huge
+mount -t hugetlbfs nodev /mnt/huge
+
 cd "$(dirname "$0")"/../..
 ./bootstrap
 ./configure \
@@ -27,3 +31,5 @@ popd
 # Convert gcno files into gcov (required by Codecov)
 find . -type f -name '*.gcno' -exec gcov -pb {} +
 
+# Wrapper script can umount hugepages itself
+umount /mnt/huge || true
