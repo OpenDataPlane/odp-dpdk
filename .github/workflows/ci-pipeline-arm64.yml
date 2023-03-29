@@ -164,7 +164,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ['ubuntu_18.04', 'ubuntu_22.04-openssl']
+        os: ['ubuntu_18.04', 'ubuntu_22.04']
     steps:
       - uses: OpenDataPlane/action-clean-up@main
       - uses: actions/checkout@v3
