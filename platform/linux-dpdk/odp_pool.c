@@ -30,6 +30,7 @@
 #include <rte_errno.h>
 #include <rte_malloc.h>
 #include <rte_mempool.h>
+#include <rte_mbuf.h>
 #include <rte_mbuf_pool_ops.h>
 #include <rte_version.h>
 /* ppc64 rte_memcpy.h (included through rte_mempool.h) may define vector */
@@ -217,6 +218,7 @@ int _odp_pool_term_local(void)
 
 int _odp_event_is_valid(odp_event_t event)
 {
+	const char *reason;
 	pool_t *pool;
 	_odp_event_hdr_t *event_hdr = _odp_event_hdr(event);
 
@@ -233,6 +235,11 @@ int _odp_event_is_valid(odp_event_t event)
 
 	if (event_hdr->hdr.index >= pool->rte_mempool->size)
 		return 0;
+
+	if (odp_unlikely(rte_mbuf_check(_odp_event_to_mbuf(event), 1, &reason))) {
+		_ODP_ERR("rte_mbuf_check(): %s\n", reason);
+		return 0;
+	}
 
 	return 1;
 }
