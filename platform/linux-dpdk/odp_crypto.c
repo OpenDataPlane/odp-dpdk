@@ -2077,7 +2077,6 @@ static void op_finish(crypto_op_t *op)
 	struct rte_crypto_op *rte_op = (struct rte_crypto_op *)op;
 	odp_crypto_alg_err_t rc_cipher;
 	odp_crypto_alg_err_t rc_auth;
-	odp_bool_t result_ok;
 	odp_crypto_packet_result_t *op_result;
 
 	if (odp_likely(op->state.status == S_DEV)) {
@@ -2085,7 +2084,6 @@ static void op_finish(crypto_op_t *op)
 		if (odp_likely(rte_op->status == RTE_CRYPTO_OP_STATUS_SUCCESS)) {
 			rc_cipher = ODP_CRYPTO_ALG_ERR_NONE;
 			rc_auth = ODP_CRYPTO_ALG_ERR_NONE;
-			result_ok = true;
 			if (session->p.op == ODP_CRYPTO_OP_ENCODE &&
 			    session->p.auth_digest_len != 0) {
 				odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
@@ -2096,36 +2094,30 @@ static void op_finish(crypto_op_t *op)
 							 pkt_hdr->crypto_digest_buf);
 			}
 		} else if (rte_op->status == RTE_CRYPTO_OP_STATUS_AUTH_FAILED) {
-			result_ok = false;
 			rc_cipher = ODP_CRYPTO_ALG_ERR_NONE;
 			rc_auth = ODP_CRYPTO_ALG_ERR_ICV_CHECK;
 		} else {
-			result_ok = false;
-			rc_cipher = ODP_CRYPTO_ALG_ERR_NONE;
-			rc_auth = ODP_CRYPTO_ALG_ERR_NONE;
+			rc_cipher = ODP_CRYPTO_ALG_ERR_DATA_SIZE;
+			rc_auth = ODP_CRYPTO_ALG_ERR_DATA_SIZE;
 		}
 	} else if (odp_unlikely(op->state.status == S_NOP)) {
 		/* null cipher & null auth, cryptodev skipped */
-		result_ok = true;
 		rc_cipher = ODP_CRYPTO_ALG_ERR_NONE;
 		rc_auth = ODP_CRYPTO_ALG_ERR_NONE;
 	} else if (op->state.status == S_ERROR_LIN) {
 		/* packet linearization error before cryptodev enqueue */
-		result_ok = false;
 		rc_cipher = ODP_CRYPTO_ALG_ERR_DATA_SIZE;
 		rc_auth = ODP_CRYPTO_ALG_ERR_DATA_SIZE;
 	} else if (op->state.status == S_ERROR_HASH_OFFSET) {
 		/* hash offset not supported */
-		result_ok = false;
 		rc_cipher = ODP_CRYPTO_ALG_ERR_NONE;
 		rc_auth = ODP_CRYPTO_ALG_ERR_DATA_SIZE;
 	} else {
 		/*
 		 * other error before cryptodev enqueue
 		 */
-		result_ok = false;
-		rc_cipher = ODP_CRYPTO_ALG_ERR_NONE;
-		rc_auth = ODP_CRYPTO_ALG_ERR_NONE;
+		rc_cipher = ODP_CRYPTO_ALG_ERR_DATA_SIZE;
+		rc_auth = ODP_CRYPTO_ALG_ERR_DATA_SIZE;
 	}
 
 	/* Fill in result */
@@ -2133,11 +2125,6 @@ static void op_finish(crypto_op_t *op)
 	op_result = &packet_hdr(pkt)->crypto_op_result;
 	op_result->cipher_status.alg_err = rc_cipher;
 	op_result->auth_status.alg_err = rc_auth;
-#if ODP_DEPRECATED_API
-	op_result->cipher_status.hw_err = ODP_CRYPTO_HW_ERR_NONE;
-	op_result->auth_status.hw_err = ODP_CRYPTO_HW_ERR_NONE;
-#endif
-	op_result->ok = result_ok;
 }
 
 static
