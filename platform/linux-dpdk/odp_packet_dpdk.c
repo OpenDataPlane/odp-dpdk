@@ -20,7 +20,6 @@
 
 #include <odp_classification_internal.h>
 #include <odp_debug_internal.h>
-#include <odp_errno_define.h>
 #include <odp_eventdev_internal.h>
 #include <odp_libconfig_internal.h>
 #include <odp_packet_dpdk.h>
@@ -44,7 +43,6 @@
 #include <linux/sockios.h>
 
 #include <ctype.h>
-#include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
 #include <net/if.h>
@@ -1039,11 +1037,12 @@ static int recv_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 			 odp_packet_t pkt_table[], int num)
 {
 	pkt_dpdk_t * const pkt_dpdk = pkt_priv(pktio_entry);
-	uint16_t nb_rx;
 	const uint16_t port_id = pkt_dpdk->port_id;
 	const uint8_t min = pkt_dpdk->min_rx_burst;
+	const uint8_t lockless = pkt_dpdk->flags.lockless_rx;
+	uint16_t nb_rx;
 
-	if (!pkt_dpdk->flags.lockless_rx)
+	if (!lockless)
 		odp_ticketlock_lock(&pkt_dpdk->rx_lock[index]);
 
 	if (odp_likely(num >= min)) {
@@ -1052,14 +1051,13 @@ static int recv_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 					 (uint16_t)num);
 	} else {
 		odp_packet_t min_burst[min];
-		uint16_t i;
 
 		_ODP_DBG("PMD requires >%d buffers burst.  Current %d, dropped %d\n",
 			 min, num, min - num);
 		nb_rx = rte_eth_rx_burst(port_id, (uint16_t)index,
 					 (struct rte_mbuf **)min_burst, min);
 
-		for (i = 0; i < nb_rx; i++) {
+		for (uint16_t i = 0; i < nb_rx; i++) {
 			if (i < num)
 				pkt_table[i] = min_burst[i];
 			else
@@ -1069,7 +1067,7 @@ static int recv_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 		nb_rx = RTE_MIN(num, nb_rx);
 	}
 
-	if (!pkt_dpdk->flags.lockless_rx)
+	if (!lockless)
 		odp_ticketlock_unlock(&pkt_dpdk->rx_lock[index]);
 
 	/* Packets may also me received through eventdev, so don't add any
@@ -1195,17 +1193,15 @@ static int send_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 			 const odp_packet_t pkt_table[], int num)
 {
 	pkt_dpdk_t * const pkt_dpdk = pkt_priv(pktio_entry);
-	uint8_t chksum_insert_ena = pktio_entry->enabled.chksum_insert;
-	uint8_t tx_ts_ena = pktio_entry->enabled.tx_ts;
+	const uint8_t chksum_insert_ena = pktio_entry->enabled.chksum_insert;
+	const uint8_t tx_ts_ena = pktio_entry->enabled.tx_ts;
 	odp_pktout_config_opt_t *pktout_cfg = &pktio_entry->config.pktout;
 	odp_pktout_config_opt_t *pktout_capa = &pktio_entry->capa.config.pktout;
-	int tx_ts_idx = 0;
-	int pkts;
+	uint16_t tx_ts_idx = 0;
+	uint16_t pkts;
 
 	if (chksum_insert_ena || tx_ts_ena) {
-		int i;
-
-		for (i = 0; i < num; i++) {
+		for (uint16_t i = 0; i < num; i++) {
 			struct rte_mbuf *mbuf = pkt_to_mbuf(pkt_table[i]);
 			odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt_table[i]);
 
