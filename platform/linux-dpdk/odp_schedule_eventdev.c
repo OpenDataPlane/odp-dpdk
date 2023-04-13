@@ -1068,6 +1068,13 @@ static void schedule_print(void)
 	_ODP_PRINT("\n");
 }
 
+const _odp_schedule_api_fn_t _odp_schedule_eventdev_api;
+
+static const _odp_schedule_api_fn_t *sched_api(void)
+{
+	return &_odp_schedule_eventdev_api;
+}
+
 /* Fill in scheduler interface */
 const schedule_fn_t _odp_schedule_eventdev_fn = {
 	.pktio_start = schedule_pktio_start,
@@ -1085,7 +1092,8 @@ const schedule_fn_t _odp_schedule_eventdev_fn = {
 	.order_lock = order_lock,
 	.order_unlock = order_unlock,
 	.max_ordered_locks = schedule_max_ordered_locks,
-	.get_config = NULL
+	.get_config = NULL,
+	.sched_api = sched_api,
 };
 
 /* Fill in scheduler API calls */
