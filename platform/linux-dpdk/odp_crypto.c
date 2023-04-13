@@ -107,6 +107,7 @@ typedef enum op_status_t {
 	S_DEV,		/* processed by cryptodev */
 	S_ERROR,	/* error occurred */
 	S_ERROR_LIN,	/* packet linearization error occurred */
+	S_ERROR_HASH_OFFSET, /* hash offset in cipher range */
 } op_status_t;
 
 typedef struct crypto_op_state_t {
@@ -1889,6 +1890,24 @@ static int op_alloc(crypto_op_t *op[],
 	return n;
 }
 
+static int is_op_supported(const crypto_session_entry_t *session,
+			   const odp_crypto_packet_op_param_t *param)
+{
+	const uint32_t c_start = param->cipher_range.offset;
+	const uint32_t c_end = param->cipher_range.offset + param->cipher_range.length;
+
+	if (odp_likely(c_end <= param->hash_result_offset))
+		return 1;
+	if (odp_likely(c_start >= param->hash_result_offset + session->p.auth_digest_len))
+		return 1;
+	if (session->p.cipher_alg == ODP_CIPHER_ALG_NULL)
+		return 1;
+	if (odp_unlikely(session->p.auth_alg == ODP_AUTH_ALG_NULL))
+		return 1;
+
+	return 0;
+}
+
 static void op_prepare(crypto_op_t *ops[],
 		       const odp_crypto_packet_op_param_t param[],
 		       int num_op)
@@ -1917,10 +1936,15 @@ static void op_prepare(crypto_op_t *ops[],
 			continue;
 		}
 
-		if (cipher_is_aead(session->p.cipher_alg))
+		if (cipher_is_aead(session->p.cipher_alg)) {
 			crypto_fill_aead_param(session, op->state.pkt, &param[n], rte_op);
-		else
+		} else {
+			if (odp_unlikely(!is_op_supported(session, &param[n]))) {
+				op->state.status = S_ERROR_HASH_OFFSET;
+				continue;
+			}
 			crypto_fill_sym_param(session, op->state.pkt, &param[n], rte_op);
+		}
 
 		rte_crypto_op_attach_sym_session(rte_op, rte_session);
 		rte_op->sym->m_src = pkt_to_mbuf(op->state.pkt);
@@ -2089,6 +2113,11 @@ static void op_finish(crypto_op_t *op)
 		/* packet linearization error before cryptodev enqueue */
 		result_ok = false;
 		rc_cipher = ODP_CRYPTO_ALG_ERR_DATA_SIZE;
+		rc_auth = ODP_CRYPTO_ALG_ERR_DATA_SIZE;
+	} else if (op->state.status == S_ERROR_HASH_OFFSET) {
+		/* hash offset not supported */
+		result_ok = false;
+		rc_cipher = ODP_CRYPTO_ALG_ERR_NONE;
 		rc_auth = ODP_CRYPTO_ALG_ERR_DATA_SIZE;
 	} else {
 		/*
