@@ -2060,8 +2060,8 @@ static void op_finish(crypto_op_t *op)
 			rc_cipher = ODP_CRYPTO_ALG_ERR_NONE;
 			rc_auth = ODP_CRYPTO_ALG_ERR_ICV_CHECK;
 		} else {
-			rc_cipher = ODP_CRYPTO_ALG_ERR_DATA_SIZE;
-			rc_auth = ODP_CRYPTO_ALG_ERR_DATA_SIZE;
+			rc_cipher = ODP_CRYPTO_ALG_ERR_OTHER;
+			rc_auth = ODP_CRYPTO_ALG_ERR_OTHER;
 		}
 	} else if (odp_unlikely(op->state.status == S_NOP)) {
 		/* null cipher & null auth, cryptodev skipped */
@@ -2079,8 +2079,8 @@ static void op_finish(crypto_op_t *op)
 		/*
 		 * other error before cryptodev enqueue
 		 */
-		rc_cipher = ODP_CRYPTO_ALG_ERR_DATA_SIZE;
-		rc_auth = ODP_CRYPTO_ALG_ERR_DATA_SIZE;
+		rc_cipher = ODP_CRYPTO_ALG_ERR_OTHER;
+		rc_auth = ODP_CRYPTO_ALG_ERR_OTHER;
 	}
 
 	/* Fill in result */
