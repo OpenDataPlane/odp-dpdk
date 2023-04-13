@@ -2132,9 +2132,11 @@ static void op_finish(crypto_op_t *op)
 	packet_subtype_set(pkt, ODP_EVENT_PACKET_CRYPTO);
 	op_result = &packet_hdr(pkt)->crypto_op_result;
 	op_result->cipher_status.alg_err = rc_cipher;
-	op_result->cipher_status.hw_err = ODP_CRYPTO_HW_ERR_NONE;
 	op_result->auth_status.alg_err = rc_auth;
+#if ODP_DEPRECATED_API
+	op_result->cipher_status.hw_err = ODP_CRYPTO_HW_ERR_NONE;
 	op_result->auth_status.hw_err = ODP_CRYPTO_HW_ERR_NONE;
+#endif
 	op_result->ok = result_ok;
 }
 
