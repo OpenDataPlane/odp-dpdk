@@ -1782,9 +1782,6 @@ static odp_packet_t get_output_packet(const crypto_session_entry_t *session,
 {
 	int rc;
 
-	if (odp_likely(session->p.op_type == ODP_CRYPTO_OP_TYPE_BASIC))
-		return pkt_in;
-
 	if (odp_likely(pkt_in == pkt_out))
 		return pkt_out;
 
@@ -1842,11 +1839,15 @@ static int op_alloc(crypto_op_t *op[],
 		session = (crypto_session_entry_t *)(intptr_t)param[n].session;
 		_ODP_ASSERT(session != NULL);
 
-		pkt = get_output_packet(session, pkt_in[n], pkt_out[n]);
-		if (odp_unlikely(pkt == ODP_PACKET_INVALID)) {
-			for (int i = n; i < num_pkts; i++)
-				rte_crypto_op_free((struct rte_crypto_op *)op[i]);
-			break;
+		if (odp_likely(session->p.op_type == ODP_CRYPTO_OP_TYPE_BASIC)) {
+			pkt = pkt_in[n];
+		} else {
+			pkt = get_output_packet(session, pkt_in[n], pkt_out[n]);
+			if (odp_unlikely(pkt == ODP_PACKET_INVALID)) {
+				for (int i = n; i < num_pkts; i++)
+					rte_crypto_op_free((struct rte_crypto_op *)op[i]);
+				break;
+			}
 		}
 		op[n]->state.pkt = pkt;
 	}
