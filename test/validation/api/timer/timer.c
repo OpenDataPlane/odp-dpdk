@@ -1,5 +1,5 @@
 /* Copyright (c) 2015-2018, Linaro Limited
- * Copyright (c) 2019-2022, Nokia
+ * Copyright (c) 2019-2023, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -239,6 +239,14 @@ static int
 check_plain_queue_support(void)
 {
 	if (global_mem->param.queue_type_plain)
+		return ODP_TEST_ACTIVE;
+
+	return ODP_TEST_INACTIVE;
+}
+
+static int check_periodic_support(void)
+{
+	if (global_mem->periodic)
 		return ODP_TEST_ACTIVE;
 
 	return ODP_TEST_INACTIVE;
@@ -2377,6 +2385,139 @@ static void timer_test_sched_all(void)
 	timer_test_all(ODP_QUEUE_TYPE_SCHED);
 }
 
+static void timer_test_periodic_capa(void)
+{
+	odp_timer_capability_t timer_capa;
+	odp_timer_periodic_capability_t capa;
+	odp_fract_u64_t min_fract, max_fract, base_freq;
+	uint64_t freq_range, freq_step, first_hz, res_ns, max_multiplier;
+	double freq, min_freq, max_freq;
+	int ret;
+	uint32_t i, j;
+	uint32_t num = 100;
+
+	memset(&timer_capa, 0, sizeof(odp_timer_capability_t));
+	CU_ASSERT_FATAL(odp_timer_capability(ODP_CLOCK_DEFAULT, &timer_capa) == 0);
+	CU_ASSERT(timer_capa.periodic.max_pools);
+	CU_ASSERT(timer_capa.periodic.max_timers);
+
+	min_fract = timer_capa.periodic.min_base_freq_hz;
+	max_fract = timer_capa.periodic.max_base_freq_hz;
+
+	CU_ASSERT_FATAL(min_fract.integer || min_fract.numer);
+	CU_ASSERT_FATAL(max_fract.integer || max_fract.numer);
+
+	if (min_fract.numer)
+		CU_ASSERT_FATAL(min_fract.denom);
+
+	if (max_fract.numer)
+		CU_ASSERT_FATAL(max_fract.denom);
+
+	min_freq = odp_fract_u64_to_dbl(&min_fract);
+	max_freq = odp_fract_u64_to_dbl(&max_fract);
+	CU_ASSERT(min_freq <= max_freq);
+
+	memset(&capa, 0, sizeof(odp_timer_periodic_capability_t));
+
+	/* Min freq, capa fills in resolution */
+	capa.base_freq_hz   = min_fract;
+	capa.max_multiplier = 1;
+	capa.res_ns         = 0;
+
+	CU_ASSERT(odp_timer_periodic_capability(ODP_CLOCK_DEFAULT, &capa) == 1);
+	CU_ASSERT(capa.base_freq_hz.integer == min_fract.integer);
+	CU_ASSERT(capa.base_freq_hz.numer   == min_fract.numer);
+	CU_ASSERT(capa.base_freq_hz.denom   == min_fract.denom);
+	CU_ASSERT(capa.max_multiplier >= 1);
+	CU_ASSERT(capa.res_ns > 0);
+
+	/* Max freq, capa fills in resolution */
+	capa.base_freq_hz   = max_fract;
+	capa.max_multiplier = 1;
+	capa.res_ns         = 0;
+
+	CU_ASSERT(odp_timer_periodic_capability(ODP_CLOCK_DEFAULT, &capa) == 1);
+	CU_ASSERT(capa.base_freq_hz.integer == max_fract.integer);
+	CU_ASSERT(capa.base_freq_hz.numer   == max_fract.numer);
+	CU_ASSERT(capa.base_freq_hz.denom   == max_fract.denom);
+	CU_ASSERT(capa.max_multiplier >= 1);
+	CU_ASSERT(capa.res_ns > 0);
+
+	freq_range = max_fract.integer - min_fract.integer;
+
+	if (freq_range < 10 * num)
+		num = freq_range / 10;
+
+	/* Too short frequency range */
+	if (num == 0)
+		return;
+
+	freq_step = freq_range / num;
+	first_hz = min_fract.integer + 1;
+
+	ODPH_DBG("min %" PRIu64 ", max %" PRIu64 ", range %" PRIu64 ", step %" PRIu64 "\n",
+		 min_fract.integer, max_fract.integer, freq_range, freq_step);
+
+	for (i = 0; i < num; i++) {
+		base_freq.integer = first_hz + i * freq_step;
+		base_freq.numer   = 0;
+		base_freq.denom   = 0;
+
+		freq = odp_fract_u64_to_dbl(&base_freq);
+
+		if (freq > max_freq)
+			base_freq = max_fract;
+
+		for (j = 0; j < 4; j++) {
+			capa.base_freq_hz = base_freq;
+
+			max_multiplier = 1;
+			res_ns = 0;
+
+			if (j & 0x1)
+				max_multiplier = 2;
+
+			if (j & 0x2)
+				res_ns = 1 + (ODP_TIME_SEC_IN_NS / (10 * base_freq.integer));
+
+			capa.max_multiplier = max_multiplier;
+			capa.res_ns = res_ns;
+
+			ODPH_DBG("freq %" PRIu64 ",  multip %" PRIu64 ", res %" PRIu64 ",\n",
+				 base_freq.integer, max_multiplier, res_ns);
+
+			ret = odp_timer_periodic_capability(ODP_CLOCK_DEFAULT, &capa);
+
+			if (ret == 1) {
+				CU_ASSERT(capa.base_freq_hz.integer == base_freq.integer);
+				CU_ASSERT(capa.base_freq_hz.numer   == base_freq.numer);
+				CU_ASSERT(capa.base_freq_hz.denom   == base_freq.denom);
+			} else if (ret == 0) {
+				CU_ASSERT(capa.base_freq_hz.integer != base_freq.integer ||
+					  capa.base_freq_hz.numer   != base_freq.numer ||
+					  capa.base_freq_hz.denom   != base_freq.denom)
+
+				if (capa.base_freq_hz.numer)
+					CU_ASSERT_FATAL(capa.base_freq_hz.denom);
+
+				CU_ASSERT(odp_fract_u64_to_dbl(&capa.base_freq_hz) >= min_freq);
+				CU_ASSERT(odp_fract_u64_to_dbl(&capa.base_freq_hz) <= max_freq);
+			}
+
+			if (ret >= 0) {
+				CU_ASSERT(capa.max_multiplier >= max_multiplier);
+
+				if (res_ns) {
+					/* Same or better resolution */
+					CU_ASSERT(capa.res_ns <= res_ns);
+				} else {
+					CU_ASSERT(capa.res_ns > 0);
+				}
+			}
+		}
+	}
+}
+
 static void timer_test_periodic(odp_queue_type_t queue_type, int use_first)
 {
 	odp_timer_capability_t timer_capa;
@@ -2392,7 +2533,7 @@ static void timer_test_periodic(odp_queue_type_t queue_type, int use_first)
 	odp_event_t ev;
 	odp_timer_t timer;
 	odp_time_t t1, t2;
-	uint64_t tick, cur_tick, period_ns, duration_ns, diff_ns;
+	uint64_t tick, cur_tick, period_ns, duration_ns, diff_ns, offset_ns;
 	double freq, freq_out, min_freq, max_freq;
 	int ret;
 	const char *user_ctx = "User context";
@@ -2509,10 +2650,14 @@ static void timer_test_periodic(odp_queue_type_t queue_type, int use_first)
 
 	memset(&start_param, 0, sizeof(odp_timer_periodic_start_t));
 	cur_tick = odp_timer_current_tick(timer_pool);
-	tick = cur_tick + odp_timer_ns_to_tick(timer_pool, period_ns / 2);
+	offset_ns = period_ns / 2;
+	tick = cur_tick + odp_timer_ns_to_tick(timer_pool, offset_ns);
 
-	if (use_first)
+	if (use_first) {
+		/* First tick moves timer to start before the first period */
+		duration_ns -= (period_ns - offset_ns);
 		start_param.first_tick = tick;
+	}
 
 	start_param.freq_multiplier = multiplier;
 	start_param.tmo_ev = ev;
@@ -2521,7 +2666,8 @@ static void timer_test_periodic(odp_queue_type_t queue_type, int use_first)
 	ODPH_DBG("  Current tick:    %" PRIu64 "\n", cur_tick);
 	ODPH_DBG("  First tick:      %" PRIu64 "\n", start_param.first_tick);
 	ODPH_DBG("  Multiplier:      %" PRIu64 "\n", start_param.freq_multiplier);
-	ODPH_DBG("Test duration ns:  %" PRIu64 "\n", duration_ns);
+	ODPH_DBG("  Period:          %" PRIu64 " nsec\n", period_ns);
+	ODPH_DBG("Expected duration: %" PRIu64 " nsec\n", duration_ns);
 
 	ret = odp_timer_periodic_start(timer, &start_param);
 
@@ -2575,6 +2721,8 @@ static void timer_test_periodic(odp_queue_type_t queue_type, int use_first)
 	/* Stop periodic timer */
 	ret = odp_timer_periodic_cancel(timer);
 	CU_ASSERT_FATAL(ret == 0);
+
+	ODPH_DBG("Measured duration: %" PRIu64 " nsec\n", diff_ns);
 
 	t1 = odp_time_local();
 	while (1) {
@@ -2714,6 +2862,8 @@ odp_testinfo_t timer_suite[] = {
 				  check_plain_queue_support),
 	ODP_TEST_INFO_CONDITIONAL(timer_test_sched_all,
 				  check_sched_queue_support),
+	ODP_TEST_INFO_CONDITIONAL(timer_test_periodic_capa,
+				  check_periodic_support),
 	ODP_TEST_INFO_CONDITIONAL(timer_test_periodic_sched,
 				  check_periodic_sched_support),
 	ODP_TEST_INFO_CONDITIONAL(timer_test_periodic_sched_first,

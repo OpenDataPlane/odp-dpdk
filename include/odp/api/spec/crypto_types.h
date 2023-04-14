@@ -38,11 +38,6 @@ extern "C" {
  */
 
 /**
- * @typedef odp_crypto_compl_t
-*  @deprecated Crypto API completion event (platform dependent).
-*/
-
-/**
  * Crypto API operation mode
  */
 typedef enum {
@@ -516,8 +511,7 @@ typedef enum odp_crypto_op_type_t {
 	/**
 	 * Input packet data and metadata are copied in the output packet
 	 * and then processed. Output packet is allocated by the caller
-	 * or by ODP. odp_crypto_op(), odp_crypto_op_enq() and
-	 * odp_crypto_operation() can be used.
+	 * or by ODP.
 	 *
 	 * This is the default value but will be deprecated in the future.
 	 */
@@ -526,7 +520,6 @@ typedef enum odp_crypto_op_type_t {
 	/**
 	 * Input packet data and metadata are copied in the output packet
 	 * and then processed. Output packet is allocated by ODP.
-	 * odp_crypto_op() and odp_crypto_op_enq() can be used.
 	 */
 	ODP_CRYPTO_OP_TYPE_BASIC,
 
@@ -541,8 +534,6 @@ typedef enum odp_crypto_op_type_t {
 	 *
 	 * Crypto output is the processed crypto_range, auth_range and
 	 * MAC/digest (in encode sessions) of the input packet.
-	 *
-	 * odp_crypto_op() and odp_crypto_op_enq() can be used.
 	 */
 	ODP_CRYPTO_OP_TYPE_OOP,
 } odp_crypto_op_type_t;
@@ -578,7 +569,8 @@ typedef struct odp_crypto_session_param_t {
 	 *  indicates the reverse order of operation.
 	 *
 	 *  The value is ignored with authenticated encryption algorithms
-	 *  such as AES-GCM.
+	 *  such as AES-GCM. The value is also ignored when one of the
+	 *  algorithms is null.
 	 *
 	 *  true:  Authenticate cipher text
 	 *  false: Authenticate plain text
@@ -597,14 +589,6 @@ typedef struct odp_crypto_session_param_t {
 	 */
 	odp_bool_t hash_result_in_auth_range;
 
-	/** Preferred sync vs. async for odp_crypto_operation()
-	 *
-	 *  The default value is ODP_CRYPTO_SYNC.
-	 *
-	 *  @deprecated Used only with deprecated odp_crypto_operation()
-	 */
-	odp_crypto_op_mode_t ODP_DEPRECATE(pref_mode);
-
 	/** Operation mode when using packet interface: sync or async
 	 *
 	 *  The default value is ODP_CRYPTO_SYNC.
@@ -619,6 +603,9 @@ typedef struct odp_crypto_session_param_t {
 	 *  the pairing authentication algorithm. When ciphering is enabled
 	 *  cipher key and IV need to be set. The default value is
 	 *  ODP_CIPHER_ALG_NULL.
+	 *
+	 *  When ciphering is disabled, i.e. cipher_alg is ODP_CIPHER_ALG_NULL,
+	 *  cipher_key and cipher_iv_len parameters are ignored.
 	 */
 	odp_cipher_alg_t cipher_alg;
 
@@ -645,6 +632,10 @@ typedef struct odp_crypto_session_param_t {
 	 *  ODP_AUTH_ALG_CHACHA20_POLY1305. Otherwise, all authentication side
 	 *  parameters must be set when authentication is enabled. The default
 	 *  value is ODP_AUTH_ALG_NULL.
+	 *
+	 *  When authentication is disabled, i.e. auth_alg is
+	 *  ODP_AUTH_ALG_NULL, auth_key, auth_iv_len, auth_digest_len,
+	 *  auth_aad_len and hash_result_in_auth_range parameters are ignored.
 	 */
 	odp_auth_alg_t auth_alg;
 
@@ -674,8 +665,7 @@ typedef struct odp_crypto_session_param_t {
 	/** Async mode completion event queue
 	 *
 	 *  The completion queue is used to return completions from
-	 *  odp_crypto_op_enq() (and the deprecated odp_crypto_operation())
-	 *  to the application.
+	 *  odp_crypto_op_enq() to the application.
 	 */
 	odp_queue_t compl_queue;
 
@@ -693,83 +683,6 @@ typedef struct odp_crypto_session_param_t {
 } odp_crypto_session_param_t;
 
 /**
- * Crypto API per packet operation parameters
- *
- * @deprecated Use odp_crypto_packet_op_param_t instead.
- */
-typedef struct odp_crypto_op_param_t {
-	/** Session handle from creation */
-	odp_crypto_session_t session;
-
-	/** User context */
-	void *ctx;
-
-	/** Input packet
-	 *
-	 *  Specifies the input packet for the crypto operation. When the
-	 *  'out_pkt' variable is set to ODP_PACKET_INVALID (indicating a new
-	 *  packet should be allocated for the resulting packet).
-	 */
-	odp_packet_t pkt;
-
-	/** Output packet
-	 *
-	 *  Both "in place" (the original packet 'pkt' is modified) and
-	 *  "copy" (the packet is replicated to a new packet which contains
-	 *  the modified data) modes are supported. The "in place" mode of
-	 *  operation is indicated by setting 'out_pkt' equal to 'pkt'.
-	 *  For the copy mode of operation, setting 'out_pkt' to a valid packet
-	 *  value indicates the caller wishes to specify the destination packet.
-	 *  Setting 'out_pkt' to ODP_PACKET_INVALID indicates the caller wishes
-	 *  the destination packet be allocated from the output pool specified
-	 *  during session creation.
-	 */
-	odp_packet_t out_pkt;
-
-	/** IV pointer for cipher */
-	uint8_t *cipher_iv_ptr;
-
-	/** Authentication IV pointer */
-	uint8_t *auth_iv_ptr;
-
-	/** Offset from start of packet for hash result
-	 *
-	 *  In case of decode sessions, the expected hash will be read from
-	 *  this offset and compared with the calculated hash. After the
-	 *  operation the hash bytes will have undefined values.
-	 *
-	 *  In case of encode sessions the calculated hash will be stored in
-	 *  this offset.
-	 *
-	 *  If the hash_result_in_auth_range session parameter is true,
-	 *  the hash result location may overlap auth_range. In that case
-	 *  the result location will be zeroed in decode sessions before
-	 *  hash calculation. Zeroing is not done in encode sessions.
-	 */
-	uint32_t hash_result_offset;
-
-	/** Pointer to AAD. AAD length is defined by 'auth_aad_len'
-	 *  session parameter.
-	 */
-	uint8_t *aad_ptr;
-
-	/** Data range to be ciphered */
-	odp_packet_data_range_t cipher_range;
-
-	/** Data range to be authenticated
-	 *
-	 *  The value is ignored with authenticated encryption algorithms,
-	 *  such as AES-GCM, which authenticate data in the cipher range
-	 *  and the AAD.
-	 *
-	 *  As a special case AES-GMAC uses this field instead of aad_ptr
-	 *  for the data bytes to be authenticated.
-	 */
-	odp_packet_data_range_t auth_range;
-
-} ODP_DEPRECATE(odp_crypto_op_param_t);
-
-/**
  * Crypto packet API per packet operation parameters
  */
 typedef struct odp_crypto_packet_op_param_t {
@@ -777,10 +690,10 @@ typedef struct odp_crypto_packet_op_param_t {
 	odp_crypto_session_t session;
 
 	/** IV pointer for cipher */
-	uint8_t *cipher_iv_ptr;
+	const uint8_t *cipher_iv_ptr;
 
 	/** IV pointer for authentication */
-	uint8_t *auth_iv_ptr;
+	const uint8_t *auth_iv_ptr;
 
 	/** Offset from start of packet for hash result
 	 *
@@ -808,12 +721,31 @@ typedef struct odp_crypto_packet_op_param_t {
 	/** Pointer to AAD. AAD length is defined by 'auth_aad_len'
 	 *  session parameter.
 	 */
-	uint8_t *aad_ptr;
+	const uint8_t *aad_ptr;
 
-	/** Data range to apply cipher */
+	/** Data range to be ciphered.
+	 *
+	 *  Ignored by the null cipher with operation types other than
+	 *  ODP_CRYPTO_OP_TYPE_OOP. Must be set to zero range (zero offset
+	 *  and zero length) with the null cipher used with the out-of-place
+	 *  operation type.
+	 **/
 	odp_packet_data_range_t cipher_range;
 
-	/** Data range to authenticate */
+	/** Data range to be authenticated
+	 *
+	 *  The value is ignored with authenticated encryption algorithms,
+	 *  such as AES-GCM, which authenticate data in the cipher range
+	 *  and the AAD.
+	 *
+	 *  Ignored by the null auth algorithm with operation types other than
+	 *  ODP_CRYPTO_OP_TYPE_OOP. Must be set to zero range (zero offset
+	 *  and zero length) with the null cipher used with the out-of-place
+	 *  operation type.
+	 *
+	 *  As a special case AES-GMAC uses this field instead of aad_ptr
+	 *  for the data bytes to be authenticated.
+	 */
 	odp_packet_data_range_t auth_range;
 
 	/** Shift of the output offsets with ODP_CRYPTO_OP_TYPE_OOP
@@ -871,14 +803,16 @@ typedef enum {
 	ODP_CRYPTO_SES_ERR_PARAMS,
 } odp_crypto_ses_create_err_t;
 
-/** This synonym for backward compatibility will be deprecated later */
+#if ODP_DEPRECATED_API
+/** This synonym for backward compatibility has been deprecated */
 #define ODP_CRYPTO_SES_CREATE_ERR_NONE       ODP_CRYPTO_SES_ERR_NONE
-/** This synonym for backward compatibility will be deprecated later */
+/** This synonym for backward compatibility has been deprecated */
 #define ODP_CRYPTO_SES_CREATE_ERR_ENOMEM     ODP_CRYPTO_SES_ERR_ENOMEM
-/** This synonym for backward compatibility will be deprecated later */
+/** This synonym for backward compatibility has been deprecated */
 #define ODP_CRYPTO_SES_CREATE_ERR_INV_CIPHER ODP_CRYPTO_SES_ERR_CIPHER
-/** This synonym for backward compatibility will be deprecated later */
+/** This synonym for backward compatibility has been deprecated */
 #define ODP_CRYPTO_SES_CREATE_ERR_INV_AUTH   ODP_CRYPTO_SES_ERR_AUTH
+#endif
 
 /**
  * Crypto API algorithm return code
@@ -886,14 +820,16 @@ typedef enum {
 typedef enum {
 	/** Algorithm successful */
 	ODP_CRYPTO_ALG_ERR_NONE,
-	/** Invalid data block size */
+	/** Invalid range or packet size */
 	ODP_CRYPTO_ALG_ERR_DATA_SIZE,
 	/** Key size invalid for algorithm */
-	ODP_CRYPTO_ALG_ERR_KEY_SIZE,
+	ODP_DEPRECATE(ODP_CRYPTO_ALG_ERR_KEY_SIZE),
 	/** Computed ICV value mismatch */
 	ODP_CRYPTO_ALG_ERR_ICV_CHECK,
 	/** IV value not specified */
-	ODP_CRYPTO_ALG_ERR_IV_INVALID,
+	ODP_DEPRECATE(ODP_CRYPTO_ALG_ERR_IV_INVALID),
+	/** Other error */
+	ODP_CRYPTO_ALG_ERR_OTHER,
 } odp_crypto_alg_err_t;
 
 /**
@@ -901,12 +837,12 @@ typedef enum {
  */
 typedef enum {
 	/** Operation completed successfully */
-	ODP_CRYPTO_HW_ERR_NONE,
+	ODP_DEPRECATE(ODP_CRYPTO_HW_ERR_NONE),
 	/** Error detected during DMA of data */
-	ODP_CRYPTO_HW_ERR_DMA,
+	ODP_DEPRECATE(ODP_CRYPTO_HW_ERR_DMA),
 	/** Operation failed due to pool depletion */
-	ODP_CRYPTO_HW_ERR_BP_DEPLETED,
-} odp_crypto_hw_err_t;
+	ODP_DEPRECATE(ODP_CRYPTO_HW_ERR_BP_DEPLETED),
+} ODP_DEPRECATE(odp_crypto_hw_err_t);
 
 /**
  * Cryto API per packet operation completion status
@@ -916,39 +852,18 @@ typedef struct odp_crypto_op_status {
 	odp_crypto_alg_err_t alg_err;
 
 	/** Hardware specific return code */
-	odp_crypto_hw_err_t  hw_err;
-
+	ODP_DEPRECATE(odp_crypto_hw_err_t) ODP_DEPRECATE(hw_err);
 } odp_crypto_op_status_t;
-
-/**
- * Crypto API operation result
- *
- * @deprecated Use odp_crypto_packet_result_t instead.
- */
-typedef struct odp_crypto_op_result {
-	/** Request completed successfully */
-	odp_bool_t  ok;
-
-	/** User context from request */
-	void *ctx;
-
-	/** Output packet */
-	odp_packet_t pkt;
-
-	/** Cipher status */
-	odp_crypto_op_status_t cipher_status;
-
-	/** Authentication status */
-	odp_crypto_op_status_t auth_status;
-
-} ODP_DEPRECATE(odp_crypto_op_result_t);
 
 /**
  * Crypto packet API operation result
  */
 typedef struct odp_crypto_packet_result_t {
-	/** Request completed successfully */
-	odp_bool_t  ok;
+	/** Request completed successfully.
+	 *
+	 *  @deprecated Check the return value of odp_crypto_result() instead.
+	 */
+	odp_bool_t  ODP_DEPRECATE(ok);
 
 	/** Input packet passed to odp_crypo_op_enq() when the operation
 	 *  type of the session is ODP_CRYPTO_OP_TYPE_OOP. In other cases

@@ -1,5 +1,5 @@
 /* Copyright (c) 2016-2018, Linaro Limited
- * Copyright (c) 2019-2022, Nokia
+ * Copyright (c) 2019-2023, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -24,7 +24,6 @@
 
 #include <odp_classification_internal.h>
 #include <odp_debug_internal.h>
-#include <odp_errno_define.h>
 #include <odp_global_data.h>
 #include <odp_libconfig_internal.h>
 #include <odp_macros_internal.h>
@@ -59,6 +58,7 @@
 #endif
 
 #include <ctype.h>
+#include <errno.h>
 #include <sched.h>
 #include <stdint.h>
 #include <unistd.h>
@@ -71,6 +71,41 @@
 	#define RTE_MBUF_F_TX_UDP_CKSUM PKT_TX_UDP_CKSUM
 	#define RTE_MBUF_F_TX_TCP_CKSUM PKT_TX_TCP_CKSUM
 	#define RTE_MEMPOOL_REGISTER_OPS MEMPOOL_REGISTER_OPS
+
+	#define RTE_ETH_RSS_IPV4 ETH_RSS_IPV4
+	#define RTE_ETH_RSS_FRAG_IPV4 ETH_RSS_FRAG_IPV4
+	#define RTE_ETH_RSS_NONFRAG_IPV4_TCP ETH_RSS_NONFRAG_IPV4_TCP
+	#define RTE_ETH_RSS_NONFRAG_IPV4_UDP ETH_RSS_NONFRAG_IPV4_UDP
+	#define RTE_ETH_RSS_NONFRAG_IPV4_OTHER ETH_RSS_NONFRAG_IPV4_OTHER
+
+	#define RTE_ETH_RSS_IPV6 ETH_RSS_IPV6
+	#define RTE_ETH_RSS_IPV6_EX ETH_RSS_IPV6_EX
+	#define RTE_ETH_RSS_IPV6_UDP_EX ETH_RSS_IPV6_UDP_EX
+	#define RTE_ETH_RSS_IPV6_TCP_EX ETH_RSS_IPV6_TCP_EX
+	#define RTE_ETH_RSS_FRAG_IPV6 ETH_RSS_FRAG_IPV6
+	#define RTE_ETH_RSS_NONFRAG_IPV6_TCP ETH_RSS_NONFRAG_IPV6_TCP
+	#define RTE_ETH_RSS_NONFRAG_IPV6_UDP ETH_RSS_NONFRAG_IPV6_UDP
+	#define RTE_ETH_RSS_NONFRAG_IPV6_OTHER ETH_RSS_NONFRAG_IPV6_OTHER
+
+	#define RTE_ETH_MQ_RX_RSS ETH_MQ_RX_RSS
+	#define RTE_ETH_MQ_TX_NONE ETH_MQ_TX_NONE
+
+	#define RTE_ETH_RX_OFFLOAD_IPV4_CKSUM DEV_RX_OFFLOAD_IPV4_CKSUM
+	#define RTE_ETH_RX_OFFLOAD_TCP_CKSUM DEV_RX_OFFLOAD_TCP_CKSUM
+	#define RTE_ETH_RX_OFFLOAD_UDP_CKSUM DEV_RX_OFFLOAD_UDP_CKSUM
+
+	#define RTE_ETH_TX_OFFLOAD_IPV4_CKSUM DEV_TX_OFFLOAD_IPV4_CKSUM
+	#define RTE_ETH_TX_OFFLOAD_SCTP_CKSUM DEV_TX_OFFLOAD_SCTP_CKSUM
+	#define RTE_ETH_TX_OFFLOAD_TCP_CKSUM DEV_TX_OFFLOAD_TCP_CKSUM
+	#define RTE_ETH_TX_OFFLOAD_UDP_CKSUM DEV_TX_OFFLOAD_UDP_CKSUM
+
+	#define RTE_ETH_FC_FULL RTE_FC_FULL
+	#define RTE_ETH_FC_RX_PAUSE RTE_FC_RX_PAUSE
+	#define RTE_ETH_FC_TX_PAUSE RTE_FC_TX_PAUSE
+	#define RTE_ETH_LINK_AUTONEG ETH_LINK_AUTONEG
+	#define RTE_ETH_LINK_FULL_DUPLEX ETH_LINK_FULL_DUPLEX
+	#define RTE_ETH_LINK_UP ETH_LINK_UP
+	#define RTE_ETH_SPEED_NUM_NONE ETH_SPEED_NUM_NONE
 #endif
 
 #define MEMPOOL_FLAGS 0
@@ -848,12 +883,11 @@ static inline void pkt_set_ol_tx(odp_pktout_config_opt_t *pktout_cfg,
 static inline int pkt_to_mbuf(pktio_entry_t *pktio_entry,
 			      struct rte_mbuf *mbuf_table[],
 			      const odp_packet_t pkt_table[], uint16_t num,
-			      int *tx_ts_idx)
+			      uint16_t *tx_ts_idx)
 {
 	pkt_dpdk_t *pkt_dpdk = pkt_priv(pktio_entry);
-	int i, j;
 	char *data;
-	uint16_t pkt_len;
+	uint16_t i, j, pkt_len;
 	uint8_t chksum_enabled = pktio_entry->enabled.chksum_insert;
 	uint8_t tx_ts_enabled = _odp_pktio_tx_ts_enabled(pktio_entry);
 	odp_pktout_config_opt_t *pktout_cfg = &pktio_entry->config.pktout;
@@ -868,11 +902,8 @@ static inline int pkt_to_mbuf(pktio_entry_t *pktio_entry,
 
 		pkt_len = packet_len(pkt_hdr);
 
-		if (odp_unlikely(pkt_len > pkt_dpdk->mtu)) {
-			if (i == 0)
-				_odp_errno = EMSGSIZE;
+		if (odp_unlikely(pkt_len > pkt_dpdk->mtu))
 			goto fail;
-		}
 
 		/* Packet always fits in mbuf */
 		data = rte_pktmbuf_append(mbuf_table[i], pkt_len);
@@ -894,7 +925,7 @@ fail:
 	for (j = i; j < num; j++)
 		rte_pktmbuf_free(mbuf_table[j]);
 
-	return i;
+	return i > 0 ? i : -1;
 }
 
 static inline void prefetch_pkt(struct rte_mbuf *mbuf)
@@ -1007,15 +1038,15 @@ static inline int mbuf_to_pkt_zero(pktio_entry_t *pktio_entry,
 static inline int pkt_to_mbuf_zero(pktio_entry_t *pktio_entry,
 				   struct rte_mbuf *mbuf_table[],
 				   const odp_packet_t pkt_table[], uint16_t num,
-				   uint16_t *copy_count, uint16_t cpy_idx[], int *tx_ts_idx)
+				   uint16_t *copy_count, uint16_t cpy_idx[], uint16_t *tx_ts_idx)
 {
 	pkt_dpdk_t *pkt_dpdk = pkt_priv(pktio_entry);
 	odp_pktout_config_opt_t *pktout_cfg = &pktio_entry->config.pktout;
 	odp_pktout_config_opt_t *pktout_capa = &pkt_dpdk->pktout_capa;
 	uint16_t mtu = pkt_dpdk->mtu;
+	uint16_t i;
 	uint8_t chksum_enabled = pktio_entry->enabled.chksum_insert;
 	uint8_t tx_ts_enabled = _odp_pktio_tx_ts_enabled(pktio_entry);
-	int i;
 	*copy_count = 0;
 
 	for (i = 0; i < num; i++) {
@@ -1034,7 +1065,7 @@ static inline int pkt_to_mbuf_zero(pktio_entry_t *pktio_entry,
 				pkt_set_ol_tx(pktout_cfg, pktout_capa, pkt_hdr,
 					      mbuf, odp_packet_data(pkt));
 		} else {
-			int dummy_idx = 0;
+			uint16_t dummy_idx = 0;
 
 			/* Fall back to packet copy */
 			if (odp_unlikely(pkt_to_mbuf(pktio_entry, &mbuf,
@@ -1052,9 +1083,7 @@ static inline int pkt_to_mbuf_zero(pktio_entry_t *pktio_entry,
 	return i;
 
 fail:
-	if (i == 0)
-		_odp_errno = EMSGSIZE;
-	return i;
+	return  i > 0 ? i : -1;
 }
 
 /* Test if s has only digits or not. Dpdk pktio uses only digits.*/
@@ -1189,22 +1218,22 @@ static void hash_proto_to_rss_conf(struct rte_eth_rss_conf *rss_conf,
 				   const odp_pktin_hash_proto_t *hash_proto)
 {
 	if (hash_proto->proto.ipv4_udp)
-		rss_conf->rss_hf |= ETH_RSS_NONFRAG_IPV4_UDP;
+		rss_conf->rss_hf |= RTE_ETH_RSS_NONFRAG_IPV4_UDP;
 	if (hash_proto->proto.ipv4_tcp)
-		rss_conf->rss_hf |= ETH_RSS_NONFRAG_IPV4_TCP;
+		rss_conf->rss_hf |= RTE_ETH_RSS_NONFRAG_IPV4_TCP;
 	if (hash_proto->proto.ipv4)
-		rss_conf->rss_hf |= ETH_RSS_IPV4 | ETH_RSS_FRAG_IPV4 |
-				    ETH_RSS_NONFRAG_IPV4_OTHER;
+		rss_conf->rss_hf |= RTE_ETH_RSS_IPV4 | RTE_ETH_RSS_FRAG_IPV4 |
+				    RTE_ETH_RSS_NONFRAG_IPV4_OTHER;
 	if (hash_proto->proto.ipv6_udp)
-		rss_conf->rss_hf |= ETH_RSS_NONFRAG_IPV6_UDP |
-				    ETH_RSS_IPV6_UDP_EX;
+		rss_conf->rss_hf |= RTE_ETH_RSS_NONFRAG_IPV6_UDP |
+				    RTE_ETH_RSS_IPV6_UDP_EX;
 	if (hash_proto->proto.ipv6_tcp)
-		rss_conf->rss_hf |= ETH_RSS_NONFRAG_IPV6_TCP |
-				    ETH_RSS_IPV6_TCP_EX;
+		rss_conf->rss_hf |= RTE_ETH_RSS_NONFRAG_IPV6_TCP |
+				    RTE_ETH_RSS_IPV6_TCP_EX;
 	if (hash_proto->proto.ipv6)
-		rss_conf->rss_hf |= ETH_RSS_IPV6 | ETH_RSS_FRAG_IPV6 |
-				    ETH_RSS_NONFRAG_IPV6_OTHER |
-				    ETH_RSS_IPV6_EX;
+		rss_conf->rss_hf |= RTE_ETH_RSS_IPV6 | RTE_ETH_RSS_FRAG_IPV6 |
+				    RTE_ETH_RSS_NONFRAG_IPV6_OTHER |
+				    RTE_ETH_RSS_IPV6_EX;
 	rss_conf->rss_key = NULL;
 }
 
@@ -1218,34 +1247,34 @@ static int dpdk_setup_eth_dev(pktio_entry_t *pktio_entry)
 
 	memset(&eth_conf, 0, sizeof(eth_conf));
 
-	eth_conf.rxmode.mq_mode = ETH_MQ_RX_RSS;
-	eth_conf.txmode.mq_mode = ETH_MQ_TX_NONE;
+	eth_conf.rxmode.mq_mode = RTE_ETH_MQ_RX_RSS;
+	eth_conf.txmode.mq_mode = RTE_ETH_MQ_TX_NONE;
 	eth_conf.rx_adv_conf.rss_conf = pkt_dpdk->rss_conf;
 
 	/* Setup RX checksum offloads */
 	if (pktio_entry->config.pktin.bit.ipv4_chksum)
-		rx_offloads |= DEV_RX_OFFLOAD_IPV4_CKSUM;
+		rx_offloads |= RTE_ETH_RX_OFFLOAD_IPV4_CKSUM;
 
 	if (pktio_entry->config.pktin.bit.udp_chksum)
-		rx_offloads |= DEV_RX_OFFLOAD_UDP_CKSUM;
+		rx_offloads |= RTE_ETH_RX_OFFLOAD_UDP_CKSUM;
 
 	if (pktio_entry->config.pktin.bit.tcp_chksum)
-		rx_offloads |= DEV_RX_OFFLOAD_TCP_CKSUM;
+		rx_offloads |= RTE_ETH_RX_OFFLOAD_TCP_CKSUM;
 
 	eth_conf.rxmode.offloads = rx_offloads;
 
 	/* Setup TX checksum offloads */
 	if (pktio_entry->config.pktout.bit.ipv4_chksum_ena)
-		tx_offloads |= DEV_TX_OFFLOAD_IPV4_CKSUM;
+		tx_offloads |= RTE_ETH_TX_OFFLOAD_IPV4_CKSUM;
 
 	if (pktio_entry->config.pktout.bit.udp_chksum_ena)
-		tx_offloads |= DEV_TX_OFFLOAD_UDP_CKSUM;
+		tx_offloads |= RTE_ETH_TX_OFFLOAD_UDP_CKSUM;
 
 	if (pktio_entry->config.pktout.bit.tcp_chksum_ena)
-		tx_offloads |= DEV_TX_OFFLOAD_TCP_CKSUM;
+		tx_offloads |= RTE_ETH_TX_OFFLOAD_TCP_CKSUM;
 
 	if (pktio_entry->config.pktout.bit.sctp_chksum_ena)
-		tx_offloads |= DEV_TX_OFFLOAD_SCTP_CKSUM;
+		tx_offloads |= RTE_ETH_TX_OFFLOAD_SCTP_CKSUM;
 
 	eth_conf.txmode.offloads = tx_offloads;
 
@@ -1461,32 +1490,32 @@ static void prepare_rss_conf(pktio_entry_t *pktio_entry,
 
 	/* Print debug info about unsupported hash protocols */
 	if (p->hash_proto.proto.ipv4 &&
-	    ((rss_hf_capa & ETH_RSS_IPV4) == 0))
+	    ((rss_hf_capa & RTE_ETH_RSS_IPV4) == 0))
 		_ODP_PRINT("DPDK: hash_proto.ipv4 not supported (rss_hf_capa 0x%" PRIx64 ")\n",
 			   rss_hf_capa);
 
 	if (p->hash_proto.proto.ipv4_udp &&
-	    ((rss_hf_capa & ETH_RSS_NONFRAG_IPV4_UDP) == 0))
+	    ((rss_hf_capa & RTE_ETH_RSS_NONFRAG_IPV4_UDP) == 0))
 		_ODP_PRINT("DPDK: hash_proto.ipv4_udp not supported (rss_hf_capa 0x%" PRIx64 ")\n",
 			   rss_hf_capa);
 
 	if (p->hash_proto.proto.ipv4_tcp &&
-	    ((rss_hf_capa & ETH_RSS_NONFRAG_IPV4_TCP) == 0))
+	    ((rss_hf_capa & RTE_ETH_RSS_NONFRAG_IPV4_TCP) == 0))
 		_ODP_PRINT("DPDK: hash_proto.ipv4_tcp not supported (rss_hf_capa 0x%" PRIx64 ")\n",
 			   rss_hf_capa);
 
 	if (p->hash_proto.proto.ipv6 &&
-	    ((rss_hf_capa & ETH_RSS_IPV6) == 0))
+	    ((rss_hf_capa & RTE_ETH_RSS_IPV6) == 0))
 		_ODP_PRINT("DPDK: hash_proto.ipv6 not supported (rss_hf_capa 0x%" PRIx64 ")\n",
 			   rss_hf_capa);
 
 	if (p->hash_proto.proto.ipv6_udp &&
-	    ((rss_hf_capa & ETH_RSS_NONFRAG_IPV6_UDP) == 0))
+	    ((rss_hf_capa & RTE_ETH_RSS_NONFRAG_IPV6_UDP) == 0))
 		_ODP_PRINT("DPDK: hash_proto.ipv6_udp not supported (rss_hf_capa 0x%" PRIx64 ")\n",
 			   rss_hf_capa);
 
 	if (p->hash_proto.proto.ipv6_tcp &&
-	    ((rss_hf_capa & ETH_RSS_NONFRAG_IPV6_TCP) == 0))
+	    ((rss_hf_capa & RTE_ETH_RSS_NONFRAG_IPV6_TCP) == 0))
 		_ODP_PRINT("DPDK: hash_proto.ipv6_tcp not supported (rss_hf_capa 0x%" PRIx64 ")\n",
 			   rss_hf_capa);
 
@@ -1684,26 +1713,26 @@ static int dpdk_init_capability(pktio_entry_t *pktio_entry,
 	capa->config.pktin.bit.ts_ptp = 1;
 
 	capa->config.pktin.bit.ipv4_chksum = ptype_l3_ipv4 &&
-		(dev_info->rx_offload_capa & DEV_RX_OFFLOAD_IPV4_CKSUM) ? 1 : 0;
+		(dev_info->rx_offload_capa & RTE_ETH_RX_OFFLOAD_IPV4_CKSUM) ? 1 : 0;
 	if (capa->config.pktin.bit.ipv4_chksum)
 		capa->config.pktin.bit.drop_ipv4_err = 1;
 
 	capa->config.pktin.bit.udp_chksum = ptype_l4_udp &&
-		(dev_info->rx_offload_capa & DEV_RX_OFFLOAD_UDP_CKSUM) ? 1 : 0;
+		(dev_info->rx_offload_capa & RTE_ETH_RX_OFFLOAD_UDP_CKSUM) ? 1 : 0;
 	if (capa->config.pktin.bit.udp_chksum)
 		capa->config.pktin.bit.drop_udp_err = 1;
 
 	capa->config.pktin.bit.tcp_chksum = ptype_l4_tcp &&
-		(dev_info->rx_offload_capa & DEV_RX_OFFLOAD_TCP_CKSUM) ? 1 : 0;
+		(dev_info->rx_offload_capa & RTE_ETH_RX_OFFLOAD_TCP_CKSUM) ? 1 : 0;
 	if (capa->config.pktin.bit.tcp_chksum)
 		capa->config.pktin.bit.drop_tcp_err = 1;
 
 	capa->config.pktout.bit.ipv4_chksum =
-		(dev_info->tx_offload_capa & DEV_TX_OFFLOAD_IPV4_CKSUM) ? 1 : 0;
+		(dev_info->tx_offload_capa & RTE_ETH_TX_OFFLOAD_IPV4_CKSUM) ? 1 : 0;
 	capa->config.pktout.bit.udp_chksum =
-		(dev_info->tx_offload_capa & DEV_TX_OFFLOAD_UDP_CKSUM) ? 1 : 0;
+		(dev_info->tx_offload_capa & RTE_ETH_TX_OFFLOAD_UDP_CKSUM) ? 1 : 0;
 	capa->config.pktout.bit.tcp_chksum =
-		(dev_info->tx_offload_capa & DEV_TX_OFFLOAD_TCP_CKSUM) ? 1 : 0;
+		(dev_info->tx_offload_capa & RTE_ETH_TX_OFFLOAD_TCP_CKSUM) ? 1 : 0;
 
 	capa->config.pktout.bit.ipv4_chksum_ena =
 		capa->config.pktout.bit.ipv4_chksum;
@@ -2099,10 +2128,9 @@ static int dpdk_send(pktio_entry_t *pktio_entry, int index,
 	pkt_dpdk_t *pkt_dpdk = pkt_priv(pktio_entry);
 	uint16_t copy_count = 0;
 	uint16_t cpy_idx[num];
-	int tx_pkts;
-	int i;
+	uint16_t tx_pkts;
 	int mbufs;
-	int tx_ts_idx = 0;
+	uint16_t tx_ts_idx = 0;
 
 	if (_ODP_DPDK_ZERO_COPY)
 		mbufs = pkt_to_mbuf_zero(pktio_entry, tx_mbufs, pkt_table, num,
@@ -2110,6 +2138,9 @@ static int dpdk_send(pktio_entry_t *pktio_entry, int index,
 	else
 		mbufs = pkt_to_mbuf(pktio_entry, tx_mbufs, pkt_table, num,
 				    &tx_ts_idx);
+
+	if (odp_unlikely(mbufs < 1))
+		return mbufs;
 
 	if (!pkt_dpdk->flags.lockless_tx)
 		odp_ticketlock_lock(&pkt_dpdk->tx_lock[index]);
@@ -2128,7 +2159,7 @@ static int dpdk_send(pktio_entry_t *pktio_entry, int index,
 		if (odp_unlikely(copy_count)) {
 			uint16_t idx;
 
-			for (i = 0; i < copy_count; i++) {
+			for (uint16_t i = 0; i < copy_count; i++) {
 				idx = cpy_idx[i];
 
 				if (odp_likely(idx < tx_pkts))
@@ -2137,20 +2168,14 @@ static int dpdk_send(pktio_entry_t *pktio_entry, int index,
 					rte_pktmbuf_free(tx_mbufs[idx]);
 			}
 		}
-		if (odp_unlikely(tx_pkts == 0 && _odp_errno != 0))
-			return -1;
 	} else {
 		if (odp_unlikely(tx_pkts < mbufs)) {
-			for (i = tx_pkts; i < mbufs; i++)
+			for (uint16_t i = tx_pkts; i < mbufs; i++)
 				rte_pktmbuf_free(tx_mbufs[i]);
 		}
 
-		if (odp_unlikely(tx_pkts == 0)) {
-			if (_odp_errno != 0)
-				return -1;
-		} else {
+		if (odp_likely(tx_pkts))
 			odp_packet_free_multi(pkt_table, tx_pkts);
-		}
 	}
 
 	return tx_pkts;
@@ -2234,32 +2259,32 @@ static int dpdk_link_info(pktio_entry_t *pktio_entry, odp_pktio_link_info_t *inf
 	memset(info, 0, sizeof(odp_pktio_link_info_t));
 	info->pause_rx = ODP_PKTIO_LINK_PAUSE_OFF;
 	info->pause_tx = ODP_PKTIO_LINK_PAUSE_OFF;
-	if (fc_conf.mode == RTE_FC_RX_PAUSE) {
+	if (fc_conf.mode == RTE_ETH_FC_RX_PAUSE) {
 		info->pause_rx = ODP_PKTIO_LINK_PAUSE_ON;
-	} else if (fc_conf.mode == RTE_FC_TX_PAUSE) {
+	} else if (fc_conf.mode == RTE_ETH_FC_TX_PAUSE) {
 		info->pause_tx = ODP_PKTIO_LINK_PAUSE_ON;
-	} else if (fc_conf.mode == RTE_FC_FULL) {
+	} else if (fc_conf.mode == RTE_ETH_FC_FULL) {
 		info->pause_rx = ODP_PKTIO_LINK_PAUSE_ON;
 		info->pause_tx = ODP_PKTIO_LINK_PAUSE_ON;
 	}
 
 	rte_eth_link_get_nowait(port_id, &link);
-	if (link.link_autoneg == ETH_LINK_AUTONEG)
+	if (link.link_autoneg == RTE_ETH_LINK_AUTONEG)
 		info->autoneg = ODP_PKTIO_LINK_AUTONEG_ON;
 	else
 		info->autoneg = ODP_PKTIO_LINK_AUTONEG_OFF;
 
-	if (link.link_duplex == ETH_LINK_FULL_DUPLEX)
+	if (link.link_duplex == RTE_ETH_LINK_FULL_DUPLEX)
 		info->duplex = ODP_PKTIO_LINK_DUPLEX_FULL;
 	else
 		info->duplex = ODP_PKTIO_LINK_DUPLEX_HALF;
 
-	if (link.link_speed == ETH_SPEED_NUM_NONE)
+	if (link.link_speed == RTE_ETH_SPEED_NUM_NONE)
 		info->speed = ODP_PKTIO_LINK_SPEED_UNKNOWN;
 	else
 		info->speed = link.link_speed;
 
-	if (link.link_status == ETH_LINK_UP)
+	if (link.link_status == RTE_ETH_LINK_UP)
 		info->status = ODP_PKTIO_LINK_STATUS_UP;
 	else
 		info->status = ODP_PKTIO_LINK_STATUS_DOWN;

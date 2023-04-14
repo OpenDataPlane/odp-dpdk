@@ -300,6 +300,8 @@ static void pktio_init_packet_eth_ipv4(odp_packet_t pkt, uint8_t proto)
 	seq = odp_atomic_fetch_inc_u32(&ip_seq);
 	ip->id = odp_cpu_to_be_16(seq);
 	ip->chksum = 0;
+	ip->frag_offset = 0;
+	ip->tos = 0;
 	odph_ipv4_csum_update(pkt);
 }
 
@@ -1681,7 +1683,6 @@ static void pktio_test_lookup(void)
 
 	pktio_inval = odp_pktio_open(iface_name[0], default_pkt_pool,
 				     &pktio_param);
-	CU_ASSERT(odp_errno() != 0);
 	CU_ASSERT(pktio_inval == ODP_PKTIO_INVALID);
 
 	CU_ASSERT(odp_pktio_close(pktio) == 0);
@@ -2039,8 +2040,10 @@ static void pktio_config_flow_control(int pfc, int rx, int tx)
 	if (cos != ODP_COS_INVALID)
 		odp_cos_destroy(cos);
 
-	if (default_cos != ODP_COS_INVALID)
+	if (default_cos != ODP_COS_INVALID) {
+		odp_pktio_default_cos_set(pktio, ODP_COS_INVALID);
 		odp_cos_destroy(default_cos);
+	}
 
 	if (queue != ODP_QUEUE_INVALID)
 		odp_queue_destroy(queue);
@@ -4433,7 +4436,7 @@ static int create_pool(const char *iface, int num)
 
 	pool[num] = odp_pool_create(pool_name, &params);
 	if (ODP_POOL_INVALID == pool[num]) {
-		ODPH_ERR("failed to create pool: %d", odp_errno());
+		ODPH_ERR("failed to create pool: %s\n", pool_name);
 		return -1;
 	}
 
@@ -4463,7 +4466,7 @@ static int create_pktv_pool(const char *iface, int num)
 
 	pktv_pool[num] = odp_pool_create(pool_name, &params);
 	if (ODP_POOL_INVALID == pktv_pool[num]) {
-		ODPH_ERR("failed to create pool: %d", odp_errno());
+		ODPH_ERR("failed to create pool: %s\n", pool_name);
 		return -1;
 	}
 
