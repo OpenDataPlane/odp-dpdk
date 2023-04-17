@@ -54,7 +54,7 @@ fi
 echo "Mounting hugetlbfs"
 export SIZE=2MB
 export SIZE_KB=2048
-export RESERVE=512
+export RESERVE=768
 mount_and_reserve
 res=$?
 if [ $res -ne 0 ]; then
