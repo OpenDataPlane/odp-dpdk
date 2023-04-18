@@ -90,20 +90,20 @@ typedef struct {
  */
 typedef struct {
 	/**
-	 * If non zero prints content of packets. Enabled by -d or
+	 * If non-zero, prints content of packets. Enabled by -d or
 	 * --debug option.
 	 */
 	int debug_packets;
 
 	/**
-	 * If non zero Try to run crypto operation in place. Note some
+	 * If non-zero, try to run crypto operation in place. Note some
 	 * implementation may not support such mode. Enabled by -n or
 	 * --inplace option.
 	 */
 	int in_place;
 
 	/**
-	 * If non zeor output of previous operation taken as input for
+	 * If non-zero, output of previous operation taken as input for
 	 * next encrypt operations. Enabled by -r or --reuse option.
 	 */
 	int reuse_packet;
@@ -118,7 +118,7 @@ typedef struct {
 
 	/**
 	 * Number of iteration to repeat crypto operation to get good
-	 * average number. Specified through -i or --terations option.
+	 * average number. Specified through -i or --iterations option.
 	 * Default is 10000.
 	 */
 	int iteration_count;
@@ -136,7 +136,7 @@ typedef struct {
 
 	/**
 	 * Pointer to selected algorithm to test. If NULL all available
-	 * alogorthims are tested. Name of algorithm is passed through
+	 * algorithms are tested. Name of algorithm is passed through
 	 * -a or --algorithm option.
 	 */
 	crypto_alg_config_t *alg_config;
@@ -443,6 +443,49 @@ static crypto_alg_config_t algs_config[] = {
 			},
 			.cipher_iv_len = 16,
 			.auth_alg = ODP_AUTH_ALG_ZUC_EIA3,
+			.auth_key = {
+				.data = test_key16,
+				.length = sizeof(test_key16)
+			},
+			.auth_iv_len = 16,
+			.auth_digest_len = 4,
+		},
+	},
+	{
+		.name = "snow3g-uea2",
+		.session = {
+			.cipher_alg = ODP_CIPHER_ALG_SNOW3G_UEA2,
+			.cipher_key = {
+				.data = test_key16,
+				.length = sizeof(test_key16)
+			},
+			.cipher_iv_len = 16,
+			.auth_alg = ODP_AUTH_ALG_NULL,
+		},
+	},
+	{
+		.name = "snow3g-uia2",
+		.session = {
+			.cipher_alg = ODP_CIPHER_ALG_NULL,
+			.auth_alg = ODP_AUTH_ALG_SNOW3G_UIA2,
+			.auth_key = {
+				.data = test_key16,
+				.length = sizeof(test_key16)
+			},
+			.auth_iv_len = 16,
+			.auth_digest_len = 4,
+		},
+	},
+	{
+		.name = "snow3g-uea2-snow3g-uia2",
+		.session = {
+			.cipher_alg = ODP_CIPHER_ALG_SNOW3G_UEA2,
+			.cipher_key = {
+				.data = test_key16,
+				.length = sizeof(test_key16)
+			},
+			.cipher_iv_len = 16,
+			.auth_alg = ODP_AUTH_ALG_SNOW3G_UIA2,
 			.auth_key = {
 				.data = test_key16,
 				.length = sizeof(test_key16)
@@ -810,8 +853,6 @@ run_measure_one(crypto_args_t *cargs,
 				}
 				packets_sent += rc;
 			} else {
-				odp_crypto_packet_result_t result;
-
 				rc = odp_crypto_op(&pkt, &out_pkt,
 						   &params, 1);
 				if (rc <= 0) {
@@ -822,8 +863,7 @@ run_measure_one(crypto_args_t *cargs,
 				}
 				packets_sent += rc;
 				packets_received++;
-				if (odp_unlikely(odp_crypto_result(&result, out_pkt) != 0) ||
-				    odp_unlikely(!result.ok)) {
+				if (odp_unlikely(odp_crypto_result(NULL, out_pkt) != 0)) {
 					ODPH_ERR("Crypto operation failed\n");
 					odp_packet_free(out_pkt);
 					return -1;
@@ -846,7 +886,6 @@ run_measure_one(crypto_args_t *cargs,
 
 		if (cargs->schedule || cargs->poll) {
 			odp_event_t ev;
-			odp_crypto_packet_result_t result;
 			odp_packet_t out_pkt;
 
 			if (cargs->schedule)
@@ -857,8 +896,7 @@ run_measure_one(crypto_args_t *cargs,
 
 			while (ev != ODP_EVENT_INVALID) {
 				out_pkt = odp_crypto_packet_from_event(ev);
-				if (odp_unlikely(odp_crypto_result(&result, out_pkt) != 0) ||
-				    odp_unlikely(!result.ok)) {
+				if (odp_unlikely(odp_crypto_result(NULL, out_pkt) != 0)) {
 					ODPH_ERR("Crypto operation failed\n");
 					odp_packet_free(out_pkt);
 					return -1;
@@ -948,6 +986,11 @@ static int check_cipher_alg(const odp_crypto_capability_t *capa,
 	case ODP_CIPHER_ALG_ZUC_EEA3:
 		if (capa->ciphers.bit.zuc_eea3)
 			return 0;
+		break;
+	case ODP_CIPHER_ALG_SNOW3G_UEA2:
+		if (capa->ciphers.bit.snow3g_uea2)
+			return 0;
+		break;
 	default:
 		break;
 	}
@@ -1002,6 +1045,11 @@ static int check_auth_alg(const odp_crypto_capability_t *capa,
 	case ODP_AUTH_ALG_ZUC_EIA3:
 		if (capa->auths.bit.zuc_eia3)
 			return 0;
+		break;
+	case ODP_AUTH_ALG_SNOW3G_UIA2:
+		if (capa->auths.bit.snow3g_uia2)
+			return 0;
+		break;
 	default:
 		break;
 	}
@@ -1096,7 +1144,7 @@ static int check_auth_params(const odp_crypto_capability_t *crypto_capa,
 }
 
 /**
- * Process one algorithm. Note if paload size is specicified it is
+ * Process one algorithm. Note if payload size is specified it is
  * only one run. Or iterate over set of predefined payloads.
  */
 static int run_measure_one_config(test_run_arg_t *arg)
@@ -1442,7 +1490,7 @@ static void parse_args(int argc, char *argv[], crypto_args_t *cargs)
 }
 
 /**
- * Prinf usage information
+ * Print usage information
  */
 static void usage(char *progname)
 {

@@ -1599,43 +1599,6 @@ int _odp_crypto_term_global(void)
 	return rc;
 }
 
-#if ODP_DEPRECATED_API
-odp_crypto_compl_t odp_crypto_compl_from_event(odp_event_t ev)
-{
-	/* This check not mandated by the API specification */
-	if (odp_event_type(ev) != ODP_EVENT_CRYPTO_COMPL)
-		_ODP_ABORT("Event not a crypto completion");
-	return (odp_crypto_compl_t)ev;
-}
-
-odp_event_t odp_crypto_compl_to_event(odp_crypto_compl_t completion_event)
-{
-	return (odp_event_t)completion_event;
-}
-
-void odp_crypto_compl_result(odp_crypto_compl_t completion_event,
-			     odp_crypto_op_result_t *result)
-{
-	(void)completion_event;
-	(void)result;
-
-	/* We won't get such events anyway, so there can be no result */
-	_ODP_ASSERT(0);
-}
-
-void odp_crypto_compl_free(odp_crypto_compl_t completion_event)
-{
-	odp_event_t ev = odp_crypto_compl_to_event(completion_event);
-
-	odp_buffer_free(odp_buffer_from_event(ev));
-}
-
-uint64_t odp_crypto_compl_to_u64(odp_crypto_compl_t hdl)
-{
-	return _odp_pri(hdl);
-}
-#endif
-
 void odp_crypto_session_param_init(odp_crypto_session_param_t *param)
 {
 	memset(param, 0, sizeof(odp_crypto_session_param_t));
@@ -1819,9 +1782,6 @@ static odp_packet_t get_output_packet(const crypto_session_entry_t *session,
 {
 	int rc;
 
-	if (odp_likely(session->p.op_type == ODP_CRYPTO_OP_TYPE_BASIC))
-		return pkt_in;
-
 	if (odp_likely(pkt_in == pkt_out))
 		return pkt_out;
 
@@ -1879,11 +1839,15 @@ static int op_alloc(crypto_op_t *op[],
 		session = (crypto_session_entry_t *)(intptr_t)param[n].session;
 		_ODP_ASSERT(session != NULL);
 
-		pkt = get_output_packet(session, pkt_in[n], pkt_out[n]);
-		if (odp_unlikely(pkt == ODP_PACKET_INVALID)) {
-			for (int i = n; i < num_pkts; i++)
-				rte_crypto_op_free((struct rte_crypto_op *)op[i]);
-			break;
+		if (odp_likely(session->p.op_type == ODP_CRYPTO_OP_TYPE_BASIC)) {
+			pkt = pkt_in[n];
+		} else {
+			pkt = get_output_packet(session, pkt_in[n], pkt_out[n]);
+			if (odp_unlikely(pkt == ODP_PACKET_INVALID)) {
+				for (int i = n; i < num_pkts; i++)
+					rte_crypto_op_free((struct rte_crypto_op *)op[i]);
+				break;
+			}
 		}
 		op[n]->state.pkt = pkt;
 	}
@@ -2077,7 +2041,6 @@ static void op_finish(crypto_op_t *op)
 	struct rte_crypto_op *rte_op = (struct rte_crypto_op *)op;
 	odp_crypto_alg_err_t rc_cipher;
 	odp_crypto_alg_err_t rc_auth;
-	odp_bool_t result_ok;
 	odp_crypto_packet_result_t *op_result;
 
 	if (odp_likely(op->state.status == S_DEV)) {
@@ -2085,7 +2048,6 @@ static void op_finish(crypto_op_t *op)
 		if (odp_likely(rte_op->status == RTE_CRYPTO_OP_STATUS_SUCCESS)) {
 			rc_cipher = ODP_CRYPTO_ALG_ERR_NONE;
 			rc_auth = ODP_CRYPTO_ALG_ERR_NONE;
-			result_ok = true;
 			if (session->p.op == ODP_CRYPTO_OP_ENCODE &&
 			    session->p.auth_digest_len != 0) {
 				odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
@@ -2096,46 +2058,37 @@ static void op_finish(crypto_op_t *op)
 							 pkt_hdr->crypto_digest_buf);
 			}
 		} else if (rte_op->status == RTE_CRYPTO_OP_STATUS_AUTH_FAILED) {
-			result_ok = false;
 			rc_cipher = ODP_CRYPTO_ALG_ERR_NONE;
 			rc_auth = ODP_CRYPTO_ALG_ERR_ICV_CHECK;
 		} else {
-			result_ok = false;
-			rc_cipher = ODP_CRYPTO_ALG_ERR_NONE;
-			rc_auth = ODP_CRYPTO_ALG_ERR_NONE;
+			rc_cipher = ODP_CRYPTO_ALG_ERR_OTHER;
+			rc_auth = ODP_CRYPTO_ALG_ERR_OTHER;
 		}
 	} else if (odp_unlikely(op->state.status == S_NOP)) {
 		/* null cipher & null auth, cryptodev skipped */
-		result_ok = true;
 		rc_cipher = ODP_CRYPTO_ALG_ERR_NONE;
 		rc_auth = ODP_CRYPTO_ALG_ERR_NONE;
 	} else if (op->state.status == S_ERROR_LIN) {
 		/* packet linearization error before cryptodev enqueue */
-		result_ok = false;
 		rc_cipher = ODP_CRYPTO_ALG_ERR_DATA_SIZE;
 		rc_auth = ODP_CRYPTO_ALG_ERR_DATA_SIZE;
 	} else if (op->state.status == S_ERROR_HASH_OFFSET) {
 		/* hash offset not supported */
-		result_ok = false;
 		rc_cipher = ODP_CRYPTO_ALG_ERR_NONE;
 		rc_auth = ODP_CRYPTO_ALG_ERR_DATA_SIZE;
 	} else {
 		/*
 		 * other error before cryptodev enqueue
 		 */
-		result_ok = false;
-		rc_cipher = ODP_CRYPTO_ALG_ERR_NONE;
-		rc_auth = ODP_CRYPTO_ALG_ERR_NONE;
+		rc_cipher = ODP_CRYPTO_ALG_ERR_OTHER;
+		rc_auth = ODP_CRYPTO_ALG_ERR_OTHER;
 	}
 
 	/* Fill in result */
 	packet_subtype_set(pkt, ODP_EVENT_PACKET_CRYPTO);
 	op_result = &packet_hdr(pkt)->crypto_op_result;
 	op_result->cipher_status.alg_err = rc_cipher;
-	op_result->cipher_status.hw_err = ODP_CRYPTO_HW_ERR_NONE;
 	op_result->auth_status.alg_err = rc_auth;
-	op_result->auth_status.hw_err = ODP_CRYPTO_HW_ERR_NONE;
-	op_result->ok = result_ok;
 }
 
 static
@@ -2161,65 +2114,6 @@ int odp_crypto_int(const odp_packet_t pkt_in[],
 	}
 	return num_pkt;
 }
-
-#if ODP_DEPRECATED_API
-int odp_crypto_operation(odp_crypto_op_param_t *param,
-			 odp_bool_t *posted,
-			 odp_crypto_op_result_t *result)
-{
-	odp_crypto_packet_op_param_t packet_param;
-	odp_packet_t out_pkt = param->out_pkt;
-	odp_crypto_packet_result_t packet_result;
-	odp_crypto_op_result_t local_result;
-	int rc;
-
-	if (((crypto_session_entry_t *)(intptr_t)param->session)->p.op_type !=
-	    ODP_CRYPTO_OP_TYPE_LEGACY)
-		return -1;
-
-	packet_param.session = param->session;
-	packet_param.cipher_iv_ptr = param->cipher_iv_ptr;
-	packet_param.auth_iv_ptr = param->auth_iv_ptr;
-	packet_param.hash_result_offset = param->hash_result_offset;
-	packet_param.aad_ptr = param->aad_ptr;
-	packet_param.cipher_range = param->cipher_range;
-	packet_param.auth_range = param->auth_range;
-
-	rc = odp_crypto_int(&param->pkt, &out_pkt, &packet_param, 1);
-	if (rc < 0)
-		return rc;
-
-	rc = odp_crypto_result(&packet_result, out_pkt);
-	if (rc < 0) {
-		/*
-		 * We cannot fail since odp_crypto_op() has already processed
-		 * the packet. Let's indicate error in the result instead.
-		 */
-		packet_result.ok = false;
-	}
-
-	/* Indicate to caller operation was sync */
-	*posted = 0;
-
-	packet_subtype_set(out_pkt, ODP_EVENT_PACKET_BASIC);
-
-	/* Fill in result */
-	local_result.ctx = param->ctx;
-	local_result.pkt = out_pkt;
-	local_result.cipher_status = packet_result.cipher_status;
-	local_result.auth_status = packet_result.auth_status;
-	local_result.ok = packet_result.ok;
-
-	/*
-	 * Be bug-to-bug compatible. Return output packet also through params.
-	 */
-	param->out_pkt = out_pkt;
-
-	*result = local_result;
-
-	return 0;
-}
-#endif
 
 int odp_crypto_op(const odp_packet_t pkt_in[],
 		  odp_packet_t pkt_out[],
