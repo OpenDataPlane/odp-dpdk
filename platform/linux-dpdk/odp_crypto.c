@@ -575,19 +575,10 @@ static void capability_process(struct rte_cryptodev_info *dev_info,
 				auths->bit.sha512_hmac = 1;
 			if (cap_auth_algo == RTE_CRYPTO_AUTH_AES_GMAC)
 				auths->bit.aes_gmac = 1;
-
-			/* Using AES-CMAC with the aesni_mb driver for IPsec
-			 * causes a crash inside the intel-mb library.
-			 * As a workaround, we do not use AES-CMAC with
-			 * the aesni_mb driver.
-			 */
-			if (cap_auth_algo == RTE_CRYPTO_AUTH_AES_CMAC &&
-			    !is_dev_aesni_mb(dev_info))
+			if (cap_auth_algo == RTE_CRYPTO_AUTH_AES_CMAC)
 				auths->bit.aes_cmac = 1;
-
 			if (cap_auth_algo == RTE_CRYPTO_AUTH_AES_XCBC_MAC)
 				auths->bit.aes_xcbc_mac = 1;
-
 		}
 
 		if (cap->sym.xform_type == RTE_CRYPTO_SYM_XFORM_AEAD) {
@@ -1192,13 +1183,6 @@ static int is_auth_supported(const struct rte_cryptodev_info *dev_info,
 	if (cap == NULL)
 		return 0;
 
-	/* As a bug workaround, we do not use AES_CMAC with
-	 * the aesni-mb crypto driver.
-	 */
-	if (auth_xform->auth.algo == RTE_CRYPTO_AUTH_AES_CMAC &&
-	    is_dev_aesni_mb(dev_info))
-		return 0;
-
 	/* Check if key size is supported by the algorithm. */
 	if (!is_valid_size(auth_xform->auth.key.length,
 			   &cap->sym.auth.key_size)) {
@@ -1234,10 +1218,10 @@ static int is_combo_buggy(struct rte_cryptodev_info *dev_info,
 	 */
 	if (is_dev_aesni_mb(dev_info)) {
 		if (cipher == RTE_CRYPTO_CIPHER_3DES_CBC &&
-		    auth == RTE_CRYPTO_AUTH_AES_XCBC_MAC)
+		    (auth == RTE_CRYPTO_AUTH_AES_XCBC_MAC ||
+		     auth == RTE_CRYPTO_AUTH_AES_CMAC))
 			return 1;
 	}
-
 	return 0;
 }
 
