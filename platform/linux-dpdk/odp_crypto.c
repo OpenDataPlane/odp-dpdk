@@ -585,13 +585,7 @@ static void capability_process(struct rte_cryptodev_info *dev_info,
 			    !is_dev_aesni_mb(dev_info))
 				auths->bit.aes_cmac = 1;
 
-			/* Combination of (3)DES-CBC and AES-XCBC-MAC does not
-			 * work with the aesni_mb crypto driver but causes
-			 * crash inside the intel-mb library. As a workaround,
-			 * we do not use aes-xcbc-mac with the aesni_mb driver.
-			 */
-			if (cap_auth_algo == RTE_CRYPTO_AUTH_AES_XCBC_MAC &&
-			    !is_dev_aesni_mb(dev_info))
+			if (cap_auth_algo == RTE_CRYPTO_AUTH_AES_XCBC_MAC)
 				auths->bit.aes_xcbc_mac = 1;
 
 		}
@@ -1205,13 +1199,6 @@ static int is_auth_supported(const struct rte_cryptodev_info *dev_info,
 	    is_dev_aesni_mb(dev_info))
 		return 0;
 
-	/* As a bug workaround, we do not use AES_XCBC_MAC with
-	 * the aesni-mb crypto driver.
-	 */
-	if (auth_xform->auth.algo == RTE_CRYPTO_AUTH_AES_XCBC_MAC &&
-	    is_dev_aesni_mb(dev_info))
-		return 0;
-
 	/* Check if key size is supported by the algorithm. */
 	if (!is_valid_size(auth_xform->auth.key.length,
 			   &cap->sym.auth.key_size)) {
@@ -1237,6 +1224,23 @@ static int is_auth_supported(const struct rte_cryptodev_info *dev_info,
 	return 1;
 }
 
+static int is_combo_buggy(struct rte_cryptodev_info *dev_info,
+			  enum rte_crypto_cipher_algorithm cipher,
+			  enum rte_crypto_auth_algorithm auth)
+{
+	/*
+	 * Certain algorithm combinations do not work in the aesni_mb
+	 * crypto driver because of bugs in the driver.
+	 */
+	if (is_dev_aesni_mb(dev_info)) {
+		if (cipher == RTE_CRYPTO_CIPHER_3DES_CBC &&
+		    auth == RTE_CRYPTO_AUTH_AES_XCBC_MAC)
+			return 1;
+	}
+
+	return 0;
+}
+
 static odp_crypto_ses_create_err_t
 get_crypto_dev(struct rte_crypto_sym_xform *cipher_xform,
 	       struct rte_crypto_sym_xform *auth_xform,
@@ -1260,6 +1264,11 @@ get_crypto_dev(struct rte_crypto_sym_xform *cipher_xform,
 			cipher_supported = 1;
 		if (auth_ok)
 			auth_supported = 1;
+
+		if (is_combo_buggy(&dev_info,
+				   cipher_xform->cipher.algo,
+				   auth_xform->auth.algo))
+			continue;
 
 		if (cipher_ok && auth_ok) {
 			*dev_id = cdev_id;
