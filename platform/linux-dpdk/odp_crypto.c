@@ -531,6 +531,9 @@ static void capability_process(struct rte_cryptodev_info *dev_info,
 	for (cap = &dev_info->capabilities[0];
 	     cap->op != RTE_CRYPTO_OP_TYPE_UNDEFINED;
 	     cap++) {
+		if (cap->op != RTE_CRYPTO_OP_TYPE_SYMMETRIC)
+			continue;
+
 		if (cap->sym.xform_type == RTE_CRYPTO_SYM_XFORM_CIPHER) {
 			enum rte_crypto_cipher_algorithm cap_cipher_algo;
 
@@ -755,7 +758,8 @@ static int cipher_aead_capability(odp_cipher_alg_t cipher,
 
 		for (cap = &dev_info.capabilities[0];
 		     cap->op != RTE_CRYPTO_OP_TYPE_UNDEFINED &&
-		     !(cap->sym.xform_type == RTE_CRYPTO_SYM_XFORM_AEAD &&
+		     !(cap->op == RTE_CRYPTO_OP_TYPE_SYMMETRIC &&
+		       cap->sym.xform_type == RTE_CRYPTO_SYM_XFORM_AEAD &&
 		       cap->sym.aead.algo == aead_xform.aead.algo);
 		     cap++)
 			;
@@ -807,7 +811,8 @@ static int cipher_capability(odp_cipher_alg_t cipher,
 
 		for (cap = &dev_info.capabilities[0];
 		     cap->op != RTE_CRYPTO_OP_TYPE_UNDEFINED &&
-		     !(cap->sym.xform_type == RTE_CRYPTO_SYM_XFORM_CIPHER &&
+		     !(cap->op == RTE_CRYPTO_OP_TYPE_SYMMETRIC &&
+		       cap->sym.xform_type == RTE_CRYPTO_SYM_XFORM_CIPHER &&
 		       cap->sym.cipher.algo == cipher_xform.cipher.algo);
 		     cap++)
 			;
@@ -967,7 +972,8 @@ static int auth_aead_capability(odp_auth_alg_t auth,
 
 		for (cap = &dev_info.capabilities[0];
 		     cap->op != RTE_CRYPTO_OP_TYPE_UNDEFINED &&
-		     !(cap->sym.xform_type == RTE_CRYPTO_SYM_XFORM_AEAD &&
+		     !(cap->op == RTE_CRYPTO_OP_TYPE_SYMMETRIC &&
+		       cap->sym.xform_type == RTE_CRYPTO_SYM_XFORM_AEAD &&
 		       cap->sym.auth.algo == aead_xform.auth.algo);
 		     cap++)
 			;
@@ -1054,7 +1060,8 @@ static int auth_capability(odp_auth_alg_t auth,
 
 		for (cap = &dev_info.capabilities[0];
 		     cap->op != RTE_CRYPTO_OP_TYPE_UNDEFINED &&
-		     !(cap->sym.xform_type == RTE_CRYPTO_SYM_XFORM_AUTH &&
+		     !(cap->op == RTE_CRYPTO_OP_TYPE_SYMMETRIC &&
+		       cap->sym.xform_type == RTE_CRYPTO_SYM_XFORM_AUTH &&
 		       cap->sym.auth.algo == auth_xform.auth.algo);
 		     cap++)
 			;
@@ -1116,7 +1123,8 @@ static int get_crypto_aead_dev(struct rte_crypto_sym_xform *aead_xform,
 
 		for (cap = &dev_info.capabilities[0];
 		     cap->op != RTE_CRYPTO_OP_TYPE_UNDEFINED &&
-		     !(cap->sym.xform_type == RTE_CRYPTO_SYM_XFORM_AEAD &&
+		     !(cap->op == RTE_CRYPTO_OP_TYPE_SYMMETRIC &&
+		       cap->sym.xform_type == RTE_CRYPTO_SYM_XFORM_AEAD &&
 		       cap->sym.aead.algo == aead_xform->aead.algo);
 		     cap++)
 			;
@@ -1170,7 +1178,8 @@ static int get_crypto_dev(struct rte_crypto_sym_xform *cipher_xform,
 
 		for (cap = &dev_info.capabilities[0];
 		     cap->op != RTE_CRYPTO_OP_TYPE_UNDEFINED &&
-		     !(cap->sym.xform_type == RTE_CRYPTO_SYM_XFORM_CIPHER &&
+		     !(cap->op == RTE_CRYPTO_OP_TYPE_SYMMETRIC &&
+		       cap->sym.xform_type == RTE_CRYPTO_SYM_XFORM_CIPHER &&
 		       cap->sym.cipher.algo == cipher_xform->cipher.algo);
 		     cap++)
 			;
@@ -1200,7 +1209,8 @@ check_auth:
 
 		for (cap = &dev_info.capabilities[0];
 		     cap->op != RTE_CRYPTO_OP_TYPE_UNDEFINED &&
-		     !(cap->sym.xform_type == RTE_CRYPTO_SYM_XFORM_AUTH &&
+		     !(cap->op == RTE_CRYPTO_OP_TYPE_SYMMETRIC &&
+		       cap->sym.xform_type == RTE_CRYPTO_SYM_XFORM_AUTH &&
 		       cap->sym.auth.algo == auth_xform->auth.algo);
 		     cap++)
 			;
