@@ -138,19 +138,19 @@ static inline int is_valid_size(uint16_t length,
 	uint16_t supp_size;
 
 	if (length < range->min)
-		return -1;
+		return 0;
 
 	if (range->min != length && range->increment == 0)
-		return -1;
+		return 0;
 
 	for (supp_size = range->min;
 	     supp_size <= range->max;
 	     supp_size += range->increment) {
 		if (length == supp_size)
-			return 0;
+			return 1;
 	}
 
-	return -1;
+	return 0;
 }
 
 static int cipher_is_aead(odp_cipher_alg_t cipher_alg)
@@ -1067,8 +1067,8 @@ static int auth_capability(odp_auth_alg_t auth,
 			continue;
 
 		if (key_size_override != 0 &&
-		    is_valid_size(key_size_override,
-				  &cap->sym.auth.key_size) != 0)
+		    !is_valid_size(key_size_override,
+				   &cap->sym.auth.key_size))
 			continue;
 
 		idx = auth_gen_capability(key_size_override ?
@@ -1106,8 +1106,9 @@ int odp_crypto_auth_capability(odp_auth_alg_t auth,
 		return auth_capability(auth, dst, num_copy);
 }
 
-static int get_crypto_aead_dev(struct rte_crypto_sym_xform *aead_xform,
-			       uint8_t *dev_id)
+static odp_crypto_ses_create_err_t
+get_crypto_aead_dev(struct rte_crypto_sym_xform *aead_xform,
+		    uint8_t *dev_id)
 {
 	uint8_t cdev_id, id;
 	const struct rte_cryptodev_capabilities *cap;
@@ -1123,119 +1124,153 @@ static int get_crypto_aead_dev(struct rte_crypto_sym_xform *aead_xform,
 			continue;
 
 		/* Check if key size is supported by the algorithm. */
-		if (is_valid_size(aead_xform->aead.key.length,
-				  &cap->sym.aead.key_size) != 0) {
-			_ODP_ERR("Unsupported aead key length\n");
+		if (!is_valid_size(aead_xform->aead.key.length,
+				   &cap->sym.aead.key_size)) {
+			_ODP_DBG("Unsupported aead key length\n");
 			continue;
 		}
 
 		/* Check if iv length is supported by the algorithm. */
 		if (aead_xform->aead.iv.length > MAX_IV_LENGTH ||
-		    is_valid_size(aead_xform->aead.iv.length,
-				  &cap->sym.aead.iv_size) != 0) {
-			_ODP_ERR("Unsupported iv length\n");
+		    !is_valid_size(aead_xform->aead.iv.length,
+				   &cap->sym.aead.iv_size)) {
+			_ODP_DBG("Unsupported iv length\n");
 			continue;
 		}
 
 		/* Check if digest size is supported by the algorithm. */
-		if (is_valid_size(aead_xform->aead.digest_length,
-				  &cap->sym.aead.digest_size) != 0) {
-			_ODP_ERR("Unsupported digest length\n");
+		if (!is_valid_size(aead_xform->aead.digest_length,
+				   &cap->sym.aead.digest_size)) {
+			_ODP_DBG("Unsupported digest length\n");
 			continue;
 		}
 
 		*dev_id = cdev_id;
+		return ODP_CRYPTO_SES_ERR_NONE;
+	}
+
+	return ODP_CRYPTO_SES_ERR_CIPHER;
+}
+
+static int is_cipher_supported(const struct rte_cryptodev_info *dev_info,
+			       const struct rte_crypto_sym_xform *cipher_xform)
+{
+	const struct rte_cryptodev_capabilities *cap;
+
+	_ODP_ASSERT(cipher_xform->type == RTE_CRYPTO_SYM_XFORM_CIPHER);
+
+	if (cipher_xform->cipher.algo == RTE_CRYPTO_CIPHER_NULL)
+		return 1;
+
+	cap = find_capa_for_alg(dev_info, cipher_xform);
+	if (cap == NULL)
+		return 0;
+
+	/* Check if key size is supported by the algorithm. */
+	if (!is_valid_size(cipher_xform->cipher.key.length,
+			   &cap->sym.cipher.key_size)) {
+		_ODP_DBG("Unsupported cipher key length\n");
 		return 0;
 	}
 
-	return -1;
+	/* Check if iv length is supported by the algorithm. */
+	if (cipher_xform->cipher.iv.length > MAX_IV_LENGTH ||
+	    !is_valid_size(cipher_xform->cipher.iv.length,
+			   &cap->sym.cipher.iv_size)) {
+		_ODP_DBG("Unsupported iv length\n");
+		return 0;
+	}
+
+	return 1;
 }
 
-static int get_crypto_dev(struct rte_crypto_sym_xform *cipher_xform,
-			  struct rte_crypto_sym_xform *auth_xform,
-			  uint8_t *dev_id)
+static int is_auth_supported(const struct rte_cryptodev_info *dev_info,
+			     const struct rte_crypto_sym_xform *auth_xform)
+{
+	const struct rte_cryptodev_capabilities *cap;
+
+	_ODP_ASSERT(auth_xform->type == RTE_CRYPTO_SYM_XFORM_AUTH);
+
+	if (auth_xform->auth.algo == RTE_CRYPTO_AUTH_NULL)
+		return 1;
+
+	cap = find_capa_for_alg(dev_info, auth_xform);
+	if (cap == NULL)
+		return 0;
+
+	/* As a bug workaround, we do not use AES_CMAC with
+	 * the aesni-mb crypto driver.
+	 */
+	if (auth_xform->auth.algo == RTE_CRYPTO_AUTH_AES_CMAC &&
+	    is_dev_aesni_mb(dev_info))
+		return 0;
+
+	/* As a bug workaround, we do not use AES_XCBC_MAC with
+	 * the aesni-mb crypto driver.
+	 */
+	if (auth_xform->auth.algo == RTE_CRYPTO_AUTH_AES_XCBC_MAC &&
+	    is_dev_aesni_mb(dev_info))
+		return 0;
+
+	/* Check if key size is supported by the algorithm. */
+	if (!is_valid_size(auth_xform->auth.key.length,
+			   &cap->sym.auth.key_size)) {
+		_ODP_DBG("Unsupported auth key length\n");
+		return 0;
+	}
+
+	/* Check if digest size is supported by the algorithm. */
+	if (!is_valid_size(auth_xform->auth.digest_length,
+			   &cap->sym.auth.digest_size)) {
+		_ODP_DBG("Unsupported digest length\n");
+		return 0;
+	}
+
+	/* Check if iv length is supported by the algorithm. */
+	if (auth_xform->auth.iv.length > MAX_IV_LENGTH ||
+	    !is_valid_size(auth_xform->auth.iv.length,
+			   &cap->sym.auth.iv_size)) {
+		_ODP_DBG("Unsupported iv length\n");
+		return 0;
+	}
+
+	return 1;
+}
+
+static odp_crypto_ses_create_err_t
+get_crypto_dev(struct rte_crypto_sym_xform *cipher_xform,
+	       struct rte_crypto_sym_xform *auth_xform,
+	       uint8_t *dev_id)
 {
 	uint8_t cdev_id, id;
-	const struct rte_cryptodev_capabilities *cap;
+	int cipher_supported = 0;
+	int auth_supported = 0;
 
 	for (id = 0; id < global->enabled_crypto_devs; id++) {
 		struct rte_cryptodev_info dev_info;
+		int cipher_ok, auth_ok;
 
 		cdev_id = global->enabled_crypto_dev_ids[id];
 		rte_cryptodev_info_get(cdev_id, &dev_info);
-		if (cipher_xform->cipher.algo == RTE_CRYPTO_CIPHER_NULL)
-			goto check_auth;
 
-		cap = find_capa_for_alg(&dev_info, cipher_xform);
-		if (cap == NULL)
-			continue;
+		cipher_ok = is_cipher_supported(&dev_info, cipher_xform);
+		auth_ok = is_auth_supported(&dev_info, auth_xform);
 
-		/* Check if key size is supported by the algorithm. */
-		if (is_valid_size(cipher_xform->cipher.key.length,
-				  &cap->sym.cipher.key_size) != 0) {
-			_ODP_ERR("Unsupported cipher key length\n");
-			continue;
+		if (cipher_ok)
+			cipher_supported = 1;
+		if (auth_ok)
+			auth_supported = 1;
+
+		if (cipher_ok && auth_ok) {
+			*dev_id = cdev_id;
+			return ODP_CRYPTO_SES_ERR_NONE;
 		}
-
-		/* Check if iv length is supported by the algorithm. */
-		if (cipher_xform->cipher.iv.length > MAX_IV_LENGTH ||
-		    is_valid_size(cipher_xform->cipher.iv.length,
-				  &cap->sym.cipher.iv_size) != 0) {
-			_ODP_ERR("Unsupported iv length\n");
-			continue;
-		}
-
-check_auth:
-		if (auth_xform->auth.algo == RTE_CRYPTO_AUTH_NULL &&
-		    cipher_xform->cipher.algo != RTE_CRYPTO_CIPHER_NULL)
-			goto check_finish;
-
-		cap = find_capa_for_alg(&dev_info, auth_xform);
-		if (cap == NULL)
-			continue;
-
-		/* As a bug workaround, we do not use AES_CMAC with
-		 * the aesni-mb crypto driver.
-		 */
-		if (auth_xform->auth.algo == RTE_CRYPTO_AUTH_AES_CMAC &&
-		    is_dev_aesni_mb(&dev_info))
-			continue;
-
-		/* As a bug workaround, we do not use AES_XCBC_MAC with
-		 * the aesni-mb crypto driver.
-		 */
-		if (auth_xform->auth.algo == RTE_CRYPTO_AUTH_AES_XCBC_MAC &&
-		    is_dev_aesni_mb(&dev_info))
-			continue;
-
-		/* Check if key size is supported by the algorithm. */
-		if (is_valid_size(auth_xform->auth.key.length,
-				  &cap->sym.auth.key_size) != 0) {
-			_ODP_ERR("Unsupported auth key length\n");
-			continue;
-		}
-
-		/* Check if digest size is supported by the algorithm. */
-		if (is_valid_size(auth_xform->auth.digest_length,
-				  &cap->sym.auth.digest_size) != 0) {
-			_ODP_ERR("Unsupported digest length\n");
-			continue;
-		}
-
-		/* Check if iv length is supported by the algorithm. */
-		if (auth_xform->auth.iv.length > MAX_IV_LENGTH ||
-		    is_valid_size(auth_xform->auth.iv.length,
-				  &cap->sym.auth.iv_size) != 0) {
-			_ODP_ERR("Unsupported iv length\n");
-			continue;
-		}
-
-check_finish:
-		*dev_id = cdev_id;
-		return 0;
 	}
+	if (cipher_supported && auth_supported)
+		return ODP_CRYPTO_SES_ERR_ALG_COMBO;
 
-	return -1;
+	return !cipher_supported ? ODP_CRYPTO_SES_ERR_CIPHER
+				 : ODP_CRYPTO_SES_ERR_AUTH;
 }
 
 static int chained_bufs_ok(const odp_crypto_session_param_t *param,
@@ -1367,7 +1402,7 @@ int odp_crypto_session_create(const odp_crypto_session_param_t *param,
 			      odp_crypto_session_t *session_out,
 			      odp_crypto_ses_create_err_t *status)
 {
-	int rc = 0;
+	odp_crypto_ses_create_err_t rc = ODP_CRYPTO_SES_ERR_NONE;
 	uint8_t cdev_id = 0;
 	uint8_t socket_id;
 	struct rte_crypto_sym_xform cipher_xform;
@@ -1469,9 +1504,9 @@ int odp_crypto_session_create(const odp_crypto_session_param_t *param,
 				    &auth_xform,
 				    &cdev_id);
 	}
-	if (rc) {
-		_ODP_ERR("Couldn't find a crypto device");
-		*status = ODP_CRYPTO_SES_ERR_ENOMEM;
+	if (rc != ODP_CRYPTO_SES_ERR_NONE) {
+		_ODP_DBG("Couldn't find a crypto device (error %d)", rc);
+		*status = rc;
 		goto err;
 	}
 
