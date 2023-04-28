@@ -602,13 +602,10 @@ static void capability_process(struct rte_cryptodev_info *dev_info,
 				ciphers->bit.aes_gcm = 1;
 				auths->bit.aes_gcm = 1;
 			}
-			/* AES-CCM algorithm produces errors in Ubuntu Trusty,
-			 * so it is disabled for now
 			if (cap_aead_algo == RTE_CRYPTO_AEAD_AES_CCM) {
 				ciphers->bit.aes_ccm = 1;
 				auths->bit.aes_ccm = 1;
 			}
-			*/
 #if RTE_VERSION >= RTE_VERSION_NUM(20, 11, 0, 0)
 			if (cap_aead_algo == RTE_CRYPTO_AEAD_CHACHA20_POLY1305) {
 				ciphers->bit.chacha20_poly1305 = 1;
@@ -1311,6 +1308,7 @@ static int chained_bufs_ok(const odp_crypto_session_param_t *param,
 	if (dev_info.driver_name &&
 	    !strcmp(dev_info.driver_name, "crypto_openssl") &&
 	    (param->cipher_alg == ODP_CIPHER_ALG_AES_GCM ||
+	     param->cipher_alg == ODP_CIPHER_ALG_AES_CCM ||
 	     param->auth_alg == ODP_AUTH_ALG_AES_GMAC))
 		chained_bufs_ok = 0;
 
