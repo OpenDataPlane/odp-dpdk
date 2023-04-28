@@ -159,6 +159,7 @@ static int cipher_is_aead(odp_cipher_alg_t cipher_alg)
 	switch (cipher_alg) {
 	case ODP_CIPHER_ALG_AES_GCM:
 	case ODP_CIPHER_ALG_AES_CCM:
+	case ODP_CIPHER_ALG_CHACHA20_POLY1305:
 		return 1;
 	default:
 		return 0;
@@ -170,6 +171,7 @@ static int auth_is_aead(odp_auth_alg_t auth_alg)
 	switch (auth_alg) {
 	case ODP_AUTH_ALG_AES_GCM:
 	case ODP_AUTH_ALG_AES_CCM:
+	case ODP_AUTH_ALG_CHACHA20_POLY1305:
 		return 1;
 	default:
 		return 0;
@@ -188,6 +190,11 @@ static int cipher_aead_alg_odp_to_rte(odp_cipher_alg_t cipher_alg,
 	case ODP_CIPHER_ALG_AES_CCM:
 		aead_xform->aead.algo = RTE_CRYPTO_AEAD_AES_CCM;
 		break;
+#if RTE_VERSION >= RTE_VERSION_NUM(20, 11, 0, 0)
+	case ODP_CIPHER_ALG_CHACHA20_POLY1305:
+		aead_xform->aead.algo = RTE_CRYPTO_AEAD_CHACHA20_POLY1305;
+		break;
+#endif
 	default:
 		rc = -1;
 	}
@@ -207,6 +214,11 @@ static int auth_aead_alg_odp_to_rte(odp_auth_alg_t auth_alg,
 	case ODP_AUTH_ALG_AES_CCM:
 		aead_xform->aead.algo = RTE_CRYPTO_AEAD_AES_CCM;
 		break;
+#if RTE_VERSION >= RTE_VERSION_NUM(20, 11, 0, 0)
+	case ODP_AUTH_ALG_CHACHA20_POLY1305:
+		aead_xform->aead.algo = RTE_CRYPTO_AEAD_CHACHA20_POLY1305;
+		break;
+#endif
 	default:
 		rc = -1;
 	}
@@ -597,6 +609,12 @@ static void capability_process(struct rte_cryptodev_info *dev_info,
 				auths->bit.aes_ccm = 1;
 			}
 			*/
+#if RTE_VERSION >= RTE_VERSION_NUM(20, 11, 0, 0)
+			if (cap_aead_algo == RTE_CRYPTO_AEAD_CHACHA20_POLY1305) {
+				ciphers->bit.chacha20_poly1305 = 1;
+				auths->bit.chacha20_poly1305 = 1;
+			}
+#endif
 		}
 	}
 }
