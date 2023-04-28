@@ -82,6 +82,7 @@ typedef struct crypto_session_entry_s {
 	struct {
 		unsigned int cdev_qpairs_shared:1;
 		unsigned int chained_bufs_ok:1;
+		unsigned int aead:1;
 	} flags;
 	uint8_t cdev_id;
 
@@ -1446,6 +1447,8 @@ int odp_crypto_session_create(const odp_crypto_session_param_t *param,
 	session->p = *param;
 
 	if (cipher_is_aead(param->cipher_alg)) {
+		session->flags.aead = 1;
+
 		if (crypto_fill_aead_xform(&cipher_xform, &session->p) < 0) {
 			*status = ODP_CRYPTO_SES_ERR_CIPHER;
 			goto err;
@@ -1457,6 +1460,8 @@ int odp_crypto_session_create(const odp_crypto_session_param_t *param,
 					 &cdev_id);
 	} else {
 		odp_bool_t do_cipher_first;
+
+		session->flags.aead = 0;
 
 		if (crypto_fill_cipher_xform(&cipher_xform, &session->p) < 0) {
 			*status = ODP_CRYPTO_SES_ERR_CIPHER;
@@ -1914,7 +1919,7 @@ static void op_prepare(crypto_op_t *ops[],
 			continue;
 		}
 
-		if (cipher_is_aead(session->p.cipher_alg)) {
+		if (session->flags.aead) {
 			crypto_fill_aead_param(session, op->state.pkt, &param[n], rte_op);
 		} else {
 			if (odp_unlikely(!is_op_supported(session, &param[n]))) {
