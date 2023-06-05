@@ -127,6 +127,9 @@ typedef struct {
 typedef struct ODP_ALIGNED_CACHE {
 	/* --- Fast path data --- */
 
+	/* Function for mbuf to ODP packet conversion */
+	int (*mbuf_to_pkt_fn)(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], uint16_t num);
+
 	/* DPDK port identifier */
 	uint16_t port_id;
 	struct {
@@ -186,6 +189,11 @@ const pktio_if_ops_t * const _odp_pktio_if_ops[]  = {
 extern void *pktio_entry_ptr[ODP_CONFIG_PKTIO_ENTRIES];
 
 static uint32_t mtu_get_pkt_dpdk(pktio_entry_t *pktio_entry);
+
+static inline int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], uint16_t num);
+
+static inline int input_pkts_minimal(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[],
+				     uint16_t num);
 
 uint16_t _odp_dpdk_pktio_port_id(pktio_entry_t *pktio_entry)
 {
@@ -901,6 +909,12 @@ static int dpdk_start(pktio_entry_t *pktio_entry)
 		}
 	}
 
+	/* Use simpler function when packet parsing and classifying are not required */
+	if (pktio_entry->parse_layer == ODP_PROTO_LAYER_NONE)
+		pkt_dpdk->mbuf_to_pkt_fn = input_pkts_minimal;
+	else
+		pkt_dpdk->mbuf_to_pkt_fn = input_pkts;
+
 	/* Start device */
 	ret = rte_eth_dev_start(port_id);
 	if (ret < 0) {
@@ -932,7 +946,49 @@ static inline void prefetch_pkt(odp_packet_t pkt)
 	odp_prefetch(&pkt_hdr->p);
 }
 
-static inline int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int num)
+/**
+ * Input packets when packet parsing and classifier are disabled
+ */
+static inline int input_pkts_minimal(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[],
+				     uint16_t num)
+{
+	uint16_t i;
+	odp_time_t ts_val;
+	odp_time_t *ts = NULL;
+	const uint8_t ts_ena = (pktio_entry->config.pktin.bit.ts_all ||
+				pktio_entry->config.pktin.bit.ts_ptp);
+	const odp_pktio_t input = pktio_entry->handle;
+	const uint16_t num_prefetch = RTE_MIN(num, NUM_RX_PREFETCH);
+
+	for (i = 0; i < num_prefetch; i++)
+		prefetch_pkt(pkt_table[i]);
+
+	if (ts_ena) {
+		ts_val = odp_time_global();
+		ts = &ts_val;
+	}
+
+	for (i = 0; i < num; ++i) {
+		odp_packet_t pkt = pkt_table[i];
+		odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
+
+		if (odp_likely(i + num_prefetch < num))
+			prefetch_pkt(pkt_table[i + num_prefetch]);
+
+		packet_init(pkt_hdr, input);
+
+		packet_set_ts(pkt_hdr, ts);
+
+		odp_prefetch(rte_pktmbuf_mtod(pkt_to_mbuf(pkt), char *));
+	}
+
+	return num;
+}
+
+/**
+ * input packets when packet parsing is required
+ */
+static inline int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], uint16_t num)
 {
 	uint16_t i;
 	uint16_t num_pkts = 0;
@@ -1032,7 +1088,9 @@ static inline int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[
 
 int _odp_input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int num)
 {
-	return input_pkts(pktio_entry, pkt_table, num);
+	pkt_dpdk_t * const pkt_dpdk = pkt_priv(pktio_entry);
+
+	return pkt_dpdk->mbuf_to_pkt_fn(pktio_entry, pkt_table, num);
 }
 
 static int recv_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
@@ -1073,10 +1131,10 @@ static int recv_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 		odp_ticketlock_unlock(&pkt_dpdk->rx_lock[index]);
 
 	/* Packets may also me received through eventdev, so don't add any
-	 * processing here. Instead, perform all processing in input_pkts()
+	 * processing here. Instead, perform all processing in mbuf_to_pkt_fn()
 	 * which is also called by eventdev. */
 	if (nb_rx)
-		return input_pkts(pktio_entry, pkt_table, nb_rx);
+		return pkt_dpdk->mbuf_to_pkt_fn(pktio_entry, pkt_table, nb_rx);
 	return 0;
 }
 
