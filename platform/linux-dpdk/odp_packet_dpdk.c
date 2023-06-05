@@ -988,7 +988,7 @@ static inline int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[
 	}
 
 	if (pktio_cls_enabled(pktio_entry)) {
-		int success = 0;
+		int nb_cls = 0;
 
 		for (i = 0; i < num_pkts; i++) {
 			odp_packet_t pkt = pkt_table[i];
@@ -1014,15 +1014,17 @@ static inline int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[
 					odp_atomic_inc_u64(&pktio_entry->stats_extra.in_discards);
 					continue;
 				}
-				pkt_table[i] = new_pkt;
 				pkt = new_pkt;
 			}
 
-			if (success != i)
-				pkt_table[success] = pkt;
-			++success;
+			/* Enqueue packets directly to classifier destination queue */
+			pkt_table[nb_cls++] = pkt;
+			nb_cls = _odp_cls_enq(pkt_table, nb_cls, (i + 1 == num_pkts));
 		}
-		num_pkts = success;
+
+		/* Enqueue remaining classified packets */
+		if (odp_unlikely(nb_cls))
+			_odp_cls_enq(pkt_table, nb_cls, true);
 	}
 
 	return num_pkts;
