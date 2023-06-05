@@ -1228,8 +1228,14 @@ uint64_t odp_timeout_to_u64(odp_timeout_t tmo)
 
 int odp_timeout_fresh(odp_timeout_t tmo)
 {
+	timer_entry_t *timer;
 	odp_timeout_hdr_t *timeout_hdr = timeout_to_hdr(tmo);
-	timer_entry_t *timer = timer_from_hdl(timeout_hdr->timer);
+
+	/* Timeout not connected to a timer */
+	if (odp_unlikely(timeout_hdr->timer == ODP_TIMER_INVALID))
+		return 0;
+
+	timer = timer_from_hdl(timeout_hdr->timer);
 
 	if (timer->timer_pool->periodic)
 		return timer->periodic_ticks != PERIODIC_CANCELLED;
@@ -1240,6 +1246,7 @@ int odp_timeout_fresh(odp_timeout_t tmo)
 
 odp_timeout_t odp_timeout_alloc(odp_pool_t pool_hdl)
 {
+	odp_timeout_hdr_t *timeout_hdr;
 	odp_event_t event;
 	pool_t *pool;
 
@@ -1252,6 +1259,9 @@ odp_timeout_t odp_timeout_alloc(odp_pool_t pool_hdl)
 	event = _odp_event_alloc(pool);
 	if (odp_unlikely(event == ODP_EVENT_INVALID))
 		return ODP_TIMEOUT_INVALID;
+
+	timeout_hdr = timeout_to_hdr(odp_timeout_from_event(event));
+	timeout_hdr->timer = ODP_TIMER_INVALID;
 
 	return odp_timeout_from_event(event);
 }
