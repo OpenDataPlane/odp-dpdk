@@ -991,13 +991,14 @@ static inline int input_pkts_minimal(pktio_entry_t *pktio_entry, odp_packet_t pk
 static inline int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], uint16_t num)
 {
 	uint16_t i;
-	uint16_t num_pkts = 0;
-	odp_pktin_config_opt_t pktin_cfg = pktio_entry->config.pktin;
-	odp_pktio_t input = pktio_entry->handle;
+	uint16_t num_pkts = 0, num_cls = 0;
 	odp_time_t ts_val;
 	odp_time_t *ts = NULL;
-	uint16_t num_prefetch = RTE_MIN(num, NUM_RX_PREFETCH);
+	const odp_pktin_config_opt_t pktin_cfg = pktio_entry->config.pktin;
+	const odp_pktio_t input = pktio_entry->handle;
 	const odp_proto_layer_t layer = pktio_entry->parse_layer;
+	const int cls_enabled = pktio_cls_enabled(pktio_entry);
+	const uint16_t num_prefetch = RTE_MIN(num, NUM_RX_PREFETCH);
 
 	for (i = 0; i < num_prefetch; i++)
 		prefetch_pkt(pkt_table[i]);
@@ -1011,47 +1012,34 @@ static inline int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[
 		odp_packet_t pkt = pkt_table[i];
 		odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
 		struct rte_mbuf *mbuf = pkt_to_mbuf(pkt);
+		int ret;
 
 		if (odp_likely(i + num_prefetch < num))
 			prefetch_pkt(pkt_table[i + num_prefetch]);
 
 		packet_init(pkt_hdr, input);
 
-		if (layer != ODP_PROTO_LAYER_NONE) {
-			int ret;
+		ret = _odp_dpdk_packet_parse_common(pkt_hdr,
+						    rte_pktmbuf_mtod(mbuf, uint8_t *),
+						    rte_pktmbuf_pkt_len(mbuf),
+						    rte_pktmbuf_data_len(mbuf),
+						    mbuf, layer, pktin_cfg);
+		if (odp_unlikely(ret)) {
+			odp_atomic_inc_u64(&pktio_entry->stats_extra.in_errors);
 
-			ret = _odp_dpdk_packet_parse_common(pkt_hdr,
-							    rte_pktmbuf_mtod(mbuf, uint8_t *),
-							    rte_pktmbuf_pkt_len(mbuf),
-							    rte_pktmbuf_data_len(mbuf),
-							    mbuf, layer, pktin_cfg);
-			if (odp_unlikely(ret)) {
-				odp_atomic_inc_u64(&pktio_entry->stats_extra.in_errors);
-
-				if (ret < 0) {
-					odp_packet_free(pkt);
-					continue;
-				}
+			if (ret < 0) {
+				odp_packet_free(pkt);
+				continue;
 			}
-
-			if (odp_unlikely(num_pkts != i))
-				pkt_table[num_pkts] = pkt;
 		}
+
 		packet_set_ts(pkt_hdr, ts);
 
 		odp_prefetch(rte_pktmbuf_mtod(mbuf, char *));
-		num_pkts++;
-	}
 
-	if (pktio_cls_enabled(pktio_entry)) {
-		int nb_cls = 0;
-
-		for (i = 0; i < num_pkts; i++) {
-			odp_packet_t pkt = pkt_table[i];
+		if (cls_enabled) {
 			odp_pool_t new_pool;
 			uint8_t *data = odp_packet_data(pkt);
-			odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
-			int ret;
 
 			ret = _odp_cls_classify_packet(pktio_entry, data, &new_pool, pkt_hdr);
 			if (odp_unlikely(ret)) {
@@ -1074,14 +1062,16 @@ static inline int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[
 			}
 
 			/* Enqueue packets directly to classifier destination queue */
-			pkt_table[nb_cls++] = pkt;
-			nb_cls = _odp_cls_enq(pkt_table, nb_cls, (i + 1 == num_pkts));
+			pkt_table[num_cls++] = pkt;
+			num_cls = _odp_cls_enq(pkt_table, num_cls, (i + 1 == num));
+		} else {
+			pkt_table[num_pkts++] = pkt;
 		}
-
-		/* Enqueue remaining classified packets */
-		if (odp_unlikely(nb_cls))
-			_odp_cls_enq(pkt_table, nb_cls, true);
 	}
+
+	/* Enqueue remaining classified packets */
+	if (odp_unlikely(num_cls))
+		_odp_cls_enq(pkt_table, num_cls, true);
 
 	return num_pkts;
 }
