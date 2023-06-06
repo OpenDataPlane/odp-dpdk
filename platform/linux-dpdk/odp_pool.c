@@ -823,6 +823,24 @@ int odp_buffer_alloc_multi(odp_pool_t pool_hdl, odp_buffer_t buf[], int num)
 	return _odp_event_alloc_multi(pool, (_odp_event_hdr_t **)buf, num);
 }
 
+static const char *get_short_type_str(odp_pool_type_t type)
+{
+	switch (type) {
+	case ODP_POOL_BUFFER:
+		return "B";
+	case ODP_POOL_PACKET:
+		return "P";
+	case ODP_POOL_TIMEOUT:
+		return "T";
+	case ODP_POOL_VECTOR:
+		return "V";
+	case ODP_POOL_DMA_COMPL:
+		return "D";
+	default:
+		return "-";
+	}
+}
+
 void odp_pool_print(odp_pool_t pool_hdl)
 {
 	pool_t *pool = _odp_pool_entry(pool_hdl);
@@ -837,8 +855,7 @@ void odp_pool_print_all(void)
 	uint32_t elt_size, elt_len = 0;
 	uint8_t type, ext;
 	const int col_width = 24;
-	const char *name;
-	char type_c;
+	const char *name, *type_c;
 
 	_ODP_PRINT("\nList of all pools\n");
 	_ODP_PRINT("-----------------\n");
@@ -868,12 +885,9 @@ void odp_pool_print_all(void)
 		if (type == ODP_POOL_BUFFER || type == ODP_POOL_PACKET)
 			elt_len = elt_size;
 
-		type_c = (type == ODP_POOL_BUFFER) ? 'B' :
-			 (type == ODP_POOL_PACKET) ? 'P' :
-			 (type == ODP_POOL_TIMEOUT) ? 'T' :
-			 (type == ODP_POOL_VECTOR) ? 'V' : '-';
+		type_c = get_short_type_str(pool->type_2);
 
-		_ODP_PRINT("%4u %-*s    %c %6" PRIu64 " %6" PRIu32 " %6" PRIu32 " %8" PRIu32 "    "
+		_ODP_PRINT("%4u %-*s    %s %6" PRIu64 " %6" PRIu32 " %6" PRIu32 " %8" PRIu32 "    "
 			   "%" PRIu8 "\n", index, col_width, name, type_c, available, tot,
 			   cache_size, elt_len, ext);
 	}
