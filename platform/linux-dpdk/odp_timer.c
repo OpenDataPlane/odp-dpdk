@@ -517,14 +517,26 @@ int odp_timer_res_capability(odp_timer_clk_src_t clk_src,
 	}
 
 	if (res_capa->min_tmo) {
-		_ODP_ERR("Only res_ns or max_tmo based quaries supported\n");
+		_ODP_ERR("Only res_ns or max_tmo based queries supported\n");
 		return -1;
 	}
 
 	if (res_capa->res_ns || res_capa->res_hz) {
+		if (res_capa->res_ns && res_capa->res_ns < MAX_RES_NS) {
+			_ODP_DBG("Timeout resolution capability (res_ns) exceeded\n");
+			return -1;
+		}
+		if (res_capa->res_hz && res_capa->res_hz > MAX_RES_HZ) {
+			_ODP_DBG("Timeout resolution capability (res_hz) exceeded\n");
+			return -1;
+		}
 		res_capa->min_tmo = min_tmo;
 		res_capa->max_tmo = MAX_TMO_NS;
 	} else { /* max_tmo */
+		if (res_capa->max_tmo > MAX_TMO_NS) {
+			_ODP_DBG("Maximum relative timeout capability (max_tmo) exceeded\n");
+			return -1;
+		}
 		res_capa->min_tmo = min_tmo;
 		res_capa->res_ns  = MAX_RES_NS;
 		res_capa->res_hz = MAX_RES_HZ;
