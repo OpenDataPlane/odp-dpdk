@@ -93,6 +93,9 @@ ODP_STATIC_ASSERT(MAX_TIMERS < MAX_TIMER_RING_SIZE,
 /* Maximum number of periodic timers per pool */
 #define MAX_PERIODIC_TIMERS 100
 
+/* Periodic tick fractional part accumulator size */
+#define ACC_SIZE (1ull << 32)
+
 typedef struct {
 	odp_ticketlock_t     lock;
 	uint64_t             tick;
@@ -102,8 +105,13 @@ typedef struct {
 	struct timer_pool_s *timer_pool;
 	int                  state;
 	uint32_t             timer_idx;
+
 	/* Period of periodic timer in ticks, includes PERIODIC_CANCELLED flag. */
 	uint64_t             periodic_ticks;
+	/* Periodic ticks fractional part. */
+	uint32_t periodic_ticks_frac;
+	/* Periodic ticks fractional part accumulator. */
+	uint32_t periodic_ticks_frac_acc;
 
 	struct rte_timer     rte_timer;
 
@@ -1065,6 +1073,7 @@ int odp_timer_periodic_start(odp_timer_t timer_hdl,
 	timer_pool_t *tp = timer->timer_pool;
 	uint64_t multiplier = start_param->freq_multiplier;
 	double freq = multiplier * tp->base_freq;
+	double period_ns_dbl;
 	int absolute;
 	int ret;
 
@@ -1083,13 +1092,18 @@ int odp_timer_periodic_start(odp_timer_t timer_hdl,
 		return ODP_TIMER_FAIL;
 	}
 
-	period_ns = (uint64_t)((double)ODP_TIME_SEC_IN_NS / freq);
+	period_ns_dbl = (double)ODP_TIME_SEC_IN_NS / freq;
+	period_ns = period_ns_dbl;
+
 	if (period_ns == 0) {
 		_ODP_ERR("Too high periodic timer frequency: %f\n", freq);
 		return ODP_TIMER_FAIL;
 	}
 
 	timer->periodic_ticks = odp_timer_ns_to_tick(timer_pool_to_hdl(tp), period_ns);
+	timer->periodic_ticks_frac = (period_ns_dbl - period_ns) * ACC_SIZE;
+	timer->periodic_ticks_frac_acc = 0;
+
 	first_tick = timer->periodic_ticks;
 	absolute = 0;
 
@@ -1113,7 +1127,7 @@ int odp_timer_periodic_start(odp_timer_t timer_hdl,
 
 int odp_timer_periodic_ack(odp_timer_t timer_hdl, odp_event_t tmo_ev)
 {
-	uint64_t abs_tick;
+	uint64_t abs_tick, acc;
 	odp_timeout_t tmo = odp_timeout_from_event(tmo_ev);
 	timer_entry_t *timer = timer_from_hdl(timer_hdl);
 	odp_timeout_hdr_t *timeout_hdr;
@@ -1128,6 +1142,15 @@ int odp_timer_periodic_ack(odp_timer_t timer_hdl, odp_event_t tmo_ev)
 
 	if (odp_unlikely(abs_tick == PERIODIC_CANCELLED))
 		return 2;
+
+	acc = (uint64_t)timer->periodic_ticks_frac_acc + (uint64_t)timer->periodic_ticks_frac;
+
+	if (acc >= ACC_SIZE) {
+		abs_tick++;
+		acc -= ACC_SIZE;
+	}
+
+	timer->periodic_ticks_frac_acc = acc;
 
 	timeout_hdr = timeout_to_hdr(tmo);
 	abs_tick += timeout_hdr->expiration;
