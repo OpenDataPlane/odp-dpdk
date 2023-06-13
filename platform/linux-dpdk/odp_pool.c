@@ -63,6 +63,8 @@
 /* Maximum packet user area size */
 #define MAX_UAREA_SIZE 2048
 
+#define ROUNDUP_DIV(a, b) (((a) + ((b) - 1)) / (b))
+
 /* The pool table ptr - resides in shared memory */
 pool_global_t *_odp_pool_glb;
 
@@ -83,6 +85,12 @@ struct mem_cb_arg_t {
 	uintptr_t min_data_addr;
 	uintptr_t max_data_addr;
 	odp_bool_t match;
+};
+
+struct priv_data_t {
+	pool_t *pool;
+	odp_pool_type_t type;
+	int event_type;
 };
 
 static void ptr_from_mempool(struct rte_mempool *mp ODP_UNUSED, void *opaque,
@@ -403,14 +411,6 @@ odp_dpdk_mbuf_ctor(struct rte_mempool *mp,
 	}
 }
 
-#define CHECK_U16_OVERFLOW(X)	do {			\
-	if (odp_unlikely(X > UINT16_MAX)) {		\
-		_ODP_ERR("Invalid size: %d\n", X);	\
-		UNLOCK(&pool->lock);			\
-		return ODP_POOL_INVALID;		\
-	}						\
-} while (0)
-
 static int check_params(const odp_pool_param_t *params)
 {
 	odp_pool_capability_t capa;
@@ -672,221 +672,194 @@ static int reserve_uarea(pool_t *pool, uint32_t uarea_size, uint32_t num_pkt)
 	return 0;
 }
 
-/* Create pool according to params. Actual type of the pool is type_2, which is recorded for pool
- * info calls. */
-odp_pool_t _odp_pool_create(const char *name, const odp_pool_param_t *params,
-			    odp_pool_type_t type_2)
+/* If unused pool found, return it locked */
+static pool_t *get_unused_pool(void)
 {
-	struct rte_pktmbuf_pool_private mbp_ctor_arg;
-	struct mbuf_ctor_arg mb_ctor_arg;
-	odp_pool_t pool_hdl = ODP_POOL_INVALID;
-	odp_pool_type_t type = params->type;
-	unsigned int mb_size, i, cache_size;
-	size_t hdr_size;
 	pool_t *pool;
-	uint32_t buf_align, blk_size, headroom, tailroom, min_seg_len;
-	uint32_t max_len, min_align;
-	uint32_t uarea_size = 0;
-	uint32_t trailer_size = 0;
-	int8_t event_type;
-	char pool_name[ODP_POOL_NAME_LEN];
-	char rte_name[RTE_MEMPOOL_NAMESIZE];
 
-	if (name == NULL) {
-		pool_name[0] = 0;
-	} else {
-		strncpy(pool_name, name, ODP_POOL_NAME_LEN - 1);
-		pool_name[ODP_POOL_NAME_LEN - 1] = 0;
-	}
-
-	/* Find an unused buffer pool slot and initialize it as requested */
-	for (i = 0; i < ODP_CONFIG_POOLS; i++) {
-		uint32_t num;
-		struct rte_mempool *mp;
-
+	for (int i = 0; i < ODP_CONFIG_POOLS; i++) {
 		pool = _odp_pool_entry_from_idx(i);
-
 		LOCK(&pool->lock);
+
 		if (pool->rte_mempool != NULL) {
 			UNLOCK(&pool->lock);
 			continue;
 		}
 
-		memset(&pool->memset_mark, 0,
-		       sizeof(pool_t) - offsetof(pool_t, memset_mark));
-
-		switch (type) {
-		case ODP_POOL_BUFFER:
-			buf_align = params->buf.align;
-			trailer_size = _ODP_EV_ENDMARK_SIZE;
-			blk_size = params->buf.size + trailer_size;
-			cache_size = params->buf.cache_size;
-			uarea_size = params->buf.uarea_size;
-
-			/* Set correct alignment based on input request */
-			if (buf_align == 0)
-				buf_align = ODP_CACHE_LINE_SIZE;
-			else if (buf_align < ODP_CONFIG_BUFFER_ALIGN_MIN)
-				buf_align = ODP_CONFIG_BUFFER_ALIGN_MIN;
-
-			if (params->buf.align != 0)
-				blk_size = _ODP_ROUNDUP_ALIGN(blk_size, buf_align);
-
-			hdr_size = sizeof(odp_buffer_hdr_t);
-			CHECK_U16_OVERFLOW(blk_size);
-			mbp_ctor_arg.mbuf_data_room_size = blk_size;
-			num = params->buf.num;
-			event_type = ODP_EVENT_BUFFER;
-
-			_ODP_DBG("type: buffer, name: %s, num: %u, size: %u, align: %u\n",
-				 pool_name, num, params->buf.size, params->buf.align);
-			break;
-		case ODP_POOL_PACKET:
-			headroom = RTE_PKTMBUF_HEADROOM;
-			tailroom = CONFIG_PACKET_TAILROOM;
-			trailer_size = _ODP_EV_ENDMARK_SIZE;
-			min_seg_len = CONFIG_PACKET_SEG_LEN_MIN;
-			min_align = ODP_CONFIG_BUFFER_ALIGN_MIN;
-			cache_size = params->pkt.cache_size;
-
-			blk_size = min_seg_len;
-			if (params->pkt.seg_len > blk_size)
-				blk_size = params->pkt.seg_len;
-			if (params->pkt.len > blk_size)
-				blk_size = params->pkt.len;
-
-			/* Make sure at least one max len packet fits in the pool */
-			max_len = 0;
-			if (params->pkt.max_len != 0)
-				max_len = params->pkt.max_len;
-			if ((max_len + blk_size) / blk_size > params->pkt.num)
-				blk_size = (max_len + params->pkt.num) /
-					params->pkt.num;
-			blk_size = _ODP_ROUNDUP_ALIGN(headroom + blk_size + tailroom + trailer_size,
-						      min_align);
-
-			/* Segment size minus headroom might be rounded down by the driver (e.g.
-			 * ixgbe) to the nearest multiple of 1024. Round it up here to make sure the
-			 * requested size is still going to fit without segmentation. */
-			blk_size = _ODP_ROUNDUP_ALIGN(blk_size - headroom, min_seg_len) + headroom;
-
-			/* Round down the block size to 16 bits  */
-			if (blk_size > UINT16_MAX) {
-				blk_size = UINT16_MAX;
-				_ODP_DBG("Packet pool block size rounded down to %" PRIu32 "\n",
-					 blk_size);
-			}
-
-			hdr_size = sizeof(odp_packet_hdr_t);
-			CHECK_U16_OVERFLOW(blk_size);
-			mbp_ctor_arg.mbuf_data_room_size = blk_size;
-			num = params->pkt.num;
-			event_type = ODP_EVENT_PACKET;
-			uarea_size = params->pkt.uarea_size;
-
-			_ODP_DBG("type: packet, name: %s, num: %u, len: %u, blk_size: %u, "
-				 "uarea_size: %d, hdr_size: %zu\n", pool_name, num, params->pkt.len,
-				 blk_size, uarea_size, hdr_size);
-			break;
-		case ODP_POOL_TIMEOUT:
-			hdr_size = sizeof(odp_timeout_hdr_t);
-			mbp_ctor_arg.mbuf_data_room_size = 0;
-			num = params->tmo.num;
-			cache_size = params->tmo.cache_size;
-			uarea_size = params->tmo.uarea_size;
-			event_type = ODP_EVENT_TIMEOUT;
-
-			_ODP_DBG("type: tmo, name: %s, num: %u\n", pool_name, num);
-			break;
-		case ODP_POOL_VECTOR:
-			hdr_size = sizeof(odp_event_vector_hdr_t) +
-					(params->vector.max_size * sizeof(odp_packet_t));
-			mbp_ctor_arg.mbuf_data_room_size = 0;
-			num = params->vector.num;
-			cache_size = params->vector.cache_size;
-			uarea_size = params->vector.uarea_size;
-			event_type = ODP_EVENT_PACKET_VECTOR;
-
-			_ODP_DBG("type: vector, name: %s, num: %u\n", pool_name, num);
-			break;
-		default:
-			_ODP_ERR("Bad pool type %i\n", (int)type);
-			UNLOCK(&pool->lock);
-			return ODP_POOL_INVALID;
-		}
-
-		mb_ctor_arg.seg_buf_offset = (uint16_t)_ODP_ROUNDUP_CACHE_LINE(hdr_size);
-		mb_ctor_arg.seg_buf_size = mbp_ctor_arg.mbuf_data_room_size;
-		mb_ctor_arg.type = type;
-		mb_ctor_arg.event_type = event_type;
-		mb_size = mb_ctor_arg.seg_buf_offset + mb_ctor_arg.seg_buf_size;
-		mb_ctor_arg.pool = pool;
-		mbp_ctor_arg.mbuf_priv_size = mb_ctor_arg.seg_buf_offset -
-			sizeof(struct rte_mbuf);
-
-		_ODP_DBG("Metadata size: %u, mb_size %d\n", mb_ctor_arg.seg_buf_offset, mb_size);
-
-		cache_size = calc_cache_size(num, cache_size);
-
-		format_pool_name(pool_name, rte_name);
-
-		if (type == ODP_POOL_PACKET) {
-			uint16_t data_room_size, priv_size;
-
-			data_room_size  = mbp_ctor_arg.mbuf_data_room_size;
-			priv_size = mbp_ctor_arg.mbuf_priv_size;
-			mp = rte_pktmbuf_pool_create(rte_name, num, cache_size,
-						     priv_size, data_room_size,
-						     rte_socket_id());
-			pool->seg_len = data_room_size - trailer_size;
-		} else {
-			unsigned int priv_size;
-
-			priv_size = sizeof(struct rte_pktmbuf_pool_private);
-			mp = rte_mempool_create(rte_name, num, mb_size,
-						cache_size, priv_size,
-						rte_pktmbuf_pool_init,
-						&mbp_ctor_arg, NULL, NULL,
-						rte_socket_id(), 0);
-		}
-		if (mp == NULL) {
-			_ODP_ERR("Cannot init DPDK mbuf pool: %s\n", rte_strerror(rte_errno));
-			UNLOCK(&pool->lock);
-			return ODP_POOL_INVALID;
-		}
-
-		if (name == NULL) {
-			pool->name[0] = 0;
-		} else {
-			strncpy(pool->name, name,
-				ODP_POOL_NAME_LEN - 1);
-			pool->name[ODP_POOL_NAME_LEN - 1] = 0;
-		}
-
-		pool->type = type;
-		pool->type_2 = type_2;
-		pool->params = *params;
-		pool->trailer_size = trailer_size;
-
-		if (reserve_uarea(pool, uarea_size, num)) {
-			_ODP_ERR("User area SHM reserve failed\n");
-			rte_mempool_free(mp);
-			UNLOCK(&pool->lock);
-			return ODP_POOL_INVALID;
-		}
-
-		/* Initialize pool objects */
-		rte_mempool_obj_iter(mp, odp_dpdk_mbuf_ctor, &mb_ctor_arg);
-
-		pool->rte_mempool = mp;
-		_ODP_DBG("Header/element/trailer size: %u/%u/%u, total pool size: %lu\n",
-			 mp->header_size, mp->elt_size, mp->trailer_size,
-			 (unsigned long)((mp->header_size + mp->elt_size +
-			 mp->trailer_size) * num));
-		UNLOCK(&pool->lock);
-		pool_hdl = _odp_pool_handle(pool);
-		break;
+		return pool;
 	}
+
+	return NULL;
+}
+
+static inline uint16_t get_mbuf_priv_size(uint16_t len)
+{
+	const uint16_t priv_size = len - sizeof(struct rte_mbuf);
+
+	return _ODP_ROUNDUP_ALIGN(priv_size, RTE_MBUF_PRIV_ALIGN);
+}
+
+static void init_obj_priv_data(struct rte_mempool *mp ODP_UNUSED, void *arg, void *mbuf,
+			       unsigned int i)
+{
+	struct priv_data_t *priv_data = arg;
+	struct rte_mbuf *mb = mbuf;
+	_odp_event_hdr_t *event_hdr = (_odp_event_hdr_t *)mbuf;
+	void *uarea = priv_data->pool->uarea_base_addr + i * priv_data->pool->uarea_size;
+	void **obj_uarea;
+
+	if (priv_data->type != ODP_POOL_PACKET)
+		/* No need for headroom in non-packet objects */
+		mb->data_off = 0;
+
+	event_hdr->index = i;
+	event_hdr->pool = _odp_pool_handle(priv_data->pool);
+	event_hdr->type = priv_data->type;
+	event_hdr->event_type = priv_data->event_type;
+
+	switch (priv_data->type) {
+	case ODP_POOL_BUFFER:
+		obj_uarea = &((odp_buffer_hdr_t *)mbuf)->uarea_addr;
+		break;
+	case ODP_POOL_PACKET:
+		obj_uarea = &((odp_packet_hdr_t *)mbuf)->uarea_addr;
+		break;
+	case ODP_POOL_TIMEOUT:
+		obj_uarea = &((odp_timeout_hdr_t *)mbuf)->uarea_addr;
+		break;
+	case ODP_POOL_VECTOR:
+		obj_uarea = &((odp_event_vector_hdr_t *)mbuf)->uarea_addr;
+		break;
+	default:
+		_ODP_ABORT("Invalid pool type: %i\n", priv_data->type);
+	}
+
+	*obj_uarea = uarea;
+
+	if (priv_data->type == ODP_POOL_BUFFER || priv_data->type == ODP_POOL_PACKET) {
+		mb->buf_len -= _ODP_EV_ENDMARK_SIZE;
+		_odp_event_endmark_set(_odp_event_from_mbuf(mb));
+	}
+}
+
+
+odp_pool_t _odp_pool_create(const char *name, const odp_pool_param_t *params,
+			    odp_pool_type_t type_2)
+{
+	pool_t *pool = get_unused_pool();
+	uint32_t num, cache_size, priv_size, align = 0, data_size, seg_size = 0, uarea_size = 0;
+	const uint32_t hroom = RTE_PKTMBUF_HEADROOM, trailer = _ODP_EV_ENDMARK_SIZE;
+	struct priv_data_t priv_data;
+	struct rte_mempool *mp;
+	char rte_name[RTE_MEMPOOL_NAMESIZE];
+	odp_pool_t pool_hdl = ODP_POOL_INVALID;
+
+	if (pool == NULL)
+		return ODP_POOL_INVALID;
+
+	memset(&pool->memset_mark, 0, sizeof(pool_t) - offsetof(pool_t, memset_mark));
+	priv_data.pool = pool;
+	priv_data.type = params->type;
+
+	if (name)
+		strncpy(pool->name, name, ODP_POOL_NAME_LEN - 1);
+
+	switch (params->type) {
+	case ODP_POOL_BUFFER:
+		num = params->buf.num;
+		cache_size = params->buf.cache_size;
+		priv_size = get_mbuf_priv_size(sizeof(odp_buffer_hdr_t));
+		align = params->buf.align > 0 ? params->buf.align : ODP_CACHE_LINE_SIZE;
+		align = _ODP_MAX(align, (uint32_t)ODP_CONFIG_BUFFER_ALIGN_MIN);
+		data_size = _ODP_ROUNDUP_ALIGN(params->buf.size + trailer, align);
+		uarea_size = params->buf.uarea_size;
+		priv_data.event_type = ODP_EVENT_BUFFER;
+		break;
+	case ODP_POOL_PACKET:
+		num = params->pkt.num;
+		cache_size = params->pkt.cache_size;
+		priv_size = get_mbuf_priv_size(sizeof(odp_packet_hdr_t));
+		align = params->pkt.align > 0 ? params->pkt.align : ODP_CONFIG_BUFFER_ALIGN_MIN;
+		align = _ODP_MAX(align, (uint32_t)ODP_CONFIG_BUFFER_ALIGN_MIN);
+		data_size = _ODP_MAX(params->pkt.seg_len, (uint32_t)CONFIG_PACKET_SEG_LEN_MIN);
+		data_size = _ODP_MAX(data_size, params->pkt.len);
+
+		if (params->pkt.max_len > 0 &&
+		    ROUNDUP_DIV(params->pkt.max_len, data_size) > num)
+			data_size = ROUNDUP_DIV(params->pkt.max_len, num);
+
+		data_size = _ODP_ROUNDUP_ALIGN(hroom + data_size + CONFIG_PACKET_TAILROOM +
+					       trailer, align);
+		/* Segment size minus headroom might be rounded down by the driver (e.g. ixgbe) to
+		 * the nearest multiple of 1024. Round it up here to make sure the requested size
+		 * is still going to fit without segmentation. */
+		data_size = _ODP_ROUNDUP_ALIGN(data_size - hroom, CONFIG_PACKET_SEG_LEN_MIN) +
+					       hroom;
+		data_size = _ODP_MIN(data_size, (uint16_t)UINT16_MAX);
+		seg_size = data_size - trailer;
+		uarea_size = params->pkt.uarea_size;
+		priv_data.event_type = ODP_EVENT_PACKET;
+		break;
+	case ODP_POOL_TIMEOUT:
+		num = params->tmo.num;
+		cache_size = params->tmo.cache_size;
+		priv_size = get_mbuf_priv_size(sizeof(odp_timeout_hdr_t));
+		data_size = 0;
+		uarea_size = params->tmo.uarea_size;
+		priv_data.event_type = ODP_EVENT_TIMEOUT;
+		break;
+	case ODP_POOL_VECTOR:
+		num = params->vector.num;
+		cache_size = params->vector.cache_size;
+		priv_size = get_mbuf_priv_size(sizeof(odp_event_vector_hdr_t) +
+					       params->vector.max_size * sizeof(odp_packet_t));
+		data_size = 0;
+		uarea_size = params->vector.uarea_size;
+		priv_data.event_type = ODP_EVENT_PACKET_VECTOR;
+		break;
+	default:
+		UNLOCK(&pool->lock);
+		_ODP_ERR("Bad pool type %i\n", params->type);
+		return ODP_POOL_INVALID;
+	}
+
+	_ODP_DBG("Pool type: %d, name: %s, num: %u, priv area size: %u, alignment: %u,"
+		 "data room size: %u, segment size: %u, uarea_size: %u\n", priv_data.event_type,
+		 pool->name, num, priv_size, align, data_size, seg_size, uarea_size);
+
+	if (priv_size > UINT16_MAX || data_size > UINT16_MAX) {
+		UNLOCK(&pool->lock);
+		_ODP_ERR("Invalid element size(s), private: %u, data room: %u (max: %u)\n",
+			 priv_size, data_size, UINT16_MAX);
+		return ODP_POOL_INVALID;
+	}
+
+	format_pool_name(pool->name, rte_name);
+	mp = rte_pktmbuf_pool_create(rte_name, num, calc_cache_size(num, cache_size), priv_size,
+				     data_size, rte_socket_id());
+
+	if (mp == NULL) {
+		UNLOCK(&pool->lock);
+		_ODP_ERR("Cannot init DPDK mbuf pool: %s\n", rte_strerror(rte_errno));
+		return ODP_POOL_INVALID;
+	}
+
+	if (reserve_uarea(pool, uarea_size, num)) {
+		UNLOCK(&pool->lock);
+		_ODP_ERR("User area SHM reserve failed\n");
+		rte_mempool_free(mp);
+		return ODP_POOL_INVALID;
+	}
+
+	rte_mempool_obj_iter(mp, init_obj_priv_data, &priv_data);
+	pool->rte_mempool = mp;
+	pool->seg_len = seg_size;
+	pool->type_2 = type_2;
+	pool->type = params->type;
+	pool->params = *params;
+	pool->trailer_size = trailer;
+	UNLOCK(&pool->lock);
+	pool_hdl = _odp_pool_handle(pool);
 
 	return pool_hdl;
 }
