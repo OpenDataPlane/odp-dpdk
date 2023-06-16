@@ -311,106 +311,6 @@ struct mbuf_ctor_arg {
 	int event_type;          /* ODP event type */
 };
 
-/* ODP DPDK mbuf constructor.
- * This is a combination of rte_pktmbuf_init in rte_mbuf.c
- * and testpmd_mbuf_ctor in testpmd.c
- */
-static void
-odp_dpdk_mbuf_ctor(struct rte_mempool *mp,
-		   void *opaque_arg,
-		   void *raw_mbuf,
-		   unsigned i)
-{
-	struct mbuf_ctor_arg *mb_ctor_arg;
-	struct rte_mbuf *mb = raw_mbuf;
-	_odp_event_hdr_t *event_hdr;
-	void *uarea;
-
-	/* The rte_mbuf is at the beginning in all cases */
-	mb_ctor_arg = (struct mbuf_ctor_arg *)opaque_arg;
-	mb = (struct rte_mbuf *)raw_mbuf;
-	uarea = mb_ctor_arg->pool->uarea_base_addr + (i * mb_ctor_arg->pool->uarea_size);
-
-	RTE_ASSERT(mp->elt_size >= sizeof(struct rte_mbuf));
-
-	if (mb_ctor_arg->pool->pool_ext) {
-		odp_pool_ext_param_t *p = &mb_ctor_arg->pool->ext_param;
-		uint32_t app_hdr_offset = sizeof(odp_packet_hdr_t);
-		uint32_t app_hdr_size = p->pkt.app_header_size;
-		uint32_t buf_size = p->pkt.buf_size;
-
-		memset(mb, 0, app_hdr_offset);
-		memset((uint8_t *)mb + app_hdr_offset + app_hdr_size, 0,
-		       buf_size - app_hdr_offset - app_hdr_size);
-	} else {
-		memset(mb, 0, mp->elt_size);
-	}
-
-	/* Start of buffer is just after the ODP type specific header
-	 * which contains in the very beginning the rte_mbuf struct */
-	mb->buf_addr = (char *)mb + mb_ctor_arg->seg_buf_offset;
-	mb->buf_iova = rte_mempool_virt2iova(mb) + mb_ctor_arg->seg_buf_offset;
-	mb->buf_len = mb_ctor_arg->seg_buf_size;
-	mb->priv_size = rte_pktmbuf_priv_size(mp);
-
-	/* keep some headroom between start of buffer and data */
-	if (mb_ctor_arg->type == ODP_POOL_PACKET) {
-		mb->data_off = RTE_PKTMBUF_HEADROOM;
-		mb->port = 0xff;
-		mb->vlan_tci = 0;
-	} else {
-		mb->data_off = 0;
-	}
-
-	/* init some constant fields */
-	mb->pool = mp;
-	mb->nb_segs = 1;
-	mb->ol_flags = 0;
-	rte_mbuf_refcnt_set(mb, 1);
-	mb->next = NULL;
-
-	/* Save index, might be useful for debugging purposes */
-	event_hdr = (_odp_event_hdr_t *)raw_mbuf;
-	event_hdr->index = i;
-	event_hdr->pool = _odp_pool_handle(mb_ctor_arg->pool);
-	event_hdr->type = mb_ctor_arg->type;
-	event_hdr->event_type = mb_ctor_arg->event_type;
-
-	/* Initialize buffer metadata */
-	if (mb_ctor_arg->type == ODP_POOL_BUFFER) {
-		odp_buffer_hdr_t *buf_hdr = (void *)raw_mbuf;
-
-		buf_hdr->uarea_addr = uarea;
-	}
-
-	/* Initialize packet metadata */
-	if (mb_ctor_arg->type == ODP_POOL_PACKET) {
-		odp_packet_hdr_t *pkt_hdr = (void *)raw_mbuf;
-
-		pkt_hdr->uarea_addr = uarea;
-	}
-
-	/* Initialize data endmark */
-	if (mb_ctor_arg->type == ODP_POOL_BUFFER || mb_ctor_arg->type == ODP_POOL_PACKET) {
-		mb->buf_len -= _ODP_EV_ENDMARK_SIZE;
-		_odp_event_endmark_set(_odp_event_from_mbuf(mb));
-	}
-
-	/* Initialize event vector metadata */
-	if (mb_ctor_arg->type == ODP_POOL_VECTOR) {
-		odp_event_vector_hdr_t *vect_hdr = (void *)raw_mbuf;
-
-		vect_hdr->uarea_addr = uarea;
-	}
-
-	/* Initialize timeout metadata */
-	if (mb_ctor_arg->type == ODP_POOL_TIMEOUT) {
-		odp_timeout_hdr_t *tmo_hdr = (void *)raw_mbuf;
-
-		tmo_hdr->uarea_addr = uarea;
-	}
-}
-
 static int check_params(const odp_pool_param_t *params)
 {
 	odp_pool_capability_t capa;
@@ -1343,6 +1243,79 @@ error:
 	return ODP_POOL_INVALID;
 }
 
+/* External memory element initializer
+ *
+ * This is a combination of rte_pktmbuf_init in rte_mbuf.c and testpmd_mbuf_ctor in testpmd.c
+ */
+static void init_ext_obj(struct rte_mempool *mp, void *arg, void *mbuf, unsigned int i)
+{
+	struct mbuf_ctor_arg *mb_ctor_arg = arg;
+	struct rte_mbuf *mb = mbuf;
+	void *uarea = mb_ctor_arg->pool->uarea_base_addr + i * mb_ctor_arg->pool->uarea_size;
+	_odp_event_hdr_t *event_hdr = (_odp_event_hdr_t *)mbuf;
+	void **obj_uarea;
+	odp_pool_ext_param_t *p = &mb_ctor_arg->pool->ext_param;
+	uint32_t app_hdr_offset = sizeof(odp_packet_hdr_t);
+	uint32_t app_hdr_size = p->pkt.app_header_size;
+	uint32_t buf_size = p->pkt.buf_size;
+
+	RTE_ASSERT(mp->elt_size >= sizeof(struct rte_mbuf));
+	memset(mb, 0, app_hdr_offset);
+	memset((uint8_t *)mb + app_hdr_offset + app_hdr_size, 0,
+	       buf_size - app_hdr_offset - app_hdr_size);
+	/* Start of buffer is just after the ODP type specific header
+	 * which contains in the very beginning the rte_mbuf struct */
+	mb->buf_addr = (char *)mb + mb_ctor_arg->seg_buf_offset;
+	mb->buf_iova = rte_mempool_virt2iova(mb) + mb_ctor_arg->seg_buf_offset;
+	mb->buf_len = mb_ctor_arg->seg_buf_size;
+	mb->priv_size = rte_pktmbuf_priv_size(mp);
+
+	/* Keep some headroom between start of buffer and data */
+	if (mb_ctor_arg->type == ODP_POOL_PACKET) {
+		mb->data_off = RTE_PKTMBUF_HEADROOM;
+		mb->port = 0xff;
+		mb->vlan_tci = 0;
+	} else {
+		mb->data_off = 0;
+	}
+
+	/* Init some constant fields */
+	mb->pool = mp;
+	mb->nb_segs = 1;
+	mb->ol_flags = 0;
+	rte_mbuf_refcnt_set(mb, 1);
+	mb->next = NULL;
+	/* Save index, might be useful for debugging purposes */
+	event_hdr->index = i;
+	event_hdr->pool = _odp_pool_handle(mb_ctor_arg->pool);
+	event_hdr->type = mb_ctor_arg->type;
+	event_hdr->event_type = mb_ctor_arg->event_type;
+
+	switch (mb_ctor_arg->type) {
+	case ODP_POOL_BUFFER:
+		obj_uarea = &((odp_buffer_hdr_t *)mbuf)->uarea_addr;
+		break;
+	case ODP_POOL_PACKET:
+		obj_uarea = &((odp_packet_hdr_t *)mbuf)->uarea_addr;
+		break;
+	case ODP_POOL_TIMEOUT:
+		obj_uarea = &((odp_timeout_hdr_t *)mbuf)->uarea_addr;
+		break;
+	case ODP_POOL_VECTOR:
+		obj_uarea = &((odp_event_vector_hdr_t *)mbuf)->uarea_addr;
+		break;
+	default:
+		_ODP_ABORT("Invalid pool type: %i\n", mb_ctor_arg->type);
+	}
+
+	*obj_uarea = uarea;
+
+	if (mb_ctor_arg->type == ODP_POOL_BUFFER || mb_ctor_arg->type == ODP_POOL_PACKET) {
+		mb->buf_len -= _ODP_EV_ENDMARK_SIZE;
+		_odp_event_endmark_set(_odp_event_from_mbuf(mb));
+	}
+}
+
 int odp_pool_ext_populate(odp_pool_t pool_hdl, void *buf[], uint32_t buf_size,
 			  uint32_t num, uint32_t flags)
 {
@@ -1439,7 +1412,7 @@ int odp_pool_ext_populate(odp_pool_t pool_hdl, void *buf[], uint32_t buf_size,
 		mb_ctor_arg.type = params->type;
 		mb_ctor_arg.event_type = pool->type;
 		mb_ctor_arg.pool = pool;
-		odp_dpdk_mbuf_ctor(mp, (void *)&mb_ctor_arg, (void *)mb, num_populated);
+		init_ext_obj(mp, (void *)&mb_ctor_arg, (void *)mb, num_populated);
 		pool->num_populated++;
 	}
 
