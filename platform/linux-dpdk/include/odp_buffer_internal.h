@@ -1,5 +1,5 @@
 /* Copyright (c) 2013-2018, Linaro Limited
- * Copyright (c) 2021-2022, Nokia
+ * Copyright (c) 2021-2023, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -49,8 +49,11 @@ extern "C" {
 
 /* Internal buffer header */
 typedef struct ODP_ALIGNED_CACHE odp_buffer_hdr_t {
-	/* Common event header */
-	_odp_event_hdr_t event_hdr;
+	/* Underlying DPDK rte_mbuf */
+	struct rte_mbuf mb;
+
+	/* Common internal header */
+	_odp_event_hdr_int_t event_hdr;
 
 	/* User area pointer */
 	void *uarea_addr;

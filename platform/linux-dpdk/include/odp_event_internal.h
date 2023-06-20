@@ -33,11 +33,7 @@ extern "C" {
 	#undef vector
 #endif
 
-/* Common header for all event types. */
-typedef struct _odp_event_hdr_t {
-	/* Underlying DPDK rte_mbuf */
-	struct rte_mbuf mb;
-
+typedef struct _odp_event_hdr_int_t {
 	/* Pool handle */
 	odp_pool_t pool;
 
@@ -52,6 +48,17 @@ typedef struct _odp_event_hdr_t {
 
 	/* Event flow id */
 	uint8_t   flow_id;
+
+} _odp_event_hdr_int_t;
+
+/* Common header for all event types. Helper for casting, actual pool element types should begin
+ * with explicit struct rte_mbuf and _odp_event_hdr_int_t fields. */
+typedef struct ODP_ALIGNED_CACHE _odp_event_hdr_t {
+	/* Underlying DPDK rte_mbuf */
+	struct rte_mbuf mb;
+
+	/* Common internal header */
+	_odp_event_hdr_int_t hdr;
 
 } _odp_event_hdr_t;
 
@@ -77,7 +84,7 @@ static inline struct rte_mbuf *_odp_event_to_mbuf(odp_event_t event)
 
 static inline void _odp_event_type_set(odp_event_t event, int ev)
 {
-	_odp_event_hdr(event)->event_type = ev;
+	_odp_event_hdr(event)->hdr.event_type = ev;
 }
 
 static inline uint64_t *_odp_event_endmark_get_ptr(odp_event_t event)

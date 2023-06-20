@@ -1,5 +1,5 @@
 /* Copyright (c) 2014-2018, Linaro Limited
- * Copyright (c) 2021-2022, Nokia
+ * Copyright (c) 2021-2023, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -117,9 +117,12 @@ typedef struct {
  * packet_init(). Because of this any new fields added must be reviewed for
  * initialization requirements.
  */
-typedef struct odp_packet_hdr_t {
-	/* Common event header */
-	_odp_event_hdr_t event_hdr;
+typedef struct ODP_ALIGNED_CACHE odp_packet_hdr_t {
+	/* Underlying DPDK rte_mbuf */
+	struct rte_mbuf mb;
+
+	/* Common internal header */
+	_odp_event_hdr_int_t event_hdr;
 
 	packet_parser_t p;
 
@@ -132,13 +135,13 @@ typedef struct odp_packet_hdr_t {
 	 * processing and as Tx completion event queue. */
 	odp_queue_t dst_queue;
 
+	/* --- 64-byte cache line boundary --- */
+
 	/* User area pointer */
 	void *uarea_addr;
 
 	/* User context pointer */
 	const void *user_ptr;
-
-	/* --- 64-byte cache line boundary --- */
 
 	/* Classifier mark */
 	uint16_t cls_mark;
@@ -180,7 +183,7 @@ typedef struct odp_packet_hdr_t {
 	/* Temp storage for AAD */
 #define PACKET_AAD_MAX 32
 	uint8_t crypto_aad_buf[PACKET_AAD_MAX];
-} odp_packet_hdr_t __rte_cache_aligned;
+} odp_packet_hdr_t;
 
 /**
  * Return the packet header
@@ -197,7 +200,7 @@ static inline odp_packet_t packet_handle(odp_packet_hdr_t *pkt_hdr)
 
 static inline _odp_event_hdr_t *packet_to_event_hdr(odp_packet_t pkt)
 {
-	return (_odp_event_hdr_t *)(uintptr_t)&packet_hdr(pkt)->event_hdr;
+	return (_odp_event_hdr_t *)(uintptr_t)packet_hdr(pkt);
 }
 
 static inline odp_packet_t packet_from_event_hdr(_odp_event_hdr_t *event_hdr)
@@ -283,14 +286,14 @@ static inline void _odp_packet_copy_md(odp_packet_hdr_t *dst_hdr,
 	dst_hdr->cls_mark = src_hdr->cls_mark;
 	dst_hdr->user_ptr = src_hdr->user_ptr;
 
-	dst_hdr->event_hdr.mb.port = src_hdr->event_hdr.mb.port;
-	dst_hdr->event_hdr.mb.ol_flags = src_hdr->event_hdr.mb.ol_flags;
-	dst_hdr->event_hdr.mb.packet_type = src_hdr->event_hdr.mb.packet_type;
-	dst_hdr->event_hdr.mb.vlan_tci = src_hdr->event_hdr.mb.vlan_tci;
-	dst_hdr->event_hdr.mb.hash.rss = src_hdr->event_hdr.mb.hash.rss;
-	dst_hdr->event_hdr.mb.hash = src_hdr->event_hdr.mb.hash;
-	dst_hdr->event_hdr.mb.vlan_tci_outer = src_hdr->event_hdr.mb.vlan_tci_outer;
-	dst_hdr->event_hdr.mb.tx_offload = src_hdr->event_hdr.mb.tx_offload;
+	dst_hdr->mb.port = src_hdr->mb.port;
+	dst_hdr->mb.ol_flags = src_hdr->mb.ol_flags;
+	dst_hdr->mb.packet_type = src_hdr->mb.packet_type;
+	dst_hdr->mb.vlan_tci = src_hdr->mb.vlan_tci;
+	dst_hdr->mb.hash.rss = src_hdr->mb.hash.rss;
+	dst_hdr->mb.hash = src_hdr->mb.hash;
+	dst_hdr->mb.vlan_tci_outer = src_hdr->mb.vlan_tci_outer;
+	dst_hdr->mb.tx_offload = src_hdr->mb.tx_offload;
 
 	if (src_hdr->p.input_flags.timestamp)
 		dst_hdr->timestamp = src_hdr->timestamp;
@@ -349,12 +352,12 @@ static inline void _odp_packet_copy_cls_md(odp_packet_hdr_t *dst_hdr,
 
 static inline uint32_t packet_len(odp_packet_hdr_t *pkt_hdr)
 {
-	return rte_pktmbuf_pkt_len(&pkt_hdr->event_hdr.mb);
+	return rte_pktmbuf_pkt_len(&pkt_hdr->mb);
 }
 
 static inline void packet_set_len(odp_packet_hdr_t *pkt_hdr, uint32_t len)
 {
-	rte_pktmbuf_pkt_len(&pkt_hdr->event_hdr.mb) = len;
+	rte_pktmbuf_pkt_len(&pkt_hdr->mb) = len;
 }
 
 /* Reset parser metadata for a new parse */

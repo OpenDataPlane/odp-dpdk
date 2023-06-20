@@ -1,5 +1,5 @@
 /* Copyright (c) 2014-2018, Linaro Limited
- * Copyright (c) 2021-2022, Nokia
+ * Copyright (c) 2021-2023, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -26,8 +26,11 @@
  * Internal Timeout header
  */
 typedef struct ODP_ALIGNED_CACHE odp_timeout_hdr_t {
-	/* Common event header */
-	_odp_event_hdr_t event_hdr;
+	/* Underlying DPDK rte_mbuf */
+	struct rte_mbuf mb;
+
+	/* Common internal header */
+	_odp_event_hdr_int_t event_hdr;
 
 	/* Requested expiration time */
 	uint64_t expiration;

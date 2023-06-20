@@ -1662,10 +1662,8 @@ static uint8_t *crypto_prepare_digest(const crypto_session_entry_t *session,
 					     session->p.auth_digest_len);
 	}
 	data = pkt_hdr->crypto_digest_buf;
-	mb = &pkt_hdr->event_hdr.mb;
-	*phys_addr =
-		rte_pktmbuf_iova_offset(mb, data -
-					rte_pktmbuf_mtod(mb, uint8_t *));
+	mb = &pkt_hdr->mb;
+	*phys_addr = rte_pktmbuf_iova_offset(mb, data - rte_pktmbuf_mtod(mb, uint8_t *));
 
 	return data;
 }
@@ -1693,10 +1691,9 @@ static void crypto_fill_aead_param(const crypto_session_entry_t *session,
 		       session->p.auth_aad_len);
 	op->sym->aead.aad.data = pkt_hdr->crypto_aad_buf;
 	op->sym->aead.aad.phys_addr =
-		rte_pktmbuf_iova_offset(&pkt_hdr->event_hdr.mb,
+		rte_pktmbuf_iova_offset(&pkt_hdr->mb,
 					op->sym->aead.aad.data -
-					rte_pktmbuf_mtod(&pkt_hdr->event_hdr.mb,
-							 uint8_t *));
+					rte_pktmbuf_mtod(&pkt_hdr->mb, uint8_t *));
 	iv_ptr = rte_crypto_op_ctod_offset(op, uint8_t *, IV_OFFSET);
 	if (session->p.cipher_alg == ODP_CIPHER_ALG_AES_CCM) {
 		*iv_ptr = iv_len;
