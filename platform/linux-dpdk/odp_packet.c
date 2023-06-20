@@ -54,7 +54,7 @@
 /* Fill in packet header field offsets for inline functions */
 
 const _odp_packet_inline_offset_t _odp_packet_inline ODP_ALIGNED_CACHE = {
-	.mb               = offsetof(odp_packet_hdr_t, event_hdr.mb),
+	.mb               = offsetof(odp_packet_hdr_t, mb),
 	.pool             = offsetof(odp_packet_hdr_t, event_hdr.pool),
 	.input            = offsetof(odp_packet_hdr_t, input),
 	.user_ptr         = offsetof(odp_packet_hdr_t, user_ptr),
@@ -68,14 +68,14 @@ const _odp_packet_inline_offset_t _odp_packet_inline ODP_ALIGNED_CACHE = {
 	.cls_mark         = offsetof(odp_packet_hdr_t, cls_mark),
 	.ipsec_ctx        = offsetof(odp_packet_hdr_t, ipsec_ctx),
 	.crypto_op        = offsetof(odp_packet_hdr_t, crypto_op_result),
-	.buf_addr         = offsetof(odp_packet_hdr_t, event_hdr.mb.buf_addr),
-	.data             = offsetof(odp_packet_hdr_t, event_hdr.mb.data_off),
-	.pkt_len          = offsetof(odp_packet_hdr_t, event_hdr.mb.pkt_len),
-	.seg_len          = offsetof(odp_packet_hdr_t, event_hdr.mb.data_len),
-	.nb_segs          = offsetof(odp_packet_hdr_t, event_hdr.mb.nb_segs),
+	.buf_addr         = offsetof(odp_packet_hdr_t, mb.buf_addr),
+	.data             = offsetof(odp_packet_hdr_t, mb.data_off),
+	.pkt_len          = offsetof(odp_packet_hdr_t, mb.pkt_len),
+	.seg_len          = offsetof(odp_packet_hdr_t, mb.data_len),
+	.nb_segs          = offsetof(odp_packet_hdr_t, mb.nb_segs),
 	.user_area        = offsetof(odp_packet_hdr_t, uarea_addr),
-	.rss              = offsetof(odp_packet_hdr_t, event_hdr.mb.hash.rss),
-	.ol_flags         = offsetof(odp_packet_hdr_t, event_hdr.mb.ol_flags),
+	.rss              = offsetof(odp_packet_hdr_t, mb.hash.rss),
+	.ol_flags         = offsetof(odp_packet_hdr_t, mb.ol_flags),
 	.rss_flag         = RTE_MBUF_F_RX_RSS_HASH
 };
 
@@ -132,7 +132,7 @@ static inline int num_segments(uint32_t len, uint32_t seg_len)
 static inline int packet_reset(odp_packet_t pkt, uint32_t len)
 {
 	odp_packet_hdr_t *const pkt_hdr = packet_hdr(pkt);
-	struct rte_mbuf *ms, *mb = &pkt_hdr->event_hdr.mb;
+	struct rte_mbuf *ms, *mb = &pkt_hdr->mb;
 	uint8_t nb_segs = 0;
 	int32_t lenleft = len;
 
@@ -354,7 +354,7 @@ int odp_event_filter_packet(const odp_event_t event[],
 
 void *odp_packet_tail(odp_packet_t pkt)
 {
-	struct rte_mbuf *mb = &(packet_hdr(pkt)->event_hdr.mb);
+	struct rte_mbuf *mb = &(packet_hdr(pkt)->mb);
 
 	mb = rte_pktmbuf_lastseg(mb);
 	return (void *)(rte_pktmbuf_mtod(mb, char *) + mb->data_len);
@@ -362,7 +362,7 @@ void *odp_packet_tail(odp_packet_t pkt)
 
 void *odp_packet_push_head(odp_packet_t pkt, uint32_t len)
 {
-	struct rte_mbuf *mb = &(packet_hdr(pkt)->event_hdr.mb);
+	struct rte_mbuf *mb = &(packet_hdr(pkt)->mb);
 
 	return (void *)rte_pktmbuf_prepend(mb, len);
 }
@@ -378,7 +378,7 @@ static void _copy_head_metadata(struct rte_mbuf *newhead,
 int odp_packet_extend_head(odp_packet_t *pkt, uint32_t len, void **data_ptr,
 			   uint32_t *seg_len)
 {
-	struct rte_mbuf *mb = &(packet_hdr(*pkt)->event_hdr.mb);
+	struct rte_mbuf *mb = &(packet_hdr(*pkt)->mb);
 	int addheadsize = len - rte_pktmbuf_headroom(mb);
 
 	if (addheadsize > 0) {
@@ -482,7 +482,7 @@ int odp_packet_trunc_head(odp_packet_t *pkt, uint32_t len, void **data_ptr,
 
 void *odp_packet_push_tail(odp_packet_t pkt, uint32_t len)
 {
-	struct rte_mbuf *mb = &(packet_hdr(pkt)->event_hdr.mb);
+	struct rte_mbuf *mb = &(packet_hdr(pkt)->mb);
 
 	return (void *)rte_pktmbuf_append(mb, len);
 }
@@ -490,7 +490,7 @@ void *odp_packet_push_tail(odp_packet_t pkt, uint32_t len)
 int odp_packet_extend_tail(odp_packet_t *pkt, uint32_t len, void **data_ptr,
 			   uint32_t *seg_len)
 {
-	struct rte_mbuf *mb = &(packet_hdr(*pkt)->event_hdr.mb);
+	struct rte_mbuf *mb = &(packet_hdr(*pkt)->mb);
 	int newtailsize = len - odp_packet_tailroom(*pkt);
 	uint32_t old_pkt_len = odp_packet_len(*pkt);
 
@@ -1041,7 +1041,7 @@ void odp_packet_print(odp_packet_t pkt)
 	len += _odp_snprint(&str[len], n - len,
 			    "  l4_offset      %" PRIu32 "\n", hdr->p.l4_offset);
 	len += _odp_snprint(&str[len], n - len,
-			    "  frame_len      %" PRIu32 "\n", hdr->event_hdr.mb.pkt_len);
+			    "  frame_len      %" PRIu32 "\n", hdr->mb.pkt_len);
 	len += _odp_snprint(&str[len], n - len,
 			    "  input          %" PRIu64 "\n", odp_pktio_to_u64(hdr->input));
 	len += _odp_snprint(&str[len], n - len,
@@ -1089,7 +1089,7 @@ void odp_packet_print_data(odp_packet_t pkt, uint32_t offset,
 	len += _odp_snprint(&str[len], n - len,
 			    "  buf index      %" PRIu32 "\n", hdr->event_hdr.index);
 	len += _odp_snprint(&str[len], n - len,
-			    "  segcount       %" PRIu8 "\n", hdr->event_hdr.mb.nb_segs);
+			    "  segcount       %" PRIu8 "\n", hdr->mb.nb_segs);
 	len += _odp_snprint(&str[len], n - len,
 			    "  data len       %" PRIu32 "\n", data_len);
 	len += _odp_snprint(&str[len], n - len,
@@ -1528,7 +1528,7 @@ int odp_packet_parse(odp_packet_t pkt, uint32_t offset,
 	 * packet data range. Copy enough data to a temporary buffer for
 	 * parsing if necessary.
 	 */
-	if (odp_unlikely(pkt_hdr->event_hdr.mb.nb_segs > 1) &&
+	if (odp_unlikely(pkt_hdr->mb.nb_segs > 1) &&
 	    odp_unlikely(seg_len < min_seglen)) {
 		seg_len = min_seglen;
 		if (seg_len > packet_len - offset)
@@ -1892,15 +1892,15 @@ odp_packet_t odp_packet_reassemble(odp_pool_t pool_hdl,
 		if (i < num - 1)
 			next_seg = (odp_packet_hdr_t *)(uintptr_t)pkt_buf[i + 1];
 
-		data_len += cur_seg->event_hdr.mb.data_len;
+		data_len += cur_seg->mb.data_len;
 		mb = (struct rte_mbuf *)(uintptr_t)cur_seg;
 		mb->next = (struct rte_mbuf *)next_seg;
 		cur_seg = next_seg;
 	}
 
-	pkt_hdr->event_hdr.mb.nb_segs = num;
-	pkt_hdr->event_hdr.mb.pkt_len = data_len;
-	pkt_hdr->event_hdr.mb.data_off = headroom;
+	pkt_hdr->mb.nb_segs = num;
+	pkt_hdr->mb.pkt_len = data_len;
+	pkt_hdr->mb.data_off = headroom;
 
 	/* Reset metadata */
 	pkt_hdr->subtype = ODP_EVENT_PACKET_BASIC;

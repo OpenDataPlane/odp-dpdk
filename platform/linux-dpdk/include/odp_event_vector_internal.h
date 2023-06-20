@@ -1,4 +1,4 @@
-/* Copyright (c) 2020-2022, Nokia
+/* Copyright (c) 2020-2023, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -27,8 +27,11 @@
  * Internal event vector header
  */
 typedef struct ODP_ALIGNED_CACHE odp_event_vector_hdr_t {
-	/* Common event header */
-	_odp_event_hdr_t event_hdr;
+	/* Underlying DPDK rte_mbuf */
+	struct rte_mbuf mb;
+
+	/* Common internal header */
+	_odp_event_hdr_int_t event_hdr;
 
 	/* User area pointer */
 	void *uarea_addr;
@@ -50,6 +53,14 @@ typedef struct ODP_ALIGNED_CACHE odp_event_vector_hdr_t {
 static inline odp_event_vector_hdr_t *_odp_packet_vector_hdr(odp_packet_vector_t pktv)
 {
 	return (odp_event_vector_hdr_t *)(uintptr_t)pktv;
+}
+
+/**
+ * Return the event header
+ */
+static inline _odp_event_hdr_t *_odp_packet_vector_to_event_hdr(odp_packet_vector_t pktv)
+{
+	return (_odp_event_hdr_t *)(uintptr_t)_odp_packet_vector_hdr(pktv);
 }
 
 /**

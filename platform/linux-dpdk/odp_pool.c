@@ -235,10 +235,10 @@ int _odp_event_is_valid(odp_event_t event)
 	if (pool == NULL)
 		return 0;
 
-	if (pool != _odp_pool_entry(event_hdr->pool))
+	if (pool != _odp_pool_entry(event_hdr->hdr.pool))
 		return 0;
 
-	if (event_hdr->index >= pool->rte_mempool->size)
+	if (event_hdr->hdr.index >= pool->rte_mempool->size)
 		return 0;
 
 	return 1;
@@ -612,10 +612,10 @@ static void init_obj_priv_data(struct rte_mempool *mp ODP_UNUSED, void *arg, voi
 		/* No need for headroom in non-packet objects */
 		mb->data_off = 0;
 
-	event_hdr->index = i;
-	event_hdr->pool = _odp_pool_handle(priv_data->pool);
-	event_hdr->type = priv_data->type;
-	event_hdr->event_type = priv_data->event_type;
+	event_hdr->hdr.index = i;
+	event_hdr->hdr.pool = _odp_pool_handle(priv_data->pool);
+	event_hdr->hdr.type = priv_data->type;
+	event_hdr->hdr.event_type = priv_data->event_type;
 
 	switch (priv_data->type) {
 	case ODP_POOL_BUFFER:
@@ -1286,10 +1286,10 @@ static void init_ext_obj(struct rte_mempool *mp, void *arg, void *mbuf, unsigned
 	rte_mbuf_refcnt_set(mb, 1);
 	mb->next = NULL;
 	/* Save index, might be useful for debugging purposes */
-	event_hdr->index = i;
-	event_hdr->pool = _odp_pool_handle(mb_ctor_arg->pool);
-	event_hdr->type = mb_ctor_arg->type;
-	event_hdr->event_type = mb_ctor_arg->event_type;
+	event_hdr->hdr.index = i;
+	event_hdr->hdr.pool = _odp_pool_handle(mb_ctor_arg->pool);
+	event_hdr->hdr.type = mb_ctor_arg->type;
+	event_hdr->hdr.event_type = mb_ctor_arg->event_type;
 
 	switch (mb_ctor_arg->type) {
 	case ODP_POOL_BUFFER:
