@@ -58,7 +58,7 @@
 #define POOL_NAME_FORMAT "%" PRIu64 "-%d-%s"
 
 /* Define a practical limit for contiguous memory allocations */
-#define MAX_SIZE   (10 * 1024 * 1024)
+#define MAX_SIZE   (CONFIG_PACKET_SEG_SIZE - ODP_CONFIG_BUFFER_ALIGN_MIN)
 
 /* Maximum packet user area size */
 #define MAX_UAREA_SIZE 2048
