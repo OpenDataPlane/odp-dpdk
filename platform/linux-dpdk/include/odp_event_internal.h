@@ -46,6 +46,9 @@ typedef struct _odp_event_hdr_int_t {
 	/* Event type. Maybe different than pool type (crypto compl event) */
 	int8_t    event_type;
 
+	/* Event subtype */
+	int8_t    subtype;
+
 	/* Event flow id */
 	uint8_t   flow_id;
 
