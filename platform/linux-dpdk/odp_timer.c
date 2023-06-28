@@ -1191,14 +1191,19 @@ int odp_timer_cancel(odp_timer_t timer_hdl, odp_event_t *tmo_ev)
 	odp_ticketlock_lock(&timer->lock);
 
 	if (odp_unlikely(timer->state < TICKING)) {
+		int state = timer->state;
+
 		odp_ticketlock_unlock(&timer->lock);
-		return -1;
+
+		if (state == EXPIRED)
+			return ODP_TIMER_TOO_NEAR;
+		return ODP_TIMER_FAIL;
 	}
 
 	if (odp_unlikely(timer_global->ops.stop(&timer->rte_timer))) {
 		/* Another core runs timer callback function. */
 		odp_ticketlock_unlock(&timer->lock);
-		return -1;
+		return ODP_TIMER_TOO_NEAR;
 	}
 
 	*tmo_ev = timer->tmo_event;
@@ -1206,7 +1211,7 @@ int odp_timer_cancel(odp_timer_t timer_hdl, odp_event_t *tmo_ev)
 	timer->state = NOT_TICKING;
 
 	odp_ticketlock_unlock(&timer->lock);
-	return 0;
+	return ODP_TIMER_SUCCESS;
 }
 
 int odp_timer_periodic_cancel(odp_timer_t timer_hdl)
