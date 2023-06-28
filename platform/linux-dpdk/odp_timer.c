@@ -807,6 +807,35 @@ uint64_t odp_timer_current_tick(odp_timer_pool_t tp)
 	return rte_get_timer_cycles();
 }
 
+int odp_timer_sample_ticks(odp_timer_pool_t tp[], uint64_t tick[], uint64_t clk_count[], int num)
+{
+	uint64_t now;
+	int i;
+
+	if (num <= 0 || num > MAX_TIMER_POOLS) {
+		_ODP_ERR("Bad number of timer pools: %i\n", num);
+		return -1;
+	}
+
+	for (i = 0; i < num; i++) {
+		if (odp_unlikely(tp[i] == ODP_TIMER_POOL_INVALID)) {
+			_ODP_ERR("Invalid timer pool\n");
+			return -1;
+		}
+	}
+
+	now = rte_get_timer_cycles();
+
+	for (i = 0; i < num; i++) {
+		tick[i] = now;
+
+		if (clk_count)
+			clk_count[i] = 0;
+	}
+
+	return 0;
+}
+
 int odp_timer_pool_info(odp_timer_pool_t tp,
 			odp_timer_pool_info_t *info)
 {
