@@ -1,5 +1,5 @@
 /* Copyright (c) 2018, Linaro Limited
- * Copyright (c) 2020-2022, Nokia
+ * Copyright (c) 2020-2023, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -8,12 +8,13 @@
 #ifndef ODP_PLAT_TIME_INLINES_H_
 #define ODP_PLAT_TIME_INLINES_H_
 
-#include <stdint.h>
-
 #include <odp/api/align.h>
 #include <odp/api/hints.h>
+#include <odp/api/time_types.h>
 
 #include <odp/api/abi/cpu_time.h>
+
+#include <stdint.h>
 
 /** @cond _ODP_HIDE_FROM_DOXYGEN_ */
 

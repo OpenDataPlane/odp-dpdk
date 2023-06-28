@@ -22,7 +22,7 @@ extern "C" {
 #include <odp/api/hints.h>
 #include <odp/api/packet_types.h>
 #include <odp/api/pool_types.h>
-#include <odp/api/time.h>
+#include <odp/api/time_types.h>
 
 #include <odp/api/plat/debug_inlines.h>
 #include <odp/api/plat/event_validation_external.h>
