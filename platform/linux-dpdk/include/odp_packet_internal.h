@@ -124,8 +124,10 @@ typedef struct ODP_ALIGNED_CACHE odp_packet_hdr_t {
 	/* Common internal header */
 	_odp_event_hdr_int_t event_hdr;
 
+	/* Parser metadata */
 	packet_parser_t p;
 
+	/* Input interface */
 	odp_pktio_t input;
 
 	/* Timestamp value */
@@ -161,9 +163,6 @@ typedef struct ODP_ALIGNED_CACHE odp_packet_hdr_t {
 
 	/* LSO profile index */
 	uint8_t lso_profile_idx;
-
-	/* Event subtype */
-	int8_t subtype;
 
 	union {
 		/* Result for crypto packet op */
@@ -215,7 +214,7 @@ static inline struct rte_mbuf *pkt_to_mbuf(odp_packet_t  pkt)
 
 static inline void packet_subtype_set(odp_packet_t pkt, int ev)
 {
-	packet_hdr(pkt)->subtype = ev;
+	packet_hdr(pkt)->event_hdr.subtype = ev;
 }
 
 /**
@@ -231,8 +230,8 @@ static inline void packet_init(odp_packet_hdr_t *pkt_hdr, odp_pktio_t input)
 	pkt_hdr->p.l3_offset        = ODP_PACKET_OFFSET_INVALID;
 	pkt_hdr->p.l4_offset        = ODP_PACKET_OFFSET_INVALID;
 
-	if (odp_unlikely(pkt_hdr->subtype != ODP_EVENT_PACKET_BASIC))
-		pkt_hdr->subtype = ODP_EVENT_PACKET_BASIC;
+	if (odp_unlikely(pkt_hdr->event_hdr.subtype != ODP_EVENT_PACKET_BASIC))
+		pkt_hdr->event_hdr.subtype = ODP_EVENT_PACKET_BASIC;
 
 	pkt_hdr->input = input;
 }
@@ -277,10 +276,10 @@ static inline void _odp_packet_copy_md(odp_packet_hdr_t *dst_hdr,
 				       odp_packet_hdr_t *src_hdr,
 				       odp_bool_t uarea_copy)
 {
-	const int8_t subtype = src_hdr->subtype;
+	const int8_t subtype = src_hdr->event_hdr.subtype;
 
 	dst_hdr->input = src_hdr->input;
-	dst_hdr->subtype = subtype;
+	dst_hdr->event_hdr.subtype = subtype;
 	dst_hdr->dst_queue = src_hdr->dst_queue;
 	dst_hdr->cos = src_hdr->cos;
 	dst_hdr->cls_mark = src_hdr->cls_mark;
