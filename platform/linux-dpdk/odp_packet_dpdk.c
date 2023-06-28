@@ -943,7 +943,7 @@ static inline void prefetch_pkt(odp_packet_t pkt)
 {
 	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
 
-	odp_prefetch(&pkt_hdr->p);
+	odp_prefetch_store(&pkt_hdr->p);
 }
 
 /**
@@ -978,8 +978,6 @@ static inline int input_pkts_minimal(pktio_entry_t *pktio_entry, odp_packet_t pk
 		packet_init(pkt_hdr, input);
 
 		packet_set_ts(pkt_hdr, ts);
-
-		odp_prefetch(rte_pktmbuf_mtod(pkt_to_mbuf(pkt), char *));
 	}
 
 	return num;
