@@ -1018,6 +1018,37 @@ int odp_pool_stats(odp_pool_t pool_hdl, odp_pool_stats_t *stats)
 	return 0;
 }
 
+int odp_pool_stats_selected(odp_pool_t pool_hdl, odp_pool_stats_selected_t *stats,
+			    const odp_pool_stats_opt_t *opt)
+{
+	pool_t *pool;
+
+	if (odp_unlikely(pool_hdl == ODP_POOL_INVALID)) {
+		_ODP_ERR("Invalid pool handle\n");
+		return -1;
+	}
+	if (odp_unlikely(stats == NULL)) {
+		_ODP_ERR("Output buffer NULL\n");
+		return -1;
+	}
+	if (odp_unlikely(opt == NULL)) {
+		_ODP_ERR("Pool counters NULL\n");
+		return -1;
+	}
+
+	pool = _odp_pool_entry(pool_hdl);
+
+	if (odp_unlikely(opt->all & ~pool->params.stats.all)) {
+		_ODP_ERR("Trying to read disabled counter\n");
+		return -1;
+	}
+
+	if (opt->bit.available)
+		stats->available = rte_mempool_avail_count(pool->rte_mempool);
+
+	return 0;
+}
+
 int odp_pool_stats_reset(odp_pool_t pool_hdl ODP_UNUSED)
 {
 	return 0;
