@@ -230,9 +230,7 @@ static inline void packet_init(odp_packet_hdr_t *pkt_hdr, odp_pktio_t input)
 	pkt_hdr->p.l3_offset        = ODP_PACKET_OFFSET_INVALID;
 	pkt_hdr->p.l4_offset        = ODP_PACKET_OFFSET_INVALID;
 
-	if (odp_unlikely(pkt_hdr->event_hdr.subtype != ODP_EVENT_PACKET_BASIC))
-		pkt_hdr->event_hdr.subtype = ODP_EVENT_PACKET_BASIC;
-
+	pkt_hdr->event_hdr.subtype = ODP_EVENT_PACKET_BASIC;
 	pkt_hdr->input = input;
 }
 
