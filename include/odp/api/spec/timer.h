@@ -75,11 +75,14 @@ int odp_timer_res_capability(odp_timer_clk_src_t clk_src,
  * frequency multiplier and the minimum timeout resolution. If there is no requirement for timeout
  * resolution, it is set to zero.
  *
- * A successful call overwrites all 'capa' fields with the resulting values. Return value
- * is 1 when timer capability meets or exceeds all requested values. The call returns 0, when
- * the requested base frequency is not supported exactly, but capability meets or exceeds all other
- * requested values. In this case, the call overwrites 'base_freq_hz' with the closest supported
- * frequency.
+ * When the call returns success, 'capa' fields are overwritten in following ways. On return value
+ * of 1, timer supports the requested base frequency exactly, and meets or exceeds other requested
+ * values. The base frequency value is not modified, but other 'capa' fields are updated with
+ * resulting maximum capabilities.
+ *
+ * When the call returns 0, the requested base frequency is not supported exactly, but timer
+ * capabilities meet or exceed all other requested values. In this case, the call overwrites
+ * 'base_freq_hz' with the closest supported frequency and updates other 'capa' fields accordingly.
  *
  * Failure is returned when the requirements are not supported or the call fails otherwise.
  *
@@ -115,8 +118,11 @@ void odp_timer_pool_param_init(odp_timer_pool_param_t *param);
  * to initialize timer pool parameters into their default values.
  *
  * Periodic timer expiration frequency is a multiple of the timer pool base frequency
- * (odp_timer_pool_param_t::base_freq_hz). Use odp_timer_periodic_capability() to check
- * which base frequencies and multipliers are supported.
+ * (odp_timer_pool_param_t::base_freq_hz). Depending on implementation, the base frequency may need
+ * to be selected carefully with respect to the timer pool source clock frequency. Use
+ * odp_timer_periodic_capability() to check which base frequencies and multipliers are supported.
+ *
+ * The call returns failure when requested parameter values are not supported.
  *
  * @param name       Name of the timer pool or NULL. Maximum string length is
  *                   ODP_TIMER_POOL_NAME_LEN.
@@ -125,8 +131,7 @@ void odp_timer_pool_param_init(odp_timer_pool_param_t *param);
  * @return Timer pool handle on success
  * @retval ODP_TIMER_POOL_INVALID on failure
  */
-odp_timer_pool_t odp_timer_pool_create(const char *name,
-				       const odp_timer_pool_param_t *params);
+odp_timer_pool_t odp_timer_pool_create(const char *name, const odp_timer_pool_param_t *params);
 
 /**
  * Start a timer pool
@@ -184,6 +189,28 @@ uint64_t odp_timer_ns_to_tick(odp_timer_pool_t timer_pool, uint64_t ns);
  * @see odp_timer_tick_info_t
  */
 uint64_t odp_timer_current_tick(odp_timer_pool_t timer_pool);
+
+/**
+ * Sample tick values of timer pools
+ *
+ * Reads timer pool tick values simultaneously (or closely back-to-back) from all requested timer
+ * pools, and outputs those on success. Optionally, outputs corresponding source clock (HW) counter
+ * values, which are implementation specific and may be used for debugging. When a timer pool does
+ * not support reading of the source clock value, zero is written instead. Values are written into
+ * the output arrays in the same order which timer pools were defined. Nothing is written on
+ * failure.
+ *
+ * @param      timer_pool  Timer pools to sample
+ * @param[out] tick        Tick value array for output (one element per timer pool)
+ * @param[out] clk_count   Source clock counter value array for output (one element per
+ *                         timer pool), or NULL when counter values are not requested.
+ * @param      num         Number of timer pools to sample
+ *
+ * @retval  0 All requested timer pools sampled successfully
+ * @retval -1 Failure
+ */
+int odp_timer_sample_ticks(odp_timer_pool_t timer_pool[], uint64_t tick[], uint64_t clk_count[],
+			   int num);
 
 /**
  * Query timer pool configuration and current state
@@ -422,19 +449,22 @@ int ODP_DEPRECATE(odp_timer_set_rel)(odp_timer_t timer, uint64_t rel_tick, odp_e
 /**
  * Cancel a timer
  *
- * Cancels a previously started single shot timer. A successful operation prevents timer
- * expiration and returns the timeout event back to application. Application may use or free
- * the event normally.
+ * Cancels a previously started single shot timer. A successful operation (#ODP_TIMER_SUCCESS)
+ * prevents timer expiration and returns the timeout event back to application. Application may
+ * use or free the event normally.
  *
  * When the timer is close to expire or has expired already, the call may not be able cancel it
- * anymore. In this case, the call returns failure and the timeout is delivered to the destination
- * queue.
+ * anymore. In this case, the call returns #ODP_TIMER_TOO_NEAR and the timeout is delivered to
+ * the destination queue.
  *
  * @param      timer  Timer
- * @param[out] tmo_ev Pointer to an event handle for output
+ * @param[out] tmo_ev Pointer to an event handle for output. Event handle is written only
+ *                    on success.
  *
- * @retval 0  Success. Active timer cancelled, timeout returned in 'tmo_ev'
- * @retval <0 Failure. Timer inactive or already expired.
+ * @retval ODP_TIMER_SUCCESS  Timer was cancelled successfully. Timeout event returned in 'tmo_ev'.
+ * @retval ODP_TIMER_TOO_NEAR Timer cannot be cancelled. Timer has expired already, or cannot be
+ *                            cancelled due to close expiration time.
+ * @retval ODP_TIMER_FAIL     Other failure.
  */
 int odp_timer_cancel(odp_timer_t timer, odp_event_t *tmo_ev);
 

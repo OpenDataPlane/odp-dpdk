@@ -1,5 +1,5 @@
 /* Copyright (c) 2013-2018, Linaro Limited
- * Copyright (c) 2021, Nokia
+ * Copyright (c) 2021-2023, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier: BSD-3-Clause
@@ -357,26 +357,26 @@ typedef struct odp_packet_parse_result_t {
 	/** Parse result flags */
 	odp_packet_parse_result_flag_t flag;
 
-	/** @see odp_packet_len() */
+	/** See odp_packet_len() */
 	uint32_t packet_len;
 
-	/** @see odp_packet_l2_offset() */
+	/** See odp_packet_l2_offset() */
 	uint32_t l2_offset;
-	/** @see odp_packet_l3_offset() */
+	/** See odp_packet_l3_offset() */
 	uint32_t l3_offset;
-	/** @see odp_packet_l4_offset() */
+	/** See odp_packet_l4_offset() */
 	uint32_t l4_offset;
 
-	/** @see odp_packet_l3_chksum_status() */
+	/** See odp_packet_l3_chksum_status() */
 	odp_packet_chksum_status_t l3_chksum_status;
-	/** @see odp_packet_l4_chksum_status() */
+	/** See odp_packet_l4_chksum_status() */
 	odp_packet_chksum_status_t l4_chksum_status;
 
-	/** @see odp_packet_l2_type() */
+	/** See odp_packet_l2_type() */
 	odp_proto_l2_type_t l2_type;
-	/** @see odp_packet_l3_type() */
+	/** See odp_packet_l3_type() */
 	odp_proto_l3_type_t l3_type;
-	/** @see odp_packet_l4_type() */
+	/** See odp_packet_l4_type() */
 	odp_proto_l4_type_t l4_type;
 
 } odp_packet_parse_result_t;
@@ -418,32 +418,85 @@ typedef struct odp_packet_lso_opt_t {
 } odp_packet_lso_opt_t;
 
 /**
- * Packet Tx completion mode
+ * Packet transmit completion mode
  */
 typedef enum odp_packet_tx_compl_mode_t {
-	/** Packet Tx completion event is disabled
+	/** Disable packet transmit completion */
+	ODP_PACKET_TX_COMPL_DISABLED = 0,
+
+	/**
+	 * Enable packet transmit completion event
 	 *
-	 * When mode is disabled, all other fields of odp_packet_tx_compl_opt_t are ignored.
+	 * A packet transmit completion event is sent for both transmitted and dropped packets.
 	 */
-	ODP_PACKET_TX_COMPL_DISABLED,
-	/** Packet Tx completion event is sent for all packets (both transmitted and dropped) */
-	ODP_PACKET_TX_COMPL_ALL,
+	ODP_PACKET_TX_COMPL_EVENT,
+
+	/**
+	 * Enable packet transmit completion check through polling
+	 *
+	 * Packet transmit completion status is updated for both transmitted and dropped packets.
+	 */
+	ODP_PACKET_TX_COMPL_POLL,
+
 } odp_packet_tx_compl_mode_t;
 
 /**
- * Tx completion request options
+ * For backwards compatibility, ODP_PACKET_TX_COMPL_ALL is synonym of ODP_PACKET_TX_COMPL_EVENT.
+ *
+ * @deprecated Use #ODP_PACKET_TX_COMPL_EVENT instead.
+ */
+#define ODP_PACKET_TX_COMPL_ALL ODP_PACKET_TX_COMPL_EVENT
+
+/**
+ * Packet transmit completion request options
  */
 typedef struct odp_packet_tx_compl_opt_t {
-	/** Queue handle
+	/**
+	 * Packet transmit completion mode
 	 *
-	 * Tx completion event will be posted to ODP queue identified by this handle.
+	 * When completion mode is #ODP_PACKET_TX_COMPL_DISABLED, all other fields of this struct
+	 * are ignored.
 	 */
-	odp_queue_t queue;
-
-	/** Packet Tx completion event mode */
 	odp_packet_tx_compl_mode_t mode;
 
+	/** Union of packet transmit completion destinations */
+	union {
+		/**
+		 * Destination queue
+		 *
+		 * When completion mode is #ODP_PACKET_TX_COMPL_EVENT, a packet transmit completion
+		 * event will be sent to this queue.
+		 */
+		odp_queue_t queue;
+
+		/**
+		 * Completion identifier
+		 *
+		 * When completion mode is #ODP_PACKET_TX_COMPL_POLL, a packet transmit completion
+		 * status will be reported through this completion identifier. Application selects
+		 * a value between 0 and tx_compl.max_compl_id in packet IO configuration options
+		 * (see odp_pktio_config_t). Only single packet may be transmitted with the same
+		 * identifier value at a time (through the same packet IO interface). A value may
+		 * be reused for the next transmit only after transmit of the previous packet is
+		 * complete. Multiple packets may have the same identifier value set as long as
+		 * those packets are not transmitted simultaneously.
+		 */
+		uint32_t compl_id;
+	};
+
 } odp_packet_tx_compl_opt_t;
+
+/**
+ * Packet free control option
+ */
+typedef enum odp_packet_free_ctrl_t {
+	/** Packet free control disabled */
+	ODP_PACKET_FREE_CTRL_DISABLED = 0,
+
+	/** Don't free packet after processing it */
+	ODP_PACKET_FREE_CTRL_DONT_FREE,
+
+} odp_packet_free_ctrl_t;
 
 /**
  * Packet proto stats options

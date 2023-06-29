@@ -1,5 +1,5 @@
 /* Copyright (c) 2013-2018, Linaro Limited
- * Copyright (c) 2019-2022, Nokia
+ * Copyright (c) 2019-2023, Nokia
  *
  * All rights reserved.
  *
@@ -102,7 +102,15 @@ typedef struct {
  * Periodic timer capability
  */
 typedef struct {
-	/** Periodic timer pool base frequency in hertz */
+	/**
+	 * Periodic timer pool base frequency in hertz
+	 *
+	 * Base frequency is represented as a fractional number where the fraction part is always
+	 * less than one. In other words, the integer part specifies whole hertz whereas
+	 * the fraction part specifies parts of a hertz (if any). The fraction part does not
+	 * need to be reduced to its lowest terms - e.g. 100.5 Hz may be represented as 100 1/2 Hz,
+	 * 100 5/10 Hz, or 100 Hz with some other equivalent fraction part.
+	 */
 	odp_fract_u64_t base_freq_hz;
 
 	/** Maximum base frequency multiplier */
@@ -358,7 +366,9 @@ typedef struct {
 		 *  Use odp_timer_periodic_capability() to check base frequency support,
 		 *  and resulting max_multiplier and resolution values.
 		 *
-		 *  The default value is zero.
+		 *  Fraction part of the value is always less than one, see
+		 *  odp_timer_periodic_capability_t::base_freq_hz for details. The default value
+		 *  is zero.
 		 *
 		 *  An example with two timer frequencies:
 		 *       base_freq_hz.integer = 33333, .numer = 1, .denom = 3
@@ -477,9 +487,9 @@ typedef struct odp_timer_periodic_start_t {
 	/** First expiration time
 	 *
 	 *  The first expiration time in absolute timer ticks. When zero, the first expiration time
-	 *  is one period after the current time. After the first expiration, timer expiration
-	 *  continues with the defined frequency. The tick value must be within one timer period
-	 *  from the current time.
+	 *  is one period after the current time, or as close to that as the implementation can
+	 *  achieve. After the first expiration, timer expiration continues with the defined
+	 *  frequency. The tick value must be less than one timer period after the current time.
 	 */
 	uint64_t first_tick;
 
@@ -505,24 +515,49 @@ typedef struct odp_timer_periodic_start_t {
 } odp_timer_periodic_start_t;
 
 /**
- * Return values of timer set calls.
+ * Return values for timer start, restart and cancel calls
  */
 typedef enum {
-	/** Timer set operation succeeded */
+	/**
+	 * Timer operation succeeded
+	 *
+	 * Timer start, restart and cancel operations may return this value.
+	 */
 	ODP_TIMER_SUCCESS = 0,
 
-	/** Timer set operation failed because expiration time is too near to
-	 *  the current time. */
+	/**
+	 * Timer operation failed, too near to the current time
+	 *
+	 * The operation failed because the requested time/timer has expired already, or is too
+	 * near to the current time. Timer start, restart and cancel operations may return this
+	 * value.
+	 */
 	ODP_TIMER_TOO_NEAR = -1,
 
-	/** Timer set operation failed because expiration time is too far from
-	 *  the current time. */
+	/**
+	 * Timer operation failed, too far from the current time
+	 *
+	 * The operation failed because the requested time is too far from the current time.
+	 * Only timer start and restart operations may return this value.
+	 */
 	ODP_TIMER_TOO_FAR = -2,
 
-	/** Timer set operation failed */
+	/**
+	 * Timer operation failed
+	 *
+	 * The operation failed due to some other reason than timing of the request. Timer start,
+	 * restart and cancel operations may return this value.
+	 */
 	ODP_TIMER_FAIL = -3
 
-} odp_timer_set_t;
+} odp_timer_retval_t;
+
+/**
+ * For backwards compatibility, odp_timer_set_t is synonym of odp_timer_retval_t
+ *
+ * @deprecated Use odp_timer_retval_t instead.
+ */
+typedef odp_timer_retval_t odp_timer_set_t;
 
 #if ODP_DEPRECATED_API
 /**
