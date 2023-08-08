@@ -92,7 +92,7 @@ jobs:
         run: find . -name config.log -exec cat {} \;
 
   Build_gcc_u23:
-    if: ${{ github.repository == 'OpenDataPlane/odp' }}
+    if: ${{ github.repository == 'OpenDataPlane/odp-dpdk' }}
     runs-on: [self-hosted, ARM64]
     env:
       OS: ubuntu_23.04
