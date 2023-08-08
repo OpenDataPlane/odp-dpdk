@@ -77,6 +77,9 @@ typedef struct odp_dma_pool_capability_t {
 	/** Maximum number of DMA completion events in a pool */
 	uint32_t max_num;
 
+	/** Maximum user area size in bytes */
+	uint32_t max_uarea_size;
+
 	/** Minimum size of thread local cache */
 	uint32_t min_cache_size;
 
@@ -93,6 +96,13 @@ typedef struct odp_dma_pool_param_t {
 	 *
 	 *  Maximum value is defined by 'max_num' pool capability */
 	uint32_t num;
+
+	/** User area size in bytes
+	 *
+	 *  Maximum value is defined by 'max_uarea_size' pool capability. Specify as 0 if no user
+	 *  area is needed. The default value is 0.
+	 */
+	uint32_t uarea_size;
 
 	/** Maximum number of events cached locally per thread
 	 *
@@ -511,9 +521,8 @@ typedef struct odp_dma_compl_param_t {
 
 	/** User context pointer
 	 *
-	 *  User defined context pointer which is copied to transfer results
-	 *  (@see odp_dma_result_t). The value does not need to represent a valid address
-	 *  (any intptr_t value is allowed).
+	 *  User defined context pointer which is copied to transfer results (odp_dma_result_t). The
+	 *  value does not need to represent a valid address (any intptr_t value is allowed).
 	 *
 	 *  The default value is NULL.
 	 */
@@ -533,7 +542,7 @@ typedef struct odp_dma_result_t {
 	/** User context pointer
 	 *
 	 *  User defined context pointer value from transfer completion parameters
-	 *  (@see odp_dma_compl_param_t). The default value is NULL.
+	 *  (odp_dma_compl_param_t). The default value is NULL.
 	 */
 	void *user_ptr;
 

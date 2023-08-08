@@ -1,5 +1,5 @@
 /* Copyright (c) 2013-2018, Linaro Limited
- * Copyright (c) 2019-2022, Nokia
+ * Copyright (c) 2019-2023, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -610,7 +610,7 @@ int odp_pktio_config(odp_pktio_t hdl, const odp_pktio_config_t *config)
 	entry->config = *config;
 
 	entry->enabled.tx_ts = config->pktout.bit.ts_ena;
-	entry->enabled.tx_compl = config->pktout.bit.tx_compl_ena;
+	entry->enabled.tx_compl = (config->pktout.bit.tx_compl_ena || config->tx_compl.mode_event);
 
 	if (entry->enabled.tx_compl)
 		if (configure_tx_event_compl(entry)) {
@@ -647,6 +647,13 @@ int odp_pktio_start(odp_pktio_t hdl)
 		_ODP_ERR("Already started\n");
 		return -1;
 	}
+
+	if (entry->state == PKTIO_STATE_STOP_PENDING) {
+		unlock_entry(entry);
+		_ODP_ERR("Scheduled pktio stop pending\n");
+		return -1;
+	}
+
 	entry->parse_layer = pktio_cls_enabled(entry) ?
 				       ODP_PROTO_LAYER_ALL :
 				       entry->config.parser.layer;
@@ -769,82 +776,6 @@ odp_pktio_t odp_pktio_lookup(const char *name)
 	return hdl;
 }
 
-static void packet_vector_enq_cos(odp_queue_t queue, odp_event_t events[],
-				  uint32_t num, cos_t *cos_hdr)
-{
-	odp_packet_vector_t pktv;
-	odp_pool_t pool = cos_hdr->vector.pool;
-	uint32_t max_size = cos_hdr->vector.max_size;
-	uint32_t num_enq;
-	int num_pktv = (num + max_size - 1) / max_size;
-	int ret;
-	int i;
-	odp_packet_vector_t pktv_tbl[num_pktv];
-	odp_event_t event_tbl[num_pktv];
-
-	for (i = 0; i < num_pktv; i++) {
-		pktv = odp_packet_vector_alloc(pool);
-		if (odp_unlikely(pktv == ODP_PACKET_VECTOR_INVALID))
-			break;
-		pktv_tbl[i] = pktv;
-		event_tbl[i] = odp_packet_vector_to_event(pktv);
-	}
-	if (odp_unlikely(i == 0)) {
-		odp_event_free_multi(events, num);
-		_odp_cos_queue_stats_add(cos_hdr, queue, 0, num);
-		return;
-	}
-	num_pktv = i;
-	num_enq = 0;
-	for (i = 0; i < num_pktv; i++) {
-		odp_packet_t *pkt_tbl;
-		int pktv_size = max_size;
-
-		pktv = pktv_tbl[i];
-
-		if (num_enq + max_size > num)
-			pktv_size = num - num_enq;
-
-		odp_packet_vector_tbl(pktv, &pkt_tbl);
-		odp_packet_from_event_multi(pkt_tbl, &events[num_enq], pktv_size);
-		odp_packet_vector_size_set(pktv, pktv_size);
-		num_enq += pktv_size;
-	}
-
-	ret = odp_queue_enq_multi(queue, event_tbl, num_pktv);
-	if (odp_likely(ret == num_pktv)) {
-		_odp_cos_queue_stats_add(cos_hdr, queue, num_enq, num - num_enq);
-	} else {
-		uint32_t enqueued;
-
-		if (ret < 0)
-			ret = 0;
-		enqueued = max_size * ret;
-		_odp_cos_queue_stats_add(cos_hdr, queue, enqueued, num - enqueued);
-		odp_event_free_multi(&event_tbl[ret], num_pktv - ret);
-	}
-}
-
-static void packet_vector_enq(odp_queue_t queue, odp_event_t events[],
-			      uint32_t num, odp_pool_t pool)
-{
-	odp_packet_vector_t pktv;
-	odp_packet_t *pkt_tbl;
-
-	pktv = odp_packet_vector_alloc(pool);
-	if (odp_unlikely(pktv == ODP_PACKET_VECTOR_INVALID)) {
-		odp_event_free_multi(events, num);
-		return;
-	}
-
-	odp_packet_vector_tbl(pktv, &pkt_tbl);
-	odp_packet_from_event_multi(pkt_tbl, events, num);
-	odp_packet_vector_size_set(pktv, num);
-
-	if (odp_unlikely(odp_queue_enq(queue, odp_packet_vector_to_event(pktv))))
-		odp_event_free(odp_packet_vector_to_event(pktv));
-}
-
 static inline odp_packet_vector_t packet_vector_create(odp_packet_t packets[], uint32_t num,
 						       odp_pool_t pool)
 {
@@ -869,19 +800,9 @@ static inline odp_packet_vector_t packet_vector_create(odp_packet_t packets[], u
 static inline int pktin_recv_buf(pktio_entry_t *entry, int pktin_index,
 				 _odp_event_hdr_t *event_hdrs[], int num)
 {
-	odp_packet_t pkt;
-	odp_packet_t packets[num];
-	odp_packet_hdr_t *pkt_hdr;
+	const odp_bool_t vector_enabled = entry->in_queue[pktin_index].vector.enable;
 	odp_pool_t pool = ODP_POOL_INVALID;
-	_odp_event_hdr_t *event_hdr;
-	int i, pkts, num_rx, num_ev, num_dst;
-	odp_queue_t cur_queue;
-	odp_event_t ev[num];
-	odp_queue_t dst[num];
-	uint16_t cos[num];
-	uint16_t cur_cos = 0;
-	int dst_idx[num];
-	odp_bool_t vector_enabled = entry->in_queue[pktin_index].vector.enable;
+	int num_rx;
 
 	if (vector_enabled) {
 		/* Make sure all packets will fit into a single packet vector */
@@ -890,102 +811,18 @@ static inline int pktin_recv_buf(pktio_entry_t *entry, int pktin_index,
 		pool = entry->in_queue[pktin_index].vector.pool;
 	}
 
-	num_rx = 0;
-	num_dst = 0;
-	num_ev = 0;
+	num_rx = entry->ops->recv(entry, pktin_index, (odp_packet_t *)event_hdrs, num);
 
-	/* Some compilers need this dummy initialization */
-	cur_queue = ODP_QUEUE_INVALID;
+	if (!vector_enabled || num_rx < 2)
+		return num_rx;
 
-	pkts = entry->ops->recv(entry, pktin_index, packets, num);
+	odp_packet_vector_t pktv = packet_vector_create((odp_packet_t *)event_hdrs, num_rx, pool);
 
-	for (i = 0; i < pkts; i++) {
-		pkt = packets[i];
-		pkt_hdr = packet_hdr(pkt);
-		event_hdr = packet_to_event_hdr(pkt);
+	if (odp_unlikely(pktv == ODP_PACKET_VECTOR_INVALID))
+		return 0;
 
-		if (odp_unlikely(pkt_hdr->p.input_flags.dst_queue)) {
-			/* Sort events for enqueue multi operation(s) based on CoS
-			 * and destination queue. */
-			if (odp_unlikely(num_dst == 0)) {
-				num_dst = 1;
-				cur_queue = pkt_hdr->dst_queue;
-				cur_cos = pkt_hdr->cos;
-				dst[0] = cur_queue;
-				cos[0] = cur_cos;
-				dst_idx[0] = 0;
-			}
-
-			ev[num_ev] = odp_packet_to_event(pkt);
-
-			if (cur_queue != pkt_hdr->dst_queue || cur_cos != pkt_hdr->cos) {
-				cur_queue = pkt_hdr->dst_queue;
-				cur_cos = pkt_hdr->cos;
-				dst[num_dst] = cur_queue;
-				cos[num_dst] = cur_cos;
-				dst_idx[num_dst] = num_ev;
-				num_dst++;
-			}
-
-			num_ev++;
-			continue;
-		}
-		event_hdrs[num_rx++] = event_hdr;
-	}
-
-	/* Optimization for the common case */
-	if (odp_likely(num_dst == 0)) {
-		if (!vector_enabled || num_rx < 1)
-			return num_rx;
-
-		/* Create packet vector */
-		odp_packet_vector_t pktv = packet_vector_create((odp_packet_t *)event_hdrs,
-								num_rx, pool);
-
-		if (odp_unlikely(pktv == ODP_PACKET_VECTOR_INVALID))
-			return 0;
-
-		event_hdrs[0] = _odp_packet_vector_to_event_hdr(pktv);
-		return 1;
-	}
-
-	for (i = 0; i < num_dst; i++) {
-		cos_t *cos_hdr = NULL;
-		int num_enq, ret;
-		int idx = dst_idx[i];
-
-		if (i == (num_dst - 1))
-			num_enq = num_ev - idx;
-		else
-			num_enq = dst_idx[i + 1] - idx;
-
-		if (cos[i] != CLS_COS_IDX_NONE) {
-			/* Packets from classifier */
-			cos_hdr = _odp_cos_entry_from_idx(cos[i]);
-
-			if (cos_hdr->vector.enable) {
-				packet_vector_enq_cos(dst[i], &ev[idx], num_enq, cos_hdr);
-				continue;
-			}
-		} else if (vector_enabled) {
-			/* Packets from inline IPsec */
-			packet_vector_enq(dst[i], &ev[idx], num_enq, pool);
-			continue;
-		}
-
-		ret = odp_queue_enq_multi(dst[i], &ev[idx], num_enq);
-
-		if (ret < 0)
-			ret = 0;
-
-		if (ret < num_enq)
-			odp_event_free_multi(&ev[idx + ret], num_enq - ret);
-
-		/* Update CoS statistics */
-		if (cos[i] != CLS_COS_IDX_NONE)
-			_odp_cos_queue_stats_add(cos_hdr, dst[i], ret, num_enq - ret);
-	}
-	return num_rx;
+	event_hdrs[0] = _odp_packet_vector_to_event_hdr(pktv);
+	return 1;
 }
 
 static inline int packet_vector_send(odp_pktout_queue_t pktout_queue, odp_event_t event)
@@ -1103,6 +940,9 @@ static _odp_event_hdr_t *pktin_dequeue(odp_queue_t queue)
 	if (_odp_queue_fn->orig_deq_multi(queue, &event_hdr, 1) == 1)
 		return event_hdr;
 
+	if (odp_unlikely(entry->state != PKTIO_STATE_STARTED))
+		return 0;
+
 	pkts = pktin_recv_buf(entry, pktin_index, hdr_tbl, QUEUE_MULTI_MAX);
 
 	if (pkts <= 0)
@@ -1148,7 +988,7 @@ static int pktin_deq_multi(odp_queue_t queue, _odp_event_hdr_t *event_hdr[],
 	/** queue already has number of requested buffers,
 	 *  do not do receive in that case.
 	 */
-	if (nbr == num)
+	if (nbr == num || odp_unlikely(entry->state != PKTIO_STATE_STARTED))
 		return nbr;
 
 	pkts = pktin_recv_buf(entry, pktin_index, hdr_tbl, QUEUE_MULTI_MAX);
@@ -1725,74 +1565,68 @@ int _odp_pktio_term_global(void)
 	return ret;
 }
 
-static
-int single_capability(odp_pktio_capability_t *capa)
-{
-	memset(capa, 0, sizeof(odp_pktio_capability_t));
-	capa->max_input_queues  = 1;
-	capa->max_output_queues = 1;
-	capa->set_op.op.promisc_mode = 1;
-
-	return 0;
-}
-
 int odp_pktio_capability(odp_pktio_t pktio, odp_pktio_capability_t *capa)
 {
 	pktio_entry_t *entry;
 	int ret;
+	uint32_t mtu;
 
 	entry = get_pktio_entry(pktio);
 	if (entry == NULL) {
-		_ODP_DBG("pktio entry %" PRIuPTR " does not exist\n", (uintptr_t)pktio);
+		_ODP_ERR("pktio entry %" PRIuPTR " does not exist\n", (uintptr_t)pktio);
 		return -1;
 	}
 
-	if (entry->ops->capability)
-		ret = entry->ops->capability(entry, capa);
-	else
-		ret = single_capability(capa);
+	ret = entry->ops->capability(entry, capa);
 
-	if (ret == 0) {
-		uint32_t mtu = pktio_maxlen(pktio);
-
-		if (mtu == 0) {
-			_ODP_DBG("MTU query failed: %s\n", entry->name);
-			return -1;
-		}
-
-		/* The same parser is used for all pktios */
-		capa->config.parser.layer = ODP_PROTO_LAYER_ALL;
-		/* Header skip is not supported */
-		capa->set_op.op.skip_offset = 0;
-		/* Irrespective of whether we optimize the fast path or not,
-		 * we can report that it is supported.
-		 */
-		capa->config.pktout.bit.no_packet_refs = 1;
-
-		/* LSO implementation is common to all pktios */
-		capa->lso.max_profiles           = PKTIO_LSO_PROFILES;
-		capa->lso.max_profiles_per_pktio = PKTIO_LSO_PROFILES;
-		capa->lso.max_packet_segments    = PKT_MAX_SEGS;
-		capa->lso.max_segments           = PKTIO_LSO_MAX_SEGMENTS;
-		capa->lso.max_payload_len        = mtu - PKTIO_LSO_MIN_PAYLOAD_OFFSET;
-		capa->lso.max_payload_offset     = PKTIO_LSO_MAX_PAYLOAD_OFFSET;
-		capa->lso.max_num_custom         = ODP_LSO_MAX_CUSTOM;
-		capa->lso.proto.ipv4             = 1;
-		capa->lso.proto.custom           = 1;
-		capa->lso.mod_op.add_segment_num = 1;
-
-		capa->config.pktout.bit.tx_compl_ena = 1;
-		capa->tx_compl.queue_type_sched = 1;
-		capa->tx_compl.queue_type_plain = 1;
-		capa->tx_compl.mode_all = 1;
-
-		capa->config.pktout.bit.aging_ena = 1;
-		capa->max_tx_aging_tmo_ns = MAX_TX_AGING_TMO_NS;
+	if (ret) {
+		_ODP_ERR("Driver specific capa query failed: %s\n", entry->name);
+		return -1;
 	}
 
+	mtu = pktio_maxlen(pktio);
+
+	if (mtu == 0) {
+		_ODP_ERR("MTU query failed: %s\n", entry->name);
+		return -1;
+	}
+
+	/* The same parser is used for all pktios */
+	capa->config.parser.layer = ODP_PROTO_LAYER_ALL;
+	/* Header skip is not supported */
+	capa->set_op.op.skip_offset = 0;
+	/* Irrespective of whether we optimize the fast path or not,
+	 * we can report that it is supported.
+	 */
+	capa->config.pktout.bit.no_packet_refs = 1;
+
+	/* LSO implementation is common to all pktios */
+	capa->lso.max_profiles           = PKTIO_LSO_PROFILES;
+	capa->lso.max_profiles_per_pktio = PKTIO_LSO_PROFILES;
+	capa->lso.max_packet_segments    = PKT_MAX_SEGS;
+	capa->lso.max_segments           = PKTIO_LSO_MAX_SEGMENTS;
+	capa->lso.max_payload_len        = mtu - PKTIO_LSO_MIN_PAYLOAD_OFFSET;
+	capa->lso.max_payload_offset     = PKTIO_LSO_MAX_PAYLOAD_OFFSET;
+	capa->lso.max_num_custom         = ODP_LSO_MAX_CUSTOM;
+	capa->lso.proto.ipv4             = 1;
+	capa->lso.proto.custom           = 1;
+	capa->lso.mod_op.add_segment_num = 1;
+
+	capa->config.pktout.bit.tx_compl_ena = 1;
+	capa->tx_compl.queue_type_sched = 1;
+	capa->tx_compl.queue_type_plain = 1;
+	capa->tx_compl.mode_all = 1;
+	capa->tx_compl.mode_event = 1;
+	capa->tx_compl.mode_poll = 0;
+	capa->tx_compl.max_compl_id = 0;
+	capa->free_ctrl.dont_free = 0;
+
+	capa->config.pktout.bit.aging_ena = 1;
+	capa->max_tx_aging_tmo_ns = MAX_TX_AGING_TMO_NS;
+
 	/* Packet vector generation is common for all pktio types */
-	if (ret == 0 && (entry->param.in_mode ==  ODP_PKTIN_MODE_QUEUE ||
-			 entry->param.in_mode ==  ODP_PKTIN_MODE_SCHED)) {
+	if (entry->param.in_mode ==  ODP_PKTIN_MODE_QUEUE ||
+	    entry->param.in_mode ==  ODP_PKTIN_MODE_SCHED) {
 		capa->vector.supported = ODP_SUPPORT_YES;
 		capa->vector.max_size = CONFIG_PACKET_VECTOR_MAX_SIZE;
 		capa->vector.min_size = 1;
@@ -1808,7 +1642,7 @@ int odp_pktio_capability(odp_pktio_t pktio, odp_pktio_capability_t *capa)
 	capa->flow_control.pause_tx = 0;
 	capa->flow_control.pfc_tx = 0;
 
-	return ret;
+	return 0;
 }
 
 unsigned int odp_pktio_max_index(void)

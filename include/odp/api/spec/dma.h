@@ -1,4 +1,4 @@
-/* Copyright (c) 2021-2022, Nokia
+/* Copyright (c) 2021-2023, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -48,6 +48,10 @@ void odp_dma_param_init(odp_dma_param_t *param);
 
 /**
  * Create DMA session
+ *
+ * Create a DMA session according to the parameters. The use of session name is optional. Unique
+ * names are not required. However, odp_dma_lookup() returns only a single matching named session.
+ * Use odp_dma_param_init() to initialize parameters into their default values.
  *
  * @param name		DMA session name or NULL. Maximum string length is ODP_DMA_NAME_LEN.
  * @param param		DMA session parameters
@@ -285,6 +289,19 @@ odp_event_t odp_dma_compl_to_event(odp_dma_compl_t dma_compl);
 uint64_t odp_dma_compl_to_u64(odp_dma_compl_t dma_compl);
 
 /**
+ * DMA completion event user area
+ *
+ * Returns pointer to the user area associated with the completion event. Size of the area is fixed
+ * and defined in completion event pool parameters.
+ *
+ * @param dma_compl    DMA completion event handle
+ *
+ * @return Pointer to the user area of the completion event
+ * @retval NULL  The completion event does not have user area
+ */
+void *odp_dma_compl_user_area(odp_dma_compl_t dma_compl);
+
+/**
  * Allocate DMA completion event
  *
  * Allocates a DMA completion event from a pool. The pool must have been created with
@@ -332,7 +349,7 @@ void odp_dma_pool_param_init(odp_dma_pool_param_t *pool_param);
  * The use of pool name is optional. Unique names are not required. However, odp_pool_lookup()
  * returns only a single matching pool. Use odp_dma_pool_param_init() to initialize pool parameters
  * into their default values. Parameters values must not exceed pool capabilities
- * (@see odp_dma_pool_capability_t)
+ * (odp_dma_pool_capability_t).
  *
  * @param name          Name of the pool or NULL. Maximum string length is ODP_POOL_NAME_LEN.
  * @param pool_param    Pool parameters

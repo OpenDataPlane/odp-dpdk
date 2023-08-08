@@ -1,4 +1,4 @@
-/* Copyright (c) 2022, Nokia
+/* Copyright (c) 2022-2023, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -9,37 +9,41 @@
 #ifdef _ODP_PKTIO_XDP
 
 #include <odp_posix_extensions.h>
+#include <odp/api/cpu.h>
 #include <odp/api/debug.h>
 #include <odp/api/hints.h>
+#include <odp/api/packet_io_stats.h>
 #include <odp/api/system_info.h>
 #include <odp/api/ticketlock.h>
-#include <odp/api/packet_io_stats.h>
 
 #include <odp_classification_internal.h>
 #include <odp_debug_internal.h>
 #include <odp_libconfig_internal.h>
 #include <odp_macros_internal.h>
-#include <odp_packet_io_internal.h>
 #include <odp_packet_internal.h>
+#include <odp_packet_io_internal.h>
 #include <odp_parse_internal.h>
 #include <odp_pool_internal.h>
 #include <odp_socket_common.h>
 
-#include <string.h>
 #include <errno.h>
-#include <sys/socket.h>
-#include <unistd.h>
-#include <poll.h>
-#include <sys/ioctl.h>
 #include <linux/ethtool.h>
+#include <linux/if_xdp.h>
 #include <linux/sockios.h>
 #include <net/if.h>
-#include <linux/if_xdp.h>
+#include <poll.h>
+#include <string.h>
+#include <sys/ioctl.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 #include <xdp/xsk.h>
 
 #define NUM_DESCS_DEFAULT 1024U
 #define MIN_FRAME_SIZE 2048U
+
+#define MAX_QUEUES (ODP_PKTIN_MAX_QUEUES > ODP_PKTOUT_MAX_QUEUES ? \
+			ODP_PKTIN_MAX_QUEUES : ODP_PKTOUT_MAX_QUEUES)
 
 #define IF_DELIM " "
 #define Q_DELIM ':'
@@ -62,6 +66,10 @@ static const char * const internal_stats_strs[] = {
 };
 
 #define MAX_INTERNAL_STATS _ODP_ARRAY_SIZE(internal_stats_strs)
+
+static const char * const shadow_q_driver_strs[] = {
+	"mlx",
+};
 
 typedef struct {
 	uint64_t rx_dropped;
@@ -94,9 +102,29 @@ typedef struct {
 } xdp_umem_info_t;
 
 typedef struct {
-	xdp_sock_t qs[ODP_PKTOUT_MAX_QUEUES];
+	uint32_t rx;
+	uint32_t tx;
+	uint32_t other;
+	uint32_t combined;
+} drv_channels_t;
+
+typedef struct {
+	/* Queue counts for getting/setting driver's ethtool queue configuration. */
+	drv_channels_t drv_channels;
+	/* Packet I/O level requested input queue count. */
+	uint32_t num_in_conf_qs;
+	/* Packet I/O level requested output queue count. */
+	uint32_t num_out_conf_qs;
+	/* Actual internal queue count. */
+	uint32_t num_qs;
+	/* Length of driver's ethtool RSS indirection table. */
+	uint32_t drv_num_rss;
+} q_num_conf_t;
+
+typedef struct {
+	xdp_sock_t qs[MAX_QUEUES];
 	xdp_umem_info_t *umem_info;
-	uint32_t num_q;
+	q_num_conf_t q_num_conf;
 	int pktio_idx;
 	int helper_sock;
 	uint32_t mtu;
@@ -104,6 +132,7 @@ typedef struct {
 	uint32_t bind_q;
 	odp_bool_t lockless_rx;
 	odp_bool_t lockless_tx;
+	odp_bool_t is_shadow_q;
 } xdp_sock_info_t;
 
 typedef struct {
@@ -137,13 +166,88 @@ static inline xdp_sock_info_t *pkt_priv(pktio_entry_t *pktio_entry)
 	return (xdp_sock_info_t *)(uintptr_t)(pktio_entry->pkt_priv);
 }
 
+static odp_bool_t get_nic_queue_count(int fd, const char *devname, drv_channels_t *cur_channels)
+{
+	struct ethtool_channels channels;
+	struct ifreq ifr;
+	int ret;
+
+	memset(&channels, 0, sizeof(struct ethtool_channels));
+	channels.cmd = ETHTOOL_GCHANNELS;
+	snprintf(ifr.ifr_name, IF_NAMESIZE, "%s", devname);
+	ifr.ifr_data = (char *)&channels;
+	ret = ioctl(fd, SIOCETHTOOL, &ifr);
+
+	if (ret == -1) {
+		_ODP_DBG("Unable to query NIC queue capabilities: %s\n", strerror(errno));
+		return false;
+	}
+
+	cur_channels->rx = channels.rx_count;
+	cur_channels->tx = channels.tx_count;
+	cur_channels->other = channels.other_count;
+	cur_channels->combined = channels.combined_count;
+
+	return true;
+}
+
+static odp_bool_t get_nic_rss_indir_count(int fd, const char *devname, uint32_t *drv_num_rss)
+{
+	struct ethtool_rxfh indir;
+	struct ifreq ifr;
+	int ret;
+
+	memset(&indir, 0, sizeof(struct ethtool_rxfh));
+	indir.cmd = ETHTOOL_GRSSH;
+	snprintf(ifr.ifr_name, IF_NAMESIZE, "%s", devname);
+	ifr.ifr_data = (char *)&indir;
+	ret = ioctl(fd, SIOCETHTOOL, &ifr);
+
+	if (ret == -1) {
+		_ODP_DBG("Unable to query NIC RSS indirection table size: %s\n", strerror(errno));
+		return false;
+	}
+
+	*drv_num_rss = indir.indir_size;
+
+	return true;
+}
+
+static odp_bool_t is_shadow_q_driver(int fd, const char *devname)
+{
+	struct ethtool_drvinfo info;
+	struct ifreq ifr;
+	int ret;
+
+	memset(&info, 0, sizeof(struct ethtool_drvinfo));
+	info.cmd = ETHTOOL_GDRVINFO;
+	snprintf(ifr.ifr_name, IF_NAMESIZE, "%s", devname);
+	ifr.ifr_data = (char *)&info;
+	ret = ioctl(fd, SIOCETHTOOL, &ifr);
+
+	if (ret == -1) {
+		_ODP_DBG("Unable to query NIC driver information: %s\n", strerror(errno));
+		return false;
+	}
+
+	for (uint32_t i = 0U; i < _ODP_ARRAY_SIZE(shadow_q_driver_strs); ++i) {
+		if (strstr(info.driver, shadow_q_driver_strs[i]) != NULL) {
+			_ODP_PRINT("Driver with XDP shadow queues in use: %s, manual RSS"
+				   " configuration likely required\n", info.driver);
+			return true;
+		}
+	}
+
+	return false;
+}
+
 static void parse_options(xdp_umem_info_t *umem_info)
 {
 	if (!_odp_libconfig_lookup_ext_int(CONF_BASE_STR, NULL, RX_DESCS_STR,
 					   &umem_info->num_rx_desc) ||
 	    !_odp_libconfig_lookup_ext_int(CONF_BASE_STR, NULL, TX_DESCS_STR,
 					   &umem_info->num_tx_desc)) {
-		_ODP_ERR("Unable to parse xdp descriptor configuration, using defaults (%d).\n",
+		_ODP_ERR("Unable to parse xdp descriptor configuration, using defaults (%d)\n",
 			 NUM_DESCS_DEFAULT);
 		goto defaults;
 	}
@@ -151,7 +255,7 @@ static void parse_options(xdp_umem_info_t *umem_info)
 	if (umem_info->num_rx_desc <= 0 || umem_info->num_tx_desc <= 0 ||
 	    !_ODP_CHECK_IS_POWER2(umem_info->num_rx_desc) ||
 	    !_ODP_CHECK_IS_POWER2(umem_info->num_tx_desc)) {
-		_ODP_ERR("Invalid xdp descriptor configuration, using defaults (%d).\n",
+		_ODP_ERR("Invalid xdp descriptor configuration, using defaults (%d)\n",
 			 NUM_DESCS_DEFAULT);
 		goto defaults;
 	}
@@ -161,77 +265,6 @@ static void parse_options(xdp_umem_info_t *umem_info)
 defaults:
 	umem_info->num_rx_desc = NUM_DESCS_DEFAULT;
 	umem_info->num_tx_desc = NUM_DESCS_DEFAULT;
-}
-
-static int umem_create(xdp_umem_info_t *umem_info, pool_t *pool)
-{
-	struct xsk_umem_config cfg;
-
-	if (umem_info->ref_cnt++ > 0U)
-		return 0;
-
-	parse_options(umem_info);
-	umem_info->pool = pool;
-	/* Fill queue size is recommended to be >= HW RX ring size + AF_XDP RX
-	* ring size, so use size twice the size of AF_XDP RX ring. */
-	cfg.fill_size = umem_info->num_rx_desc * 2U;
-	cfg.comp_size = umem_info->num_tx_desc;
-	cfg.frame_size = pool->block_size;
-	cfg.frame_headroom = sizeof(odp_packet_hdr_t) + pool->headroom;
-	cfg.flags = XDP_UMEM_UNALIGNED_CHUNK_FLAG;
-
-	return xsk_umem__create(&umem_info->umem, pool->base_addr, pool->shm_size,
-				&umem_info->fill_q, &umem_info->compl_q, &cfg);
-}
-
-static void umem_delete(xdp_umem_info_t *umem_info)
-{
-	if (umem_info->ref_cnt-- != 1U)
-		return;
-
-	while (xsk_umem__delete(umem_info->umem) == -EBUSY)
-		continue;
-}
-
-static uint32_t get_bind_queue_index(const char *devname)
-{
-	const char *param = getenv("ODP_PKTIO_XDP_PARAMS");
-	char *tmp_str;
-	char *tmp;
-	char *if_str;
-	int idx = 0;
-
-	if (param == NULL)
-		goto out;
-
-	tmp_str = strdup(param);
-
-	if (tmp_str == NULL)
-		goto out;
-
-	tmp = strtok(tmp_str, IF_DELIM);
-
-	if (tmp == NULL)
-		goto out_str;
-
-	while (tmp) {
-		if_str = strchr(tmp, Q_DELIM);
-
-		if (if_str != NULL && if_str != &tmp[strlen(tmp) - 1U]) {
-			if (strncmp(devname, tmp, (uint64_t)(uintptr_t)(if_str - tmp)) == 0) {
-				idx = _ODP_MAX(atoi(++if_str), 0);
-				break;
-			}
-		}
-
-		tmp = strtok(NULL, IF_DELIM);
-	}
-
-out_str:
-	free(tmp_str);
-
-out:
-	return idx;
 }
 
 static int sock_xdp_open(odp_pktio_t pktio, pktio_entry_t *pktio_entry, const char *devname,
@@ -248,13 +281,7 @@ static int sock_xdp_open(odp_pktio_t pktio, pktio_entry_t *pktio_entry, const ch
 	memset(priv, 0, sizeof(xdp_sock_info_t));
 	pool = _odp_pool_entry(pool_hdl);
 	priv->umem_info = (xdp_umem_info_t *)pool->mem_src_data;
-	ret = umem_create(priv->umem_info, pool);
-
-	if (ret) {
-		_ODP_ERR("Error creating UMEM pool for xdp: %d\n", ret);
-		return -1;
-	}
-
+	priv->umem_info->pool = pool;
 	/* Mark transitory kernel-owned packets with the pktio index, so that they can be freed on
 	 * close. */
 	priv->pktio_idx = 1 + odp_pktio_index(pktio);
@@ -264,7 +291,7 @@ static int sock_xdp_open(odp_pktio_t pktio, pktio_entry_t *pktio_entry, const ch
 
 	if (ret == -1) {
 		_ODP_ERR("Error creating helper socket for xdp: %s\n", strerror(errno));
-		goto sock_err;
+		return -1;
 	}
 
 	priv->helper_sock = ret;
@@ -275,38 +302,282 @@ static int sock_xdp_open(odp_pktio_t pktio, pktio_entry_t *pktio_entry, const ch
 
 	priv->max_mtu = pool->seg_len;
 
-	for (int i = 0; i < ODP_PKTOUT_MAX_QUEUES; ++i) {
+	for (int i = 0; i < MAX_QUEUES; ++i) {
 		odp_ticketlock_init(&priv->qs[i].rx_lock);
 		odp_ticketlock_init(&priv->qs[i].tx_lock);
 	}
 
-	priv->bind_q = get_bind_queue_index(pktio_entry->name);
+	if (!get_nic_queue_count(priv->helper_sock, devname, &priv->q_num_conf.drv_channels) ||
+	    !get_nic_rss_indir_count(priv->helper_sock, devname, &priv->q_num_conf.drv_num_rss))
+		_ODP_PRINT("Warning: Unable to query NIC queue count/RSS, manual cleanup"
+			   " required\n");
 
+	priv->is_shadow_q = is_shadow_q_driver(priv->helper_sock, pktio_entry->name);
+	parse_options(priv->umem_info);
 	_ODP_DBG("Socket xdp interface (%s):\n", pktio_entry->name);
 	_ODP_DBG("  num_rx_desc: %d\n", priv->umem_info->num_rx_desc);
 	_ODP_DBG("  num_tx_desc: %d\n", priv->umem_info->num_tx_desc);
-	_ODP_DBG("  starting bind queue: %u\n", priv->bind_q);
 
 	return 0;
 
 mtu_err:
 	close(priv->helper_sock);
 
-sock_err:
-	umem_delete(priv->umem_info);
-
 	return -1;
+}
+
+static odp_bool_t set_nic_queue_count(int fd, const char *devname, drv_channels_t *new_channels)
+{
+	struct ethtool_channels channels;
+	struct ifreq ifr;
+	int ret;
+
+	memset(&channels, 0, sizeof(struct ethtool_channels));
+	channels.cmd = ETHTOOL_SCHANNELS;
+	channels.rx_count = new_channels->rx;
+	channels.tx_count = new_channels->tx;
+	channels.other_count = new_channels->other;
+	channels.combined_count = new_channels->combined;
+	snprintf(ifr.ifr_name, IF_NAMESIZE, "%s", devname);
+	ifr.ifr_data = (char *)&channels;
+	ret = ioctl(fd, SIOCETHTOOL, &ifr);
+
+	if (ret == -1) {
+		_ODP_DBG("Unable to set NIC queue count: %s\n", strerror(errno));
+		return false;
+	}
+
+	return true;
+}
+
+static odp_bool_t set_nic_rss_indir(int fd, const char *devname, struct ethtool_rxfh *indir)
+{
+	struct ifreq ifr;
+	int ret;
+
+	indir->cmd = ETHTOOL_SRSSH;
+	snprintf(ifr.ifr_name, IF_NAMESIZE, "%s", devname);
+	ifr.ifr_data = (char *)indir;
+	ret = ioctl(fd, SIOCETHTOOL, &ifr);
+
+	if (ret == -1) {
+		_ODP_DBG("Unable to set NIC RSS indirection table: %s\n", strerror(errno));
+		return false;
+	}
+
+	return true;
 }
 
 static int sock_xdp_close(pktio_entry_t *pktio_entry)
 {
 	xdp_sock_info_t *priv = pkt_priv(pktio_entry);
-	pool_t *pool = priv->umem_info->pool;
-	odp_packet_hdr_t *pkt_hdr;
+	struct ethtool_rxfh indir;
+
+	memset(&indir, 0, sizeof(struct ethtool_rxfh));
+
+	if (priv->q_num_conf.num_qs != 0U)
+		(void)set_nic_queue_count(priv->helper_sock, pktio_entry->name,
+					  &priv->q_num_conf.drv_channels);
+
+	if (priv->q_num_conf.drv_num_rss != 0U && !priv->is_shadow_q)
+		(void)set_nic_rss_indir(priv->helper_sock, pktio_entry->name, &indir);
 
 	close(priv->helper_sock);
 
-	for (uint32_t i = 0U; i < priv->num_q; ++i) {
+	return 0;
+}
+
+static int umem_create(xdp_umem_info_t *umem_info)
+{
+	struct xsk_umem_config cfg;
+
+	if (umem_info->ref_cnt++ > 0U)
+		return 0;
+
+	/* Fill queue size is recommended to be >= HW RX ring size + AF_XDP RX
+	 * ring size, so use size twice the size of AF_XDP RX ring. */
+	cfg.fill_size = umem_info->num_rx_desc * 2U;
+	cfg.comp_size = umem_info->num_tx_desc;
+	cfg.frame_size = umem_info->pool->block_size;
+	cfg.frame_headroom = sizeof(odp_packet_hdr_t) + umem_info->pool->headroom;
+	cfg.flags = XDP_UMEM_UNALIGNED_CHUNK_FLAG;
+
+	return xsk_umem__create(&umem_info->umem, umem_info->pool->base_addr,
+				umem_info->pool->shm_size, &umem_info->fill_q, &umem_info->compl_q,
+				&cfg);
+}
+
+static void fill_socket_config(struct xsk_socket_config *config, xdp_umem_info_t *umem_info)
+{
+	config->rx_size = umem_info->num_rx_desc * 2U;
+	config->tx_size = umem_info->num_tx_desc;
+	config->libxdp_flags = 0U;
+	config->xdp_flags = 0U;
+	config->bind_flags = XDP_ZEROCOPY;
+}
+
+static odp_bool_t reserve_fill_queue_elements(xdp_sock_info_t *sock_info, xdp_sock_t *sock,
+					      int num)
+{
+	pool_t *pool;
+	odp_packet_t packets[num];
+	int count;
+	struct xsk_ring_prod *fill_q;
+	uint32_t start_idx;
+	int pktio_idx;
+	uint32_t block_size;
+	odp_packet_hdr_t *pkt_hdr;
+
+	pool = sock_info->umem_info->pool;
+	count = odp_packet_alloc_multi(_odp_pool_handle(pool), sock_info->mtu, packets, num);
+
+	if (count <= 0) {
+		++sock->i_stats[RX_PKT_ALLOC_ERR];
+		return false;
+	}
+
+	fill_q = &sock->fill_q;
+
+	if (xsk_ring_prod__reserve(fill_q, count, &start_idx) == 0U) {
+		odp_packet_free_multi(packets, count);
+		++sock->i_stats[RX_DESC_RSV_ERR];
+		return false;
+	}
+
+	pktio_idx = sock_info->pktio_idx;
+	block_size = pool->block_size;
+
+	for (int i = 0; i < count; ++i) {
+		pkt_hdr = packet_hdr(packets[i]);
+		pkt_hdr->ms_pktio_idx = pktio_idx;
+		*xsk_ring_prod__fill_addr(fill_q, start_idx++) =
+			pkt_hdr->event_hdr.index.event * block_size;
+	}
+
+	xsk_ring_prod__submit(&sock->fill_q, count);
+
+	return true;
+}
+
+static odp_bool_t create_sockets(xdp_sock_info_t *sock_info, const char *devname)
+{
+	struct xsk_socket_config config;
+	uint32_t bind_q, i;
+	struct xsk_umem *umem;
+	xdp_sock_t *sock;
+	int ret;
+
+	bind_q = sock_info->bind_q;
+	umem = sock_info->umem_info->umem;
+
+	for (i = 0U; i < sock_info->q_num_conf.num_qs;) {
+		sock = &sock_info->qs[i];
+		fill_socket_config(&config, sock_info->umem_info);
+		ret = xsk_socket__create_shared(&sock->xsk, devname, bind_q, umem, &sock->rx,
+						&sock->tx, &sock->fill_q, &sock->compl_q, &config);
+
+		if (ret) {
+			_ODP_ERR("Error creating xdp socket for bind queue %u: %d\n", bind_q, ret);
+			goto err;
+		}
+
+		++i;
+
+		if (!reserve_fill_queue_elements(sock_info, sock, config.rx_size)) {
+			_ODP_ERR("Unable to reserve fill queue descriptors for queue: %u\n",
+				 bind_q);
+			goto err;
+		}
+
+		++bind_q;
+	}
+
+	/* Ring setup/clean up routines seem to be asynchronous with some drivers and might not be
+	 * ready yet after xsk_socket__create_shared(). */
+	sleep(1U);
+
+	return true;
+
+err:
+	for (uint32_t j = 0U; j < i; ++j) {
+		xsk_socket__delete(sock_info->qs[j].xsk);
+		sock_info->qs[j].xsk = NULL;
+	}
+
+	return false;
+}
+
+static void umem_delete(xdp_umem_info_t *umem_info)
+{
+	if (umem_info->ref_cnt-- != 1U)
+		return;
+
+	while (xsk_umem__delete(umem_info->umem) == -EBUSY)
+		continue;
+}
+
+static int sock_xdp_start(pktio_entry_t *pktio_entry)
+{
+	xdp_sock_info_t *priv = pkt_priv(pktio_entry);
+	int ret;
+	drv_channels_t channels = priv->q_num_conf.drv_channels;
+	struct ethtool_rxfh *indir = calloc(1U, sizeof(struct ethtool_rxfh)
+					    + sizeof(((struct ethtool_rxfh *)0)->rss_config[0U])
+					    * priv->q_num_conf.drv_num_rss);
+
+	if (indir == NULL) {
+		_ODP_ERR("Error allocating NIC RSS table\n");
+		return -1;
+	}
+
+	ret = umem_create(priv->umem_info);
+
+	if (ret) {
+		_ODP_ERR("Error creating UMEM pool for xdp: %d\n", ret);
+		goto err;
+	}
+
+	priv->q_num_conf.num_qs = _ODP_MAX(priv->q_num_conf.num_in_conf_qs,
+					   priv->q_num_conf.num_out_conf_qs);
+	priv->bind_q = priv->is_shadow_q ? priv->q_num_conf.num_qs : 0U;
+	channels.combined = priv->q_num_conf.num_qs;
+
+	if (!set_nic_queue_count(priv->helper_sock, pktio_entry->name, &channels))
+		_ODP_PRINT("Warning: Unable to configure NIC queue count, manual configuration"
+			   " required\n");
+
+	if (priv->q_num_conf.num_in_conf_qs > 0U && !priv->is_shadow_q) {
+		indir->indir_size = priv->q_num_conf.drv_num_rss;
+
+		for (uint32_t i = 0U; i < indir->indir_size; ++i)
+			indir->rss_config[i] = (i % priv->q_num_conf.num_in_conf_qs);
+
+		if (!set_nic_rss_indir(priv->helper_sock, pktio_entry->name, indir))
+			_ODP_PRINT("Warning: Unable to configure NIC RSS, manual configuration"
+				   " required\n");
+	}
+
+	if (!create_sockets(priv, pktio_entry->name))
+		goto sock_err;
+
+	return 0;
+
+sock_err:
+	umem_delete(priv->umem_info);
+
+err:
+	free(indir);
+
+	return -1;
+}
+
+static int sock_xdp_stop(pktio_entry_t *pktio_entry)
+{
+	xdp_sock_info_t *priv = pkt_priv(pktio_entry);
+	pool_t *pool = priv->umem_info->pool;
+	odp_packet_hdr_t *pkt_hdr;
+
+	for (uint32_t i = 0U; i < priv->q_num_conf.num_qs; ++i) {
 		if (priv->qs[i].xsk != NULL) {
 			xsk_socket__delete(priv->qs[i].xsk);
 			priv->qs[i].xsk = NULL;
@@ -342,7 +613,7 @@ static int sock_xdp_stats(pktio_entry_t *pktio_entry, odp_pktio_stats_t *stats)
 
 	memset(stats, 0, sizeof(odp_pktio_stats_t));
 
-	for (uint32_t i = 0U; i < priv->num_q; ++i) {
+	for (uint32_t i = 0U; i < priv->q_num_conf.num_qs; ++i) {
 		sock = &priv->qs[i];
 		qi_stats = sock->qi_stats;
 		qo_stats = sock->qo_stats;
@@ -372,7 +643,7 @@ static int sock_xdp_stats_reset(pktio_entry_t *pktio_entry)
 	struct xdp_statistics xdp_stats;
 	socklen_t optlen = sizeof(struct xdp_statistics);
 
-	for (uint32_t i = 0U; i < priv->num_q; ++i) {
+	for (uint32_t i = 0U; i < priv->q_num_conf.num_qs; ++i) {
 		sock = &priv->qs[i];
 		memset(&sock->qi_stats, 0, sizeof(odp_pktin_queue_stats_t));
 		memset(&sock->qo_stats, 0, sizeof(odp_pktout_queue_stats_t));
@@ -431,7 +702,7 @@ static int sock_xdp_extra_stat_info(pktio_entry_t *pktio_entry, odp_pktio_extra_
 				    int num)
 {
 	xdp_sock_info_t *priv = pkt_priv(pktio_entry);
-	const int total_stats = MAX_INTERNAL_STATS * priv->num_q;
+	const int total_stats = MAX_INTERNAL_STATS * priv->q_num_conf.num_qs;
 
 	if (info != NULL && num > 0) {
 		for (int i = 0; i < _ODP_MIN(num, total_stats); ++i)
@@ -446,7 +717,7 @@ static int sock_xdp_extra_stat_info(pktio_entry_t *pktio_entry, odp_pktio_extra_
 static int sock_xdp_extra_stats(pktio_entry_t *pktio_entry, uint64_t stats[], int num)
 {
 	xdp_sock_info_t *priv = pkt_priv(pktio_entry);
-	const int total_stats = MAX_INTERNAL_STATS * priv->num_q;
+	const int total_stats = MAX_INTERNAL_STATS * priv->q_num_conf.num_qs;
 	uint64_t *i_stats;
 
 	if (stats != NULL && num > 0) {
@@ -462,7 +733,7 @@ static int sock_xdp_extra_stats(pktio_entry_t *pktio_entry, uint64_t stats[], in
 static int sock_xdp_extra_stat_counter(pktio_entry_t *pktio_entry, uint32_t id, uint64_t *stat)
 {
 	xdp_sock_info_t *priv = pkt_priv(pktio_entry);
-	const uint32_t total_stats = MAX_INTERNAL_STATS * priv->num_q;
+	const uint32_t total_stats = MAX_INTERNAL_STATS * priv->q_num_conf.num_qs;
 
 	if (id >= total_stats) {
 		_ODP_ERR("Invalid counter id: %u (allowed range: 0-%u)\n", id, total_stats - 1U);
@@ -506,6 +777,9 @@ static uint32_t process_received(pktio_entry_t *pktio_entry, xdp_sock_t *sock, p
 	uint64_t errors = 0U, octets = 0U;
 	odp_pktio_t pktio_hdl = pktio_entry->handle;
 	uint32_t num_rx = 0U;
+	uint32_t num_cls = 0U;
+	uint32_t num_pkts = 0U;
+	const int cls_enabled = pktio_cls_enabled(pktio_entry);
 
 	for (int i = 0; i < num; ++i) {
 		extract_data(xsk_ring_cons__rx_desc(rx, start_idx++), base_addr, &pkt_data);
@@ -527,7 +801,7 @@ static uint32_t process_received(pktio_entry_t *pktio_entry, xdp_sock_t *sock, p
 				continue;
 			}
 
-			if (pktio_cls_enabled(pktio_entry)) {
+			if (cls_enabled) {
 				odp_pool_t new_pool;
 
 				ret = _odp_cls_classify_packet(pktio_entry, pkt_data.data,
@@ -546,58 +820,27 @@ static uint32_t process_received(pktio_entry_t *pktio_entry, xdp_sock_t *sock, p
 		}
 
 		pkt_data.pkt_hdr->input = pktio_hdl;
-		packets[num_rx++] = pkt_data.pkt;
+		num_pkts++;
 		octets += pkt_data.len;
+
+		if (cls_enabled) {
+			/* Enqueue packets directly to classifier destination queue */
+			packets[num_cls++] = pkt_data.pkt;
+			num_cls = _odp_cls_enq(packets, num_cls, (i + 1 == num));
+		} else {
+			packets[num_rx++] = pkt_data.pkt;
+		}
 	}
 
+	/* Enqueue remaining classified packets */
+	if (odp_unlikely(num_cls))
+		_odp_cls_enq(packets, num_cls, true);
+
 	sock->qi_stats.octets += octets;
-	sock->qi_stats.packets += num_rx;
+	sock->qi_stats.packets += num_pkts;
 	sock->qi_stats.errors += errors;
 
 	return num_rx;
-}
-
-static odp_bool_t reserve_fill_queue_elements(xdp_sock_info_t *sock_info, xdp_sock_t *sock,
-					      int num)
-{
-	pool_t *pool;
-	odp_packet_t packets[num];
-	int count;
-	struct xsk_ring_prod *fill_q;
-	uint32_t start_idx;
-	int pktio_idx;
-	uint32_t block_size;
-	odp_packet_hdr_t *pkt_hdr;
-
-	pool = sock_info->umem_info->pool;
-	count = odp_packet_alloc_multi(_odp_pool_handle(pool), sock_info->mtu, packets, num);
-
-	if (count <= 0) {
-		++sock->i_stats[RX_PKT_ALLOC_ERR];
-		return false;
-	}
-
-	fill_q = &sock->fill_q;
-
-	if (xsk_ring_prod__reserve(fill_q, count, &start_idx) == 0U) {
-		odp_packet_free_multi(packets, count);
-		++sock->i_stats[RX_DESC_RSV_ERR];
-		return false;
-	}
-
-	pktio_idx = sock_info->pktio_idx;
-	block_size = pool->block_size;
-
-	for (int i = 0; i < count; ++i) {
-		pkt_hdr = packet_hdr(packets[i]);
-		pkt_hdr->ms_pktio_idx = pktio_idx;
-		*xsk_ring_prod__fill_addr(fill_q, start_idx++) =
-			pkt_hdr->event_hdr.index.event * block_size;
-	}
-
-	xsk_ring_prod__submit(&sock->fill_q, count);
-
-	return true;
 }
 
 static int sock_xdp_recv(pktio_entry_t *pktio_entry, int index, odp_packet_t packets[], int num)
@@ -608,6 +851,7 @@ static int sock_xdp_recv(pktio_entry_t *pktio_entry, int index, odp_packet_t pac
 	uint32_t start_idx = 0U, recvd, procd;
 
 	priv = pkt_priv(pktio_entry);
+	_ODP_ASSERT((uint32_t)index < priv->q_num_conf.num_in_conf_qs);
 	sock = &priv->qs[index];
 
 	if (!priv->lockless_rx)
@@ -719,6 +963,7 @@ static int sock_xdp_send(pktio_entry_t *pktio_entry, int index, const odp_packet
 		return 0;
 
 	priv = pkt_priv(pktio_entry);
+	_ODP_ASSERT((uint32_t)index < priv->q_num_conf.num_out_conf_qs);
 	sock = &priv->qs[index];
 
 	if (!priv->lockless_tx)
@@ -830,12 +1075,13 @@ static int sock_xdp_link_info(pktio_entry_t *pktio_entry, odp_pktio_link_info_t 
 				 pktio_entry->name, info);
 }
 
-static int set_queue_capability(int fd, const char *devname, odp_pktio_capability_t *capa)
+static int get_nic_queue_capability(int fd, const char *devname, odp_pktio_capability_t *capa)
 {
-	struct ifreq ifr;
 	struct ethtool_channels channels;
-	uint32_t max_channels;
+	struct ifreq ifr;
 	int ret;
+	const uint32_t cc = odp_cpu_count();
+	uint32_t max_channels;
 
 	memset(&channels, 0, sizeof(struct ethtool_channels));
 	channels.cmd = ETHTOOL_GCHANNELS;
@@ -845,16 +1091,16 @@ static int set_queue_capability(int fd, const char *devname, odp_pktio_capabilit
 
 	if (ret == -1 || channels.max_combined == 0U) {
 		if (ret == -1 && errno != EOPNOTSUPP) {
-			_ODP_ERR("Unable to query NIC channel capabilities: %s\n", strerror(errno));
+			_ODP_ERR("Unable to query NIC queue capabilities: %s\n", strerror(errno));
 			return -1;
 		}
 
 		channels.max_combined = 1U;
 	}
 
-	max_channels = _ODP_MIN((uint32_t)ODP_PKTOUT_MAX_QUEUES, channels.max_combined);
+	max_channels = _ODP_MIN(cc, channels.max_combined);
 	capa->max_input_queues = _ODP_MIN((uint32_t)ODP_PKTIN_MAX_QUEUES, max_channels);
-	capa->max_output_queues = max_channels;
+	capa->max_output_queues = _ODP_MIN((uint32_t)ODP_PKTOUT_MAX_QUEUES, max_channels);
 
 	return 0;
 }
@@ -865,7 +1111,7 @@ static int sock_xdp_capability(pktio_entry_t *pktio_entry, odp_pktio_capability_
 
 	memset(capa, 0, sizeof(odp_pktio_capability_t));
 
-	if (set_queue_capability(priv->helper_sock, pktio_entry->name, capa))
+	if (get_nic_queue_capability(priv->helper_sock, pktio_entry->name, capa))
 		return -1;
 
 	capa->set_op.op.promisc_mode = 1U;
@@ -903,72 +1149,22 @@ static int sock_xdp_input_queues_config(pktio_entry_t *pktio_entry,
 {
 	xdp_sock_info_t *priv = pkt_priv(pktio_entry);
 
+	priv->q_num_conf.num_in_conf_qs = param->num_queues;
 	priv->lockless_rx = pktio_entry->param.in_mode == ODP_PKTIN_MODE_SCHED ||
 			    param->op_mode == ODP_PKTIO_OP_MT_UNSAFE;
 
 	return 0;
 }
 
-static void fill_socket_config(struct xsk_socket_config *config, xdp_umem_info_t *umem_info)
-{
-	config->rx_size = umem_info->num_rx_desc;
-	config->tx_size = umem_info->num_tx_desc;
-	config->libxdp_flags = 0U;
-	config->xdp_flags = 0U;
-	config->bind_flags = XDP_ZEROCOPY; /* TODO: XDP_COPY */
-}
-
 static int sock_xdp_output_queues_config(pktio_entry_t *pktio_entry,
 					 const odp_pktout_queue_param_t *param)
 {
 	xdp_sock_info_t *priv = pkt_priv(pktio_entry);
-	struct xsk_socket_config config;
-	const char *devname = pktio_entry->name;
-	uint32_t bind_q, i;
-	struct xsk_umem *umem;
-	xdp_sock_t *sock;
-	int ret;
 
+	priv->q_num_conf.num_out_conf_qs = param->num_queues;
 	priv->lockless_tx = param->op_mode == ODP_PKTIO_OP_MT_UNSAFE;
-	fill_socket_config(&config, priv->umem_info);
-	bind_q = priv->bind_q;
-	umem = priv->umem_info->umem;
-
-	for (i = 0U; i < param->num_queues;) {
-		sock = &priv->qs[i];
-		ret = xsk_socket__create_shared(&sock->xsk, devname, bind_q, umem, &sock->rx,
-						&sock->tx, &sock->fill_q, &sock->compl_q, &config);
-
-		if (ret) {
-			_ODP_ERR("Error creating xdp socket for bind queue %u: %d\n", bind_q, ret);
-			goto err;
-		}
-
-		++i;
-
-		if (!reserve_fill_queue_elements(priv, sock, config.rx_size)) {
-			_ODP_ERR("Unable to reserve fill queue descriptors for queue: %u.\n",
-				 bind_q);
-			goto err;
-		}
-
-		++bind_q;
-	}
-
-	priv->num_q = i;
-	/* Ring setup/clean up routines seem to be asynchronous with some drivers and might not be
-	 * ready yet after xsk_socket__create_shared(). */
-	sleep(1U);
 
 	return 0;
-
-err:
-	for (uint32_t j = 0U; j < i; ++j) {
-		xsk_socket__delete(priv->qs[j].xsk);
-		priv->qs[j].xsk = NULL;
-	}
-
-	return -1;
 }
 
 const pktio_if_ops_t _odp_sock_xdp_pktio_ops = {
@@ -979,8 +1175,8 @@ const pktio_if_ops_t _odp_sock_xdp_pktio_ops = {
 	.term = NULL,
 	.open = sock_xdp_open,
 	.close = sock_xdp_close,
-	.start = NULL,
-	.stop = NULL,
+	.start = sock_xdp_start,
+	.stop = sock_xdp_stop,
 	.stats = sock_xdp_stats,
 	.stats_reset = sock_xdp_stats_reset,
 	.pktin_queue_stats = sock_xdp_pktin_queue_stats,

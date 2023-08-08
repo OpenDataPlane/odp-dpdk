@@ -200,7 +200,7 @@ static int packet_suite_init(void)
 	memset(&pool_capa, 0, sizeof(odp_pool_capability_t));
 
 	if (odp_pool_capability(&pool_capa) < 0) {
-		printf("pool_capability failed\n");
+		ODPH_ERR("odp_pool_capability() failed\n");
 		return -1;
 	}
 
@@ -246,14 +246,14 @@ static int packet_suite_init(void)
 
 	default_pool = odp_pool_create("default_pool", &params);
 	if (default_pool == ODP_POOL_INVALID) {
-		printf("default pool create failed\n");
+		ODPH_ERR("Default pool create failed\n");
 		return -1;
 	}
 
 	test_packet = odp_packet_alloc(default_pool, packet_len);
 
 	if (test_packet == ODP_PACKET_INVALID) {
-		printf("test_packet alloc failed\n");
+		ODPH_ERR("Packet alloc failed\n");
 		return -1;
 	}
 
@@ -277,7 +277,7 @@ static int packet_suite_init(void)
 		 segmented_packet_len > pool_capa.pkt.min_seg_len);
 
 	if (ret != PACKET_POOL_NUM_SEG) {
-		printf("packet alloc failed\n");
+		ODPH_ERR("Packet alloc failed\n");
 		return -1;
 	}
 	segmented_test_packet = pkt_tbl[0];
@@ -285,7 +285,7 @@ static int packet_suite_init(void)
 
 	if (odp_packet_is_valid(test_packet) == 0 ||
 	    odp_packet_is_valid(segmented_test_packet) == 0) {
-		printf("packet_is_valid failed\n");
+		ODPH_ERR("odp_packet_is_valid() failed\n");
 		return -1;
 	}
 
@@ -299,7 +299,7 @@ static int packet_suite_init(void)
 
 	udat = odp_packet_user_area(test_packet);
 	if (odp_packet_user_area_size(test_packet) < uarea_size) {
-		printf("Bad packet user area size %u\n", odp_packet_user_area_size(test_packet));
+		ODPH_ERR("Bad packet user area size %u\n", odp_packet_user_area_size(test_packet));
 		return -1;
 	}
 
@@ -308,8 +308,8 @@ static int packet_suite_init(void)
 
 	udat = odp_packet_user_area(segmented_test_packet);
 	if (odp_packet_user_area_size(segmented_test_packet) < uarea_size) {
-		printf("Bad segmented packet user area size %u\n",
-		       odp_packet_user_area_size(segmented_test_packet));
+		ODPH_ERR("Bad segmented packet user area size %u\n",
+			 odp_packet_user_area_size(segmented_test_packet));
 		return -1;
 	}
 
@@ -873,6 +873,12 @@ static void packet_test_basic_metadata(void)
 	CU_ASSERT(!odp_time_cmp(ts, odp_packet_ts(pkt)));
 	odp_packet_has_ts_clr(pkt);
 	CU_ASSERT(!odp_packet_has_ts(pkt));
+
+	CU_ASSERT(odp_packet_free_ctrl(pkt) == ODP_PACKET_FREE_CTRL_DISABLED);
+	odp_packet_free_ctrl_set(pkt, ODP_PACKET_FREE_CTRL_DONT_FREE);
+	CU_ASSERT(odp_packet_free_ctrl(pkt) == ODP_PACKET_FREE_CTRL_DONT_FREE);
+	odp_packet_free_ctrl_set(pkt, ODP_PACKET_FREE_CTRL_DISABLED);
+	CU_ASSERT(odp_packet_free_ctrl(pkt) == ODP_PACKET_FREE_CTRL_DISABLED);
 }
 
 static void packet_test_length(void)
@@ -3255,6 +3261,8 @@ static void packet_vector_test_user_area(void)
 	CU_ASSERT_FATAL(pool != ODP_POOL_INVALID);
 
 	for (i = 0; i < num; i++) {
+		odp_event_t ev;
+
 		pktv[i] = odp_packet_vector_alloc(pool);
 
 		if (pktv[i] == ODP_PACKET_VECTOR_INVALID)
@@ -3264,6 +3272,9 @@ static void packet_vector_test_user_area(void)
 		addr = odp_packet_vector_user_area(pktv[i]);
 		CU_ASSERT_FATAL(addr != NULL);
 		CU_ASSERT(prev != addr);
+
+		ev = odp_packet_vector_to_event(pktv[i]);
+		CU_ASSERT(odp_event_user_area(ev) == addr);
 
 		prev = addr;
 		memset(addr, 0, size);
@@ -3337,14 +3348,14 @@ static int packet_vector_suite_init(void)
 	vector_default_pool = odp_pool_create("vector_default_pool", &params);
 
 	if (vector_default_pool == ODP_POOL_INVALID) {
-		ODPH_ERR("default vector pool create failed\n");
+		ODPH_ERR("Default vector pool create failed\n");
 		goto err1;
 	}
 
 	/* Allocating a default vector */
 	pktv_default = odp_packet_vector_alloc(vector_default_pool);
 	if (pktv_default == ODP_PACKET_VECTOR_INVALID) {
-		ODPH_ERR("default vector packet allocation failed\n");
+		ODPH_ERR("Default vector packet allocation failed\n");
 		goto err2;
 	}
 	return 0;
@@ -3400,7 +3411,7 @@ static void packet_test_max_pools(void)
 
 	CU_ASSERT(num_pool == max_pools);
 	if (num_pool != max_pools)
-		printf("Error: created only %u pools\n", num_pool);
+		ODPH_ERR("Created only %u pools\n", num_pool);
 
 	for (i = 0; i < num_pool; i++) {
 		packet[i] = odp_packet_alloc(pool[i], len);
@@ -3436,6 +3447,7 @@ static void packet_test_user_area(void)
 	odp_pool_param_t param;
 	odp_packet_t pkt;
 	odp_pool_t pool;
+	odp_event_t ev;
 
 	memcpy(&param, &default_param, sizeof(odp_pool_param_t));
 
@@ -3451,6 +3463,8 @@ static void packet_test_user_area(void)
 	} else {
 		CU_ASSERT(odp_packet_user_area(pkt) == NULL);
 	}
+	ev = odp_packet_to_event(pkt);
+	CU_ASSERT(odp_event_user_area(ev) == odp_packet_user_area(pkt));
 
 	odp_packet_free(pkt);
 	CU_ASSERT(odp_pool_destroy(pool) == 0);
@@ -3464,6 +3478,8 @@ static void packet_test_user_area(void)
 	pkt = odp_packet_alloc(pool, param.pkt.len);
 	CU_ASSERT_FATAL(pkt != ODP_PACKET_INVALID);
 	CU_ASSERT_FATAL(odp_packet_user_area(pkt) != NULL);
+	ev = odp_packet_to_event(pkt);
+	CU_ASSERT(odp_event_user_area(ev) == odp_packet_user_area(pkt));
 	CU_ASSERT(odp_packet_user_area_size(pkt) >= 1);
 	*(char *)odp_packet_user_area(pkt) = 0;
 	CU_ASSERT_FATAL(odp_packet_is_valid(pkt) == 1);
@@ -3476,6 +3492,8 @@ static void packet_test_user_area(void)
 	pkt = odp_packet_alloc(pool, param.pkt.len);
 	CU_ASSERT_FATAL(pkt != ODP_PACKET_INVALID);
 	CU_ASSERT_FATAL(odp_packet_user_area(pkt) != NULL);
+	ev = odp_packet_to_event(pkt);
+	CU_ASSERT(odp_event_user_area(ev) == odp_packet_user_area(pkt));
 	CU_ASSERT(odp_packet_user_area_size(pkt) == param.pkt.uarea_size);
 	memset(odp_packet_user_area(pkt), 0, param.pkt.uarea_size);
 	CU_ASSERT_FATAL(odp_packet_is_valid(pkt) == 1);
@@ -3492,7 +3510,7 @@ static int packet_parse_suite_init(void)
 	memset(&pool_capa, 0, sizeof(odp_pool_capability_t));
 
 	if (odp_pool_capability(&pool_capa) < 0) {
-		printf("pool_capability failed\n");
+		ODPH_ERR("odp_pool_capability() failed\n");
 		return -1;
 	}
 

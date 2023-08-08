@@ -1,5 +1,5 @@
 /* Copyright (c) 2013-2018, Linaro Limited
- * Copyright (c) 2021-2022, Nokia
+ * Copyright (c) 2021-2023, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier: BSD-3-Clause
@@ -25,7 +25,7 @@ extern "C" {
 #include <odp/api/pool_types.h>
 #include <odp/api/proto_stats_types.h>
 #include <odp/api/std_types.h>
-#include <odp/api/time.h>
+#include <odp/api/time_types.h>
 
 /** @defgroup odp_packet ODP PACKET
  *  Packet event metadata and operations.
@@ -937,7 +937,7 @@ void *odp_packet_buf_head(odp_packet_buf_t pkt_buf);
 /**
  * Packet buffer size in bytes
  *
- * Packet buffer size is calculated from the buffer head pointer (@see odp_packet_buf_head()).
+ * Packet buffer size is calculated from the buffer head pointer (see odp_packet_buf_head()).
  * It contains all buffer level headroom, data, and tailroom. For a single segmented packet this is
  * equivalent to odp_packet_buf_len().
  *
@@ -994,7 +994,7 @@ void odp_packet_buf_data_set(odp_packet_buf_t pkt_buf, uint32_t data_offset, uin
  * may be done only for packet buffers that are not part of any packet (i.e. buffers between
  * odp_packet_disassemble() and odp_packet_reassemble() calls).
  *
- * This call can be used only for packets of an external memory pool (@see odp_pool_ext_create()).
+ * This call can be used only for packets of an external memory pool (see odp_pool_ext_create()).
  *
  * @param      pool     Pool from which the packet buffer (disassembled packet) originate from
  * @param      head     Head pointer
@@ -1008,12 +1008,12 @@ odp_packet_buf_t odp_packet_buf_from_head(odp_pool_t pool, void *head);
  * Disassemble packet into packet buffers
  *
  * Breaks up a packet into a list of packet buffers. Outputs a packet buffer handle for each
- * segment of the packet (@see odp_packet_num_segs()). After a successful operation the packet
+ * segment of the packet (see odp_packet_num_segs()). After a successful operation the packet
  * handle must not be referenced anymore. Packet buffers are reassembled into a new packet (or
  * several new packets) with a later odp_packet_reassemble() call(s). All packet buffers must be
  * reassembled into a packet and freed into the originating pool before the pool is destroyed.
  *
- * This call can be used only for packets of an external memory pool (@see odp_pool_ext_create()).
+ * This call can be used only for packets of an external memory pool (see odp_pool_ext_create()).
  *
  * @param      pkt      Packet to be disassembled
  * @param[out] pkt_buf  Packet buffer handle array for output
@@ -1040,7 +1040,7 @@ uint32_t odp_packet_disassemble(odp_packet_t pkt, odp_packet_buf_t pkt_buf[], ui
  * in the buffers. All other packet metadata are set to their default values. After a successful
  * operation packet buffer handles must not be referenced anymore.
  *
- * This call can be used only for packets of an external memory pool (@see odp_pool_ext_create()).
+ * This call can be used only for packets of an external memory pool (see odp_pool_ext_create()).
  *
  * @param      pool     Pool from which all packet buffers (disassembled packets) originate from
  * @param      pkt_buf  Packet buffers to form a new packet
@@ -2054,19 +2054,21 @@ void odp_packet_aging_tmo_set(odp_packet_t pkt, uint64_t tmo_ns);
 uint64_t odp_packet_aging_tmo(odp_packet_t pkt);
 
 /**
- * Request Tx completion event.
+ * Request packet transmit completion
  *
- * Enables or disables TX completion event request for the packet. When
- * enabled, an event of type ODP_EVENT_PACKET_TX_COMPL will be sent to the
- * destination queue based on the TX completion mode. The event is sent only
- * after pktio interface has finished processing the packet. A previously
- * enabled request can be disabled by setting the mode to
- * ODP_PACKET_TX_COMPL_DISABLED.
+ * Enables or disables packet transmit completion request for the packet. Completion may be
+ * requested either in event (#ODP_PACKET_TX_COMPL_EVENT) or poll (#ODP_PACKET_TX_COMPL_POLL) mode.
+ * When event mode is enabled, an event of type ODP_EVENT_PACKET_TX_COMPL will be sent to the
+ * destination queue to signal transmit completion. When poll mode is enabled,
+ * odp_packet_tx_compl_done() is used with the provided completion identifier to check the
+ * completion. In both cases, transmit completion is reported only after pktio interface has
+ * finished processing the packet.
  *
- * TX completion event request is disabled by default.
+ * A previously enabled request can be disabled by setting the mode to ODP_PACKET_TX_COMPL_DISABLED.
+ * Transmit completion request is disabled by default.
  *
  * @param pkt     Packet handle
- * @param opt     Points to TX completion event generation options
+ * @param opt     Packet transmit completion request options
  *
  * @retval 0  On success
  * @retval <0 On failure
@@ -2074,14 +2076,47 @@ uint64_t odp_packet_aging_tmo(odp_packet_t pkt);
 int odp_packet_tx_compl_request(odp_packet_t pkt, const odp_packet_tx_compl_opt_t *opt);
 
 /**
- * Check if TX completion event is requested for the packet
+ * Check if packet transmit completion is requested
  *
  * @param pkt     Packet handle
  *
- * @retval non-zero  TX completion event is requested
- * @retval 0         TX completion event is not requested
+ * @retval non-zero  Transmit completion is requested
+ * @retval 0         Transmit completion is not requested
  */
 int odp_packet_has_tx_compl_request(odp_packet_t pkt);
+
+/**
+ * Set packet free control option
+ *
+ * This option enables application to control which packets are freed/not freed back into pool
+ * after ODP implementation has finished processing those. The option affects only packets that
+ * are transmitted directly through a packet output interface (also with LSO), i.e. packets
+ * transmitted through inline IPsec or TM are not affected.
+ *
+ * When the option is set to #ODP_PACKET_FREE_CTRL_DONT_FREE, packet output interface will not free
+ * the packet after transmit and application may reuse the packet as soon as its transmit is
+ * complete (see e.g. odp_packet_tx_compl_done()).
+ *
+ * The option must not be enabled on packets that have multiple references.
+ *
+ * Check packet IO interface capability free_ctrl.dont_free (odp_pktio_capability_t::dont_free) for
+ * the option support. When an interface does not support the option, it ignores the value.
+ *
+ * The default value is #ODP_PACKET_FREE_CTRL_DISABLED.
+ *
+ * @param pkt   Packet handle
+ * @param ctrl  Packet free control option value
+ */
+void odp_packet_free_ctrl_set(odp_packet_t pkt, odp_packet_free_ctrl_t ctrl);
+
+/**
+ * Returns packet free control option value
+ *
+ * @param pkt   Packet handle
+ *
+ * @return The current value of the packet free control option
+ */
+odp_packet_free_ctrl_t odp_packet_free_ctrl(odp_packet_t pkt);
 
 /**
  * Request packet proto stats.
@@ -2195,8 +2230,8 @@ void odp_packet_vector_free(odp_packet_vector_t pktv);
  * the vector table.
  *
  * @note The maximum number of packets this vector can hold is defined by
- * odp_pool_param_t:vector:max_size. The return value of this function will not
- * be greater than odp_pool_param_t:vector:max_size
+ * odp_pool_param_t::vector::max_size. The return value of this function will not
+ * be greater than odp_pool_param_t::vector::max_size
  *
  * @note The pkt_tbl points to the packet vector table. Application can edit the
  * packet handles in the table directly (up to odp_pool_param_t::vector::max_size).
@@ -2397,6 +2432,29 @@ void odp_packet_tx_compl_free(odp_packet_tx_compl_t tx_compl);
  * @see odp_packet_user_ptr_set()
  */
 void *odp_packet_tx_compl_user_ptr(odp_packet_tx_compl_t tx_compl);
+
+/**
+ * Check packet transmit completion
+ *
+ * Checks if a previously sent packet with a ODP_PACKET_TX_COMPL_POLL type transmit completion
+ * request (see odp_packet_tx_compl_opt_t) has been transmitted. The packet send function call
+ * clears completion identifier status, and 0 is returned while the transmit is in progress.
+ * When >0 is returned, transmit of the packet is complete and the completion identifier may be
+ * reused for another transmit.
+ *
+ * When transmit of a packet is complete, it indicates that transmit of other packets sent
+ * before the packet through the same queue have also completed.
+ *
+ * Returns initially 0 for all configured completion identifiers.
+ *
+ * @param pktio          Packet IO interface that was used to send the packet
+ * @param compl_id       Completion identifier that was used in the transmit completion request
+ *
+ * @retval >0  Packet transmit is complete
+ * @retval  0  Packet transmit is not complete
+ * @retval <0  Failed to read packet transmit status
+ */
+int odp_packet_tx_compl_done(odp_pktio_t pktio, uint32_t compl_id);
 
 /*
  *

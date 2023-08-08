@@ -64,7 +64,7 @@ const _odp_packet_inline_offset_t _odp_packet_inline ODP_ALIGNED_CACHE = {
 	.timestamp        = offsetof(odp_packet_hdr_t, timestamp),
 	.input_flags      = offsetof(odp_packet_hdr_t, p.input_flags),
 	.flags            = offsetof(odp_packet_hdr_t, p.flags),
-	.subtype          = offsetof(odp_packet_hdr_t, subtype),
+	.subtype          = offsetof(odp_packet_hdr_t, event_hdr.subtype),
 	.cls_mark         = offsetof(odp_packet_hdr_t, cls_mark),
 	.ipsec_ctx        = offsetof(odp_packet_hdr_t, ipsec_ctx),
 	.crypto_op        = offsetof(odp_packet_hdr_t, crypto_op_result),
@@ -1018,7 +1018,7 @@ void odp_packet_print(odp_packet_t pkt)
 			    odp_packet_to_u64(pkt));
 	len += _odp_snprint(&str[len], n - len, "  pool index     %u\n", pool->pool_idx);
 	len += _odp_snprint(&str[len], n - len, "  buf index      %u\n", hdr->event_hdr.index);
-	len += _odp_snprint(&str[len], n - len, "  ev subtype     %i\n", hdr->subtype);
+	len += _odp_snprint(&str[len], n - len, "  ev subtype     %i\n", hdr->event_hdr.subtype);
 	len += _odp_snprint(&str[len], n - len, "  input_flags    0x%" PRIx64 "\n",
 			    hdr->p.input_flags.all);
 	if (hdr->p.input_flags.all) {
@@ -1766,7 +1766,7 @@ int odp_packet_tx_compl_request(odp_packet_t pkt, const odp_packet_tx_compl_opt_
 {
 	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
 
-	pkt_hdr->p.flags.tx_compl = opt->mode == ODP_PACKET_TX_COMPL_ALL ? 1 : 0;
+	pkt_hdr->p.flags.tx_compl = opt->mode == ODP_PACKET_TX_COMPL_EVENT ? 1 : 0;
 	pkt_hdr->dst_queue = opt->queue;
 
 	return 0;
@@ -1799,6 +1799,34 @@ void *odp_packet_tx_compl_user_ptr(odp_packet_tx_compl_t tx_compl)
 	_odp_pktio_tx_compl_t *data = odp_buffer_addr((odp_buffer_t)tx_compl);
 
 	return (void *)(uintptr_t)data->user_ptr;
+}
+
+int odp_packet_tx_compl_done(odp_pktio_t pktio, uint32_t compl_id)
+{
+	(void)pktio;
+	(void)compl_id;
+
+	return -1;
+}
+
+void odp_packet_free_ctrl_set(odp_packet_t pkt, odp_packet_free_ctrl_t ctrl)
+{
+	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
+
+	if (ctrl == ODP_PACKET_FREE_CTRL_DONT_FREE)
+		pkt_hdr->p.flags.free_ctrl = 1;
+	else
+		pkt_hdr->p.flags.free_ctrl = 0;
+}
+
+odp_packet_free_ctrl_t odp_packet_free_ctrl(odp_packet_t pkt)
+{
+	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
+
+	if (pkt_hdr->p.flags.free_ctrl)
+		return ODP_PACKET_FREE_CTRL_DONT_FREE;
+
+	return ODP_PACKET_FREE_CTRL_DISABLED;
 }
 
 odp_packet_reass_status_t odp_packet_reass_status(odp_packet_t pkt)
@@ -1903,7 +1931,7 @@ odp_packet_t odp_packet_reassemble(odp_pool_t pool_hdl,
 	pkt_hdr->mb.data_off = headroom;
 
 	/* Reset metadata */
-	pkt_hdr->subtype = ODP_EVENT_PACKET_BASIC;
+	pkt_hdr->event_hdr.subtype = ODP_EVENT_PACKET_BASIC;
 	pkt_hdr->input = ODP_PKTIO_INVALID;
 	packet_parse_reset(pkt_hdr, 1);
 

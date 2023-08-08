@@ -2218,7 +2218,7 @@ int odp_packet_tx_compl_request(odp_packet_t pkt, const odp_packet_tx_compl_opt_
 {
 	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
 
-	pkt_hdr->p.flags.tx_compl = opt->mode == ODP_PACKET_TX_COMPL_ALL ? 1 : 0;
+	pkt_hdr->p.flags.tx_compl = opt->mode == ODP_PACKET_TX_COMPL_EVENT ? 1 : 0;
 	pkt_hdr->dst_queue = opt->queue;
 
 	return 0;
@@ -2251,6 +2251,34 @@ void *odp_packet_tx_compl_user_ptr(odp_packet_tx_compl_t tx_compl)
 	_odp_pktio_tx_compl_t *data = odp_buffer_addr((odp_buffer_t)tx_compl);
 
 	return (void *)(uintptr_t)data->user_ptr;
+}
+
+int odp_packet_tx_compl_done(odp_pktio_t pktio, uint32_t compl_id)
+{
+	(void)pktio;
+	(void)compl_id;
+
+	return -1;
+}
+
+void odp_packet_free_ctrl_set(odp_packet_t pkt, odp_packet_free_ctrl_t ctrl)
+{
+	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
+
+	if (ctrl == ODP_PACKET_FREE_CTRL_DONT_FREE)
+		pkt_hdr->p.flags.free_ctrl = 1;
+	else
+		pkt_hdr->p.flags.free_ctrl = 0;
+}
+
+odp_packet_free_ctrl_t odp_packet_free_ctrl(odp_packet_t pkt)
+{
+	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
+
+	if (pkt_hdr->p.flags.free_ctrl)
+		return ODP_PACKET_FREE_CTRL_DONT_FREE;
+
+	return ODP_PACKET_FREE_CTRL_DISABLED;
 }
 
 odp_packet_reass_status_t

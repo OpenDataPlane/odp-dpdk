@@ -823,6 +823,24 @@ int odp_buffer_alloc_multi(odp_pool_t pool_hdl, odp_buffer_t buf[], int num)
 	return _odp_event_alloc_multi(pool, (_odp_event_hdr_t **)buf, num);
 }
 
+static const char *get_short_type_str(odp_pool_type_t type)
+{
+	switch (type) {
+	case ODP_POOL_BUFFER:
+		return "B";
+	case ODP_POOL_PACKET:
+		return "P";
+	case ODP_POOL_TIMEOUT:
+		return "T";
+	case ODP_POOL_VECTOR:
+		return "V";
+	case ODP_POOL_DMA_COMPL:
+		return "D";
+	default:
+		return "-";
+	}
+}
+
 void odp_pool_print(odp_pool_t pool_hdl)
 {
 	pool_t *pool = _odp_pool_entry(pool_hdl);
@@ -837,8 +855,7 @@ void odp_pool_print_all(void)
 	uint32_t elt_size, elt_len = 0;
 	uint8_t type, ext;
 	const int col_width = 24;
-	const char *name;
-	char type_c;
+	const char *name, *type_c;
 
 	_ODP_PRINT("\nList of all pools\n");
 	_ODP_PRINT("-----------------\n");
@@ -868,12 +885,9 @@ void odp_pool_print_all(void)
 		if (type == ODP_POOL_BUFFER || type == ODP_POOL_PACKET)
 			elt_len = elt_size;
 
-		type_c = (type == ODP_POOL_BUFFER) ? 'B' :
-			 (type == ODP_POOL_PACKET) ? 'P' :
-			 (type == ODP_POOL_TIMEOUT) ? 'T' :
-			 (type == ODP_POOL_VECTOR) ? 'V' : '-';
+		type_c = get_short_type_str(pool->type_2);
 
-		_ODP_PRINT("%4u %-*s    %c %6" PRIu64 " %6" PRIu32 " %6" PRIu32 " %8" PRIu32 "    "
+		_ODP_PRINT("%4u %-*s    %s %6" PRIu64 " %6" PRIu32 " %6" PRIu32 " %8" PRIu32 "    "
 			   "%" PRIu8 "\n", index, col_width, name, type_c, available, tot,
 			   cache_size, elt_len, ext);
 	}
@@ -913,6 +927,7 @@ int odp_pool_info(odp_pool_t pool_hdl, odp_pool_info_t *info)
 
 	} else if (pool->type_2 == ODP_POOL_DMA_COMPL) {
 		info->dma_pool_param.num        = pool->params.buf.num;
+		info->dma_pool_param.uarea_size = pool->params.buf.uarea_size;
 		info->dma_pool_param.cache_size = pool->params.buf.cache_size;
 
 	} else {
@@ -999,6 +1014,37 @@ int odp_pool_stats(odp_pool_t pool_hdl, odp_pool_stats_t *stats)
 	stats->thread.last = last;
 
 	if (pool->params.stats.bit.available)
+		stats->available = rte_mempool_avail_count(pool->rte_mempool);
+
+	return 0;
+}
+
+int odp_pool_stats_selected(odp_pool_t pool_hdl, odp_pool_stats_selected_t *stats,
+			    const odp_pool_stats_opt_t *opt)
+{
+	pool_t *pool;
+
+	if (odp_unlikely(pool_hdl == ODP_POOL_INVALID)) {
+		_ODP_ERR("Invalid pool handle\n");
+		return -1;
+	}
+	if (odp_unlikely(stats == NULL)) {
+		_ODP_ERR("Output buffer NULL\n");
+		return -1;
+	}
+	if (odp_unlikely(opt == NULL)) {
+		_ODP_ERR("Pool counters NULL\n");
+		return -1;
+	}
+
+	pool = _odp_pool_entry(pool_hdl);
+
+	if (odp_unlikely(opt->all & ~pool->params.stats.all)) {
+		_ODP_ERR("Trying to read disabled counter\n");
+		return -1;
+	}
+
+	if (opt->bit.available)
 		stats->available = rte_mempool_avail_count(pool->rte_mempool);
 
 	return 0;

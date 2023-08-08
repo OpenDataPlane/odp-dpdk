@@ -101,7 +101,7 @@ static int dma_suite_init(void)
 	pkt_len = MIN(pkt_len, global.dma_capa.max_seg_len);
 	odp_pool_param_init(&pool_param);
 	pool_param.type = ODP_POOL_PACKET;
-	pool_param.pkt.num = 4;
+	pool_param.pkt.num = global.dma_capa.max_src_segs + global.dma_capa.max_dst_segs;
 	pool_param.pkt.len = pkt_len;
 	pool_param.pkt.max_len = pkt_len;
 
@@ -173,7 +173,7 @@ static int dma_suite_term(void)
 		return -1;
 	}
 
-	return 0;
+	return odp_cunit_print_inactive();
 }
 
 static void test_dma_capability(void)
@@ -234,6 +234,7 @@ static void test_dma_param(uint8_t fill)
 
 	memset(&dma_pool_param, fill, sizeof(dma_pool_param));
 	odp_dma_pool_param_init(&dma_pool_param);
+	CU_ASSERT(dma_pool_param.uarea_size == 0);
 	CU_ASSERT(dma_pool_param.cache_size <= global.dma_capa.pool.max_cache_size);
 	CU_ASSERT(dma_pool_param.cache_size >= global.dma_capa.pool.min_cache_size);
 }
@@ -269,6 +270,54 @@ static void test_dma_debug(void)
 	CU_ASSERT(odp_dma_destroy(dma) == 0);
 }
 
+static void test_dma_same_name_null(void)
+{
+	odp_dma_param_t dma_param;
+	odp_dma_t dma_a, dma_b;
+
+	odp_dma_param_init(&dma_param);
+	dma_param.compl_mode_mask = ODP_DMA_COMPL_SYNC;
+	dma_a = odp_dma_create(NULL, &dma_param);
+
+	CU_ASSERT_FATAL(dma_a != ODP_DMA_INVALID);
+
+	dma_b = odp_dma_create(NULL, &dma_param);
+
+	CU_ASSERT_FATAL(dma_b != ODP_DMA_INVALID);
+	CU_ASSERT(odp_dma_to_u64(dma_a) != odp_dma_to_u64(dma_b));
+	CU_ASSERT(odp_dma_destroy(dma_a) == 0);
+	CU_ASSERT(odp_dma_destroy(dma_b) == 0);
+}
+
+static void test_dma_same_name_named(void)
+{
+	odp_dma_param_t dma_param;
+	const char *name = "DMA session";
+	odp_dma_t dma, dma_a, dma_b;
+
+	odp_dma_param_init(&dma_param);
+	dma_param.compl_mode_mask = ODP_DMA_COMPL_SYNC;
+	dma_a = odp_dma_create(name, &dma_param);
+
+	CU_ASSERT_FATAL(dma_a != ODP_DMA_INVALID);
+
+	dma = odp_dma_lookup(name);
+
+	CU_ASSERT(odp_dma_to_u64(dma) == odp_dma_to_u64(dma_a));
+
+	dma_b = odp_dma_create(name, &dma_param);
+
+	CU_ASSERT_FATAL(dma_b != ODP_DMA_INVALID);
+
+	dma = odp_dma_lookup(name);
+
+	CU_ASSERT(odp_dma_to_u64(dma) == odp_dma_to_u64(dma_a) ||
+		  odp_dma_to_u64(dma) == odp_dma_to_u64(dma_b));
+	CU_ASSERT(odp_dma_to_u64(dma_a) != odp_dma_to_u64(dma_b));
+	CU_ASSERT(odp_dma_destroy(dma_a) == 0);
+	CU_ASSERT(odp_dma_destroy(dma_b) == 0);
+}
+
 static void test_dma_compl_pool(void)
 {
 	odp_pool_t pool;
@@ -291,6 +340,7 @@ static void test_dma_compl_pool(void)
 	CU_ASSERT(pool_info.pool_ext == 0);
 	CU_ASSERT(pool_info.type == ODP_POOL_DMA_COMPL);
 	CU_ASSERT(pool_info.dma_pool_param.num == global.dma_capa.max_transfers);
+	CU_ASSERT(pool_info.dma_pool_param.uarea_size == 0);
 	CU_ASSERT(pool_info.dma_pool_param.cache_size == global.cache_size);
 
 	for (i = 0; i < global.dma_capa.max_transfers; i++) {
@@ -362,6 +412,50 @@ static void test_dma_compl_pool_max_pools(void)
 		if (ret == -1)
 			ODPH_ERR("DMA completion pool destroy failed: %u / %u\n", j, i);
 	}
+}
+
+static void test_dma_compl_user_area(void)
+{
+	odp_dma_pool_param_t dma_pool_param;
+	uint32_t num = MIN(10, global.dma_capa.pool.max_num),
+	size = global.dma_capa.pool.max_uarea_size, i;
+	odp_pool_t pool;
+	odp_dma_compl_t compl_evs[num];
+	void *addr, *prev = NULL;
+
+	odp_dma_pool_param_init(&dma_pool_param);
+	dma_pool_param.num = num;
+	dma_pool_param.uarea_size = size;
+	pool = odp_dma_pool_create(NULL, &dma_pool_param);
+
+	CU_ASSERT_FATAL(pool != ODP_POOL_INVALID);
+
+	for (i = 0; i < num; i++) {
+		odp_event_t ev;
+
+		compl_evs[i] = odp_dma_compl_alloc(pool);
+
+		if (compl_evs[i] == ODP_DMA_COMPL_INVALID)
+			break;
+
+		addr = odp_dma_compl_user_area(compl_evs[i]);
+
+		CU_ASSERT_FATAL(addr != NULL);
+		CU_ASSERT(prev != addr);
+
+		ev = odp_dma_compl_to_event(compl_evs[i]);
+		CU_ASSERT(odp_event_user_area(ev) == addr);
+
+		prev = addr;
+		memset(addr, 0, size);
+	}
+
+	CU_ASSERT(i == num);
+
+	for (uint32_t j = 0; j < i; j++)
+		odp_dma_compl_free(compl_evs[j]);
+
+	CU_ASSERT(odp_pool_destroy(pool) == 0);
 }
 
 static void init_source(uint8_t *src, uint32_t len)
@@ -1043,12 +1137,35 @@ static int check_sync(void)
 	return ODP_TEST_ACTIVE;
 }
 
+static int check_session_count(void)
+{
+	if (global.disabled)
+		return ODP_TEST_INACTIVE;
+
+	if (global.dma_capa.max_sessions > 1)
+		return ODP_TEST_ACTIVE;
+
+	return ODP_TEST_INACTIVE;
+}
+
 static int check_event(void)
 {
 	if (global.disabled)
 		return ODP_TEST_INACTIVE;
 
 	if (global.dma_capa.compl_mode_mask & ODP_DMA_COMPL_EVENT)
+		return ODP_TEST_ACTIVE;
+
+	return ODP_TEST_INACTIVE;
+}
+
+static int check_event_user_area(void)
+{
+	if (global.disabled)
+		return ODP_TEST_INACTIVE;
+
+	if ((global.dma_capa.compl_mode_mask & ODP_DMA_COMPL_EVENT) &&
+	    global.dma_capa.pool.max_uarea_size > 0)
 		return ODP_TEST_ACTIVE;
 
 	return ODP_TEST_INACTIVE;
@@ -1126,6 +1243,72 @@ static void test_dma_addr_to_addr_sync_res(void)
 	test_dma_addr_to_addr(ODP_DMA_COMPL_SYNC, 1, 0, RESULT);
 }
 
+static void get_seg_lens(uint32_t max_len, uint32_t *src, uint32_t *dst)
+{
+	uint32_t src_segs = *src, dst_segs = *dst;
+
+	*src = max_len / src_segs;
+	*dst = *src * src_segs / dst_segs + *src * src_segs % dst_segs;
+}
+
+static void test_dma_addr_to_addr_sync_max_seg(void)
+{
+	odp_dma_param_t dma_param;
+	odp_dma_transfer_param_t trs_param;
+	odp_dma_t dma;
+	odp_dma_seg_t src_seg[global.dma_capa.max_src_segs];
+	odp_dma_seg_t dst_seg[global.dma_capa.max_dst_segs];
+	uint32_t src_len = global.dma_capa.max_src_segs, dst_len = global.dma_capa.max_dst_segs,
+	len;
+	int ret;
+
+	init_source(global.src_addr, global.data_size);
+	memset(global.dst_addr, 0, global.data_size);
+	odp_dma_param_init(&dma_param);
+	dma_param.compl_mode_mask = ODP_DMA_COMPL_SYNC;
+	dma = odp_dma_create("addr_to_addr_max_seg", &dma_param);
+
+	CU_ASSERT_FATAL(dma != ODP_DMA_INVALID);
+
+	get_seg_lens(global.len, &src_len, &dst_len);
+
+	for (uint32_t i = 0; i < global.dma_capa.max_src_segs; i++) {
+		uint8_t *addr = global.src_addr + i * src_len;
+
+		memset(&src_seg[i], 0, sizeof(odp_dma_seg_t));
+		src_seg[i].addr = addr;
+		src_seg[i].len = src_len;
+	}
+
+	len = src_len * global.dma_capa.max_src_segs;
+
+	for (uint32_t i = 0; i < global.dma_capa.max_dst_segs; i++) {
+		uint8_t *addr = global.dst_addr + i * dst_len;
+
+		memset(&dst_seg[i], 0, sizeof(odp_dma_seg_t));
+		dst_seg[i].addr = addr;
+		dst_seg[i].len = MIN(len, dst_len);
+		len -= dst_len;
+	}
+
+	odp_dma_transfer_param_init(&trs_param);
+	trs_param.src_format = ODP_DMA_FORMAT_ADDR;
+	trs_param.dst_format = ODP_DMA_FORMAT_ADDR;
+	trs_param.num_src = global.dma_capa.max_src_segs;
+	trs_param.num_dst = global.dma_capa.max_dst_segs;
+	trs_param.src_seg = src_seg;
+	trs_param.dst_seg = dst_seg;
+	ret = do_transfer(dma, &trs_param, 0, 0);
+
+	if (ret > 0) {
+		len = src_len * global.dma_capa.max_src_segs;
+
+		CU_ASSERT(check_equal(global.src_addr, global.dst_addr, len) == 0);
+	}
+
+	CU_ASSERT(odp_dma_destroy(dma) == 0);
+}
+
 static void test_dma_addr_to_pkt_sync(void)
 {
 	test_dma_addr_to_pkt(ODP_DMA_COMPL_SYNC, 0);
@@ -1139,6 +1322,87 @@ static void test_dma_pkt_to_addr_sync(void)
 static void test_dma_pkt_to_pkt_sync(void)
 {
 	test_dma_pkt_to_pkt(ODP_DMA_COMPL_SYNC, 0);
+}
+
+static void test_dma_pkt_to_pkt_sync_max_seg(void)
+{
+	odp_dma_param_t dma_param;
+	odp_dma_transfer_param_t trs_param;
+	odp_dma_t dma;
+	odp_packet_t pkt;
+	odp_dma_seg_t src_seg[global.dma_capa.max_src_segs];
+	odp_dma_seg_t dst_seg[global.dma_capa.max_dst_segs];
+	uint32_t src_len = global.dma_capa.max_src_segs, dst_len = global.dma_capa.max_dst_segs,
+	len;
+	int ret;
+
+	odp_dma_param_init(&dma_param);
+	dma_param.compl_mode_mask = ODP_DMA_COMPL_SYNC;
+	dma = odp_dma_create("pkt_to_pkt_max_seg", &dma_param);
+
+	CU_ASSERT_FATAL(dma != ODP_DMA_INVALID);
+
+	pkt = odp_packet_alloc(global.pkt_pool, global.pkt_len);
+
+	CU_ASSERT_FATAL(pkt != ODP_PACKET_INVALID);
+
+	get_seg_lens(odp_packet_seg_len(pkt), &src_len, &dst_len);
+	odp_packet_free(pkt);
+
+	for (uint32_t i = 0; i < global.dma_capa.max_src_segs; i++) {
+		pkt = odp_packet_alloc(global.pkt_pool, src_len);
+
+		CU_ASSERT_FATAL(pkt != ODP_PACKET_INVALID);
+
+		init_source(odp_packet_data(pkt), src_len);
+		memset(&src_seg[i], 0, sizeof(odp_dma_seg_t));
+		src_seg[i].packet = pkt;
+		src_seg[i].len = src_len;
+	}
+
+	len = src_len * global.dma_capa.max_src_segs;
+
+	for (uint32_t i = 0; i < global.dma_capa.max_dst_segs; i++) {
+		pkt = odp_packet_alloc(global.pkt_pool, dst_len);
+
+		CU_ASSERT_FATAL(pkt != ODP_PACKET_INVALID);
+
+		memset(odp_packet_data(pkt), 0, dst_len);
+		memset(&dst_seg[i], 0, sizeof(odp_dma_seg_t));
+		dst_seg[i].packet = pkt;
+		dst_seg[i].len = MIN(len, dst_len);
+		len -= dst_len;
+	}
+
+	odp_dma_transfer_param_init(&trs_param);
+	trs_param.src_format = ODP_DMA_FORMAT_PACKET;
+	trs_param.dst_format = ODP_DMA_FORMAT_PACKET;
+	trs_param.num_src = global.dma_capa.max_src_segs;
+	trs_param.num_dst = global.dma_capa.max_dst_segs;
+	trs_param.src_seg = src_seg;
+	trs_param.dst_seg = dst_seg;
+	ret = do_transfer(dma, &trs_param, 0, 0);
+
+	if (ret > 0) {
+		len = src_len * global.dma_capa.max_src_segs;
+		uint8_t src[len], dst[len];
+
+		for (uint32_t i = 0; i < global.dma_capa.max_src_segs; i++) {
+			memcpy(src + i * src_len, odp_packet_data(src_seg[i].packet),
+			       src_seg[i].len);
+			odp_packet_free(src_seg[i].packet);
+		}
+
+		for (uint32_t i = 0; i < global.dma_capa.max_dst_segs; i++) {
+			memcpy(dst + i * dst_len, odp_packet_data(dst_seg[i].packet),
+			       dst_seg[i].len);
+			odp_packet_free(dst_seg[i].packet);
+		}
+
+		CU_ASSERT(check_equal(src, dst, len) == 0);
+	}
+
+	CU_ASSERT(odp_dma_destroy(dma) == 0);
 }
 
 static void test_dma_addr_to_addr_poll(void)
@@ -1298,16 +1562,21 @@ odp_testinfo_t dma_suite[] = {
 	ODP_TEST_INFO(test_dma_capability),
 	ODP_TEST_INFO_CONDITIONAL(test_dma_param_init, check_sync),
 	ODP_TEST_INFO_CONDITIONAL(test_dma_debug, check_sync),
+	ODP_TEST_INFO_CONDITIONAL(test_dma_same_name_null, check_session_count),
+	ODP_TEST_INFO_CONDITIONAL(test_dma_same_name_named, check_session_count),
 	ODP_TEST_INFO_CONDITIONAL(test_dma_compl_pool, check_event),
 	ODP_TEST_INFO_CONDITIONAL(test_dma_compl_pool_same_name, check_event),
 	ODP_TEST_INFO_CONDITIONAL(test_dma_compl_pool_max_pools, check_event),
+	ODP_TEST_INFO_CONDITIONAL(test_dma_compl_user_area, check_event_user_area),
 	ODP_TEST_INFO_CONDITIONAL(test_dma_addr_to_addr_sync, check_sync),
 	ODP_TEST_INFO_CONDITIONAL(test_dma_addr_to_addr_sync_mtrs, check_sync),
 	ODP_TEST_INFO_CONDITIONAL(test_dma_addr_to_addr_sync_mseg, check_sync),
 	ODP_TEST_INFO_CONDITIONAL(test_dma_addr_to_addr_sync_res, check_sync),
+	ODP_TEST_INFO_CONDITIONAL(test_dma_addr_to_addr_sync_max_seg, check_sync),
 	ODP_TEST_INFO_CONDITIONAL(test_dma_addr_to_pkt_sync, check_sync),
 	ODP_TEST_INFO_CONDITIONAL(test_dma_pkt_to_addr_sync, check_sync),
 	ODP_TEST_INFO_CONDITIONAL(test_dma_pkt_to_pkt_sync, check_sync),
+	ODP_TEST_INFO_CONDITIONAL(test_dma_pkt_to_pkt_sync_max_seg, check_sync),
 	ODP_TEST_INFO_CONDITIONAL(test_dma_addr_to_addr_poll, check_poll),
 	ODP_TEST_INFO_CONDITIONAL(test_dma_addr_to_addr_poll_mtrs, check_poll),
 	ODP_TEST_INFO_CONDITIONAL(test_dma_addr_to_addr_poll_mseg, check_poll),

@@ -1,5 +1,5 @@
 /* Copyright (c) 2013-2018, Linaro Limited
- * Copyright (c) 2020-2022, Nokia
+ * Copyright (c) 2020-2023, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -523,12 +523,11 @@ typedef union odp_pktout_config_opt_t {
 		 */
 		uint64_t aging_ena  : 1;
 
-		/** Enable packet transmit completion event requests
+		/**
+		 * For backwards compatibility, setting this flag is the same as setting
+		 * tx_compl.mode_event in odp_pktio_config_t. The default value is zero.
 		 *
-		 * Use pktio capability tx_compl to check if TX completion events are supported.
-		 *
-		 * 0: Application will not request packet TX completion events (default)
-		 * 1: Application may request packet TX completion events
+		 * @deprecated Use odp_pktio_config_t::mode_event instead.
 		 */
 		uint64_t tx_compl_ena : 1;
 
@@ -635,8 +634,7 @@ typedef struct odp_pktio_config_t {
 	 * * 0: Disable outbound IPSEC inline operation (default)
 	 * * 1: Enable outbound IPSEC inline operation
 	 *
-	 *  @see odp_ipsec_config(), odp_ipsec_sa_create()
-	 *  odp_ipsec_out_inline()
+	 *  @see odp_ipsec_config(), odp_ipsec_sa_create(), odp_ipsec_out_inline()
 	 */
 	odp_bool_t outbound_ipsec;
 
@@ -698,6 +696,45 @@ typedef struct odp_pktio_config_t {
 		odp_pktio_link_pause_t pause_tx;
 
 	} flow_control;
+
+	/**
+	 * Packet transmit completion configuration
+	 */
+	struct {
+		/**
+		 * Enable packet transmit completion events
+		 *
+		 * Use pktio capability tx_compl to check if packet transmit completion mode
+		 * #ODP_PACKET_TX_COMPL_EVENT is supported.
+		 *
+		 * 0: Application will not request ODP_PACKET_TX_COMPL_EVENT mode
+		 *    completion (default)
+		 * 1: Application may request ODP_PACKET_TX_COMPL_EVENT mode completion
+		 */
+		uint32_t mode_event : 1;
+
+		/**
+		 * Enable packet transmit completion check through polling
+		 *
+		 * Use pktio capability tx_compl to check if packet transmit completion mode
+		 * #ODP_PACKET_TX_COMPL_POLL is supported.
+		 *
+		 * 0: Application will not request ODP_PACKET_TX_COMPL_POLL mode
+		 *    completion (default)
+		 * 1: Application may request ODP_PACKET_TX_COMPL_POLL mode completion
+		 */
+		uint32_t mode_poll : 1;
+
+		/**
+		 * Maximum completion index
+		 *
+		 * When ODP_PACKET_TX_COMPL_POLL mode is enabled, the maximum completion index
+		 * value that application will use. The value must be between 0 and
+		 * tx_compl.max_compl_id capability. The default value is zero.
+		 */
+		uint32_t max_compl_id;
+
+	} tx_compl;
 
 } odp_pktio_config_t;
 
@@ -987,10 +1024,33 @@ typedef struct odp_pktio_capability_t {
 		 */
 		odp_bool_t queue_type_plain;
 
-		/** ODP_PACKET_TX_COMPL_ALL supported */
-		uint32_t mode_all:1;
+		/**
+		 * For backwards compatibility, mode_all is synonym of mode_event.
+		 *
+		 * @deprecated Use mode_event instead.
+		 */
+		uint32_t mode_all   : 1;
+
+		/** Packet transmit completion mode ODP_PACKET_TX_COMPL_EVENT support */
+		uint32_t mode_event : 1;
+
+		/** Packet transmit completion mode ODP_PACKET_TX_COMPL_POLL support */
+		uint32_t mode_poll  : 1;
+
+		/** Maximum supported completion ID value */
+		uint32_t max_compl_id;
 
 	} tx_compl;
+
+	/** Supported packet free control options */
+	struct {
+		/**
+		 * Packet free control option #ODP_PACKET_FREE_CTRL_DONT_FREE support
+		 * with odp_packet_free_ctrl_set().
+		 */
+		uint32_t dont_free : 1;
+
+	} free_ctrl;
 
 	/** Packet input reassembly capability */
 	odp_reass_capability_t reassembly;

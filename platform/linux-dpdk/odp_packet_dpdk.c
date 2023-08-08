@@ -127,6 +127,9 @@ typedef struct {
 typedef struct ODP_ALIGNED_CACHE {
 	/* --- Fast path data --- */
 
+	/* Function for mbuf to ODP packet conversion */
+	int (*mbuf_to_pkt_fn)(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], uint16_t num);
+
 	/* DPDK port identifier */
 	uint16_t port_id;
 	struct {
@@ -186,6 +189,11 @@ const pktio_if_ops_t * const _odp_pktio_if_ops[]  = {
 extern void *pktio_entry_ptr[ODP_CONFIG_PKTIO_ENTRIES];
 
 static uint32_t mtu_get_pkt_dpdk(pktio_entry_t *pktio_entry);
+
+static inline int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], uint16_t num);
+
+static inline int input_pkts_minimal(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[],
+				     uint16_t num);
 
 uint16_t _odp_dpdk_pktio_port_id(pktio_entry_t *pktio_entry)
 {
@@ -901,6 +909,12 @@ static int dpdk_start(pktio_entry_t *pktio_entry)
 		}
 	}
 
+	/* Use simpler function when packet parsing and classifying are not required */
+	if (pktio_entry->parse_layer == ODP_PROTO_LAYER_NONE)
+		pkt_dpdk->mbuf_to_pkt_fn = input_pkts_minimal;
+	else
+		pkt_dpdk->mbuf_to_pkt_fn = input_pkts;
+
 	/* Start device */
 	ret = rte_eth_dev_start(port_id);
 	if (ret < 0) {
@@ -929,19 +943,60 @@ static inline void prefetch_pkt(odp_packet_t pkt)
 {
 	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
 
-	odp_prefetch(&pkt_hdr->p);
+	odp_prefetch_store(&pkt_hdr->p);
 }
 
-static inline int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int num)
+/**
+ * Input packets when packet parsing and classifier are disabled
+ */
+static inline int input_pkts_minimal(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[],
+				     uint16_t num)
 {
 	uint16_t i;
-	uint16_t num_pkts = 0;
-	odp_pktin_config_opt_t pktin_cfg = pktio_entry->config.pktin;
-	odp_pktio_t input = pktio_entry->handle;
 	odp_time_t ts_val;
 	odp_time_t *ts = NULL;
-	uint16_t num_prefetch = RTE_MIN(num, NUM_RX_PREFETCH);
+	const uint8_t ts_ena = (pktio_entry->config.pktin.bit.ts_all ||
+				pktio_entry->config.pktin.bit.ts_ptp);
+	const odp_pktio_t input = pktio_entry->handle;
+	const uint16_t num_prefetch = RTE_MIN(num, NUM_RX_PREFETCH);
+
+	for (i = 0; i < num_prefetch; i++)
+		prefetch_pkt(pkt_table[i]);
+
+	if (ts_ena) {
+		ts_val = odp_time_global();
+		ts = &ts_val;
+	}
+
+	for (i = 0; i < num; ++i) {
+		odp_packet_t pkt = pkt_table[i];
+		odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
+
+		if (odp_likely(i + num_prefetch < num))
+			prefetch_pkt(pkt_table[i + num_prefetch]);
+
+		packet_init(pkt_hdr, input);
+
+		packet_set_ts(pkt_hdr, ts);
+	}
+
+	return num;
+}
+
+/**
+ * input packets when packet parsing is required
+ */
+static inline int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], uint16_t num)
+{
+	uint16_t i;
+	uint16_t num_pkts = 0, num_cls = 0;
+	odp_time_t ts_val;
+	odp_time_t *ts = NULL;
+	const odp_pktin_config_opt_t pktin_cfg = pktio_entry->config.pktin;
+	const odp_pktio_t input = pktio_entry->handle;
 	const odp_proto_layer_t layer = pktio_entry->parse_layer;
+	const int cls_enabled = pktio_cls_enabled(pktio_entry);
+	const uint16_t num_prefetch = RTE_MIN(num, NUM_RX_PREFETCH);
 
 	for (i = 0; i < num_prefetch; i++)
 		prefetch_pkt(pkt_table[i]);
@@ -955,47 +1010,34 @@ static inline int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[
 		odp_packet_t pkt = pkt_table[i];
 		odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
 		struct rte_mbuf *mbuf = pkt_to_mbuf(pkt);
+		int ret;
 
 		if (odp_likely(i + num_prefetch < num))
 			prefetch_pkt(pkt_table[i + num_prefetch]);
 
 		packet_init(pkt_hdr, input);
 
-		if (layer != ODP_PROTO_LAYER_NONE) {
-			int ret;
+		ret = _odp_dpdk_packet_parse_common(pkt_hdr,
+						    rte_pktmbuf_mtod(mbuf, uint8_t *),
+						    rte_pktmbuf_pkt_len(mbuf),
+						    rte_pktmbuf_data_len(mbuf),
+						    mbuf, layer, pktin_cfg);
+		if (odp_unlikely(ret)) {
+			odp_atomic_inc_u64(&pktio_entry->stats_extra.in_errors);
 
-			ret = _odp_dpdk_packet_parse_common(pkt_hdr,
-							    rte_pktmbuf_mtod(mbuf, uint8_t *),
-							    rte_pktmbuf_pkt_len(mbuf),
-							    rte_pktmbuf_data_len(mbuf),
-							    mbuf, layer, pktin_cfg);
-			if (odp_unlikely(ret)) {
-				odp_atomic_inc_u64(&pktio_entry->stats_extra.in_errors);
-
-				if (ret < 0) {
-					odp_packet_free(pkt);
-					continue;
-				}
+			if (ret < 0) {
+				odp_packet_free(pkt);
+				continue;
 			}
-
-			if (odp_unlikely(num_pkts != i))
-				pkt_table[num_pkts] = pkt;
 		}
+
 		packet_set_ts(pkt_hdr, ts);
 
 		odp_prefetch(rte_pktmbuf_mtod(mbuf, char *));
-		num_pkts++;
-	}
 
-	if (pktio_cls_enabled(pktio_entry)) {
-		int success = 0;
-
-		for (i = 0; i < num_pkts; i++) {
-			odp_packet_t pkt = pkt_table[i];
+		if (cls_enabled) {
 			odp_pool_t new_pool;
 			uint8_t *data = odp_packet_data(pkt);
-			odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
-			int ret;
 
 			ret = _odp_cls_classify_packet(pktio_entry, data, &new_pool, pkt_hdr);
 			if (odp_unlikely(ret)) {
@@ -1014,23 +1056,29 @@ static inline int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[
 					odp_atomic_inc_u64(&pktio_entry->stats_extra.in_discards);
 					continue;
 				}
-				pkt_table[i] = new_pkt;
 				pkt = new_pkt;
 			}
 
-			if (success != i)
-				pkt_table[success] = pkt;
-			++success;
+			/* Enqueue packets directly to classifier destination queue */
+			pkt_table[num_cls++] = pkt;
+			num_cls = _odp_cls_enq(pkt_table, num_cls, (i + 1 == num));
+		} else {
+			pkt_table[num_pkts++] = pkt;
 		}
-		num_pkts = success;
 	}
+
+	/* Enqueue remaining classified packets */
+	if (odp_unlikely(num_cls))
+		_odp_cls_enq(pkt_table, num_cls, true);
 
 	return num_pkts;
 }
 
 int _odp_input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], int num)
 {
-	return input_pkts(pktio_entry, pkt_table, num);
+	pkt_dpdk_t * const pkt_dpdk = pkt_priv(pktio_entry);
+
+	return pkt_dpdk->mbuf_to_pkt_fn(pktio_entry, pkt_table, num);
 }
 
 static int recv_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
@@ -1071,10 +1119,10 @@ static int recv_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 		odp_ticketlock_unlock(&pkt_dpdk->rx_lock[index]);
 
 	/* Packets may also me received through eventdev, so don't add any
-	 * processing here. Instead, perform all processing in input_pkts()
+	 * processing here. Instead, perform all processing in mbuf_to_pkt_fn()
 	 * which is also called by eventdev. */
 	if (nb_rx)
-		return input_pkts(pktio_entry, pkt_table, nb_rx);
+		return pkt_dpdk->mbuf_to_pkt_fn(pktio_entry, pkt_table, nb_rx);
 	return 0;
 }
 
