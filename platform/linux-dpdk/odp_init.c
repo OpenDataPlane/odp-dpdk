@@ -35,8 +35,8 @@ enum init_stage {
 	LIBCONFIG_INIT,
 	CPUMASK_INIT,
 	CPU_CYCLES_INIT,
-	TIME_INIT,
 	SYSINFO_INIT,
+	TIME_INIT,
 	ISHM_INIT,
 	FDSERVER_INIT,
 	GLOBAL_RW_DATA_INIT,
@@ -473,16 +473,16 @@ static int term_global(enum init_stage stage)
 		}
 		/* Fall through */
 
-	case SYSINFO_INIT:
-		if (_odp_system_info_term()) {
-			_ODP_ERR("ODP system info term failed.\n");
+	case TIME_INIT:
+		if (_odp_time_term_global()) {
+			_ODP_ERR("ODP time term failed.\n");
 			rc = -1;
 		}
 		/* Fall through */
 
-	case TIME_INIT:
-		if (_odp_time_term_global()) {
-			_ODP_ERR("ODP time term failed.\n");
+	case SYSINFO_INIT:
+		if (_odp_system_info_term()) {
+			_ODP_ERR("ODP system info term failed.\n");
 			rc = -1;
 		}
 		/* Fall through */
@@ -558,17 +558,17 @@ int odp_init_global(odp_instance_t *instance,
 		return -1;
 	}
 
-	if (_odp_time_init_global()) {
-		_ODP_ERR("ODP time init failed.\n");
-		goto init_failed;
-	}
-	stage = TIME_INIT;
-
 	if (_odp_system_info_init()) {
 		_ODP_ERR("ODP system_info init failed.\n");
 		goto init_failed;
 	}
 	stage = SYSINFO_INIT;
+
+	if (_odp_time_init_global()) {
+		_ODP_ERR("ODP time init failed.\n");
+		goto init_failed;
+	}
+	stage = TIME_INIT;
 
 	if (_odp_shm_init_global(params)) {
 		_ODP_ERR("ODP shm init failed.\n");
