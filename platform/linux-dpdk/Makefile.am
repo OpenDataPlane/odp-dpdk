@@ -33,6 +33,7 @@ odpapiplatinclude_HEADERS = \
 		  include/odp/api/plat/byteorder_inlines.h \
 		  include/odp/api/plat/cpu_inlines.h \
 		  include/odp/api/plat/crypto_inlines.h \
+		  include/odp/api/plat/dma_inlines.h \
 		  include/odp/api/plat/debug_inlines.h \
 		  include/odp/api/plat/event_inlines.h \
 		  include/odp/api/plat/event_inline_types.h \
@@ -78,6 +79,7 @@ odpapiabiarchinclude_HEADERS += \
 		  include-abi/odp/api/abi/crypto.h \
 		  include-abi/odp/api/abi/crypto_types.h \
 		  include-abi/odp/api/abi/debug.h \
+		  include-abi/odp/api/abi/dma.h \
 		  include-abi/odp/api/abi/dma_types.h \
 		  include-abi/odp/api/abi/errno.h \
 		  include-abi/odp/api/abi/event.h \
@@ -259,6 +261,7 @@ __LIB__libodp_dpdk_la_SOURCES += \
 			   ../linux-generic/odp_byteorder_api.c \
 			   ../linux-generic/odp_cpu_api.c \
 			   ../linux-generic/odp_crypto_api.c \
+			   ../linux-generic/odp_dma_api.c \
 			   ../linux-generic/odp_event_api.c \
 			   ../linux-generic/odp_hash_api.c \
 			   ../linux-generic/odp_ipsec_api.c \
