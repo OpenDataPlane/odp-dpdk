@@ -3262,6 +3262,7 @@ static void packet_vector_test_user_area(void)
 
 	for (i = 0; i < num; i++) {
 		odp_event_t ev;
+		int flag;
 
 		pktv[i] = odp_packet_vector_alloc(pool);
 
@@ -3275,6 +3276,8 @@ static void packet_vector_test_user_area(void)
 
 		ev = odp_packet_vector_to_event(pktv[i]);
 		CU_ASSERT(odp_event_user_area(ev) == addr);
+		CU_ASSERT(odp_event_user_area_and_flag(ev, &flag) == addr);
+		CU_ASSERT(flag == 0);
 
 		prev = addr;
 		memset(addr, 0, size);
@@ -3448,6 +3451,7 @@ static void packet_test_user_area(void)
 	odp_packet_t pkt;
 	odp_pool_t pool;
 	odp_event_t ev;
+	int flag;
 
 	memcpy(&param, &default_param, sizeof(odp_pool_param_t));
 
@@ -3465,6 +3469,8 @@ static void packet_test_user_area(void)
 	}
 	ev = odp_packet_to_event(pkt);
 	CU_ASSERT(odp_event_user_area(ev) == odp_packet_user_area(pkt));
+	CU_ASSERT(odp_event_user_area_and_flag(ev, &flag) == odp_packet_user_area(pkt));
+	CU_ASSERT(flag == 0);
 
 	odp_packet_free(pkt);
 	CU_ASSERT(odp_pool_destroy(pool) == 0);
@@ -3480,6 +3486,8 @@ static void packet_test_user_area(void)
 	CU_ASSERT_FATAL(odp_packet_user_area(pkt) != NULL);
 	ev = odp_packet_to_event(pkt);
 	CU_ASSERT(odp_event_user_area(ev) == odp_packet_user_area(pkt));
+	CU_ASSERT(odp_event_user_area_and_flag(ev, &flag) == odp_packet_user_area(pkt));
+	CU_ASSERT(flag == 0);
 	CU_ASSERT(odp_packet_user_area_size(pkt) >= 1);
 	*(char *)odp_packet_user_area(pkt) = 0;
 	CU_ASSERT_FATAL(odp_packet_is_valid(pkt) == 1);
@@ -3491,9 +3499,12 @@ static void packet_test_user_area(void)
 	CU_ASSERT_FATAL(pool != ODP_POOL_INVALID);
 	pkt = odp_packet_alloc(pool, param.pkt.len);
 	CU_ASSERT_FATAL(pkt != ODP_PACKET_INVALID);
+	odp_packet_user_flag_set(pkt, 1);
 	CU_ASSERT_FATAL(odp_packet_user_area(pkt) != NULL);
 	ev = odp_packet_to_event(pkt);
 	CU_ASSERT(odp_event_user_area(ev) == odp_packet_user_area(pkt));
+	CU_ASSERT(odp_event_user_area_and_flag(ev, &flag) == odp_packet_user_area(pkt));
+	CU_ASSERT(flag > 0);
 	CU_ASSERT(odp_packet_user_area_size(pkt) == param.pkt.uarea_size);
 	memset(odp_packet_user_area(pkt), 0, param.pkt.uarea_size);
 	CU_ASSERT_FATAL(odp_packet_is_valid(pkt) == 1);

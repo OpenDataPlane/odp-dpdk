@@ -1,4 +1,4 @@
-/* Copyright (c) 2021-2022, Nokia
+/* Copyright (c) 2021-2023, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -99,11 +99,12 @@ int odp_dma_capability(odp_dma_capability_t *capa)
 	capa->queue_type_sched = 1;
 	capa->queue_type_plain = 1;
 
-	capa->pool.max_pools      = _odp_dma_glb->pool_capa.buf.max_pools;
-	capa->pool.max_num        = _odp_dma_glb->pool_capa.buf.max_num;
-	capa->pool.max_uarea_size = _odp_dma_glb->pool_capa.buf.max_uarea_size;
-	capa->pool.min_cache_size = _odp_dma_glb->pool_capa.buf.min_cache_size;
-	capa->pool.max_cache_size = _odp_dma_glb->pool_capa.buf.max_cache_size;
+	capa->pool.max_pools         = _odp_dma_glb->pool_capa.buf.max_pools;
+	capa->pool.max_num           = _odp_dma_glb->pool_capa.buf.max_num;
+	capa->pool.max_uarea_size    = _odp_dma_glb->pool_capa.buf.max_uarea_size;
+	capa->pool.uarea_persistence = _odp_dma_glb->pool_capa.buf.uarea_persistence;
+	capa->pool.min_cache_size    = _odp_dma_glb->pool_capa.buf.min_cache_size;
+	capa->pool.max_cache_size    = _odp_dma_glb->pool_capa.buf.max_cache_size;
 
 	return 0;
 }
@@ -319,16 +320,6 @@ odp_dma_t odp_dma_lookup(const char *name)
 	}
 
 	return ODP_DMA_INVALID;
-}
-
-void odp_dma_transfer_param_init(odp_dma_transfer_param_t *trs_param)
-{
-	memset(trs_param, 0, sizeof(odp_dma_transfer_param_t));
-
-	trs_param->src_format = ODP_DMA_FORMAT_ADDR;
-	trs_param->dst_format = ODP_DMA_FORMAT_ADDR;
-	trs_param->num_src    = 1;
-	trs_param->num_dst    = 1;
 }
 
 static uint32_t transfer_len(const odp_dma_transfer_param_t *trs_param)
@@ -568,14 +559,6 @@ int odp_dma_transfer_multi(odp_dma_t dma, const odp_dma_transfer_param_t *trs_pa
 	return i;
 }
 
-void odp_dma_compl_param_init(odp_dma_compl_param_t *compl_param)
-{
-	memset(compl_param, 0, sizeof(odp_dma_compl_param_t));
-	compl_param->queue = ODP_QUEUE_INVALID;
-	compl_param->event = ODP_EVENT_INVALID;
-	compl_param->transfer_id = ODP_DMA_TRANSFER_ID_INVALID;
-}
-
 odp_dma_transfer_id_t odp_dma_transfer_id_alloc(odp_dma_t dma)
 {
 	int32_t num;
@@ -756,81 +739,17 @@ odp_pool_t odp_dma_pool_create(const char *name, const odp_dma_pool_param_t *dma
 	}
 
 	odp_pool_param_init(&pool_param);
-	pool_param.type           = ODP_POOL_BUFFER;
-	pool_param.buf.num        = num;
-	pool_param.buf.uarea_size = uarea_size;
-	pool_param.buf.cache_size = cache_size;
-	pool_param.buf.size       = sizeof(odp_dma_result_t);
+	pool_param.type               = ODP_POOL_BUFFER;
+	pool_param.uarea_init.init_fn = dma_pool_param->uarea_init.init_fn;
+	pool_param.uarea_init.args    = dma_pool_param->uarea_init.args;
+	pool_param.buf.num            = num;
+	pool_param.buf.uarea_size     = uarea_size;
+	pool_param.buf.cache_size     = cache_size;
+	pool_param.buf.size           = sizeof(odp_dma_result_t);
 
 	pool = _odp_pool_create(name, &pool_param, ODP_POOL_DMA_COMPL);
 
 	return pool;
-}
-
-odp_dma_compl_t odp_dma_compl_alloc(odp_pool_t pool)
-{
-	odp_buffer_t buf;
-	odp_event_t ev;
-	odp_dma_result_t *result;
-
-	buf = odp_buffer_alloc(pool);
-
-	if (odp_unlikely(buf == ODP_BUFFER_INVALID))
-		return ODP_DMA_COMPL_INVALID;
-
-	result = odp_buffer_addr(buf);
-	memset(result, 0, sizeof(odp_dma_result_t));
-
-	ev = odp_buffer_to_event(buf);
-	_odp_event_type_set(ev, ODP_EVENT_DMA_COMPL);
-
-	return (odp_dma_compl_t)(uintptr_t)buf;
-}
-
-void odp_dma_compl_free(odp_dma_compl_t dma_compl)
-{
-	odp_event_t ev;
-	odp_buffer_t buf = (odp_buffer_t)(uintptr_t)dma_compl;
-
-	if (odp_unlikely(dma_compl == ODP_DMA_COMPL_INVALID)) {
-		_ODP_ERR("Bad DMA compl handle\n");
-		return;
-	}
-
-	ev = odp_buffer_to_event(buf);
-	_odp_event_type_set(ev, ODP_EVENT_BUFFER);
-
-	odp_buffer_free(buf);
-}
-
-odp_dma_compl_t odp_dma_compl_from_event(odp_event_t ev)
-{
-	_ODP_ASSERT(odp_event_type(ev) == ODP_EVENT_DMA_COMPL);
-
-	return (odp_dma_compl_t)(uintptr_t)ev;
-}
-
-odp_event_t odp_dma_compl_to_event(odp_dma_compl_t dma_compl)
-{
-	return (odp_event_t)(uintptr_t)dma_compl;
-}
-
-int odp_dma_compl_result(odp_dma_compl_t dma_compl, odp_dma_result_t *result_out)
-{
-	odp_dma_result_t *result;
-	odp_buffer_t buf = (odp_buffer_t)(uintptr_t)dma_compl;
-
-	if (odp_unlikely(dma_compl == ODP_DMA_COMPL_INVALID)) {
-		_ODP_ERR("Bad DMA compl handle\n");
-		return -1;
-	}
-
-	result = odp_buffer_addr(buf);
-
-	if (result_out)
-		*result_out = *result;
-
-	return result->success ? 0 : -1;
 }
 
 uint64_t odp_dma_to_u64(odp_dma_t dma)
@@ -841,11 +760,6 @@ uint64_t odp_dma_to_u64(odp_dma_t dma)
 uint64_t odp_dma_compl_to_u64(odp_dma_compl_t dma_compl)
 {
 	return (uint64_t)(uintptr_t)dma_compl;
-}
-
-void *odp_dma_compl_user_area(odp_dma_compl_t dma_compl)
-{
-	return odp_buffer_user_area((odp_buffer_t)(uintptr_t)dma_compl);
 }
 
 void odp_dma_print(odp_dma_t dma)

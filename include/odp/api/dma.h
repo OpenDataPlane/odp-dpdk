@@ -17,6 +17,8 @@
 extern "C" {
 #endif
 
+#include <odp/api/abi/dma.h>
+
 #include <odp/api/spec/dma.h>
 
 #ifdef __cplusplus
