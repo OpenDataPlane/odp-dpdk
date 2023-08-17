@@ -263,6 +263,7 @@ int odp_pool_capability(odp_pool_capability_t *capa)
 	capa->buf.max_size  = MAX_SIZE;
 	capa->buf.max_num   = CONFIG_POOL_MAX_NUM;
 	capa->buf.max_uarea_size   = MAX_UAREA_SIZE;
+	capa->buf.uarea_persistence = true;
 	capa->buf.min_cache_size   = 0;
 	capa->buf.max_cache_size   = RTE_MEMPOOL_CACHE_MAX_SIZE;
 	capa->buf.stats.all = supported_stats.all;
@@ -279,6 +280,7 @@ int odp_pool_capability(odp_pool_capability_t *capa)
 	capa->pkt.min_seg_len      = CONFIG_PACKET_SEG_LEN_MIN;
 	capa->pkt.max_seg_len      = CONFIG_PACKET_MAX_SEG_LEN;
 	capa->pkt.max_uarea_size   = MAX_UAREA_SIZE;
+	capa->pkt.uarea_persistence = true;
 	capa->pkt.min_cache_size   = 0;
 	capa->pkt.max_cache_size   = RTE_MEMPOOL_CACHE_MAX_SIZE;
 	capa->pkt.stats.all = supported_stats.all;
@@ -287,6 +289,7 @@ int odp_pool_capability(odp_pool_capability_t *capa)
 	capa->tmo.max_pools = max_pools;
 	capa->tmo.max_num   = CONFIG_POOL_MAX_NUM;
 	capa->tmo.max_uarea_size   = MAX_UAREA_SIZE;
+	capa->tmo.uarea_persistence = true;
 	capa->tmo.min_cache_size   = 0;
 	capa->tmo.max_cache_size   = RTE_MEMPOOL_CACHE_MAX_SIZE;
 	capa->tmo.stats.all = supported_stats.all;
@@ -295,6 +298,7 @@ int odp_pool_capability(odp_pool_capability_t *capa)
 	capa->vector.max_pools      = max_pools;
 	capa->vector.max_num        = CONFIG_POOL_MAX_NUM;
 	capa->vector.max_uarea_size   = MAX_UAREA_SIZE;
+	capa->vector.uarea_persistence = true;
 	capa->vector.max_size       = CONFIG_PACKET_VECTOR_MAX_SIZE;
 	capa->vector.min_cache_size = 0;
 	capa->vector.max_cache_size = RTE_MEMPOOL_CACHE_MAX_SIZE;
@@ -550,6 +554,7 @@ static int reserve_uarea(pool_t *pool, uint32_t uarea_size, uint32_t num_pkt)
 	pool->uarea_shm = ODP_SHM_INVALID;
 
 	if (uarea_size == 0) {
+		pool->param_uarea_size = 0;
 		pool->uarea_size = 0;
 		pool->uarea_shm_size = 0;
 		return 0;
@@ -559,6 +564,7 @@ static int reserve_uarea(pool_t *pool, uint32_t uarea_size, uint32_t num_pkt)
 		 pool->pool_idx, pool->name);
 	uarea_name[ODP_SHM_NAME_LEN - 1] = 0;
 
+	pool->param_uarea_size = uarea_size;
 	pool->uarea_size = _ODP_ROUNDUP_CACHE_LINE(uarea_size);
 	pool->uarea_shm_size = num_pkt * (uint64_t)pool->uarea_size;
 
@@ -605,7 +611,8 @@ static void init_obj_priv_data(struct rte_mempool *mp ODP_UNUSED, void *arg, voi
 	struct priv_data_t *priv_data = arg;
 	struct rte_mbuf *mb = mbuf;
 	_odp_event_hdr_t *event_hdr = (_odp_event_hdr_t *)mbuf;
-	void *uarea = priv_data->pool->uarea_base_addr + i * priv_data->pool->uarea_size;
+	pool_t *pool = priv_data->pool;
+	void *uarea = pool->uarea_base_addr + i * pool->uarea_size;
 	void **obj_uarea;
 
 	if (priv_data->type != ODP_POOL_PACKET)
@@ -613,7 +620,7 @@ static void init_obj_priv_data(struct rte_mempool *mp ODP_UNUSED, void *arg, voi
 		mb->data_off = 0;
 
 	event_hdr->hdr.index = i;
-	event_hdr->hdr.pool = _odp_pool_handle(priv_data->pool);
+	event_hdr->hdr.pool = _odp_pool_handle(pool);
 	event_hdr->hdr.type = priv_data->type;
 	event_hdr->hdr.event_type = priv_data->event_type;
 
@@ -635,6 +642,10 @@ static void init_obj_priv_data(struct rte_mempool *mp ODP_UNUSED, void *arg, voi
 	}
 
 	*obj_uarea = uarea;
+
+	if (uarea && pool->params.uarea_init.init_fn)
+		pool->params.uarea_init.init_fn(uarea, pool->param_uarea_size,
+						pool->params.uarea_init.args, i);
 
 	if (priv_data->type == ODP_POOL_BUFFER || priv_data->type == ODP_POOL_PACKET) {
 		mb->buf_len -= _ODP_EV_ENDMARK_SIZE;
@@ -751,13 +762,15 @@ odp_pool_t _odp_pool_create(const char *name, const odp_pool_param_t *params,
 		return ODP_POOL_INVALID;
 	}
 
-	rte_mempool_obj_iter(mp, init_obj_priv_data, &priv_data);
 	pool->rte_mempool = mp;
 	pool->seg_len = seg_size;
 	pool->type_2 = type_2;
 	pool->type = params->type;
 	pool->params = *params;
 	pool->trailer_size = trailer;
+
+	rte_mempool_obj_iter(mp, init_obj_priv_data, &priv_data);
+
 	UNLOCK(&pool->lock);
 	pool_hdl = _odp_pool_handle(pool);
 
@@ -1097,6 +1110,7 @@ int odp_pool_ext_capability(odp_pool_type_t type,
 	capa->pkt.max_headroom_size = RTE_PKTMBUF_HEADROOM;
 	capa->pkt.max_segs_per_pkt = PKT_MAX_SEGS;
 	capa->pkt.max_uarea_size = MAX_UAREA_SIZE;
+	capa->pkt.uarea_persistence = true;
 
 	return 0;
 }
@@ -1297,10 +1311,11 @@ static void init_ext_obj(struct rte_mempool *mp, void *arg, void *mbuf, unsigned
 {
 	struct mbuf_ctor_arg *mb_ctor_arg = arg;
 	struct rte_mbuf *mb = mbuf;
-	void *uarea = mb_ctor_arg->pool->uarea_base_addr + i * mb_ctor_arg->pool->uarea_size;
+	pool_t *pool = mb_ctor_arg->pool;
+	void *uarea = pool->uarea_base_addr + i * pool->uarea_size;
 	_odp_event_hdr_t *event_hdr = (_odp_event_hdr_t *)mbuf;
 	void **obj_uarea;
-	odp_pool_ext_param_t *p = &mb_ctor_arg->pool->ext_param;
+	odp_pool_ext_param_t *p = &pool->ext_param;
 	uint32_t app_hdr_offset = sizeof(odp_packet_hdr_t);
 	uint32_t app_hdr_size = p->pkt.app_header_size;
 	uint32_t buf_size = p->pkt.buf_size;
@@ -1333,7 +1348,7 @@ static void init_ext_obj(struct rte_mempool *mp, void *arg, void *mbuf, unsigned
 	mb->next = NULL;
 	/* Save index, might be useful for debugging purposes */
 	event_hdr->hdr.index = i;
-	event_hdr->hdr.pool = _odp_pool_handle(mb_ctor_arg->pool);
+	event_hdr->hdr.pool = _odp_pool_handle(pool);
 	event_hdr->hdr.type = mb_ctor_arg->type;
 	event_hdr->hdr.event_type = mb_ctor_arg->event_type;
 
@@ -1355,6 +1370,10 @@ static void init_ext_obj(struct rte_mempool *mp, void *arg, void *mbuf, unsigned
 	}
 
 	*obj_uarea = uarea;
+
+	if (uarea && pool->ext_param.uarea_init.init_fn)
+		pool->ext_param.uarea_init.init_fn(uarea, pool->param_uarea_size,
+						   pool->ext_param.uarea_init.args, i);
 
 	if (mb_ctor_arg->type == ODP_POOL_BUFFER || mb_ctor_arg->type == ODP_POOL_PACKET) {
 		mb->buf_len -= _ODP_EV_ENDMARK_SIZE;

@@ -1,4 +1,4 @@
-/* Copyright (c) 2022, Nokia
+/* Copyright (c) 2022-2023, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -25,6 +25,7 @@
 	#define odp_timeout_user_ptr __odp_timeout_user_ptr
 	#define odp_timeout_user_area __odp_timeout_user_area
 	#define odp_timeout_from_event __odp_timeout_from_event
+	#define odp_timeout_from_event_multi __odp_timeout_from_event_multi
 	#define odp_timeout_to_event __odp_timeout_to_event
 #else
 	#define _ODP_INLINE
@@ -55,6 +56,15 @@ _ODP_INLINE odp_timeout_t odp_timeout_from_event(odp_event_t ev)
 	_ODP_ASSERT(odp_event_type(ev) == ODP_EVENT_TIMEOUT);
 
 	return (odp_timeout_t)ev;
+}
+
+_ODP_INLINE void odp_timeout_from_event_multi(odp_timeout_t tmo[], const odp_event_t ev[], int num)
+{
+	for (int i = 0; i < num; i++) {
+		_ODP_ASSERT(odp_event_type(ev[i]) == ODP_EVENT_TIMEOUT);
+
+		tmo[i] = (odp_timeout_t)ev[i];
+	}
 }
 
 _ODP_INLINE odp_event_t odp_timeout_to_event(odp_timeout_t tmo)
