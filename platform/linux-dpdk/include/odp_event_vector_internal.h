@@ -21,6 +21,8 @@
 
 #include <odp_event_internal.h>
 
+#include <rte_config.h>
+
 #include <stdint.h>
 
 /**
@@ -46,6 +48,9 @@ typedef struct ODP_ALIGNED_CACHE odp_event_vector_hdr_t {
 	odp_packet_t packet[];
 
 } odp_event_vector_hdr_t;
+
+ODP_STATIC_ASSERT(sizeof(odp_event_vector_hdr_t) <= 3 * RTE_CACHE_LINE_SIZE,
+		  "Additional cache line required for odp_event_vector_hdr_t");
 
 /**
  * Return the vector header
