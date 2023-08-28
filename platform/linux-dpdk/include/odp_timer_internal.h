@@ -22,6 +22,8 @@
 #include <odp_global_data.h>
 #include <odp_pool_internal.h>
 
+#include <rte_config.h>
+
 /**
  * Internal Timeout header
  */
@@ -45,6 +47,9 @@ typedef struct ODP_ALIGNED_CACHE odp_timeout_hdr_t {
 	odp_timer_t timer;
 
 } odp_timeout_hdr_t;
+
+ODP_STATIC_ASSERT(sizeof(odp_timeout_hdr_t) <= 3 * RTE_CACHE_LINE_SIZE,
+		  "Additional cache line required for odp_timeout_hdr_t");
 
 /* A larger decrement value should be used after receiving events compared to
  * an 'empty' call. */

@@ -60,6 +60,9 @@ typedef struct ODP_ALIGNED_CACHE odp_buffer_hdr_t {
 
 } odp_buffer_hdr_t;
 
+ODP_STATIC_ASSERT(sizeof(odp_buffer_hdr_t) <= 3 * RTE_CACHE_LINE_SIZE,
+		  "Additional cache line required for odp_buffer_hdr_t");
+
 static inline struct rte_mbuf *_odp_buf_to_mbuf(odp_buffer_t buf)
 {
 	return (struct rte_mbuf *)(uintptr_t)buf;

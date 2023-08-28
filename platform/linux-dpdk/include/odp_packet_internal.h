@@ -184,6 +184,9 @@ typedef struct ODP_ALIGNED_CACHE odp_packet_hdr_t {
 	uint8_t crypto_aad_buf[PACKET_AAD_MAX];
 } odp_packet_hdr_t;
 
+ODP_STATIC_ASSERT(sizeof(odp_packet_hdr_t) <= 6 * RTE_CACHE_LINE_SIZE,
+		  "Additional cache line required for odp_packet_hdr_t");
+
 /**
  * Return the packet header
  */
