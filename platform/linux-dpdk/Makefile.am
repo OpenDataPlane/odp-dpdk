@@ -203,7 +203,7 @@ __LIB__libodp_dpdk_la_SOURCES = \
 			   ../linux-generic/miniz/miniz_tinfl.c ../linux-generic/miniz/miniz_tinfl.h \
 			   ../linux-generic/odp_cpumask.c \
 			   ../linux-generic/odp_cpumask_task.c \
-			   ../linux-generic/odp_dma.c \
+			   odp_dma.c \
 			   odp_crypto.c \
 			   odp_errno.c \
 			   odp_event.c \
