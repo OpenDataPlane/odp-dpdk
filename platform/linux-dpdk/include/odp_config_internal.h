@@ -29,10 +29,15 @@ extern "C" {
 #define ODP_CONFIG_PKTIO_ENTRIES 64
 
 /*
- * Pools reserved for internal usage, 1 for IPsec status events and one per packet
- * I/O for TX completion
+ * Maximum number of DMA sessions
  */
-#define CONFIG_INTERNAL_POOLS (1 + ODP_CONFIG_PKTIO_ENTRIES)
+#define CONFIG_MAX_DMA_SESSIONS 32
+
+/*
+ * Pools reserved for internal usage, 1 for IPsec status events, one per packet
+ * I/O for TX completion and one per DMA session
+ */
+#define CONFIG_INTERNAL_POOLS (1 + ODP_CONFIG_PKTIO_ENTRIES + CONFIG_MAX_DMA_SESSIONS)
 
 /*
  * Maximum number of pools
@@ -67,11 +72,6 @@ extern "C" {
  * Maximum number of ordered locks per queue
  */
 #define CONFIG_QUEUE_MAX_ORD_LOCKS 2
-
-/*
- * Maximum number of DMA sessions
- */
-#define CONFIG_MAX_DMA_SESSIONS 32
 
 /*
  * Stashes reserved for internal usage
