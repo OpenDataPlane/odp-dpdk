@@ -349,6 +349,30 @@ service core, which will perform scheduling and receive packets for the
 scheduled pktio input queues. The DPDK service cores and the ODP application
 cores should not overlap.
 
-Exaple how to run odp_scheduling test application using eventdev:
+Example how to run odp_scheduling test application using eventdev:
     sudo ODP_SCHEDULER="eventdev" ODP_PLATFORM_PARAMS="--vdev event_sw0 -s 0x4" \
     ./odp_scheduling -c 1
+
+10. Using dmadev for DMA transfers
+==================================
+
+ODP-DPDK implements ODP DMA API utilizing DPDK dmadev APIs. DPDK 21.11 or newer
+is required, otherwise only a dummy implementation is provided. More
+information about dmadev can be found under official documentation:
+https://doc.dpdk.org/guides/prog_guide/dmadev.html
+
+Before running applications, required DMA devices need to be set up. Official
+documentation lists steps for setting up drivers for each supported device,
+VFIO drivers typically being the least cumbersome to set up:
+https://doc.dpdk.org/guides/dmadevs/index.html
+
+As ODP DMA API provides a single capability for the underlying DMA machinery,
+a set of similar capability devices is always tried to be discovered. If
+application requires a certain device, this can be controlled with the normal
+allowed/blocked device lists. E.g.:
+
+    sudo ODP_PLATFORM_PARAMS="-a 0000:f2:01.0" ./odp_dma_perf -t 1 -i 1 -o 1 -s 61440 -S 0 -m 0 -f 16
+
+Additionally, a few configuration file parameters are available under the "dma"
+section in DPDK configuration file. These should be configured according to used
+device capabilities.
