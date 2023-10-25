@@ -133,10 +133,11 @@ extern "C" {
 /*
  * Number of shared memory blocks reserved for implementation internal use.
  *
- * Each packet pool requires one SHM block and 20 blocks are reserved for
- * ODP module global data.
+ * Each packet pool requires one SHM block, 20 blocks are reserved for ODP
+ * module global data, and one block per packet I/O is reserved for TX
+ * completion usage.
  */
-#define CONFIG_INTERNAL_SHM_BLOCKS (ODP_CONFIG_POOLS + 20)
+#define CONFIG_INTERNAL_SHM_BLOCKS (ODP_CONFIG_POOLS + 20 + ODP_CONFIG_PKTIO_ENTRIES)
 
 /*
  * Maximum number of shared memory blocks.
