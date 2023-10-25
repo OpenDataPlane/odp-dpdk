@@ -16,11 +16,13 @@ TESTS += validation/api/pktio/pktio_run.sh
 test_SCRIPTS = $(dist_check_SCRIPTS)
 
 SUBDIRS += validation/api/pktio \
-	   example
+	   example \
+	   performance
 else
 #performance tests refer to pktio_env
 if test_perf
-SUBDIRS += validation/api/pktio
+SUBDIRS += validation/api/pktio \
+	   performance
 endif
 endif
 

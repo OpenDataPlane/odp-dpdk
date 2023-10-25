@@ -104,5 +104,7 @@ AC_CONFIG_FILES([platform/linux-dpdk/Makefile
 		 platform/linux-dpdk/test/example/ping/Makefile
 		 platform/linux-dpdk/test/example/simple_pipeline/Makefile
 		 platform/linux-dpdk/test/example/switch/Makefile
+		 platform/linux-dpdk/test/performance/Makefile
+		 platform/linux-dpdk/test/performance/dmafwd/Makefile
 		 platform/linux-dpdk/test/validation/api/pktio/Makefile])
 ])
