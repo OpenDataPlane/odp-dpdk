@@ -1936,6 +1936,10 @@ static void op_prepare(crypto_op_t *ops[],
 			op->state.status = S_NOP;
 			continue;
 		}
+		if (odp_unlikely(session->p.null_crypto_enable && param->null_crypto)) {
+			op->state.status = S_NOP;
+			continue;
+		}
 
 		if (odp_unlikely(linearize_pkt(session, op->state.pkt))) {
 			op->state.status = S_ERROR_LIN;
