@@ -1448,8 +1448,8 @@ int odp_crypto_session_create(const odp_crypto_session_param_t *param,
 		return -1;
 	}
 
-	/* ODP_CRYPTO_OP_TYPE_OOP not supported */
-	if (param->op_type == ODP_CRYPTO_OP_TYPE_OOP) {
+	if (param->op_type != ODP_CRYPTO_OP_TYPE_BASIC &&
+	    param->op_type != ODP_CRYPTO_OP_TYPE_LEGACY) {
 		*status = ODP_CRYPTO_SES_ERR_PARAMS;
 		*session_out = ODP_CRYPTO_SESSION_INVALID;
 		return -1;
