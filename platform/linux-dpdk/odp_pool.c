@@ -65,6 +65,9 @@
 
 #define ROUNDUP_DIV(a, b) (((a) + ((b) - 1)) / (b))
 
+ODP_STATIC_ASSERT(CONFIG_INTERNAL_POOLS < ODP_CONFIG_POOLS,
+		  "Internal pool count needs to be less than total configured pool count");
+
 /* The pool table ptr - resides in shared memory */
 pool_global_t *_odp_pool_glb;
 
@@ -247,8 +250,8 @@ int _odp_event_is_valid(odp_event_t event)
 int odp_pool_capability(odp_pool_capability_t *capa)
 {
 	odp_pool_stats_opt_t supported_stats;
-	/* Reserve one pool for internal usage */
-	unsigned int max_pools = ODP_CONFIG_POOLS - 1;
+	/* Reserve pools for internal usage */
+	unsigned int max_pools = ODP_CONFIG_POOLS - CONFIG_INTERNAL_POOLS;
 
 	memset(capa, 0, sizeof(odp_pool_capability_t));
 
@@ -1106,7 +1109,7 @@ int odp_pool_ext_capability(odp_pool_type_t type,
 	memset(capa, 0, sizeof(odp_pool_ext_capability_t));
 
 	capa->type = type;
-	capa->max_pools = ODP_CONFIG_POOLS - 1;
+	capa->max_pools = ODP_CONFIG_POOLS - CONFIG_INTERNAL_POOLS;
 	capa->min_cache_size = 0;
 	capa->max_cache_size = RTE_MEMPOOL_CACHE_MAX_SIZE;
 	capa->stats.all = supported_stats.all;
