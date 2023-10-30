@@ -1,7 +1,5 @@
-/* Copyright (c) 2015-2018, Linaro Limited
- * All rights reserved.
- *
- * SPDX-License-Identifier:   BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2015-2018 Linaro Limited
  */
 
 #include <stdio.h>
@@ -27,7 +25,7 @@
 #define    ODPH_MAX_BUCKET_NUM			0x10000
 
 /** @inner element structure of hash table
- * To resolve the hash confict:
+ * To resolve the hash conflict:
  * we put the elements with different keys but a same HASH-value
  * into a list
  */

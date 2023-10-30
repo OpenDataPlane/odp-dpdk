@@ -1,8 +1,6 @@
-/* Copyright (c) 2013-2018, Linaro Limited
- * Copyright (c) 2019-2021, Nokia
- * All rights reserved.
- *
- * SPDX-License-Identifier:     BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2013-2018 Linaro Limited
+ * Copyright (c) 2019-2021 Nokia
  */
 
 
@@ -13,7 +11,7 @@
  *
  * This file is an optional helper to ODP APIs. These functions are provided
  * to ease common setups in a Linux system. User is free to implement the same
- * setups in otherways (not via this API).
+ * setups in other ways (not via this API).
  */
 
 #ifndef ODPH_LINUX_H_
@@ -30,8 +28,11 @@ extern "C" {
 #include <getopt.h>
 #include <sys/types.h>
 
-/** @addtogroup odph_linux ODPH LINUX
- *  @{
+/**
+ * @defgroup odph_thread ODPH THREAD
+ * Setup threads/processes
+ *
+ * @{
  */
 
 /** Thread parameter for Linux pthreads and processes */

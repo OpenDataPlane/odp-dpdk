@@ -90,6 +90,7 @@ struct odp_crypto_generic_session_t {
 	odp_crypto_session_param_t p;
 
 	odp_bool_t do_cipher_first;
+	uint8_t null_crypto_enable :1;
 
 	struct {
 		union {
@@ -544,7 +545,18 @@ odp_crypto_session_create(const odp_crypto_session_param_t *param,
 		return -1;
 	}
 
-	if (param->op_type == ODP_CRYPTO_OP_TYPE_OOP) {
+	if (param->cipher_range_in_bits) {
+		*status = ODP_CRYPTO_SES_ERR_CIPHER;
+		*session_out = ODP_CRYPTO_SESSION_INVALID;
+		return -1;
+	}
+	if (param->auth_range_in_bits) {
+		*status = ODP_CRYPTO_SES_ERR_AUTH;
+		*session_out = ODP_CRYPTO_SESSION_INVALID;
+		return -1;
+	}
+	if (param->op_type == ODP_CRYPTO_OP_TYPE_OOP ||
+	    param->op_type == ODP_CRYPTO_OP_TYPE_BASIC_AND_OOP) {
 		*status = ODP_CRYPTO_SES_ERR_PARAMS;
 		*session_out = ODP_CRYPTO_SESSION_INVALID;
 		return -1;
@@ -579,6 +591,10 @@ odp_crypto_session_create(const odp_crypto_session_param_t *param,
 	default:
 		rc = -1;
 	}
+
+	if (param->null_crypto_enable && param->op_mode == ODP_CRYPTO_SYNC)
+		rc = -1;
+	session->null_crypto_enable = !!param->null_crypto_enable;
 
 	if (rc) {
 		*status = ODP_CRYPTO_SES_ERR_CIPHER;
@@ -802,6 +818,9 @@ int crypto_int(odp_packet_t pkt_in,
 			return -1;
 	}
 
+	if (odp_unlikely(session->null_crypto_enable && param->null_crypto))
+		goto out;
+
 	/* Invoke the crypto function */
 	if (session->do_cipher_first) {
 		rc_cipher = session->cipher.func(out_pkt, param, session);
@@ -811,6 +830,7 @@ int crypto_int(odp_packet_t pkt_in,
 		rc_cipher = session->cipher.func(out_pkt, param, session);
 	}
 
+out:
 	packet_subtype_set(out_pkt, ODP_EVENT_PACKET_CRYPTO);
 	op_result = &packet_hdr(out_pkt)->crypto_op_result;
 	op_result->cipher_status.alg_err = rc_cipher;

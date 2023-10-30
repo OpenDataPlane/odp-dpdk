@@ -1,8 +1,6 @@
-/* Copyright (c) 2014-2018, Linaro Limited
- * Copyright (c) 2021-2022, Nokia
- * All rights reserved.
- *
- * SPDX-License-Identifier:     BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2014-2018 Linaro Limited
+ * Copyright (c) 2021-2023 Nokia
  */
 
 /**
@@ -550,7 +548,7 @@ typedef struct odp_cls_capability_t {
 	 * supported. */
 	uint32_t max_cos_stats;
 
-	/** Maximun number of queues supported per CoS
+	/** Maximum number of queues supported per CoS
 	 * if the value is 1, then hashing is not supported*/
 	uint32_t max_hash_queues;
 
@@ -742,6 +740,30 @@ odp_cos_t odp_cls_cos_create(const char *name,
 			     const odp_cls_cos_param_t *param);
 
 /**
+ * Create multiple class-of-services
+ *
+ * Otherwise like odp_cls_cos_create(), but creates multiple CoSes with a
+ * single call. The output CoS handles are written in the same order as input
+ * parameters. A single odp_cls_cos_create_multi() call is equivalent to calling
+ * odp_cls_cos_create() 'num' times in row.
+ *
+ * Each parameter array must contain 'num' elements with the exception that
+ * 'name' array may also be NULL.
+ *
+ * @param      name     Array of CoS name pointers or NULL. NULL is also valid
+ *                      CoS name pointer value.
+ * @param      param    Array of CoS parameters
+ * @param[out] cos      Array of CoS handles for output
+ * @param      num      Number of CoSes to create
+ *
+ * @return Number of CoSes actually created (0 ... num)
+ * @retval <0 on failure
+ */
+int odp_cls_cos_create_multi(const char *name[],
+			     const odp_cls_cos_param_t param[],
+			     odp_cos_t cos[], int num);
+
+/**
  * Queue hash result
  * Returns the queue within a CoS in which a particular packet will be enqueued
  * based on the packet parameters and hash protocol field configured with the
@@ -771,6 +793,20 @@ odp_queue_t odp_cls_hash_result(odp_cos_t cos, odp_packet_t packet);
  * @retval <0 on failure
  */
 int odp_cos_destroy(odp_cos_t cos);
+
+/**
+ * Destroy multiple class-of-services
+ *
+ * Otherwise like odp_cos_destroy(), but destroys multiple CoSes with a single
+ * call.
+ *
+ * @param cos          Array of CoS handles
+ * @param num          Number of CoSes to destroy
+ *
+ * @retval Number of CoSes actually destroyed (1 ... num)
+ * @retval <0 on failure
+ */
+int odp_cos_destroy_multi(odp_cos_t cos[], int num);
 
 /**
  * Assign a queue for a class-of-service
@@ -990,6 +1026,30 @@ odp_pmr_t odp_cls_pmr_create(const odp_pmr_param_t *terms, int num_terms,
  */
 odp_pmr_t odp_cls_pmr_create_opt(const odp_pmr_create_opt_t *opt,
 				 odp_cos_t src_cos, odp_cos_t dst_cos);
+
+/**
+ * Create multiple packet matching rules
+ *
+ * Otherwise like odp_cls_pmr_create_opt(), but creates multiple rules with a
+ * single call. The output PMR handles are written in the same order as input
+ * parameters. A single odp_cls_pmr_create_multi() call is equivalent to calling
+ * odp_cls_pmr_create_opt() 'num' times in row.
+ *
+ * Each parameter array must contain 'num' elements.
+ *
+ * @param      opt      Array of PMR create options
+ * @param      src_cos  Array of source CoS handles
+ * @param      dst_cos  Array of destination CoS handles
+ * @param[out] pmr      Array of PMR handles for output
+ * @param      num      Number of packet matching rules to create
+ *
+ * @return Number of PMRs actually created (0 ... num)
+ * @retval <0 on failure
+ */
+int odp_cls_pmr_create_multi(const odp_pmr_create_opt_t opt[],
+			     odp_cos_t src_cos[], odp_cos_t dst_cos[],
+			     odp_pmr_t pmr[], int num);
+
 /**
  * Function to destroy a packet match rule
  *
@@ -1008,6 +1068,20 @@ odp_pmr_t odp_cls_pmr_create_opt(const odp_pmr_create_opt_t *opt,
  * @retval <0 on failure
  */
 int odp_cls_pmr_destroy(odp_pmr_t pmr);
+
+/**
+ * Destroy multiple packet matching rules
+ *
+ * Otherwise like odp_cls_pmr_destroy(), but destroys multiple PMRs with a
+ * single call.
+ *
+ * @param pmr       Array of PMR handles
+ * @param num       Number of PMRs to destroy
+ *
+ * @retval Number of PMRs actually destroyed (1 ... num)
+ * @retval <0 on failure
+ */
+int odp_cls_pmr_destroy_multi(odp_pmr_t pmr[], int num);
 
 /**
 * Assigns a packet pool for a specific class of service

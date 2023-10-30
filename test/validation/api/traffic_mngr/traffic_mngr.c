@@ -27,7 +27,7 @@
 #define NUM_LEVELS               3
 #define NUM_PRIORITIES           4
 #define NUM_QUEUES_PER_NODE      NUM_PRIORITIES
-#define FANIN_RATIO              8
+#define FANIN_RATIO              8u
 #define NUM_LEVEL0_TM_NODES      1
 #define NUM_LEVEL1_TM_NODES      FANIN_RATIO
 #define NUM_LEVEL2_TM_NODES      (FANIN_RATIO * FANIN_RATIO)
@@ -65,7 +65,7 @@
 #define MED_DROP_PROB            4
 #define MAX_DROP_PROB            8
 
-#define MAX_PKTS                 1000
+#define MAX_PKTS                 1000u
 #define PKT_BUF_SIZE             1460
 #define MAX_PAYLOAD              1400
 #define USE_IPV4                 false
@@ -109,12 +109,7 @@
 #define MBPS                     1000000
 #define GBPS                     1000000000
 
-#define MIN(a, b)  (((a) <= (b)) ? (a) : (b))
-#define MAX(a, b)  (((a) <= (b)) ? (b) : (a))
-
 #define TM_PERCENT(percent) ((uint32_t)(100 * percent))
-
-#define ARRAY_SIZE(a) (sizeof((a)) / sizeof((a)[0]))
 
 typedef enum {
 	SHAPER_PROFILE, SCHED_PROFILE, THRESHOLD_PROFILE, WRED_PROFILE
@@ -211,7 +206,7 @@ static const char ALPHABET[] =
 /* The following constant table determines the minimum and maximum number of
  * pkts that will be received when sending 100 pkts through a system with a
  * drop probability of p% (using a uniform probability distribution), with a
- * confidence of 99.9% 99.99% and 99.999%. The confidence is interepreted as
+ * confidence of 99.9% 99.99% and 99.999%. The confidence is interpreted as
  * follows: a 99.99% confidence says that receiving LESS pkts than the given
  * minimum or receiving MORE pkts than the given maximum (assuming a uniform
  * drop percent of p) will happen less than 1 time in 10,000 trials.
@@ -400,13 +395,13 @@ static odp_bool_t approx_eq64(uint64_t val, uint64_t correct)
 static uint64_t
 clamp_rate(uint64_t rate)
 {
-	return MIN(MAX(rate, tm_shaper_min_rate), tm_shaper_max_rate);
+	return ODPH_MIN(ODPH_MAX(rate, tm_shaper_min_rate), tm_shaper_max_rate);
 }
 
 static uint32_t
 clamp_burst(uint32_t burst)
 {
-	return MIN(MAX(burst, tm_shaper_min_burst), tm_shaper_max_burst);
+	return ODPH_MIN(ODPH_MAX(burst, tm_shaper_min_burst), tm_shaper_max_burst);
 }
 
 static int test_overall_capabilities(void)
@@ -1464,8 +1459,8 @@ static inline void calc_rcv_stats(rcv_stats_t *rcv_stats,
 	last_rcv_gap_idx  = (rcv_gap_cnt * (100 - ending_drop_percent)) / 100;
 	for (idx = first_rcv_gap_idx; idx <= last_rcv_gap_idx; idx++) {
 		rcv_gap                = rcv_gaps[idx];
-		rcv_stats->min_rcv_gap = MIN(rcv_stats->min_rcv_gap, rcv_gap);
-		rcv_stats->max_rcv_gap = MAX(rcv_stats->max_rcv_gap, rcv_gap);
+		rcv_stats->min_rcv_gap = ODPH_MIN(rcv_stats->min_rcv_gap, rcv_gap);
+		rcv_stats->max_rcv_gap = ODPH_MAX(rcv_stats->max_rcv_gap, rcv_gap);
 		rcv_stats->total_rcv_gap         += rcv_gap;
 		rcv_stats->total_rcv_gap_squared += rcv_gap * rcv_gap;
 		rcv_stats->num_samples++;
@@ -2365,7 +2360,7 @@ static int traffic_mngr_suite_init(void)
 
 	payload_len = 0;
 	while (payload_len < MAX_PAYLOAD) {
-		copy_len = MIN(MAX_PAYLOAD - payload_len, sizeof(ALPHABET));
+		copy_len = ODPH_MIN(MAX_PAYLOAD - payload_len, sizeof(ALPHABET));
 		memcpy(&payload_data[payload_len], ALPHABET, copy_len);
 		payload_len += copy_len;
 	}
@@ -3087,7 +3082,7 @@ static int set_sched_fanin(const char         *node_name,
 		CU_ASSERT_FATAL(odp_tm_stop(odp_tm_systems[0]) == 0);
 	}
 
-	fanin_cnt = MIN(node_desc->num_children, FANIN_RATIO);
+	fanin_cnt = ODPH_MIN(node_desc->num_children, FANIN_RATIO);
 	for (fanin = 0; fanin < fanin_cnt; fanin++) {
 		odp_tm_sched_params_init(&sched_params);
 		sched_weight = sched_weights[fanin];
@@ -3352,7 +3347,7 @@ static int test_sched_wfq(const char         *sched_base_name,
 	/* Now determine at least one tm_queue that feeds into each fanin/
 	 * child node. */
 	priority  = 0;
-	fanin_cnt = MIN(node_desc->num_children, FANIN_RATIO);
+	fanin_cnt = ODPH_MIN(node_desc->num_children, FANIN_RATIO);
 	for (fanin = 0; fanin < fanin_cnt; fanin++) {
 		child_desc = node_desc->children[fanin];
 		num_queues = find_child_queues(0, child_desc, priority,
@@ -3482,7 +3477,7 @@ static int test_threshold(const char *threshold_name,
 
 	odp_tm_threshold_params_init(&threshold_params);
 	if (max_pkts != 0) {
-		max_pkts = MIN(max_pkts, MAX_PKTS / 3);
+		max_pkts = ODPH_MIN(max_pkts, MAX_PKTS / 3);
 		threshold_params.max_pkts        = max_pkts;
 		threshold_params.enable_max_pkts = true;
 		num_pkts = 2 * max_pkts;
@@ -3490,7 +3485,7 @@ static int test_threshold(const char *threshold_name,
 	}
 
 	if (max_bytes != 0) {
-		max_bytes = MIN(max_bytes, MAX_PKTS * MAX_PAYLOAD / 3);
+		max_bytes = ODPH_MIN(max_bytes, MAX_PKTS * MAX_PAYLOAD / 3);
 		threshold_params.max_bytes        = max_bytes;
 		threshold_params.enable_max_bytes = true;
 		num_pkts = 2 * max_bytes / MAX_PAYLOAD;
@@ -3545,7 +3540,7 @@ static wred_pkt_cnts_t *search_expected_pkt_rcv_tbl(odp_tm_percent_t confidence,
 	uint32_t         idx, table_size;
 
 	/* Search the EXPECTED_PKT_RCVD table to find a matching entry */
-	table_size = sizeof(EXPECTED_PKT_RCVD) / sizeof(wred_pkt_cnts_t);
+	table_size = ODPH_ARRAY_SIZE(EXPECTED_PKT_RCVD);
 	for (idx = 0; idx < table_size; idx++) {
 		wred_pkt_cnts = &EXPECTED_PKT_RCVD[idx];
 		if ((wred_pkt_cnts->confidence_percent == confidence) &&
@@ -4662,7 +4657,7 @@ static void traffic_mngr_test_queue_stats(void)
 	odp_tm_capabilities_t capa;
 	pkt_info_t pkt_info;
 	uint32_t pkts_sent;
-	uint32_t num_pkts = MIN(50, MAX_PKTS);
+	uint32_t num_pkts = ODPH_MIN(50u, MAX_PKTS);
 	uint32_t pkt_len = 256;
 
 	CU_ASSERT_FATAL(odp_tm_capability(odp_tm_systems[0], &capa) == 0);
@@ -5039,7 +5034,7 @@ int main(int argc, char *argv[])
 		ret = odp_cunit_run();
 
 	/* Exit with 77 in order to indicate that test is skipped completely */
-	if (!ret && suite_inactive == (ARRAY_SIZE(traffic_mngr_suites) - 1))
+	if (!ret && suite_inactive == (ODPH_ARRAY_SIZE(traffic_mngr_suites) - 1))
 		return 77;
 	return ret;
 }

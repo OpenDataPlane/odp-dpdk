@@ -1,7 +1,5 @@
-/* Copyright (c) 2017-2018, Linaro Limited
- * All rights reserved
- *
- * SPDX-License-Identifier:     BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2017-2018 Linaro Limited
  */
 
 /**
@@ -30,6 +28,7 @@ extern "C" {
 #include <odp/helper/igmp.h>
 #include <odp/helper/ip.h>
 #include <odp/helper/ipsec.h>
+#include <odp/helper/macros.h>
 #include <odp/helper/odph_lineartable.h>
 #include <odp/helper/odph_iplookuptable.h>
 #include <odp/helper/sctp.h>

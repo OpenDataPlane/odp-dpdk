@@ -1250,7 +1250,7 @@ static void scheduler_test_groups(void)
 			num--;
 		}
 
-		/* Release schduler context and leave groups */
+		/* Release scheduler context and leave groups */
 		odp_schedule_group_join(mygrp1, &mymask);
 		odp_schedule_group_join(mygrp2, &mymask);
 		CU_ASSERT(drain_queues() == 0);
@@ -1360,7 +1360,7 @@ static void chaos_run(unsigned int qtype)
 	odp_schedule_sync_t sync[] = {ODP_SCHED_SYNC_PARALLEL,
 				      ODP_SCHED_SYNC_ATOMIC,
 				      ODP_SCHED_SYNC_ORDERED};
-	const unsigned num_sync = (sizeof(sync) / sizeof(odp_schedule_sync_t));
+	const unsigned int num_sync = ODPH_ARRAY_SIZE(sync);
 	const char *const qtypes[] = {"parallel", "atomic", "ordered"};
 
 	/* Set up the scheduling environment */

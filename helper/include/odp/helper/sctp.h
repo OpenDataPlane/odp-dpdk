@@ -1,7 +1,5 @@
-/* Copyright (c) 2014-2018, Linaro Limited
- * All rights reserved.
- *
- * SPDX-License-Identifier:     BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2014-2018 Linaro Limited
  */
 
 /**
@@ -19,8 +17,9 @@ extern "C" {
 
 #include <odp_api.h>
 
-/** @addtogroup odph_header ODPH HEADER
- *  @{
+/**
+ * @addtogroup odph_protocols
+ * @{
  */
 
 /** SCTP header length */
@@ -34,9 +33,10 @@ typedef struct ODP_PACKED {
 	odp_u32be_t chksum;   /**< SCTP header and data checksum */
 } odph_sctphdr_t;
 
-/** @internal Compile time assert */
+/** @cond _ODP_HIDE_FROM_DOXYGEN_ */
 ODP_STATIC_ASSERT(sizeof(odph_sctphdr_t) == ODPH_SCTPHDR_LEN,
 		  "ODPH_SCTPHDR_T__SIZE_ERROR");
+/** @endcond */
 
 /**
  * @}

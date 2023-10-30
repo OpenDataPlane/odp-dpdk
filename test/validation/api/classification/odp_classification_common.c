@@ -113,7 +113,7 @@ static uint32_t seqno_offset(odp_packet_t pkt)
 		CU_ASSERT_FATAL(rc == 0);
 		len = sizeof(ip) + odp_be_to_cpu_16(ip.payload_len);
 	} else {
-		CU_FAIL_FATAL("Unexcpected packet type");
+		CU_FAIL_FATAL("Unexpected packet type");
 	}
 
 	return l3_offset + len - sizeof(cls_test_packet_t);
@@ -360,7 +360,7 @@ odp_packet_t create_packet(cls_packet_info_t pkt_info)
 		break;
 	case CLS_PKT_L4_IGMP:
 		next_hdr = ODPH_IPPROTO_IGMP;
-		l4_hdr_len = ODP_IGMP_HLEN;
+		l4_hdr_len = ODPH_IGMP_HLEN;
 		break;
 	case CLS_PKT_L4_AH:
 		next_hdr = ODPH_IPPROTO_AH;
@@ -465,7 +465,7 @@ odp_packet_t create_packet(cls_packet_info_t pkt_info)
 		igmp->code = 0;
 		igmp->csum = 0;
 	} else if (pkt_info.l4_type == CLS_PKT_L4_ICMP) {
-		icmp->type = ICMP_ECHO;
+		icmp->type = ODPH_ICMP_ECHO;
 		icmp->code = 0;
 		icmp->un.echo.id = 0;
 		icmp->un.echo.sequence = 0;

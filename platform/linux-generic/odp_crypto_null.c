@@ -96,6 +96,9 @@ odp_crypto_generic_session_t *alloc_session(void)
 	}
 	odp_spinlock_unlock(&global->lock);
 
+	if (!session)
+		return NULL;
+
 	session->idx = session - global->sessions;
 
 	for (i = 0; i < ODP_THREAD_COUNT_MAX; i++)
@@ -206,7 +209,18 @@ odp_crypto_session_create(const odp_crypto_session_param_t *param,
 		return -1;
 	}
 
-	if (param->op_type == ODP_CRYPTO_OP_TYPE_OOP) {
+	if (param->cipher_range_in_bits) {
+		*status = ODP_CRYPTO_SES_ERR_CIPHER;
+		*session_out = ODP_CRYPTO_SESSION_INVALID;
+		return -1;
+	}
+	if (param->auth_range_in_bits) {
+		*status = ODP_CRYPTO_SES_ERR_AUTH;
+		*session_out = ODP_CRYPTO_SESSION_INVALID;
+		return -1;
+	}
+	if (param->op_type == ODP_CRYPTO_OP_TYPE_OOP ||
+	    param->op_type == ODP_CRYPTO_OP_TYPE_BASIC_AND_OOP) {
 		*status = ODP_CRYPTO_SES_ERR_PARAMS;
 		*session_out = ODP_CRYPTO_SESSION_INVALID;
 		return -1;

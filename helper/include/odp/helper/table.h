@@ -1,14 +1,25 @@
-/* Copyright (c) 2015-2018, Linaro Limited
- * All rights reserved.
- *
- * SPDX-License-Identifier:     BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2015-2018 Linaro Limited
  */
 
 /**
  * @file
  *
  * ODP table
+ */
+
+#ifndef ODPH_TABLE_H_
+#define ODPH_TABLE_H_
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/**
+ * @defgroup odph_tables ODPH TABLES
+ * Table interface
  *
+ * @details
  * TCAM(Ternary Content Addressable Memory) is used widely in packet
  * forwarding to speedup the table lookup.
  *
@@ -56,7 +67,7 @@
  *     actions and action meta-data describing what processing to be
  *     applied for the packets of the current flow, such as whether
  *     encryption/decryption is required on this packet, what kind of cipher
- *     algorithm should be chosed.
+ *     algorithm should be chosen.
  *   <li>Algorithm: Hash
  *   </ol>
  *
@@ -71,17 +82,6 @@
  *  notes: key/value and key/associated data mean the same thing
  *         in this file unless otherwise mentioned.
  *
- */
-
-#ifndef ODPH_TABLE_H_
-#define ODPH_TABLE_H_
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-/**
- * @addtogroup odph_tables ODPH TABLES
  * @{
  */
 
@@ -149,7 +149,7 @@ typedef int (*odph_table_destroy)(odph_table_t table);
 
 /**
  * Add (key,associated data) pair into the specific table.
- * When no associated data is currently assocated with key,
+ * When no associated data is currently associated with key,
  * then the (key,assocatied data) association is created.
  * When key is already associated with data0, then association (key, data0)
  * will be removed and association (key, associated data) is created.

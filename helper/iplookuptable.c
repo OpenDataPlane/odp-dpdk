@@ -1,7 +1,5 @@
-/* Copyright (c) 2016-2018, Linaro Limited
- * All rights reserved.
- *
- * SPDX-License-Identifier:     BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2016-2018 Linaro Limited
  */
 
 #include <string.h>
@@ -155,7 +153,7 @@ cache_destroy(odph_iplookup_table_impl *impl)
 	}
 }
 
-/** According to the type of cahce, set the value of
+/** According to the type of cache, set the value of
  *  a buffer to the initial value.
  */
 static void

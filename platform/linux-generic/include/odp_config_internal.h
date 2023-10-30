@@ -134,10 +134,11 @@ extern "C" {
 /*
  * Number of shared memory blocks reserved for implementation internal use.
  *
- * Each pool requires three blocks (buffers, ring, user area), and 20 blocks
- * are reserved for per ODP module global data.
+ * Each pool requires three blocks (buffers, ring, user area), 20 blocks
+ * are reserved for per ODP module global data and one block per packet I/O is
+ * reserved for TX completion usage.
  */
-#define CONFIG_INTERNAL_SHM_BLOCKS ((ODP_CONFIG_POOLS * 3) + 20)
+#define CONFIG_INTERNAL_SHM_BLOCKS ((ODP_CONFIG_POOLS * 3) + 20 + ODP_CONFIG_PKTIO_ENTRIES)
 
 /*
  * Maximum number of shared memory blocks.
@@ -188,6 +189,9 @@ extern "C" {
  * ODP lock based implementation instead.
  */
 #define CONFIG_TIMER_128BIT_ATOMICS 1
+
+/* Enable timer scan performance benchmark. This works with inline enabled. */
+#define CONFIG_TIMER_PROFILE_INLINE 0
 
 #ifdef __cplusplus
 }

@@ -32,6 +32,9 @@ static void aarch64_impl_str(char *str, int maxlen, int implementer)
 	case 0x44:
 		snprintf(str, maxlen, "Digital Equipment Corporation");
 		return;
+	case 0x46:
+		snprintf(str, maxlen, "Fujitsu Ltd.");
+		return;
 	case 0x49:
 		snprintf(str, maxlen, "Infineon Technologies AG");
 		return;
@@ -52,6 +55,9 @@ static void aarch64_impl_str(char *str, int maxlen, int implementer)
 		return;
 	case 0x69:
 		snprintf(str, maxlen, "Intel Corporation");
+		return;
+	case 0xc0:
+		snprintf(str, maxlen, "Ampere Computing");
 		return;
 	default:
 		break;
@@ -132,12 +138,20 @@ static void aarch64_part_info(char *str, int maxlen, odp_cpu_arch_arm_t *cpu_isa
 			snprintf(str, maxlen, "Cortex-A78AE");
 			*cpu_isa = ODP_CPU_ARCH_ARMV8_2;
 			return;
+		case 0xd44:
+			snprintf(str, maxlen, "Cortex-X1");
+			*cpu_isa = ODP_CPU_ARCH_ARMV8_2;
+			return;
 		case 0xd46:
 			snprintf(str, maxlen, "Cortex-A510");
 			*cpu_isa = ODP_CPU_ARCH_ARMV9_0;
 			return;
 		case 0xd47:
 			snprintf(str, maxlen, "Cortex-A710");
+			*cpu_isa = ODP_CPU_ARCH_ARMV9_0;
+			return;
+		case 0xd48:
+			snprintf(str, maxlen, "Cortex-X2");
 			*cpu_isa = ODP_CPU_ARCH_ARMV9_0;
 			return;
 		case 0xd49:
@@ -151,6 +165,18 @@ static void aarch64_part_info(char *str, int maxlen, odp_cpu_arch_arm_t *cpu_isa
 		case 0xd4b:
 			snprintf(str, maxlen, "Cortex-A78C");
 			*cpu_isa = ODP_CPU_ARCH_ARMV8_2;
+			return;
+		case 0xd4d:
+			snprintf(str, maxlen, "Cortex-A715");
+			*cpu_isa = ODP_CPU_ARCH_ARMV9_0;
+			return;
+		case 0xd80:
+			snprintf(str, maxlen, "Cortex-A520");
+			*cpu_isa = ODP_CPU_ARCH_ARMV9_2;
+			return;
+		case 0xd81:
+			snprintf(str, maxlen, "Cortex-A720");
+			*cpu_isa = ODP_CPU_ARCH_ARMV9_2;
 			return;
 		default:
 			break;
@@ -207,6 +233,11 @@ static odp_cpu_arch_arm_t arm_isa_version(void)
 	#endif
 	}
 
+	if (__ARM_ARCH == 9) {
+		/* v9.0 or higher */
+		return ODP_CPU_ARCH_ARMV9_0;
+	}
+
 	if (__ARM_ARCH >= 800) {
 		/* ACLE 2018 defines that from v8.1 onwards the value includes
 		 * the minor version number: __ARM_ARCH = X * 100 + Y
@@ -232,6 +263,10 @@ static odp_cpu_arch_arm_t arm_isa_version(void)
 				return ODP_CPU_ARCH_ARMV8_6;
 			case 7:
 				return ODP_CPU_ARCH_ARMV8_7;
+			case 8:
+				return ODP_CPU_ARCH_ARMV8_8;
+			case 9:
+				return ODP_CPU_ARCH_ARMV8_9;
 			default:
 				return ODP_CPU_ARCH_ARM_UNKNOWN;
 			}
@@ -243,6 +278,8 @@ static odp_cpu_arch_arm_t arm_isa_version(void)
 				return ODP_CPU_ARCH_ARMV9_1;
 			case 2:
 				return ODP_CPU_ARCH_ARMV9_2;
+			case 3:
+				return ODP_CPU_ARCH_ARMV9_3;
 			default:
 				return ODP_CPU_ARCH_ARM_UNKNOWN;
 			}

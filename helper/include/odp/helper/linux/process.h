@@ -1,7 +1,5 @@
-/* Copyright (c) 2017-2018, Linaro Limited
- * All rights reserved.
- *
- * SPDX-License-Identifier:     BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2017-2018 Linaro Limited
  */
 
 /**
@@ -11,7 +9,7 @@
  *
  * This file is not part of ODP APIs, but can be optionally used to ease common
  * setups in a Linux system. User is free to implement the same setups in
- * otherways (not via this file).
+ * other ways (not via this file).
  */
 
 #ifndef ODPH_LINUX_PROCESS_H_
@@ -24,8 +22,9 @@
 extern "C" {
 #endif
 
-/** @ingroup odph_linux
- *  @{
+/**
+ * @addtogroup odph_thread
+ * @{
  */
 
 /**

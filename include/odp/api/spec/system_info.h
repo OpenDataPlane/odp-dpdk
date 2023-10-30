@@ -1,8 +1,6 @@
-/* Copyright (c) 2013-2018, Linaro Limited
- * Copyright (c) 2020-2021, Nokia
- * All rights reserved.
- *
- * SPDX-License-Identifier:     BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2013-2018 Linaro Limited
+ * Copyright (c) 2020-2021 Nokia
  */
 
 /**
@@ -90,6 +88,12 @@ typedef enum odp_cpu_arch_arm_t {
 	/** ARMv8.7-A ISA */
 	ODP_CPU_ARCH_ARMV8_7,
 
+	/** ARMv8.8-A ISA */
+	ODP_CPU_ARCH_ARMV8_8,
+
+	/** ARMv8.9-A ISA */
+	ODP_CPU_ARCH_ARMV8_9,
+
 	/** ARMv9.0-A ISA */
 	ODP_CPU_ARCH_ARMV9_0,
 
@@ -98,6 +102,9 @@ typedef enum odp_cpu_arch_arm_t {
 
 	/** ARMv9.2-A ISA */
 	ODP_CPU_ARCH_ARMV9_2,
+
+	/** ARMv9.3-A ISA */
+	ODP_CPU_ARCH_ARMV9_3,
 
 } odp_cpu_arch_arm_t;
 

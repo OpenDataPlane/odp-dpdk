@@ -1,5 +1,5 @@
 /* Copyright (c) 2017-2018, Linaro Limited
- * Copyright (c) 2022, Nokia
+ * Copyright (c) 2022-2023, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -7,6 +7,8 @@
 
 #include <odp_api.h>
 #include <odp/helper/odph_api.h>
+
+#include "bench_common.h"
 
 #include <getopt.h>
 #include <inttypes.h>
@@ -20,11 +22,11 @@
 /** Default pool user area size in bytes */
 #define TEST_UAREA_SIZE 8
 
-/** Number of function calls per test cycle */
+/** Number of API function calls per test case */
 #define TEST_REPEAT_COUNT 1000
 
-/** Default number of test cycles */
-#define TEST_CYCLES 1000
+/** Default number of rounds per test case */
+#define TEST_ROUNDS 1000u
 
 /** Maximum burst size for *_multi operations */
 #define TEST_MAX_BURST 64
@@ -36,11 +38,12 @@
 #define NO_PATH(file_name) (strrchr((file_name), '/') ? \
 			    strrchr((file_name), '/') + 1 : (file_name))
 
-#define BENCH_INFO(run, init, term, name) \
-	{#run, run, init, term, name, NULL}
+#define BENCH_INFO(run_fn, init_fn, term_fn, alt_name) \
+	{.name = #run_fn, .run = run_fn, .init = init_fn, .term = term_fn, .desc = alt_name}
 
-#define BENCH_INFO_COND(run, init, term, name, cond) \
-	{#run, run, init, term, name, cond}
+#define BENCH_INFO_COND(run_fn, init_fn, term_fn, alt_name, cond_fn) \
+	{.name = #run_fn, .run = run_fn, .init = init_fn, .term = term_fn, .desc = alt_name, \
+	 .cond = cond_fn}
 
 /**
  * Parsed command line arguments
@@ -49,44 +52,9 @@ typedef struct {
 	int bench_idx;   /** Benchmark index to run indefinitely */
 	int burst_size;  /** Burst size for *_multi operations */
 	int cache_size;  /** Pool cache size */
-	int test_cycles; /** Test cycles per tested function */
+	int time;        /** Measure time vs. CPU cycles */
+	uint32_t rounds; /** Rounds per test case */
 } appl_args_t;
-
-/**
- * Initialize benchmark resources
- */
-typedef void (*bench_init_fn_t)(void);
-
-/**
- * Run benchmark
- *
- * @retval >0 on success
- * */
-typedef int (*bench_run_fn_t)(void);
-
-/**
- * Release benchmark resources
- */
-typedef void (*bench_term_fn_t)(void);
-
-/**
- * Check benchmark preconditions
- *
- * @retval !0 test enabled
- * */
-typedef int (*bench_cond_fn_t)(void);
-
-/**
- * Benchmark data
- */
-typedef struct {
-	const char *name;
-	bench_run_fn_t run;
-	bench_init_fn_t init;
-	bench_term_fn_t term;
-	const char *desc;
-	bench_cond_fn_t cond;
-} bench_info_t;
 
 /**
  * Grouping of all global data
@@ -94,20 +62,16 @@ typedef struct {
 typedef struct {
 	/** Application (parsed) arguments */
 	appl_args_t appl;
+	/** Common benchmark suite data */
+	bench_suite_t suite;
 	/** Buffer pool */
 	odp_pool_t pool;
-	/** Benchmark functions */
-	bench_info_t *bench;
-	/** Number of benchmark functions */
-	int num_bench;
 	/** Buffer size */
 	uint32_t buf_size;
 	/** Buffer user area size */
 	uint32_t uarea_size;
 	/** Max flow id */
 	uint32_t max_flow_id;
-	/** Break worker loop if set to 1 */
-	odp_atomic_u32_t exit_thread;
 	/** Array for storing test buffers */
 	odp_buffer_t buf_tbl[TEST_REPEAT_COUNT * TEST_MAX_BURST];
 	/** Array for storing test event */
@@ -120,8 +84,6 @@ typedef struct {
 	odp_event_type_t event_type_tbl[TEST_REPEAT_COUNT];
 	/** Array for storing test event subtypes */
 	odp_event_subtype_t event_subtype_tbl[TEST_REPEAT_COUNT];
-	/** Benchmark run failed */
-	uint8_t bench_failed;
 	/** CPU mask as string */
 	char cpumask_str[ODP_CPUMASK_STR_SIZE];
 } args_t;
@@ -133,117 +95,7 @@ static void sig_handler(int signo ODP_UNUSED)
 {
 	if (gbl_args == NULL)
 		return;
-	odp_atomic_store_u32(&gbl_args->exit_thread, 1);
-}
-
-/**
- * Run given benchmark indefinitely
- */
-static void run_indef(args_t *args, int idx)
-{
-	const char *desc;
-
-	desc = args->bench[idx].desc != NULL ?
-			args->bench[idx].desc : args->bench[idx].name;
-
-	printf("Running odp_%s test indefinitely\n", desc);
-
-	while (!odp_atomic_load_u32(&gbl_args->exit_thread)) {
-		int ret;
-
-		if (args->bench[idx].init != NULL)
-			args->bench[idx].init();
-
-		ret = args->bench[idx].run();
-
-		if (args->bench[idx].term != NULL)
-			args->bench[idx].term();
-
-		if (!ret)
-			ODPH_ABORT("Benchmark %s failed\n", desc);
-	}
-}
-
-static int run_benchmarks(void *arg)
-{
-	int i, j, k;
-	args_t *args = arg;
-
-	printf("\nAverage CPU cycles per function call\n"
-	       "---------------------------------------------\n");
-
-	/* Run each test twice. Results from the first warm-up round are ignored. */
-	for (i = 0; i < 2; i++) {
-		uint64_t tot_cycles = 0;
-
-		for (j = 0, k = 1; j < gbl_args->num_bench; k++) {
-			int ret;
-			uint64_t c1, c2;
-			const char *desc;
-
-			/* Run selected test indefinitely */
-			if (args->appl.bench_idx &&
-			    (j + 1) != args->appl.bench_idx) {
-				j++;
-				continue;
-			} else if (args->appl.bench_idx &&
-				   (j + 1) == args->appl.bench_idx) {
-				run_indef(args, j);
-				return 0;
-			}
-
-			desc = args->bench[j].desc != NULL ?
-					args->bench[j].desc :
-					args->bench[j].name;
-
-			/* Skip unsupported tests */
-			if (args->bench[j].cond != NULL && !args->bench[j].cond()) {
-				j++;
-				k = 1;
-				if (i > 0)
-					printf("[%02d] odp_%-26s:      n/a\n", j, desc);
-				continue;
-			}
-
-			if (args->bench[j].init != NULL)
-				args->bench[j].init();
-
-			c1 = odp_cpu_cycles();
-			ret = args->bench[j].run();
-			c2 = odp_cpu_cycles();
-
-			if (args->bench[j].term != NULL)
-				args->bench[j].term();
-
-			if (!ret) {
-				ODPH_ERR("Benchmark odp_%s failed\n", desc);
-				args->bench_failed = 1;
-				return -1;
-			}
-
-			tot_cycles += odp_cpu_cycles_diff(c2, c1);
-
-			if (k >= args->appl.test_cycles) {
-				double cycles;
-
-				/** Each benchmark runs internally TEST_REPEAT_COUNT times. */
-				cycles = ((double)tot_cycles) /
-					 (args->appl.test_cycles *
-					  TEST_REPEAT_COUNT);
-
-				/* No print from warm-up round */
-				if (i > 0)
-					printf("[%02d] odp_%-26s: %8.1f\n", j + 1, desc, cycles);
-
-				j++;
-				k = 1;
-				tot_cycles = 0;
-			}
-		}
-	}
-	printf("\n");
-
-	return 0;
+	odp_atomic_store_u32(&gbl_args->suite.exit_worker, 1);
 }
 
 static void allocate_test_buffers(odp_buffer_t buf[], int num)
@@ -612,9 +464,10 @@ static void usage(char *progname)
 	       "  -b, --burst <num>       Test burst size.\n"
 	       "  -c, --cache_size <num>  Pool cache size.\n"
 	       "  -i, --index <idx>       Benchmark index to run indefinitely.\n"
-	       "  -t, --test_cycles <num> Run each test 'num' times (default %d).\n"
+	       "  -r, --rounds <num>      Run each test case 'num' times (default %u).\n"
+	       "  -t, --time <opt>        Time measurement. 0: measure CPU cycles (default), 1: measure time\n"
 	       "  -h, --help              Display help and exit.\n\n"
-	       "\n", NO_PATH(progname), NO_PATH(progname), TEST_CYCLES);
+	       "\n", NO_PATH(progname), NO_PATH(progname), TEST_ROUNDS);
 }
 
 /**
@@ -632,17 +485,19 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 		{"burst", required_argument, NULL, 'b'},
 		{"cache_size", required_argument, NULL, 'c'},
 		{"index", required_argument, NULL, 'i'},
-		{"test_cycles", required_argument, NULL, 't'},
+		{"rounds", required_argument, NULL, 'r'},
+		{"time", required_argument, NULL, 't'},
 		{"help", no_argument, NULL, 'h'},
 		{NULL, 0, NULL, 0}
 	};
 
-	static const char *shortopts =  "c:b:i:t:h";
+	static const char *shortopts =  "c:b:i:r:t:h";
 
 	appl_args->bench_idx = 0; /* Run all benchmarks */
 	appl_args->burst_size = TEST_DEF_BURST;
 	appl_args->cache_size = -1;
-	appl_args->test_cycles = TEST_CYCLES;
+	appl_args->rounds = TEST_ROUNDS;
+	appl_args->time = 0;
 
 	while (1) {
 		opt = getopt_long(argc, argv, shortopts, longopts, &long_index);
@@ -664,8 +519,11 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 		case 'i':
 			appl_args->bench_idx = atoi(optarg);
 			break;
+		case 'r':
+			appl_args->rounds = atoi(optarg);
+			break;
 		case 't':
-			appl_args->test_cycles = atoi(optarg);
+			appl_args->time = atoi(optarg);
 			break;
 		default:
 			break;
@@ -678,8 +536,8 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 		exit(EXIT_FAILURE);
 	}
 
-	if (appl_args->test_cycles < 1) {
-		printf("Invalid test cycle repeat count: %d\n", appl_args->test_cycles);
+	if (appl_args->rounds < 1) {
+		printf("Invalid number test rounds: %d\n", appl_args->rounds);
 		exit(EXIT_FAILURE);
 	}
 
@@ -697,14 +555,15 @@ static void print_info(void)
 	       "odp_bench_buffer options\n"
 	       "------------------------\n");
 
-	printf("Burst size:      %d\n", gbl_args->appl.burst_size);
-	printf("Buffer size:     %d\n", gbl_args->buf_size);
-	printf("CPU mask:        %s\n", gbl_args->cpumask_str);
+	printf("Burst size:        %d\n", gbl_args->appl.burst_size);
+	printf("Buffer size:       %d\n", gbl_args->buf_size);
+	printf("CPU mask:          %s\n", gbl_args->cpumask_str);
 	if (gbl_args->appl.cache_size < 0)
-		printf("Pool cache size: default\n");
+		printf("Pool cache size:   default\n");
 	else
-		printf("Pool cache size: %d\n", gbl_args->appl.cache_size);
-	printf("Test cycles:     %d\n", gbl_args->appl.test_cycles);
+		printf("Pool cache size:   %d\n", gbl_args->appl.cache_size);
+	printf("Measurement unit:  %s\n", gbl_args->appl.time ? "nsec" : "CPU cycles");
+	printf("Test rounds:       %u\n", gbl_args->appl.rounds);
 	printf("\n");
 }
 
@@ -793,13 +652,17 @@ int main(int argc, char *argv[])
 	}
 
 	memset(gbl_args, 0, sizeof(args_t));
-	odp_atomic_init_u32(&gbl_args->exit_thread, 0);
-
-	gbl_args->bench = test_suite;
-	gbl_args->num_bench = sizeof(test_suite) / sizeof(test_suite[0]);
 
 	/* Parse and store the application arguments */
 	parse_args(argc, argv, &gbl_args->appl);
+
+	bench_suite_init(&gbl_args->suite);
+	gbl_args->suite.bench = test_suite;
+	gbl_args->suite.num_bench = ODPH_ARRAY_SIZE(test_suite);
+	gbl_args->suite.indef_idx = gbl_args->appl.bench_idx;
+	gbl_args->suite.rounds = gbl_args->appl.rounds;
+	gbl_args->suite.repeat_count = TEST_REPEAT_COUNT;
+	gbl_args->suite.measure_time = !!gbl_args->appl.time;
 
 	/* Get default worker cpumask */
 	if (odp_cpumask_default_worker(&default_mask, 1) != 1) {
@@ -886,15 +749,15 @@ int main(int argc, char *argv[])
 	thr_common.share_param = 1;
 
 	odph_thread_param_init(&thr_param);
-	thr_param.start = run_benchmarks;
-	thr_param.arg = gbl_args;
+	thr_param.start = bench_run;
+	thr_param.arg = &gbl_args->suite;
 	thr_param.thr_type = ODP_THREAD_WORKER;
 
 	odph_thread_create(&worker_thread, &thr_common, &thr_param, 1);
 
 	odph_thread_join(&worker_thread, 1);
 
-	ret = gbl_args->bench_failed;
+	ret = gbl_args->suite.retval;
 
 	if (odp_pool_destroy(gbl_args->pool)) {
 		ODPH_ERR("Error: pool destroy\n");

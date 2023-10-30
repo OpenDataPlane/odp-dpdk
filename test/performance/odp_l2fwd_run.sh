@@ -93,7 +93,7 @@ run_l2fwd()
 --vdev net_pcap2,iface=$IF2"
 
 	# Max 2 workers
-	$STDBUF odp_l2fwd${EXEEXT} -i 0,1 -m 0 -t 30 -c 2 | tee $LOG
+	$STDBUF odp_l2fwd${EXEEXT} -i 0,1 -m 0 -t 5 -c 2 | tee $LOG
 	ret=${PIPESTATUS[0]}
 
 	kill -2 ${GEN_PID}

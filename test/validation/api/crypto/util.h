@@ -12,14 +12,13 @@
 #include <odp_api.h>
 #include <odp_cunit_common.h>
 
-#define ARRAY_SIZE(a) (sizeof(a) / sizeof(a[0]))
-
 struct suite_context_s {
 	odp_crypto_op_mode_t op_mode;
 	odp_pool_t pool;
 	odp_queue_t queue;
 	odp_queue_type_t q_type;
 	odp_event_t (*compl_queue_deq)(void);
+	int partial_test;
 };
 
 extern struct suite_context_s suite_context;

@@ -1,7 +1,5 @@
-/* Copyright (c) 2014-2018, Linaro Limited
- * All rights reserved.
- *
- * SPDX-License-Identifier:     BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2014-2018 Linaro Limited
  */
 
 /**
@@ -18,8 +16,10 @@ extern "C" {
 
 #include <odp_api.h>
 
-/** @addtogroup odph_chksum ODPH CHECK SUM
- *  @{
+/** @defgroup odph_chksum ODPH CHECKSUM
+ * TCP/UDP/SCTP checksum
+ *
+ * @{
  */
 
 /**

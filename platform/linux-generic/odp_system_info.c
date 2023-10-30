@@ -83,7 +83,7 @@ static uint64_t default_huge_page_size(void)
 
 	while (fgets(str, sizeof(str), file) != NULL) {
 		if (sscanf(str, "Hugepagesize:   %8lu kB", &sz) == 1) {
-			_ODP_DBG("defaut hp size is %lu kB\n", sz);
+			_ODP_DBG("default hp size is %lu kB\n", sz);
 			fclose(file);
 			return (uint64_t)sz * 1024;
 		}
@@ -611,5 +611,6 @@ void odp_sys_config_print(void)
 	_ODP_PRINT("CONFIG_POOL_MAX_NUM:         %i\n", CONFIG_POOL_MAX_NUM);
 	_ODP_PRINT("CONFIG_POOL_CACHE_MAX_SIZE:  %i\n", CONFIG_POOL_CACHE_MAX_SIZE);
 	_ODP_PRINT("CONFIG_TIMER_128BIT_ATOMICS: %i\n", CONFIG_TIMER_128BIT_ATOMICS);
+	_ODP_PRINT("CONFIG_TIMER_PROFILE_INLINE: %i\n", CONFIG_TIMER_PROFILE_INLINE);
 	_ODP_PRINT("\n");
 }
