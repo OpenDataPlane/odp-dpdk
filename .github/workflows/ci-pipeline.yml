@@ -312,13 +312,13 @@ jobs:
       - if: ${{ failure() }}
         uses: ./.github/actions/run-failure-log
 
-  Run_alternate_timer:
+  Run_default_timer:
     runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v3
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}" -e ARCH="${ARCH}"
-               -e ODP_CONFIG_FILE=/odp/platform/linux-dpdk/test/alternate-timer.conf
-               -e CONF="${CONF}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH} /odp/scripts/ci/check.sh
+               -e ODP_CONFIG_FILE=/odp/platform/linux-dpdk/test/default-timer.conf
+               -e CONF="${CONF}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH} /odp/scripts/ci/check_validation.sh
       - if: ${{ failure() }}
         uses: ./.github/actions/run-failure-log
 
