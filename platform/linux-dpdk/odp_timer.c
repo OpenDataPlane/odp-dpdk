@@ -36,6 +36,7 @@
 #include <rte_timer.h>
 
 #include <inttypes.h>
+#include <stdio.h>
 #include <string.h>
 
 /* One divided by one nanosecond in Hz */
@@ -1397,6 +1398,13 @@ void odp_timer_pool_print(odp_timer_pool_t timer_pool)
 	str[len] = 0;
 
 	_ODP_PRINT("%s\n", str);
+
+	_ODP_PRINT("DPDK timer statistics\n---------------------\n");
+	if (timer_global->use_alternate)
+		rte_timer_alt_dump_stats(timer_global->data_id, stdout);
+	else
+		rte_timer_dump_stats(stdout);
+	_ODP_PRINT("\n");
 }
 
 void odp_timer_print(odp_timer_t timer_hdl)
