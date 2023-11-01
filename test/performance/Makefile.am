@@ -15,7 +15,8 @@ EXECUTABLES = odp_atomic_perf \
 	      odp_pool_perf \
 	      odp_queue_perf \
 	      odp_stash_perf \
-	      odp_random
+	      odp_random \
+	      odp_stress
 
 COMPILE_ONLY = odp_cpu_bench \
 	       odp_crypto \
@@ -29,7 +30,6 @@ COMPILE_ONLY = odp_cpu_bench \
 	       odp_sched_perf \
 	       odp_sched_pktio \
 	       odp_scheduling \
-	       odp_stress \
 	       odp_timer_perf
 
 if LIBCONFIG
