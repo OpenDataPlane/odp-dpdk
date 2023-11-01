@@ -36,7 +36,7 @@ endif
 
 test_PROGRAMS = $(EXECUTABLES) $(COMPILE_ONLY)
 
-EXTRA_DIST =  odpthreads_as_processes odpthreads_as_pthreads
+dist_check_SCRIPTS = odpthreads_as_processes odpthreads_as_pthreads
 
 chksum_SOURCES = chksum.c
 cuckootable_SOURCES = cuckootable.c
