@@ -39,6 +39,7 @@ static void test_defaults(uint8_t fill)
 	CU_ASSERT_EQUAL(param.cipher_range_in_bits, false);
 	CU_ASSERT_EQUAL(param.auth_range_in_bits, false);
 	CU_ASSERT_EQUAL(param.auth_cipher_text, false);
+	CU_ASSERT_EQUAL(param.null_crypto_enable, false);
 	CU_ASSERT_EQUAL(param.op_mode, ODP_CRYPTO_SYNC);
 	CU_ASSERT_EQUAL(param.cipher_alg, ODP_CIPHER_ALG_NULL);
 	CU_ASSERT_EQUAL(param.cipher_iv_len, 0);
@@ -68,6 +69,13 @@ static void print_alg_test_param(const crypto_op_test_param_t *p)
 	case ODP_CRYPTO_OP_TYPE_OOP:
 		printf("out-of-place ");
 		break;
+	case ODP_CRYPTO_OP_TYPE_BASIC_AND_OOP:
+		printf("basic-and-out-of-place (%s)",
+		       p->op_type == ODP_CRYPTO_OP_TYPE_BASIC ? "basic" : "oop");
+		break;
+	default:
+		printf("unknown (internal error) ");
+		break;
 	}
 	printf("%s\n", p->session.op == ODP_CRYPTO_OP_ENCODE ? "encode" : "decode");
 
@@ -90,8 +98,12 @@ static void print_alg_test_param(const crypto_op_test_param_t *p)
 	printf("header length: %d, trailer length: %d\n", p->header_len, p->trailer_len);
 	if (p->adjust_segmentation)
 		printf("segmentation adjusted, first_seg_len: %d\n", p->first_seg_len);
-	if (p->session.op_type == ODP_CRYPTO_OP_TYPE_OOP)
+	if (p->op_type == ODP_CRYPTO_OP_TYPE_OOP)
 		printf("oop_shift: %d\n", p->oop_shift);
+	if (p->session.null_crypto_enable)
+		printf("null crypto enabled in session\n");
+	if (p->null_crypto)
+		printf("null crypto requested\n");
 }
 
 static void alg_test_execute_and_print(crypto_op_test_param_t *param)
@@ -113,13 +125,13 @@ static void alg_test_execute_and_print(crypto_op_test_param_t *param)
 	}
 }
 
-static void alg_test_op(crypto_op_test_param_t *param)
+static void alg_test_op2(crypto_op_test_param_t *param)
 {
 	int32_t oop_shifts[] = {0, 3, 130, -10};
 
-	for (uint32_t n = 0; n < ARRAY_SIZE(oop_shifts); n++) {
+	for (uint32_t n = 0; n < ODPH_ARRAY_SIZE(oop_shifts); n++) {
 		if (oop_shifts[n] != 0 &&
-		    param->session.op_type != ODP_CRYPTO_OP_TYPE_OOP)
+		    param->op_type != ODP_CRYPTO_OP_TYPE_OOP)
 			continue;
 		if ((int32_t)param->header_len + oop_shifts[n] < 0)
 			continue;
@@ -127,11 +139,33 @@ static void alg_test_op(crypto_op_test_param_t *param)
 
 		param->wrong_digest = false;
 		alg_test_execute_and_print(param);
+
+		param->null_crypto = true;
+		alg_test_execute_and_print(param);
+		param->null_crypto = false;
+
 		if (full_test)
 			alg_test_execute_and_print(param); /* rerun with the same parameters */
+
+		if (!full_test && param->session.null_crypto_enable)
+			break;
+		if (!full_test && param->session.op_type == ODP_CRYPTO_OP_TYPE_BASIC_AND_OOP)
+			break;
+
 		param->wrong_digest = true;
 		alg_test_execute_and_print(param);
 	}
+}
+
+static void alg_test_op(crypto_op_test_param_t *param)
+{
+	param->op_type = param->session.op_type;
+	if (param->op_type == ODP_CRYPTO_OP_TYPE_BASIC_AND_OOP) {
+		param->op_type = ODP_CRYPTO_OP_TYPE_BASIC;
+		alg_test_op2(param);
+		param->op_type = ODP_CRYPTO_OP_TYPE_OOP;
+	}
+	alg_test_op2(param);
 }
 
 static int combo_warning_shown;
@@ -150,7 +184,8 @@ typedef enum {
 static int session_create(crypto_session_t *session,
 			  alg_order_t order,
 			  crypto_test_reference_t *ref,
-			  hash_test_mode_t hash_mode)
+			  hash_test_mode_t hash_mode,
+			  odp_bool_t must_fail)
 {
 	int rc;
 	odp_crypto_ses_create_err_t status;
@@ -176,6 +211,7 @@ static int session_create(crypto_session_t *session,
 	ses_params.cipher_range_in_bits = session->cipher_range_in_bits;
 	ses_params.auth_range_in_bits = session->auth_range_in_bits;
 	ses_params.auth_cipher_text = (order == AUTH_CIPHERTEXT);
+	ses_params.null_crypto_enable = session->null_crypto_enable;
 	ses_params.op_mode = suite_context.op_mode;
 	ses_params.cipher_alg = ref->cipher;
 	ses_params.auth_alg = ref->auth;
@@ -189,6 +225,15 @@ static int session_create(crypto_session_t *session,
 	ses_params.auth_aad_len = ref->aad_length;
 	ses_params.hash_result_in_auth_range = (hash_mode == HASH_OVERLAP);
 	rc = odp_crypto_session_create(&ses_params, &session->session, &status);
+
+	if (must_fail) {
+		CU_ASSERT(rc < 0);
+		if (rc == 0) {
+			rc = odp_crypto_session_destroy(session->session);
+			CU_ASSERT(rc == 0);
+		}
+		return -1;
+	}
 
 	if (rc < 0 && status == ODP_CRYPTO_SES_ERR_ALG_COMBO) {
 		if (!combo_warning_shown) {
@@ -216,9 +261,10 @@ static int session_create(crypto_session_t *session,
 
 	/* For now, allow out-of-place sessions not to be supported. */
 	if (rc < 0 && status == ODP_CRYPTO_SES_ERR_PARAMS &&
-	    ses_params.op_type == ODP_CRYPTO_OP_TYPE_OOP) {
+	    (ses_params.op_type == ODP_CRYPTO_OP_TYPE_OOP ||
+	     ses_params.op_type == ODP_CRYPTO_OP_TYPE_BASIC_AND_OOP)) {
 		if (!oop_warning_shown)
-			printf("\n    Skipping ODP_CRYPTO_OP_TYPE_OOP tests\n");
+			printf("\n    Skipping out-of-place tests\n");
 		oop_warning_shown = 1;
 		return -1;
 	}
@@ -247,7 +293,9 @@ static void alg_test_ses(odp_crypto_op_t op,
 			 odp_packet_data_range_t auth_range,
 			 uint32_t digest_offset,
 			 odp_bool_t cipher_range_in_bits,
-			 odp_bool_t auth_range_in_bits)
+			 odp_bool_t auth_range_in_bits,
+			 odp_bool_t null_crypto_enable,
+			 odp_bool_t session_creation_must_fail)
 {
 	unsigned int initial_num_failures = CU_get_number_of_failures();
 	const uint32_t reflength = ref_length_in_bytes(ref);
@@ -258,6 +306,9 @@ static void alg_test_ses(odp_crypto_op_t op,
 	uint32_t max_shift;
 	crypto_op_test_param_t test_param;
 
+	if (null_crypto_enable && suite_context.op_mode == ODP_CRYPTO_SYNC)
+		return;
+
 	if (digest_offset * auth_scale >= auth_range.offset &&
 	    digest_offset * auth_scale < auth_range.offset + auth_range.length)
 		hash_mode = HASH_OVERLAP;
@@ -267,7 +318,8 @@ static void alg_test_ses(odp_crypto_op_t op,
 	test_param.session.op_type = op_type;
 	test_param.session.cipher_range_in_bits = cipher_range_in_bits;
 	test_param.session.auth_range_in_bits = auth_range_in_bits;
-	if (session_create(&test_param.session, order, ref, hash_mode))
+	test_param.session.null_crypto_enable = null_crypto_enable;
+	if (session_create(&test_param.session, order, ref, hash_mode, session_creation_must_fail))
 		return;
 	test_param.ref = ref;
 	test_param.cipher_range = cipher_range;
@@ -279,13 +331,15 @@ static void alg_test_ses(odp_crypto_op_t op,
 	max_shift = reflength + ref->digest_length;
 	seg_len = 0;
 
-	if (!full_test &&
-	    ref->cipher != ODP_CIPHER_ALG_NULL &&
-	    ref->auth != ODP_AUTH_ALG_NULL) {
-		/* run the loop body just once */
-		seg_len = max_shift / 2;
-		max_shift = seg_len;
-	}
+	if (!full_test)
+		if ((ref->cipher != ODP_CIPHER_ALG_NULL &&
+		     ref->auth != ODP_AUTH_ALG_NULL) ||
+		    test_param.session.null_crypto_enable ||
+		    test_param.session.op_type == ODP_CRYPTO_OP_TYPE_BASIC_AND_OOP) {
+			/* run the loop body just once */
+			seg_len = max_shift / 2;
+			max_shift = seg_len;
+		}
 
 	/*
 	 * Test with segmented packets with all possible segment boundaries
@@ -324,24 +378,29 @@ static void alg_test_op_types(odp_crypto_op_t op,
 			      odp_packet_data_range_t auth_range,
 			      uint32_t digest_offset,
 			      odp_bool_t cipher_range_in_bits,
-			      odp_bool_t auth_range_in_bits)
+			      odp_bool_t auth_range_in_bits,
+			      odp_bool_t session_creation_must_fail)
 {
 	odp_crypto_op_type_t op_types[] = {
 		ODP_CRYPTO_OP_TYPE_LEGACY,
 		ODP_CRYPTO_OP_TYPE_BASIC,
 		ODP_CRYPTO_OP_TYPE_OOP,
+		ODP_CRYPTO_OP_TYPE_BASIC_AND_OOP,
 	};
 
-	for (unsigned int n = 0; n < ARRAY_SIZE(op_types); n++) {
-		alg_test_ses(op,
-			     op_types[n],
-			     order,
-			     ref,
-			     cipher_range,
-			     auth_range,
-			     digest_offset,
-			     cipher_range_in_bits,
-			     auth_range_in_bits);
+	for (unsigned int n = 0; n < ODPH_ARRAY_SIZE(op_types); n++) {
+		for (unsigned int null_crypto = 0 ; null_crypto <= 1; null_crypto++)
+			alg_test_ses(op,
+				     op_types[n],
+				     order,
+				     ref,
+				     cipher_range,
+				     auth_range,
+				     digest_offset,
+				     cipher_range_in_bits,
+				     auth_range_in_bits,
+				     null_crypto,
+				     session_creation_must_fail);
 	}
 }
 
@@ -360,12 +419,10 @@ static void alg_test(odp_crypto_op_t op,
 	for (int cr_in_bits = 0; cr_in_bits <= 1; cr_in_bits++) {
 		if (!cr_in_bits && cipher_bit_range.length % 8 != 0)
 			continue;
-		if (cr_in_bits && !is_bit_mode_cipher)
-			continue;
 		for (int ar_in_bits = 0; ar_in_bits <= 1; ar_in_bits++) {
+			odp_bool_t session_creation_must_fail;
+
 			if (!ar_in_bits && auth_bit_range.length % 8 != 0)
-				continue;
-			if (ar_in_bits && !is_bit_mode_auth)
 				continue;
 
 			cipher_range = cipher_bit_range;
@@ -378,8 +435,11 @@ static void alg_test(odp_crypto_op_t op,
 				auth_range.offset /= 8;
 				auth_range.length /= 8;
 			}
+			session_creation_must_fail = ((ar_in_bits && !is_bit_mode_auth) ||
+						      (cr_in_bits && !is_bit_mode_cipher));
 			alg_test_op_types(op, order, ref, cipher_range, auth_range,
-					  digest_offset, cr_in_bits, ar_in_bits);
+					  digest_offset, cr_in_bits, ar_in_bits,
+					  session_creation_must_fail);
 		}
 	}
 }
@@ -433,25 +493,17 @@ static void check_alg(odp_crypto_op_t op,
 
 	for (idx = 0; idx < count; idx++) {
 		int cipher_idx = -1, auth_idx = -1;
-		odp_bool_t bit_mode_needed = false;
 		odp_bool_t is_bit_mode_cipher = false;
 		odp_bool_t is_bit_mode_auth = false;
 		uint32_t digest_offs = ref_length_in_bytes(&ref[idx]);
 		odp_packet_data_range_t cipher_bit_range = {.offset = 0};
 		odp_packet_data_range_t auth_bit_range = {.offset = 0};
 
-		if (ref_length_in_bits(&ref[idx]) % 8 != 0)
-			bit_mode_needed = true;
-
 		for (i = 0; i < cipher_num; i++) {
 			if (cipher_capa[i].key_len ==
 			    ref[idx].cipher_key_length &&
 			    cipher_capa[i].iv_len ==
 			    ref[idx].cipher_iv_length) {
-				if (bit_mode_needed &&
-				    cipher_alg != ODP_CIPHER_ALG_NULL &&
-				    !cipher_capa[i].bit_mode)
-					continue;
 				cipher_idx = i;
 				is_bit_mode_cipher = cipher_capa[i].bit_mode;
 				break;
@@ -460,11 +512,10 @@ static void check_alg(odp_crypto_op_t op,
 
 		if (cipher_idx < 0) {
 			printf("\n    Unsupported: alg=%s, key_len=%" PRIu32
-			       ", iv_len=%" PRIu32 "%s\n",
+			       ", iv_len=%" PRIu32 "\n",
 			       cipher_alg_name(cipher_alg),
 			       ref[idx].cipher_key_length,
-			       ref[idx].cipher_iv_length,
-			       bit_mode_needed ? ", bit mode" : "");
+			       ref[idx].cipher_iv_length);
 			continue;
 		}
 
@@ -476,10 +527,6 @@ static void check_alg(odp_crypto_op_t op,
 			    auth_capa[i].key_len ==
 			    ref[idx].auth_key_length &&
 			    aad_len_ok(&auth_capa[i], ref[idx].aad_length)) {
-				if (bit_mode_needed &&
-				    auth_alg != ODP_AUTH_ALG_NULL &&
-				    !auth_capa[i].bit_mode)
-					continue;
 				auth_idx = i;
 				is_bit_mode_auth = auth_capa[i].bit_mode;
 				break;
@@ -489,12 +536,11 @@ static void check_alg(odp_crypto_op_t op,
 		if (auth_idx < 0) {
 			printf("\n    Unsupported: alg=%s, key_len=%" PRIu32
 			       ", iv_len=%" PRIu32 ", digest_len=%" PRIu32
-			       "%s\n",
+			       "\n",
 			       auth_alg_name(auth_alg),
 			       ref[idx].auth_key_length,
 			       ref[idx].auth_iv_length,
-			       ref[idx].digest_length,
-			       bit_mode_needed ? ", bit mode" : "");
+			       ref[idx].digest_length);
 			continue;
 		}
 
@@ -600,10 +646,11 @@ static int create_hash_test_reference(odp_auth_alg_t auth,
 	CU_ASSERT(rc == 0);
 
 	session.op = ODP_CRYPTO_OP_ENCODE;
-	session.op_type = ODP_CRYPTO_OP_TYPE_LEGACY;
+	session.op_type = ODP_CRYPTO_OP_TYPE_BASIC;
 	session.cipher_range_in_bits = false;
 	session.auth_range_in_bits = false;
-	if (session_create(&session, AUTH_PLAINTEXT, ref, HASH_NO_OVERLAP))
+	session.null_crypto_enable = false;
+	if (session_create(&session, AUTH_PLAINTEXT, ref, HASH_NO_OVERLAP, false))
 		return -1;
 
 	odp_crypto_packet_op_param_t op_params = {
@@ -616,7 +663,8 @@ static int create_hash_test_reference(odp_auth_alg_t auth,
 		.auth_range = { .offset = 0, .length = auth_bytes },
 		.dst_offset_shift = 0,
 	};
-	rc = crypto_op(pkt, &pkt, &ok, &op_params, ODP_CRYPTO_OP_TYPE_LEGACY);
+	rc = crypto_op(pkt, &pkt, &ok, &op_params,
+		       ODP_CRYPTO_OP_TYPE_BASIC, ODP_CRYPTO_OP_TYPE_BASIC);
 
 	CU_ASSERT(rc == 0);
 	if (rc) {
@@ -649,6 +697,7 @@ static int create_hash_test_reference(odp_auth_alg_t auth,
 
 static void test_auth_hash_in_auth_range(odp_auth_alg_t auth,
 					 const odp_crypto_auth_capability_t *capa,
+					 odp_bool_t is_bit_mode_cipher,
 					 alg_order_t order)
 {
 	static crypto_test_reference_t ref = {.length = 0};
@@ -681,7 +730,7 @@ static void test_auth_hash_in_auth_range(odp_auth_alg_t auth,
 		 &ref,
 		 cipher_bit_range, auth_bit_range,
 		 digest_offset,
-		 false,
+		 is_bit_mode_cipher,
 		 capa->bit_mode);
 
 	/*
@@ -706,7 +755,7 @@ static void test_auth_hash_in_auth_range(odp_auth_alg_t auth,
 		 &ref,
 		 cipher_bit_range, auth_bit_range,
 		 digest_offset,
-		 false,
+		 is_bit_mode_cipher,
 		 capa->bit_mode);
 }
 
@@ -758,12 +807,16 @@ static odp_auth_alg_t auth_algs[] = {
 
 static void test_auth_hashes_in_auth_range(void)
 {
-	for (size_t n = 0; n < ARRAY_SIZE(auth_algs); n++) {
+	for (size_t n = 0; n < ODPH_ARRAY_SIZE(auth_algs); n++) {
 		odp_auth_alg_t auth = auth_algs[n];
+		odp_crypto_cipher_capability_t c_capa;
 		int num;
 
 		if (check_alg_support(ODP_CIPHER_ALG_NULL, auth) == ODP_TEST_INACTIVE)
 			continue;
+
+		num = odp_crypto_cipher_capability(ODP_CIPHER_ALG_NULL, &c_capa, 1);
+		CU_ASSERT_FATAL(num == 1);
 
 		num = odp_crypto_auth_capability(auth, NULL, 0);
 		CU_ASSERT_FATAL(num > 0);
@@ -773,8 +826,10 @@ static void test_auth_hashes_in_auth_range(void)
 		num = odp_crypto_auth_capability(auth, capa, num);
 
 		for (int i = 0; i < num; i++) {
-			test_auth_hash_in_auth_range(auth, &capa[i], AUTH_PLAINTEXT);
-			test_auth_hash_in_auth_range(auth, &capa[i], AUTH_CIPHERTEXT);
+			test_auth_hash_in_auth_range(auth, &capa[i], c_capa.bit_mode,
+						     AUTH_PLAINTEXT);
+			test_auth_hash_in_auth_range(auth, &capa[i], c_capa.bit_mode,
+						     AUTH_CIPHERTEXT);
 		}
 	}
 }
@@ -800,10 +855,11 @@ static int crypto_encode_ref(crypto_test_reference_t *ref,
 	CU_ASSERT(rc == 0);
 
 	session.op = ODP_CRYPTO_OP_ENCODE;
-	session.op_type = ODP_CRYPTO_OP_TYPE_LEGACY;
+	session.op_type = ODP_CRYPTO_OP_TYPE_BASIC;
 	session.cipher_range_in_bits = false;
 	session.auth_range_in_bits = false;
-	if (session_create(&session, AUTH_PLAINTEXT, ref, HASH_OVERLAP)) {
+	session.null_crypto_enable = false;
+	if (session_create(&session, AUTH_PLAINTEXT, ref, HASH_OVERLAP, false)) {
 		odp_packet_free(pkt);
 		return 1;
 	}
@@ -827,7 +883,8 @@ static int crypto_encode_ref(crypto_test_reference_t *ref,
 		.auth_range = auth_range,
 		.dst_offset_shift = 0,
 	};
-	rc = crypto_op(pkt, &pkt, &ok, &op_params, ODP_CRYPTO_OP_TYPE_LEGACY);
+	rc = crypto_op(pkt, &pkt, &ok, &op_params,
+		       ODP_CRYPTO_OP_TYPE_BASIC, ODP_CRYPTO_OP_TYPE_BASIC);
 	CU_ASSERT(rc == 0);
 	if (rc) {
 		(void)odp_crypto_session_destroy(session.session);
@@ -1296,9 +1353,14 @@ static void test_combo_variants(odp_cipher_alg_t cipher, odp_auth_alg_t auth)
 
 static void test_all_combinations(void)
 {
+	if (suite_context.partial_test) {
+		printf("skipped ");
+		return;
+	}
+
 	printf("\n");
-	for (size_t n = 0; n < ARRAY_SIZE(cipher_algs); n++)
-		for (size_t i = 0; i < ARRAY_SIZE(auth_algs); i++)
+	for (size_t n = 0; n < ODPH_ARRAY_SIZE(cipher_algs); n++)
+		for (size_t i = 0; i < ODPH_ARRAY_SIZE(auth_algs); i++)
 			test_combo_variants(cipher_algs[n], auth_algs[i]);
 }
 
@@ -1311,14 +1373,14 @@ static void crypto_test_enc_alg_null(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
 		  null_reference,
-		  ARRAY_SIZE(null_reference));
+		  ODPH_ARRAY_SIZE(null_reference));
 }
 
 static void crypto_test_dec_alg_null(void)
 {
 	check_alg(ODP_CRYPTO_OP_DECODE,
 		  null_reference,
-		  ARRAY_SIZE(null_reference));
+		  ODPH_ARRAY_SIZE(null_reference));
 }
 
 static int check_alg_3des_cbc(void)
@@ -1330,14 +1392,14 @@ static void crypto_test_enc_alg_3des_cbc(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
 		  tdes_cbc_reference,
-		  ARRAY_SIZE(tdes_cbc_reference));
+		  ODPH_ARRAY_SIZE(tdes_cbc_reference));
 }
 
 static void crypto_test_dec_alg_3des_cbc(void)
 {
 	check_alg(ODP_CRYPTO_OP_DECODE,
 		  tdes_cbc_reference,
-		  ARRAY_SIZE(tdes_cbc_reference));
+		  ODPH_ARRAY_SIZE(tdes_cbc_reference));
 }
 
 static int check_alg_3des_ecb(void)
@@ -1349,14 +1411,14 @@ static void crypto_test_enc_alg_3des_ecb(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
 		  tdes_ecb_reference,
-		  ARRAY_SIZE(tdes_ecb_reference));
+		  ODPH_ARRAY_SIZE(tdes_ecb_reference));
 }
 
 static void crypto_test_dec_alg_3des_ecb(void)
 {
 	check_alg(ODP_CRYPTO_OP_DECODE,
 		  tdes_ecb_reference,
-		  ARRAY_SIZE(tdes_ecb_reference));
+		  ODPH_ARRAY_SIZE(tdes_ecb_reference));
 }
 
 static int check_alg_chacha20_poly1305(void)
@@ -1369,14 +1431,14 @@ static void crypto_test_enc_alg_chacha20_poly1305(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
 		  chacha20_poly1305_reference,
-		  ARRAY_SIZE(chacha20_poly1305_reference));
+		  ODPH_ARRAY_SIZE(chacha20_poly1305_reference));
 }
 
 static void crypto_test_dec_alg_chacha20_poly1305(void)
 {
 	check_alg(ODP_CRYPTO_OP_DECODE,
 		  chacha20_poly1305_reference,
-		  ARRAY_SIZE(chacha20_poly1305_reference));
+		  ODPH_ARRAY_SIZE(chacha20_poly1305_reference));
 }
 
 static int check_alg_aes_gcm(void)
@@ -1388,14 +1450,14 @@ static void crypto_test_enc_alg_aes_gcm(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
 		  aes_gcm_reference,
-		  ARRAY_SIZE(aes_gcm_reference));
+		  ODPH_ARRAY_SIZE(aes_gcm_reference));
 }
 
 static void crypto_test_dec_alg_aes_gcm(void)
 {
 	check_alg(ODP_CRYPTO_OP_DECODE,
 		  aes_gcm_reference,
-		  ARRAY_SIZE(aes_gcm_reference));
+		  ODPH_ARRAY_SIZE(aes_gcm_reference));
 }
 
 static int check_alg_aes_ccm(void)
@@ -1407,14 +1469,14 @@ static void crypto_test_enc_alg_aes_ccm(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
 		  aes_ccm_reference,
-		  ARRAY_SIZE(aes_ccm_reference));
+		  ODPH_ARRAY_SIZE(aes_ccm_reference));
 }
 
 static void crypto_test_dec_alg_aes_ccm(void)
 {
 	check_alg(ODP_CRYPTO_OP_DECODE,
 		  aes_ccm_reference,
-		  ARRAY_SIZE(aes_ccm_reference));
+		  ODPH_ARRAY_SIZE(aes_ccm_reference));
 }
 
 static int check_alg_aes_cbc(void)
@@ -1426,14 +1488,14 @@ static void crypto_test_enc_alg_aes_cbc(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
 		  aes_cbc_reference,
-		  ARRAY_SIZE(aes_cbc_reference));
+		  ODPH_ARRAY_SIZE(aes_cbc_reference));
 }
 
 static void crypto_test_dec_alg_aes_cbc(void)
 {
 	check_alg(ODP_CRYPTO_OP_DECODE,
 		  aes_cbc_reference,
-		  ARRAY_SIZE(aes_cbc_reference));
+		  ODPH_ARRAY_SIZE(aes_cbc_reference));
 }
 
 static int check_alg_aes_ctr(void)
@@ -1445,14 +1507,14 @@ static void crypto_test_enc_alg_aes_ctr(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
 		  aes_ctr_reference,
-		  ARRAY_SIZE(aes_ctr_reference));
+		  ODPH_ARRAY_SIZE(aes_ctr_reference));
 }
 
 static void crypto_test_dec_alg_aes_ctr(void)
 {
 	check_alg(ODP_CRYPTO_OP_DECODE,
 		  aes_ctr_reference,
-		  ARRAY_SIZE(aes_ctr_reference));
+		  ODPH_ARRAY_SIZE(aes_ctr_reference));
 }
 
 static int check_alg_aes_ecb(void)
@@ -1464,14 +1526,14 @@ static void crypto_test_enc_alg_aes_ecb(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
 		  aes_ecb_reference,
-		  ARRAY_SIZE(aes_ecb_reference));
+		  ODPH_ARRAY_SIZE(aes_ecb_reference));
 }
 
 static void crypto_test_dec_alg_aes_ecb(void)
 {
 	check_alg(ODP_CRYPTO_OP_DECODE,
 		  aes_ecb_reference,
-		  ARRAY_SIZE(aes_ecb_reference));
+		  ODPH_ARRAY_SIZE(aes_ecb_reference));
 }
 
 static int check_alg_aes_cfb128(void)
@@ -1483,14 +1545,14 @@ static void crypto_test_enc_alg_aes_cfb128(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
 		  aes_cfb128_reference,
-		  ARRAY_SIZE(aes_cfb128_reference));
+		  ODPH_ARRAY_SIZE(aes_cfb128_reference));
 }
 
 static void crypto_test_dec_alg_aes_cfb128(void)
 {
 	check_alg(ODP_CRYPTO_OP_DECODE,
 		  aes_cfb128_reference,
-		  ARRAY_SIZE(aes_cfb128_reference));
+		  ODPH_ARRAY_SIZE(aes_cfb128_reference));
 }
 
 static int check_alg_aes_xts(void)
@@ -1502,14 +1564,14 @@ static void crypto_test_enc_alg_aes_xts(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
 		  aes_xts_reference,
-		  ARRAY_SIZE(aes_xts_reference));
+		  ODPH_ARRAY_SIZE(aes_xts_reference));
 }
 
 static void crypto_test_dec_alg_aes_xts(void)
 {
 	check_alg(ODP_CRYPTO_OP_DECODE,
 		  aes_xts_reference,
-		  ARRAY_SIZE(aes_xts_reference));
+		  ODPH_ARRAY_SIZE(aes_xts_reference));
 }
 
 static int check_alg_kasumi_f8(void)
@@ -1521,14 +1583,14 @@ static void crypto_test_enc_alg_kasumi_f8(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
 		  kasumi_f8_reference,
-		  ARRAY_SIZE(kasumi_f8_reference));
+		  ODPH_ARRAY_SIZE(kasumi_f8_reference));
 }
 
 static void crypto_test_dec_alg_kasumi_f8(void)
 {
 	check_alg(ODP_CRYPTO_OP_DECODE,
 		  kasumi_f8_reference,
-		  ARRAY_SIZE(kasumi_f8_reference));
+		  ODPH_ARRAY_SIZE(kasumi_f8_reference));
 }
 
 static int check_alg_snow3g_uea2(void)
@@ -1540,14 +1602,14 @@ static void crypto_test_enc_alg_snow3g_uea2(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
 		  snow3g_uea2_reference,
-		  ARRAY_SIZE(snow3g_uea2_reference));
+		  ODPH_ARRAY_SIZE(snow3g_uea2_reference));
 }
 
 static void crypto_test_dec_alg_snow3g_uea2(void)
 {
 	check_alg(ODP_CRYPTO_OP_DECODE,
 		  snow3g_uea2_reference,
-		  ARRAY_SIZE(snow3g_uea2_reference));
+		  ODPH_ARRAY_SIZE(snow3g_uea2_reference));
 }
 
 static int check_alg_aes_eea2(void)
@@ -1560,14 +1622,14 @@ static void crypto_test_enc_alg_aes_eea2(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
 		  aes_eea2_reference,
-		  ARRAY_SIZE(aes_eea2_reference));
+		  ODPH_ARRAY_SIZE(aes_eea2_reference));
 }
 
 static void crypto_test_dec_alg_aes_eea2(void)
 {
 	check_alg(ODP_CRYPTO_OP_DECODE,
 		  aes_eea2_reference,
-		  ARRAY_SIZE(aes_eea2_reference));
+		  ODPH_ARRAY_SIZE(aes_eea2_reference));
 }
 
 static int check_alg_zuc_eea3(void)
@@ -1579,14 +1641,14 @@ static void crypto_test_enc_alg_zuc_eea3(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
 		  zuc_eea3_reference,
-		  ARRAY_SIZE(zuc_eea3_reference));
+		  ODPH_ARRAY_SIZE(zuc_eea3_reference));
 }
 
 static void crypto_test_dec_alg_zuc_eea3(void)
 {
 	check_alg(ODP_CRYPTO_OP_DECODE,
 		  zuc_eea3_reference,
-		  ARRAY_SIZE(zuc_eea3_reference));
+		  ODPH_ARRAY_SIZE(zuc_eea3_reference));
 }
 
 static int check_alg_hmac_md5(void)
@@ -1598,14 +1660,14 @@ static void crypto_test_gen_alg_hmac_md5(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
 		  hmac_md5_reference,
-		  ARRAY_SIZE(hmac_md5_reference));
+		  ODPH_ARRAY_SIZE(hmac_md5_reference));
 }
 
 static void crypto_test_check_alg_hmac_md5(void)
 {
 	check_alg(ODP_CRYPTO_OP_DECODE,
 		  hmac_md5_reference,
-		  ARRAY_SIZE(hmac_md5_reference));
+		  ODPH_ARRAY_SIZE(hmac_md5_reference));
 }
 
 static int check_alg_hmac_sha1(void)
@@ -1617,14 +1679,14 @@ static void crypto_test_gen_alg_hmac_sha1(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
 		  hmac_sha1_reference,
-		  ARRAY_SIZE(hmac_sha1_reference));
+		  ODPH_ARRAY_SIZE(hmac_sha1_reference));
 }
 
 static void crypto_test_check_alg_hmac_sha1(void)
 {
 	check_alg(ODP_CRYPTO_OP_DECODE,
 		  hmac_sha1_reference,
-		  ARRAY_SIZE(hmac_sha1_reference));
+		  ODPH_ARRAY_SIZE(hmac_sha1_reference));
 }
 
 static int check_alg_hmac_sha224(void)
@@ -1636,14 +1698,14 @@ static void crypto_test_gen_alg_hmac_sha224(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
 		  hmac_sha224_reference,
-		  ARRAY_SIZE(hmac_sha224_reference));
+		  ODPH_ARRAY_SIZE(hmac_sha224_reference));
 }
 
 static void crypto_test_check_alg_hmac_sha224(void)
 {
 	check_alg(ODP_CRYPTO_OP_DECODE,
 		  hmac_sha224_reference,
-		  ARRAY_SIZE(hmac_sha224_reference));
+		  ODPH_ARRAY_SIZE(hmac_sha224_reference));
 }
 
 static int check_alg_hmac_sha256(void)
@@ -1655,14 +1717,14 @@ static void crypto_test_gen_alg_hmac_sha256(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
 		  hmac_sha256_reference,
-		  ARRAY_SIZE(hmac_sha256_reference));
+		  ODPH_ARRAY_SIZE(hmac_sha256_reference));
 }
 
 static void crypto_test_check_alg_hmac_sha256(void)
 {
 	check_alg(ODP_CRYPTO_OP_DECODE,
 		  hmac_sha256_reference,
-		  ARRAY_SIZE(hmac_sha256_reference));
+		  ODPH_ARRAY_SIZE(hmac_sha256_reference));
 }
 
 static int check_alg_hmac_sha384(void)
@@ -1674,14 +1736,14 @@ static void crypto_test_gen_alg_hmac_sha384(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
 		  hmac_sha384_reference,
-		  ARRAY_SIZE(hmac_sha384_reference));
+		  ODPH_ARRAY_SIZE(hmac_sha384_reference));
 }
 
 static void crypto_test_check_alg_hmac_sha384(void)
 {
 	check_alg(ODP_CRYPTO_OP_DECODE,
 		  hmac_sha384_reference,
-		  ARRAY_SIZE(hmac_sha384_reference));
+		  ODPH_ARRAY_SIZE(hmac_sha384_reference));
 }
 
 static int check_alg_hmac_sha512(void)
@@ -1693,14 +1755,14 @@ static void crypto_test_gen_alg_hmac_sha512(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
 		  hmac_sha512_reference,
-		  ARRAY_SIZE(hmac_sha512_reference));
+		  ODPH_ARRAY_SIZE(hmac_sha512_reference));
 }
 
 static void crypto_test_check_alg_hmac_sha512(void)
 {
 	check_alg(ODP_CRYPTO_OP_DECODE,
 		  hmac_sha512_reference,
-		  ARRAY_SIZE(hmac_sha512_reference));
+		  ODPH_ARRAY_SIZE(hmac_sha512_reference));
 }
 
 static int check_alg_aes_xcbc(void)
@@ -1713,14 +1775,14 @@ static void crypto_test_gen_alg_aes_xcbc(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
 		  aes_xcbc_reference,
-		  ARRAY_SIZE(aes_xcbc_reference));
+		  ODPH_ARRAY_SIZE(aes_xcbc_reference));
 }
 
 static void crypto_test_check_alg_aes_xcbc(void)
 {
 	check_alg(ODP_CRYPTO_OP_DECODE,
 		  aes_xcbc_reference,
-		  ARRAY_SIZE(aes_xcbc_reference));
+		  ODPH_ARRAY_SIZE(aes_xcbc_reference));
 }
 
 static int check_alg_aes_gmac(void)
@@ -1732,14 +1794,14 @@ static void crypto_test_gen_alg_aes_gmac(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
 		  aes_gmac_reference,
-		  ARRAY_SIZE(aes_gmac_reference));
+		  ODPH_ARRAY_SIZE(aes_gmac_reference));
 }
 
 static void crypto_test_check_alg_aes_gmac(void)
 {
 	check_alg(ODP_CRYPTO_OP_DECODE,
 		  aes_gmac_reference,
-		  ARRAY_SIZE(aes_gmac_reference));
+		  ODPH_ARRAY_SIZE(aes_gmac_reference));
 }
 
 static int check_alg_aes_cmac(void)
@@ -1751,14 +1813,14 @@ static void crypto_test_gen_alg_aes_cmac(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
 		  aes_cmac_reference,
-		  ARRAY_SIZE(aes_cmac_reference));
+		  ODPH_ARRAY_SIZE(aes_cmac_reference));
 }
 
 static void crypto_test_check_alg_aes_cmac(void)
 {
 	check_alg(ODP_CRYPTO_OP_DECODE,
 		  aes_cmac_reference,
-		  ARRAY_SIZE(aes_cmac_reference));
+		  ODPH_ARRAY_SIZE(aes_cmac_reference));
 }
 
 static int check_alg_kasumi_f9(void)
@@ -1770,14 +1832,14 @@ static void crypto_test_gen_alg_kasumi_f9(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
 		  kasumi_f9_reference,
-		  ARRAY_SIZE(kasumi_f9_reference));
+		  ODPH_ARRAY_SIZE(kasumi_f9_reference));
 }
 
 static void crypto_test_check_alg_kasumi_f9(void)
 {
 	check_alg(ODP_CRYPTO_OP_DECODE,
 		  kasumi_f9_reference,
-		  ARRAY_SIZE(kasumi_f9_reference));
+		  ODPH_ARRAY_SIZE(kasumi_f9_reference));
 }
 
 static int check_alg_snow3g_uia2(void)
@@ -1789,14 +1851,14 @@ static void crypto_test_gen_alg_snow3g_uia2(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
 		  snow3g_uia2_reference,
-		  ARRAY_SIZE(snow3g_uia2_reference));
+		  ODPH_ARRAY_SIZE(snow3g_uia2_reference));
 }
 
 static void crypto_test_check_alg_snow3g_uia2(void)
 {
 	check_alg(ODP_CRYPTO_OP_DECODE,
 		  snow3g_uia2_reference,
-		  ARRAY_SIZE(snow3g_uia2_reference));
+		  ODPH_ARRAY_SIZE(snow3g_uia2_reference));
 }
 
 static int check_alg_aes_eia2(void)
@@ -1809,14 +1871,14 @@ static void crypto_test_gen_alg_aes_eia2(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
 		  aes_eia2_reference,
-		  ARRAY_SIZE(aes_eia2_reference));
+		  ODPH_ARRAY_SIZE(aes_eia2_reference));
 }
 
 static void crypto_test_check_alg_aes_eia2(void)
 {
 	check_alg(ODP_CRYPTO_OP_DECODE,
 		  aes_eia2_reference,
-		  ARRAY_SIZE(aes_eia2_reference));
+		  ODPH_ARRAY_SIZE(aes_eia2_reference));
 }
 
 static int check_alg_zuc_eia3(void)
@@ -1828,14 +1890,14 @@ static void crypto_test_gen_alg_zuc_eia3(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
 		  zuc_eia3_reference,
-		  ARRAY_SIZE(zuc_eia3_reference));
+		  ODPH_ARRAY_SIZE(zuc_eia3_reference));
 }
 
 static void crypto_test_check_alg_zuc_eia3(void)
 {
 	check_alg(ODP_CRYPTO_OP_DECODE,
 		  zuc_eia3_reference,
-		  ARRAY_SIZE(zuc_eia3_reference));
+		  ODPH_ARRAY_SIZE(zuc_eia3_reference));
 }
 
 static int check_alg_md5(void)
@@ -1847,14 +1909,14 @@ static void crypto_test_gen_alg_md5(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
 		  md5_reference,
-		  ARRAY_SIZE(md5_reference));
+		  ODPH_ARRAY_SIZE(md5_reference));
 }
 
 static void crypto_test_check_alg_md5(void)
 {
 	check_alg(ODP_CRYPTO_OP_DECODE,
 		  md5_reference,
-		  ARRAY_SIZE(md5_reference));
+		  ODPH_ARRAY_SIZE(md5_reference));
 }
 
 static int check_alg_sha1(void)
@@ -1866,14 +1928,14 @@ static void crypto_test_gen_alg_sha1(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
 		  sha1_reference,
-		  ARRAY_SIZE(sha1_reference));
+		  ODPH_ARRAY_SIZE(sha1_reference));
 }
 
 static void crypto_test_check_alg_sha1(void)
 {
 	check_alg(ODP_CRYPTO_OP_DECODE,
 		  sha1_reference,
-		  ARRAY_SIZE(sha1_reference));
+		  ODPH_ARRAY_SIZE(sha1_reference));
 }
 
 static int check_alg_sha224(void)
@@ -1885,14 +1947,14 @@ static void crypto_test_gen_alg_sha224(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
 		  sha224_reference,
-		  ARRAY_SIZE(sha224_reference));
+		  ODPH_ARRAY_SIZE(sha224_reference));
 }
 
 static void crypto_test_check_alg_sha224(void)
 {
 	check_alg(ODP_CRYPTO_OP_DECODE,
 		  sha224_reference,
-		  ARRAY_SIZE(sha224_reference));
+		  ODPH_ARRAY_SIZE(sha224_reference));
 }
 
 static int check_alg_sha256(void)
@@ -1904,14 +1966,14 @@ static void crypto_test_gen_alg_sha256(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
 		  sha256_reference,
-		  ARRAY_SIZE(sha256_reference));
+		  ODPH_ARRAY_SIZE(sha256_reference));
 }
 
 static void crypto_test_check_alg_sha256(void)
 {
 	check_alg(ODP_CRYPTO_OP_DECODE,
 		  sha256_reference,
-		  ARRAY_SIZE(sha256_reference));
+		  ODPH_ARRAY_SIZE(sha256_reference));
 }
 
 static int check_alg_sha384(void)
@@ -1923,14 +1985,14 @@ static void crypto_test_gen_alg_sha384(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
 		  sha384_reference,
-		  ARRAY_SIZE(sha384_reference));
+		  ODPH_ARRAY_SIZE(sha384_reference));
 }
 
 static void crypto_test_check_alg_sha384(void)
 {
 	check_alg(ODP_CRYPTO_OP_DECODE,
 		  sha384_reference,
-		  ARRAY_SIZE(sha384_reference));
+		  ODPH_ARRAY_SIZE(sha384_reference));
 }
 
 static int check_alg_sha512(void)
@@ -1942,14 +2004,14 @@ static void crypto_test_gen_alg_sha512(void)
 {
 	check_alg(ODP_CRYPTO_OP_ENCODE,
 		  sha512_reference,
-		  ARRAY_SIZE(sha512_reference));
+		  ODPH_ARRAY_SIZE(sha512_reference));
 }
 
 static void crypto_test_check_alg_sha512(void)
 {
 	check_alg(ODP_CRYPTO_OP_DECODE,
 		  sha512_reference,
-		  ARRAY_SIZE(sha512_reference));
+		  ODPH_ARRAY_SIZE(sha512_reference));
 }
 
 static odp_queue_t sched_compl_queue_create(void)
@@ -1980,6 +2042,24 @@ static odp_event_t plain_compl_queue_deq(void)
 	return odp_queue_deq(suite_context.queue);
 }
 
+static int partial_test_only(odp_crypto_op_mode_t op_mode, odp_queue_type_t q_type)
+{
+	odp_crypto_capability_t capa;
+
+	if (full_test || odp_crypto_capability(&capa))
+		return 0;
+
+	if (!capa.async_mode)
+		return 0;
+
+	if (op_mode == ODP_CRYPTO_SYNC)
+		return 1;
+	else if (q_type == ODP_QUEUE_TYPE_PLAIN && capa.queue_type_sched)
+		return 1;
+
+	return 0;
+}
+
 static int crypto_suite_packet_sync_init(void)
 {
 	suite_context.op_mode = ODP_CRYPTO_SYNC;
@@ -1989,6 +2069,8 @@ static int crypto_suite_packet_sync_init(void)
 		return -1;
 
 	suite_context.queue = ODP_QUEUE_INVALID;
+	suite_context.partial_test = partial_test_only(suite_context.op_mode,
+						       ODP_QUEUE_TYPE_PLAIN);
 	return 0;
 }
 
@@ -2010,6 +2092,8 @@ static int crypto_suite_packet_async_plain_init(void)
 	suite_context.queue = out_queue;
 	suite_context.q_type = ODP_QUEUE_TYPE_PLAIN;
 	suite_context.compl_queue_deq = plain_compl_queue_deq;
+	suite_context.partial_test = partial_test_only(suite_context.op_mode,
+						       suite_context.q_type);
 
 	return 0;
 }
@@ -2032,6 +2116,8 @@ static int crypto_suite_packet_async_sched_init(void)
 	suite_context.queue = out_queue;
 	suite_context.q_type = ODP_QUEUE_TYPE_SCHED;
 	suite_context.compl_queue_deq = sched_compl_queue_deq;
+	suite_context.partial_test = partial_test_only(suite_context.op_mode,
+						       suite_context.q_type);
 
 	return 0;
 }

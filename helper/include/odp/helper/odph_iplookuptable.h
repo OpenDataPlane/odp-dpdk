@@ -1,18 +1,11 @@
-/* Copyright (c) 2016-2018, Linaro Limited
- * All rights reserved.
- *
- * SPDX-License-Identifier:    BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2016-2018 Linaro Limited
  */
 
 /**
  * @file
  *
  * ODP IP Lookup Table
- *
- * This is an implementation of the IP lookup table. The key of
- * this table is IPv4 address (32 bits), and the value can be
- * defined by user. This table uses the 16,8,8 ip lookup (longest
- * prefix matching) algorithm.
  */
 
 #ifndef ODPH_IPLOOKUP_TABLE_H_
@@ -25,7 +18,14 @@ extern "C" {
 #endif
 
 /**
- * @addtogroup odph_iplookuptable ODPH IP LOOKUP TABLE
+ * @defgroup odph_iplookuptable ODPH IP LOOKUP TABLE
+ * IP lookup table
+ *
+ * @details
+ * This is an implementation of the IP lookup table. The key of this table is
+ * IPv4 address (32 bits), and the value can be defined by user. This table uses
+ * the 16,8,8 ip lookup (longest prefix matching) algorithm.
+ *
  * @{
  */
 

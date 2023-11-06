@@ -1,4 +1,5 @@
 /* Copyright (c) 2018, Linaro Limited
+ * Copyright (c) 2023, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -32,7 +33,12 @@ typedef struct _odp_queue_inline_offset_t {
 typedef struct {
 	odp_queue_t (*queue_create)(const char *name,
 				    const odp_queue_param_t *param);
+	int (*queue_create_multi)(const char *name[],
+				  const odp_queue_param_t param[],
+				  odp_bool_t share_param, odp_queue_t queue[],
+				  int num);
 	int (*queue_destroy)(odp_queue_t queue);
+	int (*queue_destroy_multi)(odp_queue_t queue[], int num);
 	odp_queue_t (*queue_lookup)(const char *name);
 	int (*queue_capability)(odp_queue_capability_t *capa);
 	int (*queue_context_set)(odp_queue_t queue, void *context,

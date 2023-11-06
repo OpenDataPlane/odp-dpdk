@@ -1,7 +1,5 @@
-/* Copyright (c) 2014-2018, Linaro Limited
- * All rights reserved.
- *
- * SPDX-License-Identifier:     BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2014-2018 Linaro Limited
  */
 
 
@@ -20,8 +18,9 @@ extern "C" {
 
 #include <odp_api.h>
 
-/** @addtogroup odph_header ODPH HEADER
- *  @{
+/**
+ * @addtogroup odph_protocols
+ * @{
  */
 
 #define ODPH_TCPHDR_LEN 20 /**< Min length of TCP header (no options) */

@@ -16,7 +16,7 @@
 
 #define DEBUG_PRINT       0
 #define MAX_WORKERS       64
-#define MAX_PKTIOS        32
+#define MAX_PKTIOS        (ODP_PKTIO_MAX_INDEX + 1)
 #define MAX_PKTIO_NAME    31
 #define MAX_PKTIO_QUEUES  MAX_WORKERS
 #define MAX_PIPE_STAGES   64
@@ -26,7 +26,6 @@
 #define MIN_PKT_SEG_LEN   64
 #define CHECK_PERIOD      10000
 #define TEST_PASSED_LIMIT 5000
-#define TIMEOUT_OFFSET_NS 1000000
 #define SCHED_MODE_PARAL  1
 #define SCHED_MODE_ATOMIC 2
 #define SCHED_MODE_ORDER  3
@@ -1337,10 +1336,6 @@ static int start_timers(test_global_t *test_global)
 	if (test_global->opt.timeout_us == 0)
 		return 0;
 
-	/* Delay the first timeout so that workers have time to startup */
-	timeout_tick += odp_timer_ns_to_tick(test_global->timer.timer_pool,
-					     TIMEOUT_OFFSET_NS);
-
 	start_param.tick_type = ODP_TIMER_TICK_REL;
 	start_param.tick = timeout_tick;
 
@@ -1532,9 +1527,6 @@ int main(int argc, char *argv[])
 	if (create_timers(test_global))
 		goto quit;
 
-	if (start_timers(test_global))
-		goto quit;
-
 	if (start_pktios(test_global))
 		goto quit;
 
@@ -1542,6 +1534,11 @@ int main(int argc, char *argv[])
 			 test_global->opt.num_worker + 1);
 
 	start_workers(thread, test_global);
+
+	if (start_timers(test_global)) {
+		test_global->stop_workers = 1;
+		odp_mb_full();
+	}
 
 	/* Synchronize pktio configuration with workers. Worker are now ready
 	 * to process packets. */

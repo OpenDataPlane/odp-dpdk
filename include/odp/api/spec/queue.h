@@ -1,7 +1,6 @@
-/* Copyright (c) 2013-2018, Linaro Limited
- * All rights reserved.
- *
- * SPDX-License-Identifier:     BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2013-2018 Linaro Limited
+ * Copyright (c) 2023 Nokia
  */
 
 /**
@@ -30,12 +29,11 @@ extern "C" {
 /**
  * Queue create
  *
- * Create a queue according to the queue parameters. Queue type is specified by
- * queue parameter 'type'. Use odp_queue_param_init() to initialize parameters
- * into their default values. Default values are also used when 'param' pointer
- * is NULL. The default queue type is ODP_QUEUE_TYPE_PLAIN. The use of queue
- * name is optional. Unique names are not required. However, odp_queue_lookup()
- * returns only a single matching queue.
+ * Create a queue according to the queue parameters. The use of queue name is
+ * optional. Unique names are not required. However, odp_queue_lookup() returns
+ * only a single matching queue. Use odp_queue_param_init() to initialize
+ * parameters into their default values. Default values are also used when
+ * 'param' pointer is NULL.
  *
  * @param name    Name of the queue or NULL. Maximum string length is
  *                ODP_QUEUE_NAME_LEN.
@@ -45,6 +43,34 @@ extern "C" {
  * @retval ODP_QUEUE_INVALID on failure
  */
 odp_queue_t odp_queue_create(const char *name, const odp_queue_param_t *param);
+
+/**
+ * Create multiple queues
+ *
+ * Otherwise like odp_queue_create(), but creates multiple queues with a single
+ * call. The output queue handles are written in the same order as input
+ * parameters. A single odp_queue_create_multi() call is equivalent to calling
+ * odp_queue_create() 'num' times in row.
+ *
+ * If 'share_param' value is false, 'param' array must contain 'num' elements.
+ * If the value is true, only a single element is required and it's used as
+ * queue parameters for all created queues. If 'name' array is not NULL, the
+ * array must contain 'num' elements.
+ *
+ * @param      name         Array of queue name pointers or NULL. NULL is also
+ *                          valid queue name pointer value.
+ * @param      param        Array of queue parameters
+ * @param      share_param  If true, use same parameters ('param[0]') for all
+ *                          queues.
+ * @param[out] queue        Array of queue handles for output
+ * @param      num          Number of queues to create
+ *
+ * @return Number of queues actually created (0 ... num)
+ * @retval <0 on failure
+ */
+int odp_queue_create_multi(const char *name[], const odp_queue_param_t param[],
+			   odp_bool_t share_param, odp_queue_t queue[],
+			   int num);
 
 /**
  * Destroy ODP queue
@@ -60,6 +86,20 @@ odp_queue_t odp_queue_create(const char *name, const odp_queue_param_t *param);
  * @retval <0 on failure
  */
 int odp_queue_destroy(odp_queue_t queue);
+
+/**
+ * Destroy multiple queues
+ *
+ * Otherwise like odp_queue_destroy(), but destroys multiple queues with a
+ * single call.
+ *
+ * @param queue    Array of queue handles
+ * @param num      Number of queues to destroy
+ *
+ * @retval Number of queues actually destroyed (1 ... num)
+ * @retval <0 on failure
+ */
+int odp_queue_destroy_multi(odp_queue_t queue[], int num);
 
 /**
  * Find a queue by name

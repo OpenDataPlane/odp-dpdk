@@ -709,7 +709,7 @@ static int ipc_pktio_recv_lockless(pktio_entry_t *pktio_entry,
 		pkt_table[i] = pkt;
 	}
 
-	/* put back to rx ring dequed but not processed packets*/
+	/* put back to rx ring dequeued but not processed packets*/
 	if (pkts != i) {
 		ipcbufs_p = (void *)&offsets[i];
 		r_p = pktio_ipc->rx.cache;
@@ -923,6 +923,10 @@ static int ipc_capability(pktio_entry_t *pktio_entry ODP_UNUSED, odp_pktio_capab
 
 	capa->max_input_queues  = 1;
 	capa->max_output_queues = 1;
+	capa->config.pktout.bit.tx_compl_ena = 1;
+	capa->tx_compl.mode_all = 1;
+	capa->tx_compl.mode_event = 1;
+	capa->tx_compl.mode_poll = 1;
 
 	return 0;
 }

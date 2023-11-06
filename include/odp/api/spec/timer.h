@@ -1,9 +1,6 @@
-/* Copyright (c) 2013-2018, Linaro Limited
- * Copyright (c) 2019-2023, Nokia
- *
- * All rights reserved.
- *
- * SPDX-License-Identifier:     BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2013-2018 Linaro Limited
+ * Copyright (c) 2019-2023 Nokia
  */
 
 /**
@@ -582,6 +579,20 @@ void *odp_timeout_user_area(odp_timeout_t tmo);
 odp_timeout_t odp_timeout_alloc(odp_pool_t pool);
 
 /**
+ * Allocate multiple timeouts
+ *
+ * Otherwise like odp_timeout_alloc(), but allocates multiple timeouts from a pool.
+ *
+ * @param      pool   Pool handle
+ * @param[out] tmo    Array of timeout handles for output
+ * @param      num    Number of timeouts to allocate
+ *
+ * @return Number of timeouts actually allocated (0 ... num)
+ * @retval <0 on failure
+ */
+int odp_timeout_alloc_multi(odp_pool_t pool, odp_timeout_t tmo[], int num);
+
+/**
  * Timeout free
  *
  * Frees the timeout back to the pool it was allocated from.
@@ -589,6 +600,16 @@ odp_timeout_t odp_timeout_alloc(odp_pool_t pool);
  * @param tmo Timeout handle
  */
 void odp_timeout_free(odp_timeout_t tmo);
+
+/**
+ * Free multiple timeouts
+ *
+ * Otherwise like odp_timeout_free(), but frees multiple timeouts to their originating pools.
+ *
+ * @param tmo         Array of timeout handles
+ * @param num         Number of timeouts to free
+ */
+void odp_timeout_free_multi(odp_timeout_t tmo[], int num);
 
 /**
  * Print timer pool debug information

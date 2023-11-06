@@ -36,6 +36,7 @@
 #include <rte_timer.h>
 
 #include <inttypes.h>
+#include <stdio.h>
 #include <string.h>
 
 /* One divided by one nanosecond in Hz */
@@ -1335,9 +1336,38 @@ odp_timeout_t odp_timeout_alloc(odp_pool_t pool_hdl)
 	return odp_timeout_from_event(event);
 }
 
+int odp_timeout_alloc_multi(odp_pool_t pool_hdl, odp_timeout_t tmo[], int num)
+{
+	pool_t *pool;
+	int ret;
+
+	_ODP_ASSERT(pool_hdl != ODP_POOL_INVALID);
+	_ODP_ASSERT(tmo != NULL);
+	_ODP_ASSERT(num > 0);
+
+	pool = _odp_pool_entry(pool_hdl);
+
+	_ODP_ASSERT(pool->type == ODP_POOL_TIMEOUT);
+
+	ret = _odp_event_alloc_multi(pool, (_odp_event_hdr_t **)tmo, num);
+
+	for (int i = 0; i < ret; i++)
+		timeout_to_hdr(tmo[i])->timer = ODP_TIMER_INVALID;
+
+	return ret;
+}
+
 void odp_timeout_free(odp_timeout_t tmo)
 {
 	_odp_event_free(odp_timeout_to_event(tmo));
+}
+
+void odp_timeout_free_multi(odp_timeout_t tmo[], int num)
+{
+	_ODP_ASSERT(tmo != NULL);
+	_ODP_ASSERT(num > 0);
+
+	_odp_event_free_multi((_odp_event_hdr_t **)(uintptr_t)tmo, num);
 }
 
 void odp_timer_pool_print(odp_timer_pool_t timer_pool)
@@ -1368,6 +1398,13 @@ void odp_timer_pool_print(odp_timer_pool_t timer_pool)
 	str[len] = 0;
 
 	_ODP_PRINT("%s\n", str);
+
+	_ODP_PRINT("DPDK timer statistics\n---------------------\n");
+	if (timer_global->use_alternate)
+		rte_timer_alt_dump_stats(timer_global->data_id, stdout);
+	else
+		rte_timer_dump_stats(stdout);
+	_ODP_PRINT("\n");
 }
 
 void odp_timer_print(odp_timer_t timer_hdl)

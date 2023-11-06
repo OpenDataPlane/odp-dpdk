@@ -1,7 +1,5 @@
-/* Copyright (c) 2016-2018, Linaro Limited
- * All rights reserved.
- *
- * SPDX-License-Identifier:     BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2016-2018 Linaro Limited
  */
 
 /*-
@@ -53,7 +51,9 @@ extern "C" {
 #endif
 
 /**
- * @addtogroup odph_cuckootable ODPH CUCKOO TABLE
+ * @defgroup odph_cuckootable ODPH CUCKOO TABLE
+ * Cuckoo table
+ *
  * @{
  */
 

@@ -1,8 +1,6 @@
-/* Copyright (c) 2013-2018, Linaro Limited
- * Copyright (c) 2020-2023, Nokia
- * All rights reserved.
- *
- * SPDX-License-Identifier:     BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2013-2018 Linaro Limited
+ * Copyright (c) 2020-2023 Nokia
  */
 
 /**
@@ -58,6 +56,12 @@ extern "C" {
 /**
  * @def ODP_LSO_PROFILE_INVALID
  * Invalid LSO profile handle
+ */
+
+/**
+ * @def ODP_PKTIO_MAX_INDEX
+ * Maximum packet IO interface index. Use odp_pktio_max_index() to check the
+ * runtime maximum value, which may be smaller than this value.
  */
 
 /**

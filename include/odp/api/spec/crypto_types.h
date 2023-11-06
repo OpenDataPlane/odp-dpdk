@@ -1,8 +1,6 @@
-/* Copyright (c) 2014-2018, Linaro Limited
- * Copyright (c) 2021-2023, Nokia
- * All rights reserved.
- *
- * SPDX-License-Identifier:     BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2014-2018 Linaro Limited
+ * Copyright (c) 2021-2023 Nokia
  */
 
 /**
@@ -536,6 +534,21 @@ typedef enum odp_crypto_op_type_t {
 	 * MAC/digest (in encode sessions) of the input packet.
 	 */
 	ODP_CRYPTO_OP_TYPE_OOP,
+
+	/**
+	 * Basic or out-of-place crypto operation depending on op params.
+	 *
+	 * If the output packet specified in a crypto operation (i.e.
+	 * pkt_out[i] is ODP_PACKET_INVALID) then the packet is processed
+	 * the same way as in the ODP_CRYPTO_OP_TYPE_BASIC operation type.
+	 * Otherwise the packet is processed as in the ODP_CRYPTO_OP_TYPE_OOP
+	 * operation type.
+	 *
+	 * Sessions of this operation type may have lower performance than
+	 * the more specific operation types.
+	 */
+	ODP_CRYPTO_OP_TYPE_BASIC_AND_OOP,
+
 } odp_crypto_op_type_t;
 
 /**
@@ -612,6 +625,20 @@ typedef struct odp_crypto_session_param_t {
 	 *  Default value is false.
 	 */
 	odp_bool_t hash_result_in_auth_range;
+
+	/** Enable skipping crypto on per-packet basis
+	 *
+	 *  When this flag is true, the null_crypto flag of crypto operation
+	 *  parameters can be set to request skipping of ciphering and
+	 *  authentication of a packet regardless of session configuration.
+	 *  This may be useful for preserving packet order between packets
+	 *  that require crypto processing and packets that do not.
+	 *
+	 *  This flag must be set false when op_mode is ODP_CRYPTO_SYNC.
+	 *
+	 *  The default value is false.
+	 */
+	odp_bool_t null_crypto_enable;
 
 	/** Operation mode when using packet interface: sync or async
 	 *
@@ -803,6 +830,14 @@ typedef struct odp_crypto_packet_op_param_t {
 	 */
 	int32_t dst_offset_shift;
 
+	/** Use null crypto algorithms
+	 *
+	 * Process packet using the null cipher and null auth algorithm
+	 * instead of the algoithms configured in the session. This flag is
+	 * ignored if the null_crypto_enable session parameter is not set.
+	 */
+	uint8_t null_crypto :1;
+
 } odp_crypto_packet_op_param_t;
 
 /**
@@ -887,7 +922,7 @@ typedef enum {
 } ODP_DEPRECATE(odp_crypto_hw_err_t);
 
 /**
- * Cryto API per packet operation completion status
+ * Crypto API per packet operation completion status
  */
 typedef struct odp_crypto_op_status {
 	/** Algorithm specific return code */

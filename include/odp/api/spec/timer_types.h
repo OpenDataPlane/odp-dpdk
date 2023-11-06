@@ -1,9 +1,6 @@
-/* Copyright (c) 2013-2018, Linaro Limited
- * Copyright (c) 2019-2023, Nokia
- *
- * All rights reserved.
- *
- * SPDX-License-Identifier:     BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2013-2018 Linaro Limited
+ * Copyright (c) 2019-2023 Nokia
  */
 
 /**
@@ -389,8 +386,7 @@ typedef struct {
 
 	} periodic;
 
-	/** Number of timers needed. Application will create in maximum this
-	 *  many concurrent timers from the timer pool. */
+	/** Number of timers in the pool. */
 	uint32_t num_timers;
 
 	/** Thread private timer pool. When zero, multiple thread may use the

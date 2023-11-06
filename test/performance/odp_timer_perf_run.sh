@@ -11,7 +11,7 @@ TEST_DIR="${TEST_DIR:-$(dirname $0)}"
 echo odp_timer_perf: odp_schedule overhead mode
 echo ===============================================
 
-$TEST_DIR/odp_timer_perf${EXEEXT} -m 0 -c 1 -s 0
+$TEST_DIR/odp_timer_perf${EXEEXT} -m 0 -c 1
 
 RET_VAL=$?
 if [ $RET_VAL -ne 0 ]; then
@@ -22,7 +22,7 @@ fi
 echo odp_timer_perf: timer set + cancel mode
 echo ===============================================
 
-$TEST_DIR/odp_timer_perf${EXEEXT} -m 1 -c 1 -t 10 -R 50 -s 0
+$TEST_DIR/odp_timer_perf${EXEEXT} -m 1 -c 1 -t 10 -R 50
 
 RET_VAL=$?
 if [ $RET_VAL -ne 0 ]; then

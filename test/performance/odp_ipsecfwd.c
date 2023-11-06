@@ -1,8 +1,5 @@
-/* Copyright (c) 2022, Nokia
- *
- * All rights reserved.
- *
- * SPDX-License-Identifier:     BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2022-2023 Nokia
  */
 
 #ifndef _GNU_SOURCE
@@ -24,8 +21,6 @@
 #define PROG_NAME "odp_ipsecfwd"
 #define SHORT_PROG_NAME "ipsfwd"
 #define DELIMITER ","
-
-#define MIN(a, b)  (((a) <= (b)) ? (a) : (b))
 
 #define MAX_IFS 2U
 #define MAX_SAS 4000U
@@ -254,7 +249,7 @@ static void parse_interfaces(prog_config_t *config, const char *optarg)
 static void print_supported_algos(const odp_ipsec_capability_t *ipsec_capa)
 {
 	int c_cnt, a_cnt;
-	const size_t len = sizeof(exposed_algs) / sizeof(exposed_algs[0]);
+	const size_t len = ODPH_ARRAY_SIZE(exposed_algs);
 
 	printf("                          Cipher algorithms:\n");
 
@@ -326,66 +321,59 @@ static void print_usage(void)
 	}
 
 	printf("\n"
-	       "Simple IPsec performance tester. Forward and process plain and ipsec packets.\n"
+	       "Simple IPsec performance tester. Forward and process plain and IPsec packets.\n"
 	       "\n"
-	       "Examples:\n"
-	       "    %s -i ens9f1 -C /etc/odp/ipsecfwd.conf\n"
+	       "Usage: %s OPTIONS\n"
 	       "\n"
-	       "    With ipsecfwd.conf containing, for example:\n"
-	       "        default: {\n"
-	       "            dir = 1\n"
-	       "            proto = 0\n"
-	       "            mode = 0\n"
-	       "            crypto: {\n"
-	       "                cipher_alg = 4\n"
-	       "                cipher_key = \"jWnZr4t7w!zwC*F-\"\n"
-	       "                auth_alg = 2\n"
-	       "                auth_key = \"n2r5u7x!A%%D*\"\n"
-	       "                icv_len = 12\n"
-	       "            };\n"
-	       "        };\n"
+	       "  E.g. %s -i ens9f1 -C /etc/odp/ipsecfwd.conf\n"
 	       "\n"
-	       "        sa: (\n"
-	       "            {\n"
-	       "                spi = 1337\n"
-	       "                outbound: {\n"
-	       "                    tunnel: {\n"
-	       "                        src_addr = \"192.168.1.10\"\n"
-	       "                        dst_addr = \"192.168.1.16\"\n"
-	       "                    };\n"
-	       "                };\n"
-	       "            },\n"
-	       "            {\n"
-	       "                spi = 1338\n"
-	       "                outbound: {\n"
-	       "                    tunnel: {\n"
-	       "                        src_addr = \"192.168.3.110\"\n"
-	       "                        dst_addr = \"192.168.3.116\"\n"
-	       "                    };\n"
-	       "                };\n"
-	       "            }\n"
-	       "        );\n"
+	       "  With ipsecfwd.conf containing, for example:\n"
+	       "      default: {\n"
+	       "          dir = 1\n"
+	       "          proto = 0\n"
+	       "          mode = 0\n"
+	       "          crypto: {\n"
+	       "              cipher_alg = 4\n"
+	       "              cipher_key = \"jWnZr4t7w!zwC*F-\"\n"
+	       "              auth_alg = 2\n"
+	       "              auth_key = \"n2r5u7x!A%%D*\"\n"
+	       "              icv_len = 12\n"
+	       "          };\n"
+	       "      };\n"
 	       "\n"
-	       "        fwd: (\n"
-	       "            {\n"
-	       "                prefix: \"192.168.1.0/24\"\n"
-	       "                if: \"ens9f1\"\n"
-	       "                dst_mac: \"00:00:05:00:07:00\"\n"
-	       "            }\n"
-	       "        );\n"
+	       "      sa: (\n"
+	       "          {\n"
+	       "              spi = 1337\n"
+	       "              outbound: {\n"
+	       "                  tunnel: {\n"
+	       "                      src_addr = \"192.168.1.10\"\n"
+	       "                      dst_addr = \"192.168.1.16\"\n"
+	       "                  };\n"
+	       "              };\n"
+	       "          },\n"
+	       "          {\n"
+	       "              spi = 1338\n"
+	       "              outbound: {\n"
+	       "                  tunnel: {\n"
+	       "                      src_addr = \"192.168.3.110\"\n"
+	       "                      dst_addr = \"192.168.3.116\"\n"
+	       "                  };\n"
+	       "              };\n"
+	       "          }\n"
+	       "      );\n"
 	       "\n"
-	       "Usage: %s [options]\n"
+	       "      fwd: (\n"
+	       "          {\n"
+	       "              prefix: \"192.168.1.0/24\"\n"
+	       "              if: \"ens9f1\"\n"
+	       "              dst_mac: \"00:00:05:00:07:00\"\n"
+	       "          }\n"
+	       "      );\n"
+	       "\n"
+	       "Mandatory OPTIONS:\n"
 	       "\n"
 	       "  -i, --interfaces    Ethernet interfaces for packet I/O, comma-separated,\n"
 	       "                      no spaces.\n"
-	       "  -n, --num_pkts      Number of packet buffers allocated for packet I/O pool.\n"
-	       "                      %u by default.\n"
-	       "  -l, --pkt_len       Maximum size of packet buffers in packet I/O pool. %u by\n"
-	       "                      default.\n"
-	       "  -c, --count         Worker thread count, 1 by default.\n"
-	       "  -m, --mode          Queueing mode.\n"
-	       "                          0: ordered (default)\n"
-	       "                          1: parallel\n"
 	       "  -C, --conf          Configuration file. 'libconfig' syntax is expected.\n"
 	       "                      SA configuration supports default fallback, i.e.\n"
 	       "                      individual SA configuration blocks may omit some\n"
@@ -405,10 +393,20 @@ static void print_usage(void)
 	       "                      potential SA and forwarding configuration.\n"
 	       "\n"
 	       "                      Supported cipher and authentication algorithms for SAs:\n",
-	       PROG_NAME, PROG_NAME, MIN(pool_capa.pkt.max_num, PKT_CNT),
-	       MIN(pool_capa.pkt.max_len, PKT_SIZE));
+	       PROG_NAME, PROG_NAME);
 	print_supported_algos(&ipsec_capa);
-	printf("  -I, --num_input_qs  Input queue count. 1 by default.\n"
+	printf("\n"
+	       "Optional OPTIONS:\n"
+	       "\n"
+	       "  -n, --num_pkts      Number of packet buffers allocated for packet I/O pool.\n"
+	       "                      %u by default.\n"
+	       "  -l, --pkt_len       Maximum size of packet buffers in packet I/O pool. %u by\n"
+	       "                      default.\n"
+	       "  -c, --count         Worker thread count. 1 by default.\n"
+	       "  -m, --mode          Queueing mode.\n"
+	       "                          0: ordered (default)\n"
+	       "                          1: parallel\n"
+	       "  -I, --num_input_qs  Input queue count. 1 by default.\n"
 	       "  -S, --num_sa_qs     SA queue count. 1 by default.\n"
 	       "  -O, --num_output_qs Output queue count. 1 by default.\n"
 	       "  -d, --direct_rx     Use direct RX. Interfaces will be polled by workers\n"
@@ -416,7 +414,9 @@ static void print_usage(void)
 	       "                      options are ignored, input and output queue counts will\n"
 	       "                      match worker count.\n"
 	       "  -h, --help          This help.\n"
-	       "\n");
+	       "\n", pool_capa.pkt.max_num > 0U ? ODPH_MIN(pool_capa.pkt.max_num, PKT_CNT) :
+	       PKT_CNT, pool_capa.pkt.max_len > 0U ? ODPH_MIN(pool_capa.pkt.max_len, PKT_SIZE) :
+	       PKT_SIZE);
 }
 
 static inline odp_ipsec_sa_t *get_in_sa(odp_packet_t pkt)
@@ -964,7 +964,7 @@ static odp_bool_t create_sa_dest_queues(odp_ipsec_capability_t *ipsec_capa,
 					prog_config_t *config)
 {
 	odp_queue_param_t q_param;
-	const uint32_t max_sa_qs = MIN(MAX_SA_QUEUES, ipsec_capa->max_queues);
+	const uint32_t max_sa_qs = ODPH_MIN(MAX_SA_QUEUES, ipsec_capa->max_queues);
 
 	if (config->num_sa_qs == 0U || config->num_sa_qs > max_sa_qs) {
 		ODPH_ERR("Invalid number of SA queues: %u (min: 1, max: %u)\n", config->num_sa_qs,
@@ -1275,7 +1275,7 @@ static void parse_sas(config_t *cfg, prog_config_t *config)
 	if (!config->is_dir_rx && !create_sa_dest_queues(&ipsec_capa, config))
 		return;
 
-	max_num_sa = MIN(MAX_SAS, ipsec_capa.max_num_sa);
+	max_num_sa = ODPH_MIN(MAX_SAS, ipsec_capa.max_num_sa);
 	parse_and_create_sa_entries(cfg, config, max_num_sa);
 }
 
@@ -1391,23 +1391,25 @@ static parse_result_t check_options(prog_config_t *config)
 		return PRS_NOK;
 	}
 
-	if (config->num_pkts > pool_capa.pkt.max_num) {
+	if (pool_capa.pkt.max_num > 0U && config->num_pkts > pool_capa.pkt.max_num) {
 		ODPH_ERR("Invalid pool packet count: %u (max: %u)\n", config->num_pkts,
 			 pool_capa.pkt.max_num);
 		return PRS_NOK;
 	}
 
 	if (config->num_pkts == 0U)
-		config->num_pkts = MIN(pool_capa.pkt.max_num, PKT_CNT);
+		config->num_pkts = pool_capa.pkt.max_num > 0U ?
+					ODPH_MIN(pool_capa.pkt.max_num, PKT_CNT) : PKT_CNT;
 
-	if (config->pkt_len > pool_capa.pkt.max_len) {
+	if (pool_capa.pkt.max_len > 0U && config->pkt_len > pool_capa.pkt.max_len) {
 		ODPH_ERR("Invalid pool packet length: %u (max: %u)\n", config->pkt_len,
 			 pool_capa.pkt.max_len);
 		return PRS_NOK;
 	}
 
 	if (config->pkt_len == 0U)
-		config->pkt_len = MIN(pool_capa.pkt.max_len, PKT_SIZE);
+		config->pkt_len = pool_capa.pkt.max_len > 0U ?
+					ODPH_MIN(pool_capa.pkt.max_len, PKT_SIZE) : PKT_SIZE;
 
 	if (config->num_thrs <= 0 || config->num_thrs > MAX_WORKERS) {
 		ODPH_ERR("Invalid thread count: %d (min: 1, max: %d)\n", config->num_thrs,
@@ -1617,7 +1619,7 @@ static odp_bool_t setup_pktios(prog_config_t *config)
 			return false;
 		}
 
-		max_output_qs = MIN(MAX_QUEUES, capa.max_output_queues);
+		max_output_qs = ODPH_MIN(MAX_QUEUES, capa.max_output_queues);
 
 		if (config->num_output_qs == 0U || config->num_output_qs > max_output_qs) {
 			ODPH_ERR("Invalid number of output queues for packet I/O: %u (min: 1, "
@@ -1863,6 +1865,40 @@ static void stop_test(prog_config_t *config)
 	(void)odph_thread_join(config->thread_tbl, config->num_thrs);
 }
 
+static void print_stats(const prog_config_t *config)
+{
+	const stats_t *stats;
+
+	printf("\n====================\n\n"
+	       "IPsec forwarder done\n\n"
+	       "    configuration file: %s\n"
+	       "    queuing mode:       %s\n"
+	       "    input queue count:  %u\n"
+	       "    SA queue count:     %u\n"
+	       "    output queue count: %u\n"
+	       "    RX mode:            %s\n", config->conf_file,
+	       config->mode == ORDERED ? "ordered" : "parallel", config->num_input_qs,
+	       config->num_sa_qs, config->num_output_qs,
+	       config->is_dir_rx ? "direct" : "scheduled");
+
+	for (int i = 0; i < config->num_thrs; ++i) {
+		stats = &config->thread_config[i].stats;
+
+		printf("\n    worker %d:\n"
+		"        IPsec in packets:        %" PRIu64 "\n"
+		"        IPsec out packets:       %" PRIu64 "\n"
+		"        IPsec in packet errors:  %" PRIu64 "\n"
+		"        IPsec out packet errors: %" PRIu64 "\n"
+		"        IPsec status errors:     %" PRIu64 "\n"
+		"        packets forwarded:       %" PRIu64 "\n"
+		"        packets dropped:         %" PRIu64 "\n", i, stats->ipsec_in_pkts,
+		stats->ipsec_out_pkts, stats->ipsec_in_errs, stats->ipsec_out_errs,
+		stats->status_errs, stats->fwd_pkts, stats->discards);
+	}
+
+	printf("\n====================\n");
+}
+
 static void wait_sas_disabled(uint32_t num_sas)
 {
 	uint32_t num_sas_dis = 0U;
@@ -1896,11 +1932,12 @@ static void teardown_test(const prog_config_t *config)
 {
 	(void)odph_iplookup_table_destroy(config->fwd_tbl);
 
-	for (uint32_t i = 0U; i < config->num_ifs; ++i)
-		if (config->pktios[i].handle != ODP_PKTIO_INVALID) {
+	for (uint32_t i = 0U; i < config->num_ifs; ++i) {
+		free(config->pktios[i].name);
+
+		if (config->pktios[i].handle != ODP_PKTIO_INVALID)
 			(void)odp_pktio_close(config->pktios[i].handle);
-			free(config->pktios[i].name);
-		}
+	}
 
 	if (config->pktio_pool != ODP_POOL_INVALID)
 		(void)odp_pool_destroy(config->pktio_pool);
@@ -1922,28 +1959,6 @@ static void teardown_test(const prog_config_t *config)
 		(void)odp_queue_destroy(config->compl_q);
 
 	free(config->conf_file);
-}
-
-static void print_stats(const prog_config_t *config)
-{
-	const stats_t *stats;
-
-	printf("\nProgram finished:\n");
-
-	for (int i = 0; i < config->num_thrs; ++i) {
-		stats = &config->thread_config[i].stats;
-
-		printf("\n    Worker %d:\n"
-		"        IPsec in packets: %" PRIu64 "\n"
-		"        IPsec out packets: %" PRIu64 "\n"
-		"        IPsec in packet errors: %" PRIu64 "\n"
-		"        IPsec out packet errors: %" PRIu64 "\n"
-		"        IPsec status errors: %" PRIu64 "\n"
-		"        Packets forwarded: %" PRIu64 "\n"
-		"        Packets dropped: %" PRIu64 "\n", i, stats->ipsec_in_pkts,
-		stats->ipsec_out_pkts, stats->ipsec_in_errs, stats->ipsec_out_errs,
-		stats->status_errs, stats->fwd_pkts, stats->discards);
-	}
 }
 
 int main(int argc, char **argv)

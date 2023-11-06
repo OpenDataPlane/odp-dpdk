@@ -1,7 +1,5 @@
-/* Copyright (c) 2015-2018, Linaro Limited
- * All rights reserved.
- *
- * SPDX-License-Identifier:     BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2015-2018 Linaro Limited
  */
 
 /**
@@ -21,7 +19,9 @@ extern "C" {
 #endif
 
 /**
- * @addtogroup odph_lineartable ODPH LINEAR TABLE
+ * @defgroup odph_lineartable ODPH LINEAR TABLE
+ * Linear table
+ *
  * @{
  */
 

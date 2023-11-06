@@ -1,4 +1,5 @@
 /* Copyright (c) 2018, Linaro Limited
+ * Copyright (c) 2023, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -36,9 +37,21 @@ odp_queue_t odp_queue_create(const char *name, const odp_queue_param_t *param)
 	return _odp_queue_api->queue_create(name, param);
 }
 
+int odp_queue_create_multi(const char *name[], const odp_queue_param_t param[],
+			   odp_bool_t share_param, odp_queue_t queue[], int num)
+{
+	return _odp_queue_api->queue_create_multi(name, param, share_param,
+						  queue, num);
+}
+
 int odp_queue_destroy(odp_queue_t queue)
 {
 	return _odp_queue_api->queue_destroy(queue);
+}
+
+int odp_queue_destroy_multi(odp_queue_t queue[], int num)
+{
+	return _odp_queue_api->queue_destroy_multi(queue, num);
 }
 
 odp_queue_t odp_queue_lookup(const char *name)

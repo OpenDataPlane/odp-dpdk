@@ -1,4 +1,4 @@
-/* Copyright (c) 2020-2022, Nokia
+/* Copyright (c) 2020-2023, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -21,7 +21,25 @@
 #include <odp_api.h>
 #include <odp/helper/odph_api.h>
 
-#define MAX_PKTIOS        32
+#if ODP_THREAD_COUNT_MAX > 33
+/* One control thread, even number of workers */
+#define MAX_THREADS  33
+#else
+#define MAX_THREADS  ODP_THREAD_COUNT_MAX
+#endif
+
+#define MAX_WORKERS  (MAX_THREADS - 1)
+
+/* At least one control and two worker threads */
+ODP_STATIC_ASSERT(MAX_WORKERS >= 2, "Too few threads");
+
+/* Maximum number of packet IO interfaces */
+#define MAX_PKTIOS        16
+/* Maximum number of packets to be allocated for
+ * one transmit round: bursts * burst_size * bins */
+#define MAX_ALLOC_PACKETS (64 * 1024)
+/* Maximum number of packet length bins */
+#define MAX_BINS          1024
 #define MAX_PKTIO_NAME    255
 #define RX_THREAD         1
 #define TX_THREAD         2
@@ -30,8 +48,11 @@
 #define RAND_16BIT_WORDS  128
 /* Max retries to generate random data */
 #define MAX_RAND_RETRIES  1000
-/* Maximum pktio index table size */
-#define MAX_PKTIO_INDEXES 1024
+
+/* Used don't free */
+#define TX_MODE_DF        0
+/* Use static references */
+#define TX_MODE_REF       1
 
 /* Minimum number of packets to receive in CI test */
 #define MIN_RX_PACKETS_CI 800
@@ -67,7 +88,7 @@ typedef struct test_options_t {
 	uint32_t wait_sec;
 	uint32_t wait_start_sec;
 	uint32_t mtu;
-	odp_bool_t use_refs;
+	int tx_mode;
 	odp_bool_t promisc_mode;
 	odp_bool_t calc_latency;
 	odp_bool_t calc_cs;
@@ -98,6 +119,9 @@ typedef struct thread_arg_t {
 
 	/* In direct_rx mode, pktin queue per pktio interface (per thread) */
 	odp_pktin_queue_t pktin[MAX_PKTIOS];
+
+	/* Pre-built packets for TX thread */
+	odp_packet_t packet[MAX_PKTIOS][MAX_ALLOC_PACKETS];
 
 } thread_arg_t;
 
@@ -133,22 +157,26 @@ typedef struct test_global_t {
 	odp_cpumask_t cpumask;
 	odp_pool_t pool;
 	uint64_t drained;
-	odph_thread_t thread_tbl[ODP_THREAD_COUNT_MAX];
-	thread_stat_t stat[ODP_THREAD_COUNT_MAX];
-	thread_arg_t thread_arg[ODP_THREAD_COUNT_MAX];
+	odph_thread_t thread_tbl[MAX_THREADS];
+	thread_stat_t stat[MAX_THREADS];
+	thread_arg_t thread_arg[MAX_THREADS];
 
 	struct {
 		odph_ethaddr_t eth_src;
 		odph_ethaddr_t eth_dst;
 		odp_pktio_t pktio;
-		odp_pktout_queue_t pktout[ODP_THREAD_COUNT_MAX];
-		odp_pktin_queue_t pktin[ODP_THREAD_COUNT_MAX];
+		odp_pktout_queue_t pktout[MAX_THREADS];
+		odp_pktin_queue_t pktin[MAX_THREADS];
 		int started;
 
 	} pktio[MAX_PKTIOS];
 
 	/* Interface lookup table. Table index is pktio_index of the API. */
-	uint8_t if_from_pktio_idx[MAX_PKTIO_INDEXES];
+	uint8_t if_from_pktio_idx[ODP_PKTIO_MAX_INDEX + 1];
+
+	uint32_t num_tx_pkt;
+	uint32_t num_bins;
+	uint32_t len_bin[MAX_BINS];
 
 } test_global_t;
 
@@ -196,17 +224,18 @@ static void print_usage(void)
 	       "                            Random packet length. Specify the minimum and maximum\n"
 	       "                            packet lengths and the number of bins. To reduce pool size\n"
 	       "                            requirement the length range can be divided into even sized\n"
-	       "                            bins. Min and max size packets are always used and included\n"
+	       "                            bins (max %u). Min and max size packets are always used and included\n"
 	       "                            into the number of bins (bins >= 2). Bin value of 0 means\n"
 	       "                            that each packet length is used. Comma-separated (no spaces).\n"
 	       "                            Overrides standard packet length option.\n"
 	       "  -D, --direct_rx           Direct input mode (default: 0)\n"
 	       "                              0: Use scheduler for packet input\n"
-	       "                              1: Poll packet input in direct mode\n");
-	printf("  -R, --no_pkt_refs         Do not use packet references. Always allocate a\n"
-	       "                            fresh set of packets for a transmit burst. Some\n"
-	       "                            features may be available only with references\n"
-	       "                            disabled.\n"
+	       "                              1: Poll packet input in direct mode\n", MAX_BINS);
+	printf("  -m, --tx_mode             Transmit mode (default 1):\n"
+	       "                              0: Re-send packets with don't free option\n"
+	       "                              1: Send static packet references. Some features may\n"
+	       "                                 not be available with references.\n"
+	       "                              2: Send copies of packets\n"
 	       "  -M, --mtu <len>           Interface MTU in bytes.\n"
 	       "  -b, --burst_size          Transmit burst size. Default: 8\n"
 	       "  -x, --bursts              Number of bursts per one transmit round. Default: 1\n"
@@ -218,8 +247,8 @@ static void print_usage(void)
 	       "  -o, --udp_src             UDP source port. Default: 10000\n"
 	       "  -p, --udp_dst             UDP destination port. Default: 20000\n"
 	       "  -P, --promisc_mode        Enable promiscuous mode.\n"
-	       "  -a, --latency             Calculate latency. Disables packet references (see\n"
-	       "                            \"--no_pkt_refs\").\n"
+	       "  -a, --latency             Calculate latency. Cannot be used with packet\n"
+	       "                            references (see \"--tx_mode\").\n"
 	       "  -c, --c_mode <counts>     Counter mode for incrementing UDP port numbers.\n"
 	       "                            Specify the number of port numbers used starting from\n"
 	       "                            udp_src/udp_dst. Comma-separated (no spaces) list of\n"
@@ -280,15 +309,49 @@ static int parse_vlan(const char *str, test_global_t *global)
 	return num_vlan;
 }
 
+static int init_bins(test_global_t *global)
+{
+	uint32_t i, bin_size;
+	test_options_t *test_options = &global->test_options;
+	uint32_t num_bins = test_options->rand_pkt_len_bins;
+	uint32_t len_min = test_options->rand_pkt_len_min;
+	uint32_t len_max = test_options->rand_pkt_len_max;
+	uint32_t num_bytes = len_max - len_min + 1;
+
+	if (len_max <= len_min) {
+		ODPH_ERR("Error: Bad max packet length\n");
+		return -1;
+	}
+
+	if (num_bins == 0)
+		num_bins = num_bytes;
+
+	if (num_bins == 1 || num_bins > MAX_BINS || num_bins > num_bytes) {
+		ODPH_ERR("Error: Bad number of packet length bins: %u\n", num_bins);
+		return -1;
+	}
+
+	bin_size = (len_max - len_min + 1) / (num_bins - 1);
+
+	/* Min length is the first bin */
+	for (i = 0; i < num_bins - 1; i++)
+		global->len_bin[i] = len_min + (i * bin_size);
+
+	/* Max length is the last bin */
+	global->len_bin[i] = len_max;
+	global->num_bins   = num_bins;
+
+	return 0;
+}
+
 static int parse_options(int argc, char *argv[], test_global_t *global)
 {
 	int opt, i, len, str_len, long_index, udp_port;
 	unsigned long int count;
-	uint32_t min_packets, num_tx_pkt, pkt_len, val;
+	uint32_t min_packets, num_tx_pkt, num_tx_alloc, pkt_len, val, bins;
 	char *name, *str, *end;
 	test_options_t *test_options = &global->test_options;
 	int ret = 0;
-	int help = 0;
 	uint8_t default_eth_dst[6] = {0x02, 0x00, 0x00, 0xa0, 0xb0, 0xc0};
 
 	static const struct option longopts[] = {
@@ -300,7 +363,7 @@ static int parse_options(int argc, char *argv[], test_global_t *global)
 		{"len",         required_argument, NULL, 'l'},
 		{"len_range",   required_argument, NULL, 'L'},
 		{"direct_rx",   required_argument, NULL, 'D'},
-		{"no_pkt_refs", no_argument,       NULL, 'R'},
+		{"tx_mode",     required_argument, NULL, 'm'},
 		{"burst_size",  required_argument, NULL, 'b'},
 		{"bursts",      required_argument, NULL, 'x'},
 		{"gap",         required_argument, NULL, 'g'},
@@ -323,7 +386,7 @@ static int parse_options(int argc, char *argv[], test_global_t *global)
 		{NULL, 0, NULL, 0}
 	};
 
-	static const char *shortopts = "+i:e:r:t:n:l:L:D:RM:b:x:g:v:s:d:o:p:c:CAq:u:w:W:Pah";
+	static const char *shortopts = "+i:e:r:t:n:l:L:D:m:M:b:x:g:v:s:d:o:p:c:CAq:u:w:W:Pah";
 
 	test_options->num_pktio  = 0;
 	test_options->num_rx     = 1;
@@ -332,7 +395,7 @@ static int parse_options(int argc, char *argv[], test_global_t *global)
 	test_options->pkt_len    = 512;
 	test_options->use_rand_pkt_len = 0;
 	test_options->direct_rx  = 0;
-	test_options->use_refs   = 1;
+	test_options->tx_mode    = TX_MODE_REF;
 	test_options->burst_size = 8;
 	test_options->bursts     = 1;
 	test_options->gap_nsec   = 1000000;
@@ -482,8 +545,8 @@ static int parse_options(int argc, char *argv[], test_global_t *global)
 		case 'D':
 			test_options->direct_rx = atoi(optarg);
 			break;
-		case 'R':
-			test_options->use_refs = 0;
+		case 'm':
+			test_options->tx_mode = atoi(optarg);
 			break;
 		case 'M':
 			test_options->mtu = atoi(optarg);
@@ -551,69 +614,68 @@ static int parse_options(int argc, char *argv[], test_global_t *global)
 		case 'h':
 			/* fall through */
 		default:
-			help = 1;
 			print_usage();
 			ret = -1;
 			break;
 		}
 	}
 
-	if (help == 0 && test_options->num_pktio == 0) {
+	if (ret)
+		return -1;
+
+	if (test_options->num_pktio == 0) {
 		ODPH_ERR("Error: At least one packet IO interface is needed.\n");
 		ODPH_ERR("       Use -i <name> to specify interfaces.\n");
-		ret = -1;
+		return -1;
 	}
 
 	if (test_options->num_rx < 1 || test_options->num_tx < 1) {
 		ODPH_ERR("Error: At least one rx and tx thread needed.\n");
-		ret = -1;
+		return -1;
 	}
 
 	test_options->num_cpu = test_options->num_rx + test_options->num_tx;
 
-	num_tx_pkt  = test_options->burst_size * test_options->bursts;
-	if (test_options->use_rand_pkt_len) {
-		uint32_t pkt_sizes = test_options->rand_pkt_len_max -
-					test_options->rand_pkt_len_min + 1;
-		uint32_t pkt_bins = test_options->rand_pkt_len_bins;
-		uint32_t req_pkts;
-
-		if (test_options->rand_pkt_len_max <= test_options->rand_pkt_len_min) {
-			ODPH_ERR("Error: Bad max packet length\n");
-			ret = -1;
-		}
-		if (pkt_bins == 1) {
-			ODPH_ERR("Error: Invalid bins value\n");
-			ret = -1;
-		}
-		if (pkt_sizes < pkt_bins) {
-			ODPH_ERR("Error: Not enough packet sizes for %" PRIu32 " bins\n", pkt_bins);
-			ret = -1;
-		}
-		if (pkt_bins && num_tx_pkt > pkt_bins && num_tx_pkt % pkt_bins)
-			ODPH_ERR("\nWARNING: Transmit packet count is not evenly divisible into packet length bins.\n\n");
-		else if (!pkt_bins && num_tx_pkt > pkt_sizes && num_tx_pkt % pkt_sizes)
-			ODPH_ERR("\nWARNING: Transmit packet count is not evenly divisible into packet lengths.\n\n");
-
-		req_pkts = pkt_bins ? pkt_bins : pkt_sizes;
-		if (req_pkts > num_tx_pkt)
-			num_tx_pkt = req_pkts;
+	if (test_options->num_cpu > MAX_WORKERS) {
+		ODPH_ERR("Error: Too many worker threads\n");
+		return -1;
 	}
 
-	/* Pool needs to have enough packets for all tx side bursts and
-	 * one rx side burst */
-	min_packets = (test_options->num_pktio * test_options->num_tx *
-		      num_tx_pkt) +
-		      (test_options->num_pktio * test_options->num_rx *
-		      test_options->burst_size);
+	num_tx_pkt = test_options->burst_size * test_options->bursts;
+	global->num_tx_pkt = num_tx_pkt;
+
+	if (num_tx_pkt == 0) {
+		ODPH_ERR("Error: Bad number of tx packets: %u\n", num_tx_pkt);
+		return -1;
+	}
+
+	if (test_options->use_rand_pkt_len) {
+		if (init_bins(global))
+			return -1;
+	}
+
+	bins = global->num_bins ? global->num_bins : 1;
+	num_tx_alloc = num_tx_pkt * bins;
+	if (num_tx_alloc > MAX_ALLOC_PACKETS) {
+		ODPH_ERR("Error: Too many tx packets: %u\n", num_tx_alloc);
+		return -1;
+	}
+
+	/* Pool needs to have enough packets for all TX side pre-allocated packets and
+	 * a burst per thread (for packet copies). RX side needs one burst per thread per pktio. */
+	min_packets  = test_options->num_pktio * test_options->num_tx * num_tx_alloc;
+	min_packets += test_options->num_tx * test_options->burst_size;
+	min_packets += test_options->num_pktio * test_options->num_rx * test_options->burst_size;
 
 	if (test_options->num_pkt < min_packets) {
 		ODPH_ERR("Error: Pool needs to have at least %u packets\n", min_packets);
-		ret = -1;
+		return -1;
 	}
 
-	if (test_options->calc_latency)
-		test_options->use_refs = 0;
+	if (test_options->calc_latency && test_options->tx_mode == TX_MODE_REF) {
+		ODPH_ERR("Error: Latency test is not supported with packet references (--tx_mode 1)\n");
+		return -1;
+	}
 
 	if (test_options->gap_nsec) {
 		double gap_hz = 1000000000.0 / test_options->gap_nsec;
@@ -622,6 +684,14 @@ static int parse_options(int argc, char *argv[], test_global_t *global)
 			ODPH_ERR("\nWARNING: Burst gap exceeds time counter resolution "
 				 "%" PRIu64 "\n\n", odp_time_local_res());
 		}
+	}
+
+	if (global->num_bins) {
+		if (num_tx_pkt > global->num_bins && num_tx_pkt % global->num_bins)
+			ODPH_ERR("\nWARNING: Transmit packet count is not evenly divisible into packet length bins.\n\n");
+
+		if (num_tx_pkt < global->num_bins)
+			ODPH_ERR("\nWARNING: Not enough packets for every packet length bin.\n\n");
 	}
 
 	if (test_options->c_mode.udp_dst &&
@@ -640,10 +710,10 @@ static int parse_options(int argc, char *argv[], test_global_t *global)
 			test_options->rand_pkt_len_min : test_options->pkt_len;
 	if (test_options->hdr_len >= pkt_len) {
 		ODPH_ERR("Error: Headers do not fit into packet length %" PRIu32 "\n", pkt_len);
-		ret = -1;
+		return -1;
 	}
 
-	return ret;
+	return 0;
 }
 
 static int set_num_cpu(test_global_t *global)
@@ -651,13 +721,6 @@ static int set_num_cpu(test_global_t *global)
 	int ret;
 	test_options_t *test_options = &global->test_options;
 	int num_cpu = test_options->num_cpu;
-
-	/* One thread used for the main thread */
-	if (num_cpu > ODP_THREAD_COUNT_MAX - 1) {
-		ODPH_ERR("Error: Too many threads. API supports max %i.\n",
-			 ODP_THREAD_COUNT_MAX - 1);
-		return -1;
-	}
 
 	ret = odp_cpumask_default_worker(&global->cpumask, num_cpu);
 
@@ -736,7 +799,7 @@ static int open_pktios(test_global_t *global)
 		printf("interface default\n");
 	printf("  packet input mode:  %s\n", test_options->direct_rx ? "direct" : "scheduler");
 	printf("  promisc mode:       %s\n", test_options->promisc_mode ? "enabled" : "disabled");
-	printf("  packet references:  %s\n", test_options->use_refs ? "enabled" : "disabled");
+	printf("  transmit mode:      %i\n", test_options->tx_mode);
 	printf("  measure latency:    %s\n", test_options->calc_latency ? "enabled" : "disabled");
 	printf("  UDP checksum:       %s\n", test_options->calc_cs ? "enabled" : "disabled");
 	printf("  payload filling:    %s\n", test_options->fill_pl ? "enabled" : "disabled");
@@ -818,9 +881,6 @@ static int open_pktios(test_global_t *global)
 
 	global->pool = pool;
 
-	if (odp_pktio_max_index() >= MAX_PKTIO_INDEXES)
-		ODPH_ERR("Warning: max pktio index (%u) is too large\n", odp_pktio_max_index());
-
 	odp_pktio_param_init(&pktio_param);
 
 	if (test_options->direct_rx)
@@ -848,8 +908,8 @@ static int open_pktios(test_global_t *global)
 		odp_pktio_print(pktio);
 
 		pktio_idx = odp_pktio_index(pktio);
-		if (pktio_idx < 0 || pktio_idx >= MAX_PKTIO_INDEXES) {
-			ODPH_ERR("Error (%s): Bad pktio index: %i\n", name, pktio_idx);
+		if (pktio_idx < 0) {
+			ODPH_ERR("Error (%s): Reading pktio index failed: %i\n", name, pktio_idx);
 			return -1;
 		}
 		global->if_from_pktio_idx[pktio_idx] = i;
@@ -911,6 +971,11 @@ static int open_pktios(test_global_t *global)
 				ODPH_ERR("Error (%s): setting MTU failed\n", name);
 				return -1;
 			}
+		}
+
+		if (test_options->tx_mode == TX_MODE_DF && pktio_capa.free_ctrl.dont_free == 0) {
+			ODPH_ERR("Error (%s): Don't free mode not supported\n", name);
+			return -1;
 		}
 
 		odp_pktio_config_init(&pktio_config);
@@ -1464,166 +1529,132 @@ static inline void set_timestamp(odp_packet_t pkt, uint32_t ts_off, odp_bool_t c
 	udp->chksum = calc_cs ? odph_ipv4_udp_chksum(pkt) : 0;
 }
 
-static inline int send_burst(odp_pktout_queue_t pktout, odp_packet_t pkt[],
-			     int burst_size, odp_bool_t use_rand_len, odp_bool_t use_refs,
-			     odp_bool_t calc_cs, uint32_t ts_off, uint32_t pkts_per_pktio,
-			     uint64_t *sent_bytes) {
-	int i;
-	int ret = 0;
-	int num = burst_size;
-	odp_packet_t out_pkt[burst_size];
+static int alloc_packets(odp_pool_t pool, odp_packet_t *pkt_tbl, uint32_t num,
+			 test_global_t *global)
+{
+	uint32_t i, pkt_len;
+	test_options_t *test_options = &global->test_options;
+	uint32_t num_bins = global->num_bins;
+
+	pkt_len = test_options->pkt_len;
+
+	for (i = 0; i < num; i++) {
+		if (num_bins)
+			pkt_len = global->len_bin[i % num_bins];
+
+		pkt_tbl[i] = odp_packet_alloc(pool, pkt_len);
+		if (pkt_tbl[i] == ODP_PACKET_INVALID) {
+			ODPH_ERR("Error: Alloc of %uB packet failed\n", pkt_len);
+			break;
+		}
+	}
+
+	if (i == 0)
+		return -1;
+
+	if (i != num) {
+		odp_packet_free_multi(pkt_tbl, i);
+		return -1;
+	}
+
+	return 0;
+}
+
+static inline uint32_t form_burst(odp_packet_t out_pkt[], uint32_t burst_size, uint32_t num_bins,
+				  uint32_t burst, odp_packet_t *pkt_tbl, odp_pool_t pool,
+				  int tx_mode, uint32_t ts_off, odp_bool_t calc_cs,
+				  uint64_t *total_bytes)
+{
+	uint32_t i, idx;
+	odp_packet_t pkt;
 	static __thread int rand_idx = RAND_16BIT_WORDS;
 	static __thread uint16_t rand_data[RAND_16BIT_WORDS];
-	uint64_t bytes_total = 0;
+	uint64_t bytes = 0;
+
+	idx = burst * burst_size;
+	if (num_bins)
+		idx = burst * burst_size * num_bins;
 
 	for (i = 0; i < burst_size; i++) {
-		int idx = i;
+		if (num_bins) {
+			uint32_t bin;
 
-		if (use_rand_len) {
 			if (rand_idx >= RAND_16BIT_WORDS) {
 				if (odp_unlikely(update_rand_data((uint8_t *)rand_data,
-								  RAND_16BIT_WORDS * 2))) {
-					num = i;
-					ret = -1;
+								  RAND_16BIT_WORDS * 2)))
 					break;
-				}
 				rand_idx = 0;
 			}
-			idx = rand_data[rand_idx++] % pkts_per_pktio;
+			/* Select random length bin */
+			bin = rand_data[rand_idx++] % num_bins;
+			pkt = pkt_tbl[idx + bin];
+			idx += num_bins;
+		} else {
+			pkt = pkt_tbl[idx];
+			idx++;
 		}
 
-		if (use_refs) {
-			out_pkt[i] = odp_packet_ref_static(pkt[idx]);
-			if (odp_unlikely(out_pkt[i] == ODP_PACKET_INVALID)) {
-				num = i;
+		if (tx_mode == TX_MODE_DF) {
+			out_pkt[i] = pkt;
+		} else if (tx_mode == TX_MODE_REF) {
+			out_pkt[i] = odp_packet_ref_static(pkt);
+
+			if (odp_unlikely(out_pkt[i] == ODP_PACKET_INVALID))
 				break;
-			}
 		} else {
-			out_pkt[i] = pkt[idx];
-			pkt[idx] = ODP_PACKET_INVALID;
+			out_pkt[i] = odp_packet_copy(pkt, pool);
+
+			if (odp_unlikely(out_pkt[i] == ODP_PACKET_INVALID))
+				break;
 
 			if (ts_off)
 				set_timestamp(out_pkt[i], ts_off, calc_cs);
 		}
-		bytes_total += odp_packet_len(out_pkt[i]);
+
+		bytes += odp_packet_len(out_pkt[i]);
 	}
 
-	if (odp_unlikely(num < burst_size)) {
-		if (!use_refs)
-			for (int i = 0; i < burst_size; i++)
-				if (pkt[i] != ODP_PACKET_INVALID)
-					odp_packet_free(pkt[i]);
+	*total_bytes = bytes;
 
-		if (num == 0) {
-			*sent_bytes = 0;
-			return ret;
-		}
-	}
+	return i;
+}
 
-	ret = odp_pktout_send(pktout, out_pkt, num);
+static inline uint32_t send_burst(odp_pktout_queue_t pktout, odp_packet_t pkt[],
+				  uint32_t num, int tx_mode, uint64_t *drop_bytes)
+{
+	int ret;
+	uint32_t sent;
+	uint64_t bytes = 0;
 
+	ret = odp_pktout_send(pktout, pkt, num);
+
+	sent = ret;
 	if (odp_unlikely(ret < 0))
-		ret = 0;
+		sent = 0;
 
-	if (odp_unlikely(ret != num)) {
-		uint32_t num_drop = num - ret;
+	if (odp_unlikely(sent != num)) {
+		uint32_t i;
+		uint32_t num_drop = num - sent;
 
-		for (i = ret; i < num; i++)
-			bytes_total -= odp_packet_len(out_pkt[i]);
-		odp_packet_free_multi(&out_pkt[ret], num_drop);
+		for (i = sent; i < num; i++)
+			bytes += odp_packet_len(pkt[i]);
+
+		if (tx_mode != TX_MODE_DF)
+			odp_packet_free_multi(&pkt[sent], num_drop);
 	}
 
-	*sent_bytes = bytes_total;
-	return ret;
-}
+	*drop_bytes = bytes;
 
-static int alloc_test_packets(odp_pool_t pool, odp_packet_t *pkt_tbl, int num_pkt,
-			      int pkts_per_pktio, test_options_t *test_options)
-{
-	int num_alloc = 0;
-
-	if (test_options->use_rand_pkt_len) {
-		int i, j;
-		int num_pktio = test_options->num_pktio;
-		uint32_t pkt_bins = test_options->rand_pkt_len_bins;
-		uint32_t pkt_len_min = test_options->rand_pkt_len_min;
-		uint32_t pkt_len_max = test_options->rand_pkt_len_max;
-		uint32_t bin_size = 1;
-
-		if (pkt_bins)
-			bin_size = (pkt_len_max - pkt_len_min + 1) / (pkt_bins - 1);
-
-		for (i = 0; i < num_pktio; i++) {
-			uint32_t cur_bin = 0;
-			uint32_t pkt_len = pkt_len_min;
-
-			for (j = 0; j < pkts_per_pktio; j++) {
-				if (pkt_bins) {
-					if (cur_bin + 1 < pkt_bins) {
-						pkt_len = pkt_len_min + (cur_bin * bin_size);
-						cur_bin++;
-					} else {
-						cur_bin = 0;
-						pkt_len = pkt_len_max;
-					}
-				}
-
-				pkt_tbl[num_alloc] = odp_packet_alloc(pool, pkt_len);
-				if (pkt_tbl[num_alloc] == ODP_PACKET_INVALID) {
-					ODPH_ERR("Error: Alloc of %dB packet failed\n", pkt_len);
-					break;
-				}
-				num_alloc++;
-
-				if (!pkt_bins) {
-					pkt_len++;
-					if (pkt_len > pkt_len_max)
-						pkt_len = pkt_len_min;
-				}
-			}
-		}
-		return num_alloc;
-	}
-	num_alloc = odp_packet_alloc_multi(pool, test_options->pkt_len, pkt_tbl, num_pkt);
-	if (num_alloc != num_pkt)
-		ODPH_ERR("Error: Alloc of %u packets failed\n", num_pkt);
-
-	return num_alloc;
-}
-
-static int allocate_and_init_packets(odp_pool_t pool, odp_packet_t *pkt_tbl, int num_pkt,
-				     int pkts_per_pktio, test_options_t *test_options,
-				     test_global_t *global)
-{
-	int num_alloc, num_pktio = test_options->num_pktio;
-
-	num_alloc = alloc_test_packets(pool, pkt_tbl, num_pkt, pkts_per_pktio, test_options);
-
-	if (num_alloc != num_pkt)
-		goto err;
-
-	for (int i = 0; i < num_pktio; i++) {
-		int f = i * pkts_per_pktio;
-
-		if (init_packets(global, i, &pkt_tbl[f], pkts_per_pktio, f))
-			goto err;
-	}
-
-	return 0;
-
-err:
-	if (num_alloc > 0)
-		odp_packet_free_multi(pkt_tbl, num_alloc);
-
-	return -1;
+	return sent;
 }
 
 static int tx_thread(void *arg)
 {
 	int i, thr, tx_thr;
-	uint32_t exit_test;
+	uint32_t exit_test, num_alloc, j;
 	odp_time_t t1, t2, next_tmo;
 	uint64_t diff_ns, t1_nsec;
+	odp_packet_t *pkt_tbl;
 	thread_arg_t *thread_arg = arg;
 	test_global_t *global = thread_arg->global;
 	test_options_t *test_options = &global->test_options;
@@ -1636,44 +1667,49 @@ static int tx_thread(void *arg)
 	uint64_t tx_packets = 0;
 	uint64_t tx_drops = 0;
 	int ret = 0;
-	int burst_size = test_options->burst_size;
-	int bursts = test_options->bursts;
-	uint32_t num_tx = test_options->num_tx;
-	odp_bool_t use_rand_len = test_options->use_rand_pkt_len;
-	odp_bool_t use_refs = test_options->use_refs;
-	odp_bool_t is_allocd = false;
+	const uint32_t burst_size = test_options->burst_size;
+	const uint32_t bursts = test_options->bursts;
+	const uint32_t num_tx = test_options->num_tx;
+	const int tx_mode = test_options->tx_mode;
 	odp_bool_t calc_cs = test_options->calc_cs;
 	int num_pktio = test_options->num_pktio;
-	int num_pkt;
 	odp_pktout_queue_t pktout[num_pktio];
-	uint32_t pkts_per_pktio = bursts * burst_size;
 	uint32_t ts_off = test_options->calc_latency ? test_options->hdr_len : 0;
-
-	if (use_rand_len) {
-		uint32_t pkt_sizes = test_options->rand_pkt_len_max -
-					test_options->rand_pkt_len_min + 1;
-
-		if (test_options->rand_pkt_len_bins)
-			pkt_sizes = test_options->rand_pkt_len_bins;
-		if (pkt_sizes > pkts_per_pktio)
-			pkts_per_pktio = pkt_sizes;
-	}
-	num_pkt = num_pktio * pkts_per_pktio;
-
-	odp_packet_t pkt[num_pkt];
-
+	uint32_t tot_packets = 0;
+	uint32_t num_bins = global->num_bins;
 	thr = odp_thread_id();
 	tx_thr = thread_arg->tx_thr;
 	global->stat[thr].thread_type = TX_THREAD;
 
-	for (i = 0; i < num_pktio; i++)
-		pktout[i] = thread_arg->pktout[i];
+	num_alloc = global->num_tx_pkt;
+	if (num_bins)
+		num_alloc = global->num_tx_pkt * num_bins;
 
-	if (use_refs) {
-		ret = allocate_and_init_packets(pool, pkt, num_pkt, pkts_per_pktio, test_options,
-						global);
-		is_allocd = !ret;
+	for (i = 0; i < num_pktio; i++) {
+		int seq = i * num_alloc;
+
+		pktout[i] = thread_arg->pktout[i];
+		pkt_tbl = thread_arg->packet[i];
+
+		if (alloc_packets(pool, pkt_tbl, num_alloc, global)) {
+			ret = -1;
+			break;
+		}
+
+		tot_packets += num_alloc;
+
+		if (init_packets(global, i, pkt_tbl, num_alloc, seq)) {
+			ret = -1;
+			break;
+		}
+
+		if (tx_mode == TX_MODE_DF) {
+			for (j = 0; j < num_alloc; j++)
+				odp_packet_free_ctrl_set(pkt_tbl[j],
+							 ODP_PACKET_FREE_CTRL_DONT_FREE);
+		}
 	}
+
 	/* Start all workers at the same time */
 	odp_barrier_wait(&global->barrier);
 
@@ -1700,32 +1736,33 @@ static int tx_thread(void *arg)
 		}
 		tx_timeouts++;
 
-		if (!use_refs) {
-			if (odp_unlikely(allocate_and_init_packets(pool, pkt, num_pkt,
-								   pkts_per_pktio, test_options,
-								   global) < 0)) {
-				ret = -1;
-				break;
-			}
-		}
 		/* Send bursts to each pktio */
 		for (i = 0; i < num_pktio; i++) {
-			int sent, j;
-			int first = i * bursts * pkts_per_pktio;
-			uint64_t sent_bytes;
+			uint32_t num, sent;
+			uint64_t total_bytes, drop_bytes;
+			odp_packet_t pkt[burst_size];
+
+			pkt_tbl = thread_arg->packet[i];
 
 			for (j = 0; j < bursts; j++) {
-				sent = send_burst(pktout[i], &pkt[first + j * burst_size],
-						  burst_size, use_rand_len, use_refs, calc_cs,
-						  ts_off, pkts_per_pktio, &sent_bytes);
+				num = form_burst(pkt, burst_size, num_bins, j, pkt_tbl, pool,
+						 tx_mode, ts_off, calc_cs, &total_bytes);
 
-				if (odp_unlikely(sent < 0)) {
+				if (odp_unlikely(num == 0)) {
 					ret = -1;
 					tx_drops += burst_size;
 					break;
 				}
 
-				tx_bytes += sent_bytes;
+				sent = send_burst(pktout[i], pkt, num, tx_mode, &drop_bytes);
+
+				if (odp_unlikely(sent == 0)) {
+					ret = -1;
+					tx_drops += burst_size;
+					break;
+				}
+
+				tx_bytes   += total_bytes - drop_bytes;
 				tx_packets += sent;
 				if (odp_unlikely(sent < burst_size))
 					tx_drops += burst_size - sent;
@@ -1740,8 +1777,15 @@ static int tx_thread(void *arg)
 	t2 = odp_time_local();
 	diff_ns = odp_time_diff_ns(t2, t1);
 
-	if (is_allocd)
-		odp_packet_free_multi(pkt, num_pkt);
+	for (i = 0; i < num_pktio; i++) {
+		pkt_tbl = thread_arg->packet[i];
+
+		if (tot_packets == 0)
+			break;
+
+		odp_packet_free_multi(pkt_tbl, num_alloc);
+		tot_packets -= num_alloc;
+	}
 
 	/* Update stats */
 	global->stat[thr].time_nsec   = diff_ns;
@@ -1825,7 +1869,7 @@ static void print_periodic_stat(test_global_t *global, uint64_t nsec)
 		num_tx[i] = 0;
 		num_rx[i] = 0;
 
-		for (j = 0; j < ODP_THREAD_COUNT_MAX; j++) {
+		for (j = 0; j < MAX_THREADS; j++) {
 			if (global->stat[j].thread_type == RX_THREAD)
 				num_rx[i] += global->stat[j].pktio[i].rx_packets;
 			else if (global->stat[j].thread_type == TX_THREAD)
@@ -1929,7 +1973,7 @@ static int print_final_stat(test_global_t *global)
 	printf("  ");
 
 	num_thr = 0;
-	for (i = 0; i < ODP_THREAD_COUNT_MAX; i++) {
+	for (i = 0; i < MAX_THREADS; i++) {
 		if (global->stat[i].thread_type != RX_THREAD)
 			continue;
 
@@ -1948,7 +1992,7 @@ static int print_final_stat(test_global_t *global)
 	printf("  ");
 
 	num_thr = 0;
-	for (i = 0; i < ODP_THREAD_COUNT_MAX; i++) {
+	for (i = 0; i < MAX_THREADS; i++) {
 		if (global->stat[i].thread_type != TX_THREAD)
 			continue;
 
@@ -1961,7 +2005,7 @@ static int print_final_stat(test_global_t *global)
 
 	printf("\n\n");
 
-	for (i = 0; i < ODP_THREAD_COUNT_MAX; i++) {
+	for (i = 0; i < MAX_THREADS; i++) {
 		if (global->stat[i].thread_type == RX_THREAD) {
 			rx_tmo_sum      += global->stat[i].rx_timeouts;
 			rx_pkt_sum      += global->stat[i].rx_packets;
@@ -2113,7 +2157,7 @@ int main(int argc, char **argv)
 	memset(global, 0, sizeof(test_global_t));
 	odp_atomic_init_u32(&global->exit_test, 0);
 
-	for (i = 0; i < ODP_THREAD_COUNT_MAX; i++)
+	for (i = 0; i < MAX_THREADS; i++)
 		global->thread_arg[i].global = global;
 
 	if (parse_options(argc, argv, global)) {

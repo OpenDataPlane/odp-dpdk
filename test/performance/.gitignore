@@ -5,10 +5,12 @@ odp_atomic_perf
 odp_bench_buffer
 odp_bench_misc
 odp_bench_packet
+odp_bench_pktio_sp
 odp_bench_timer
 odp_cpu_bench
 odp_crc
 odp_crypto
+odp_dmafwd
 odp_dma_perf
 odp_ipsec
 odp_ipsecfwd
@@ -25,5 +27,6 @@ odp_sched_latency
 odp_sched_perf
 odp_sched_pktio
 odp_scheduling
+odp_stash_perf
 odp_stress
 odp_timer_perf

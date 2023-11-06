@@ -11,6 +11,8 @@
 #include <odp_api.h>
 #include <odp/helper/odph_api.h>
 
+#include "bench_common.h"
+
 #include <getopt.h>
 #include <inttypes.h>
 #include <signal.h>
@@ -29,27 +31,8 @@
 /** Timer duration in nsec */
 #define TIMER_NSEC 50000000
 
-#define BENCH_INFO(run, max, name) \
-	{#run, run, max, name}
-
-/* Run benchmark, returns >0 on success */
-typedef int (*bench_run_fn_t)(void);
-
-/* Benchmark data */
-typedef struct {
-	/* Default test name */
-	const char *name;
-
-	/* Test function to run */
-	bench_run_fn_t run;
-
-	/* Test specific limit for rounds (tuning for slow implementation) */
-	uint32_t max_rounds;
-
-	/* Override default test name */
-	const char *desc;
-
-} bench_info_t;
+#define BENCH_INFO(run_fn, max, alt_name) \
+	{.name = #run_fn, .run = run_fn, .max_rounds = max, .desc = alt_name}
 
 typedef struct {
 	/* Command line options */
@@ -68,6 +51,9 @@ typedef struct {
 
 	} opt;
 
+	/* Common benchmark suite data */
+	bench_suite_t suite;
+
 	odp_timer_pool_t timer_pool;
 	odp_timer_t timer;
 	odp_queue_t queue;
@@ -80,26 +66,11 @@ typedef struct {
 	double tick_hz;
 	int plain_queue;
 
-	/* Benchmark functions */
-	bench_info_t *bench;
-
-	/* Number of benchmark functions */
-	int num_bench;
-
-	/* Break worker loop if set to 1 */
-	odp_atomic_u32_t exit_thread;
-
 	/* Test case input / output data */
 	uint64_t      a1[REPEAT_COUNT];
 	odp_event_t   ev[REPEAT_COUNT];
 	odp_timeout_t tmo[REPEAT_COUNT];
 	odp_timer_t   tim[REPEAT_COUNT];
-
-	/* Dummy result */
-	uint64_t dummy;
-
-	/* Benchmark run failed */
-	int bench_failed;
 
 	/* CPU mask as string */
 	char cpumask_str[ODP_CPUMASK_STR_SIZE];
@@ -112,7 +83,7 @@ static void sig_handler(int signo ODP_UNUSED)
 {
 	if (gbl_args == NULL)
 		return;
-	odp_atomic_store_u32(&gbl_args->exit_thread, 1);
+	odp_atomic_store_u32(&gbl_args->suite.exit_worker, 1);
 }
 
 static int setup_sig_handler(void)
@@ -129,113 +100,6 @@ static int setup_sig_handler(void)
 
 	if (sigaction(SIGINT, &action, NULL))
 		return -1;
-
-	return 0;
-}
-
-/* Run given benchmark indefinitely */
-static void run_indef(gbl_args_t *args, int idx)
-{
-	const char *desc;
-	const bench_info_t *bench = &args->bench[idx];
-
-	desc = bench->desc != NULL ? bench->desc : bench->name;
-
-	printf("Running odp_%s test indefinitely\n", desc);
-
-	while (!odp_atomic_load_u32(&gbl_args->exit_thread)) {
-		int ret;
-
-		ret = bench->run();
-
-		if (!ret)
-			ODPH_ABORT("Benchmark %s failed\n", desc);
-	}
-}
-
-static int run_benchmarks(void *arg)
-{
-	int i, j;
-	uint64_t c1, c2;
-	odp_time_t t1, t2;
-	gbl_args_t *args = arg;
-	const int meas_time = args->opt.time;
-
-	printf("\nAverage %s per function call\n", meas_time ? "time (nsec)" : "CPU cycles");
-	printf("-------------------------------------------------\n");
-
-	/* Run each test twice. Results from the first warm-up round are ignored. */
-	for (i = 0; i < 2; i++) {
-		uint64_t total = 0;
-		uint32_t round = 1;
-
-		for (j = 0; j < gbl_args->num_bench; round++) {
-			int ret;
-			const char *desc;
-			const bench_info_t *bench = &args->bench[j];
-			uint32_t max_rounds = args->opt.rounds;
-
-			if (bench->max_rounds && max_rounds > bench->max_rounds)
-				max_rounds = bench->max_rounds;
-
-			/* Run selected test indefinitely */
-			if (args->opt.bench_idx) {
-				if ((j + 1) != args->opt.bench_idx) {
-					j++;
-					continue;
-				}
-
-				run_indef(args, j);
-				return 0;
-			}
-
-			desc = bench->desc != NULL ? bench->desc : bench->name;
-
-			if (meas_time)
-				t1 = odp_time_local();
-			else
-				c1 = odp_cpu_cycles();
-
-			ret = bench->run();
-
-			if (meas_time)
-				t2 = odp_time_local();
-			else
-				c2 = odp_cpu_cycles();
-
-			if (!ret) {
-				ODPH_ERR("Benchmark odp_%s failed\n", desc);
-				args->bench_failed = -1;
-				return -1;
-			}
-
-			if (meas_time)
-				total += odp_time_diff_ns(t2, t1);
-			else
-				total += odp_cpu_cycles_diff(c2, c1);
-
-			for (i = 0; i < REPEAT_COUNT; i++)
-				args->dummy += args->a1[i];
-
-			if (round >= max_rounds) {
-				double result;
-
-				/* Each benchmark runs internally REPEAT_COUNT times. */
-				result = ((double)total) / (max_rounds * REPEAT_COUNT);
-
-				/* No print from warm-up round */
-				if (i > 0)
-					printf("[%02d] odp_%-26s: %12.2f\n", j + 1, desc, result);
-
-				j++;
-				total = 0;
-				round = 1;
-			}
-		}
-	}
-
-	/* Print dummy result to prevent compiler to optimize it away*/
-	printf("\n(dummy result: 0x%" PRIx64 ")\n\n", args->dummy);
 
 	return 0;
 }
@@ -287,7 +151,7 @@ static int timeout_to_event(void)
 	for (i = 0; i < REPEAT_COUNT; i++)
 		ev[i] = odp_timeout_to_event(timeout);
 
-	gbl_args->dummy += odp_event_to_u64(ev[0]);
+	gbl_args->suite.dummy += odp_event_to_u64(ev[0]);
 
 	return i;
 }
@@ -301,7 +165,7 @@ static int timeout_from_event(void)
 	for (i = 0; i < REPEAT_COUNT; i++)
 		tmo[i] = odp_timeout_from_event(ev);
 
-	gbl_args->dummy += odp_timeout_to_u64(tmo[0]);
+	gbl_args->suite.dummy += odp_timeout_to_u64(tmo[0]);
 
 	return i;
 }
@@ -327,7 +191,7 @@ static int timeout_timer(void)
 	for (i = 0; i < REPEAT_COUNT; i++)
 		tim[i] = odp_timeout_timer(timeout);
 
-	gbl_args->dummy += odp_timer_to_u64(tim[0]);
+	gbl_args->suite.dummy += odp_timer_to_u64(tim[0]);
 
 	return i;
 }
@@ -491,7 +355,8 @@ static int parse_args(int argc, char *argv[])
 		return -1;
 	}
 
-	if (gbl_args->opt.bench_idx < 0 || gbl_args->opt.bench_idx > gbl_args->num_bench) {
+	if (gbl_args->opt.bench_idx < 0 ||
+	    gbl_args->opt.bench_idx > (int)ODPH_ARRAY_SIZE(test_suite)) {
 		ODPH_ERR("Bad bench index %i\n", gbl_args->opt.bench_idx);
 		return -1;
 	}
@@ -760,15 +625,11 @@ int main(int argc, char *argv[])
 	}
 
 	memset(gbl_args, 0, sizeof(gbl_args_t));
-	odp_atomic_init_u32(&gbl_args->exit_thread, 0);
 	gbl_args->timer_pool = ODP_TIMER_POOL_INVALID;
 	gbl_args->timer = ODP_TIMER_INVALID;
 	gbl_args->queue = ODP_QUEUE_INVALID;
 	gbl_args->pool = ODP_POOL_INVALID;
 	gbl_args->timeout = ODP_TIMEOUT_INVALID;
-
-	gbl_args->bench = test_suite;
-	gbl_args->num_bench = sizeof(test_suite) / sizeof(test_suite[0]);
 
 	for (i = 0; i < REPEAT_COUNT; i++) {
 		gbl_args->a1[i] = i;
@@ -781,6 +642,14 @@ int main(int argc, char *argv[])
 	ret = parse_args(argc, argv);
 	if (ret)
 		goto exit;
+
+	bench_suite_init(&gbl_args->suite);
+	gbl_args->suite.bench = test_suite;
+	gbl_args->suite.num_bench = ODPH_ARRAY_SIZE(test_suite);
+	gbl_args->suite.measure_time = !!gbl_args->opt.time;
+	gbl_args->suite.indef_idx = gbl_args->opt.bench_idx;
+	gbl_args->suite.rounds = gbl_args->opt.rounds;
+	gbl_args->suite.repeat_count = REPEAT_COUNT;
 
 	/* Get default worker cpumask */
 	if (odp_cpumask_default_worker(&default_mask, 1) != 1) {
@@ -819,15 +688,15 @@ int main(int argc, char *argv[])
 	thr_common.share_param = 1;
 
 	odph_thread_param_init(&thr_param);
-	thr_param.start = run_benchmarks;
-	thr_param.arg = gbl_args;
+	thr_param.start = bench_run;
+	thr_param.arg = &gbl_args->suite;
 	thr_param.thr_type = ODP_THREAD_WORKER;
 
 	odph_thread_create(&worker_thread, &thr_common, &thr_param, 1);
 
 	odph_thread_join(&worker_thread, 1);
 
-	ret = gbl_args->bench_failed;
+	ret = gbl_args->suite.retval;
 
 exit:
 	if (gbl_args->timeout != ODP_TIMEOUT_INVALID)

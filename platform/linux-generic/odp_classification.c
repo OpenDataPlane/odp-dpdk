@@ -1,5 +1,5 @@
 /* Copyright (c) 2014-2018, Linaro Limited
- * Copyright (c) 2019-2022, Nokia
+ * Copyright (c) 2019-2023, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -7,17 +7,20 @@
 
 #include <odp/api/classification.h>
 #include <odp/api/align.h>
-#include <odp/api/queue.h>
 #include <odp/api/debug.h>
+#include <odp/api/hints.h>
+#include <odp/api/packet_io.h>
 #include <odp/api/pool.h>
+#include <odp/api/queue.h>
+#include <odp/api/shared_memory.h>
+#include <odp/api/spinlock.h>
+
 #include <odp_init_internal.h>
 #include <odp_debug_internal.h>
 #include <odp_packet_internal.h>
-#include <odp/api/packet_io.h>
 #include <odp_packet_io_internal.h>
 #include <odp_classification_datamodel.h>
 #include <odp_classification_internal.h>
-#include <odp/api/shared_memory.h>
 #include <protocols/eth.h>
 #include <protocols/ip.h>
 #include <protocols/ipsec.h>
@@ -28,7 +31,6 @@
 #include <errno.h>
 #include <stdbool.h>
 #include <inttypes.h>
-#include <odp/api/spinlock.h>
 
 /* Debug level for per packet classification operations */
 #define CLS_DBG  3
@@ -362,6 +364,26 @@ odp_cos_t odp_cls_cos_create(const char *name, const odp_cls_cos_param_t *param_
 	return ODP_COS_INVALID;
 }
 
+int odp_cls_cos_create_multi(const char *name[], const odp_cls_cos_param_t param[],
+			     odp_cos_t cos[], int num)
+{
+	int i;
+
+	_ODP_ASSERT(param != NULL);
+	_ODP_ASSERT(cos != NULL);
+
+	for (i = 0; i < num; i++) {
+		const char *cur_name = name != NULL ? name[i] : NULL;
+		odp_cos_t new_cos = odp_cls_cos_create(cur_name, &param[i]);
+
+		if (odp_unlikely(new_cos == ODP_COS_INVALID))
+			return (i == 0) ? -1 : i;
+
+		cos[i] = new_cos;
+	}
+	return i;
+}
+
 /*
  * Allocate an odp_pmr_t Handle
  */
@@ -424,6 +446,23 @@ int odp_cos_destroy(odp_cos_t cos_id)
 
 	cos->valid = 0;
 	return 0;
+}
+
+int odp_cos_destroy_multi(odp_cos_t cos[], int num)
+{
+	int i;
+
+	_ODP_ASSERT(cos != NULL);
+	_ODP_ASSERT(num > 0);
+
+	for (i = 0; i < num; i++) {
+		int ret = odp_cos_destroy(cos[i]);
+
+		if (ret)
+			return (i == 0) ? ret : i;
+	}
+
+	return i;
 }
 
 int odp_cos_queue_set(odp_cos_t cos_id, odp_queue_t queue_id)
@@ -785,6 +824,23 @@ no_rule:
 	return 0;
 }
 
+int odp_cls_pmr_destroy_multi(odp_pmr_t pmr[], int num)
+{
+	int i;
+
+	_ODP_ASSERT(pmr != NULL);
+	_ODP_ASSERT(num > 0);
+
+	for (i = 0; i < num; i++) {
+		int ret = odp_cls_pmr_destroy(pmr[i]);
+
+		if (ret)
+			return (i == 0) ? ret : i;
+	}
+
+	return i;
+}
+
 static odp_pmr_t cls_pmr_create(const odp_pmr_param_t *terms, int num_terms, uint16_t mark,
 				odp_cos_t src_cos, odp_cos_t dst_cos)
 {
@@ -853,6 +909,27 @@ odp_pmr_t odp_cls_pmr_create_opt(const odp_pmr_create_opt_t *opt,
 	}
 
 	return cls_pmr_create(opt->terms, opt->num_terms, opt->mark, src_cos, dst_cos);
+}
+
+int odp_cls_pmr_create_multi(const odp_pmr_create_opt_t opt[], odp_cos_t src_cos[],
+			     odp_cos_t dst_cos[], odp_pmr_t pmr[], int num)
+{
+	int i;
+
+	_ODP_ASSERT(opt != NULL);
+	_ODP_ASSERT(src_cos != NULL);
+	_ODP_ASSERT(dst_cos != NULL);
+	_ODP_ASSERT(pmr != NULL);
+
+	for (i = 0; i < num; i++) {
+		odp_pmr_t new_pmr = odp_cls_pmr_create_opt(&opt[i], src_cos[i], dst_cos[i]);
+
+		if (odp_unlikely(new_pmr == ODP_PMR_INVALID))
+			return (i == 0) ? -1 : i;
+
+		pmr[i] = new_pmr;
+	}
+	return i;
 }
 
 int odp_cls_cos_pool_set(odp_cos_t cos_id, odp_pool_t pool)

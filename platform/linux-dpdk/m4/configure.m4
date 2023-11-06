@@ -39,7 +39,7 @@ AC_ARG_ENABLE([dpdk-shared],
 # Check for DPDK availability
 #
 # DPDK pmd drivers are not linked unless the --whole-archive option is
-# used. No spaces are allowed between the --whole-arhive flags.
+# used. No spaces are allowed between the --whole-archive flags.
 ##########################################################################
 ODP_DPDK([$DPDK_PATH], [$dpdk_shared], [],
 	 [AC_MSG_FAILURE([can't find DPDK])])
@@ -104,5 +104,7 @@ AC_CONFIG_FILES([platform/linux-dpdk/Makefile
 		 platform/linux-dpdk/test/example/ping/Makefile
 		 platform/linux-dpdk/test/example/simple_pipeline/Makefile
 		 platform/linux-dpdk/test/example/switch/Makefile
+		 platform/linux-dpdk/test/performance/Makefile
+		 platform/linux-dpdk/test/performance/dmafwd/Makefile
 		 platform/linux-dpdk/test/validation/api/pktio/Makefile])
 ])

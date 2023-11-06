@@ -1,5 +1,5 @@
 /* Copyright (c) 2014-2018, Linaro Limited
- * Copyright (c) 2019-2022, Nokia
+ * Copyright (c) 2019-2023, Nokia
  * Copyright (c) 2020-2021, Marvell
  * All rights reserved.
  *
@@ -41,9 +41,6 @@
 
 /* Maximum number of pktio interfaces */
 #define MAX_PKTIOS             8
-
-/* Maximum pktio index table size */
-#define MAX_PKTIO_INDEXES      1024
 
 /* Default vector size */
 #define DEFAULT_VEC_SIZE       MAX_PKT_BURST
@@ -200,7 +197,7 @@ typedef struct {
 	/* Destination port lookup table.
 	 * Table index is pktio_index of the API. This is used by the sched
 	 * mode. */
-	uint8_t dst_port_from_idx[MAX_PKTIO_INDEXES];
+	uint8_t dst_port_from_idx[ODP_PKTIO_MAX_INDEX + 1];
 	/* Break workers loop if set to 1 */
 	odp_atomic_u32_t exit_threads;
 
@@ -1411,8 +1408,10 @@ static void init_port_lookup_tbl(void)
 		int pktio_idx     = odp_pktio_index(pktio);
 		int dst_port      = find_dest_port(rx_idx);
 
-		if (pktio_idx < 0 || pktio_idx >= MAX_PKTIO_INDEXES) {
-			ODPH_ERR("Bad pktio index %i\n", pktio_idx);
+		if (pktio_idx < 0) {
+			ODPH_ERR("Reading pktio (%s) index failed: %i\n",
+				 gbl_args->appl.if_names[rx_idx], pktio_idx);
+
 			exit(EXIT_FAILURE);
 		}
 
@@ -1421,7 +1420,7 @@ static void init_port_lookup_tbl(void)
 }
 
 /*
- * Prinf usage information
+ * Print usage information
  */
 static void usage(char *progname)
 {
@@ -2216,10 +2215,6 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	if (odp_pktio_max_index() >= MAX_PKTIO_INDEXES)
-		ODPH_DBG("Warning: max pktio index (%u) is too large\n",
-			 odp_pktio_max_index());
-
 	bind_workers();
 
 	odp_schedule_config_init(&sched_config);
@@ -2431,7 +2426,14 @@ int main(int argc, char *argv[])
 	}
 
 	for (i = 0; i < if_count; ++i) {
-		if (odp_pktio_close(gbl_args->pktios[i].pktio)) {
+		odp_pktio_t pktio = gbl_args->pktios[i].pktio;
+
+		if (gbl_args->appl.verbose && odp_pktio_extra_stat_info(pktio, NULL, 0) > 0) {
+			printf("Pktio %s extra statistics:\n", gbl_args->appl.if_names[i]);
+			odp_pktio_extra_stats_print(pktio);
+		}
+
+		if (odp_pktio_close(pktio)) {
 			ODPH_ERR("Pktio close failed: %s\n", gbl_args->appl.if_names[i]);
 			exit(EXIT_FAILURE);
 		}

@@ -20,8 +20,8 @@
 #define VEC_LEN  32
 #define PKT_LEN  400
 #define PKT_NUM  500
-#define ELEM_NUM 10
-#define ELEM_SIZE 128
+#define ELEM_NUM 10u
+#define ELEM_SIZE 128u
 #define CACHE_SIZE 32
 #define MAX_NUM_DEFAULT (10 * 1024 * 1024)
 #define UAREA    0xaa
@@ -33,8 +33,6 @@
 #define EXT_UAREA_SIZE     32
 #define EXT_HEADROOM       16
 #define MAGIC_U8           0x7a
-
-#define MIN(a, b)  (((a) < (b)) ? (a) : (b))
 
 typedef struct {
 	odp_barrier_t init_barrier;
@@ -204,8 +202,8 @@ static void init_event_uarea(void *uarea, uint32_t size, void *args, uint32_t in
 static void pool_test_buffer_uarea_init(void)
 {
 	odp_pool_param_t param;
-	uint32_t num = MIN(global_pool_capa.buf.max_num, ELEM_NUM),
-	size = MIN(global_pool_capa.buf.max_size, ELEM_SIZE), i;
+	uint32_t num = ODPH_MIN(global_pool_capa.buf.max_num, ELEM_NUM),
+	size = ODPH_MIN(global_pool_capa.buf.max_size, ELEM_SIZE), i;
 	odp_pool_t pool;
 	uarea_init_t data;
 	odp_buffer_t bufs[num];
@@ -246,8 +244,8 @@ static void pool_test_buffer_uarea_init(void)
 static void pool_test_packet_uarea_init(void)
 {
 	odp_pool_param_t param;
-	uint32_t num = MIN(global_pool_capa.pkt.max_num, ELEM_NUM),
-	size = MIN(global_pool_capa.pkt.max_len, ELEM_SIZE), i;
+	uint32_t num = ODPH_MIN(global_pool_capa.pkt.max_num, ELEM_NUM),
+	size = ODPH_MIN(global_pool_capa.pkt.max_len, ELEM_SIZE), i;
 	odp_pool_t pool;
 	uarea_init_t data;
 	odp_packet_t pkts[num];
@@ -288,8 +286,8 @@ static void pool_test_packet_uarea_init(void)
 static void pool_test_vector_uarea_init(void)
 {
 	odp_pool_param_t param;
-	uint32_t num = MIN(global_pool_capa.vector.max_num, ELEM_NUM),
-	size = MIN(global_pool_capa.vector.max_size, ELEM_NUM), i;
+	uint32_t num = ODPH_MIN(global_pool_capa.vector.max_num, ELEM_NUM),
+	size = ODPH_MIN(global_pool_capa.vector.max_size, ELEM_NUM), i;
 	odp_pool_t pool;
 	uarea_init_t data;
 	odp_packet_vector_t vecs[num];
@@ -332,7 +330,7 @@ static void pool_test_vector_uarea_init(void)
 static void pool_test_timeout_uarea_init(void)
 {
 	odp_pool_param_t param;
-	uint32_t num = MIN(global_pool_capa.tmo.max_num, ELEM_NUM), i;
+	uint32_t num = ODPH_MIN(global_pool_capa.tmo.max_num, ELEM_NUM), i;
 	odp_pool_t pool;
 	uarea_init_t data;
 	odp_timeout_t tmos[num];
@@ -1698,7 +1696,19 @@ static void pool_ext_init_packet_pool_param(odp_pool_ext_param_t *param)
 static void test_packet_pool_ext_capa(void)
 {
 	odp_pool_ext_capability_t capa;
-	odp_pool_type_t type = ODP_POOL_PACKET;
+	odp_pool_type_t type;
+	const odp_pool_type_t unsupported_types[] = {ODP_POOL_BUFFER, ODP_POOL_TIMEOUT,
+						     ODP_POOL_VECTOR, ODP_POOL_DMA_COMPL};
+	const int num_types = ODPH_ARRAY_SIZE(unsupported_types);
+
+	/* Verify operation for unsupported pool types */
+	for (int i = 0; i < num_types; i++) {
+		type = unsupported_types[i];
+		CU_ASSERT_FATAL(odp_pool_ext_capability(type, &capa) == 0);
+		CU_ASSERT(capa.max_pools == 0);
+	}
+
+	type = ODP_POOL_PACKET;
 
 	CU_ASSERT_FATAL(odp_pool_ext_capability(type, &capa) == 0);
 
@@ -2023,6 +2033,7 @@ static void test_packet_pool_ext_uarea_init(void)
 	odp_pool_ext_capability_t capa;
 	odp_pool_ext_param_t param;
 	uint32_t num = ELEM_NUM, i;
+	uint32_t max_payload;
 	odp_pool_t pool;
 	uarea_init_t data;
 	odp_shm_t shm;
@@ -2034,7 +2045,7 @@ static void test_packet_pool_ext_uarea_init(void)
 	pool_ext_init_packet_pool_param(&param);
 	param.uarea_init.init_fn = init_event_uarea;
 	param.uarea_init.args = &data;
-	num = MIN(num, param.pkt.num_buf);
+	num = ODPH_MIN(num, param.pkt.num_buf);
 	param.pkt.num_buf = num;
 	param.pkt.uarea_size = 1;
 	pool = odp_pool_ext_create(NULL, &param);
@@ -2049,10 +2060,14 @@ static void test_packet_pool_ext_uarea_init(void)
 	CU_ASSERT_FATAL(shm != ODP_SHM_INVALID);
 	CU_ASSERT(data.count == num);
 
+	max_payload = param.pkt.buf_size;
+	max_payload -= capa.pkt.odp_header_size + param.pkt.app_header_size;
+	max_payload -= capa.pkt.max_headroom_size;
+	max_payload -= capa.pkt.odp_trailer_size;
 	for (i = 0; i < num; i++) {
 		CU_ASSERT(data.mark[i] == 1);
 
-		pkts[i] = odp_packet_alloc(pool, (param.pkt.buf_size - param.pkt.headroom) / 2);
+		pkts[i] = odp_packet_alloc(pool, max_payload);
 
 		CU_ASSERT(pkts[i] != ODP_PACKET_INVALID);
 

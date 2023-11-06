@@ -19,7 +19,9 @@ AC_ARG_WITH([pcap],
 have_pcap=no
 AS_IF([test "x$with_pcap" != xno],
       [ODP_PCAP([with_pcap=yes]‚[with_pcap=no])])
+AC_CONFIG_COMMANDS_PRE([dnl
 AM_CONDITIONAL([ODP_PKTIO_PCAP], [test x$have_pcap = xyes])
+])
 
 m4_include([platform/linux-generic/m4/odp_libconfig.m4])
 m4_include([platform/linux-generic/m4/odp_openssl.m4])
@@ -69,5 +71,7 @@ AC_CONFIG_FILES([platform/linux-generic/Makefile
 		 platform/linux-generic/test/example/switch/Makefile
 		 platform/linux-generic/test/validation/api/shmem/Makefile
 		 platform/linux-generic/test/validation/api/pktio/Makefile
+		 platform/linux-generic/test/performance/Makefile
+		 platform/linux-generic/test/performance/dmafwd/Makefile
 		 platform/linux-generic/test/pktio_ipc/Makefile])
 ])

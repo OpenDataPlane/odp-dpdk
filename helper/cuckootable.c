@@ -1,7 +1,5 @@
-/* Copyright (c) 2016-2018, Linaro Limited
- * All rights reserved.
- *
- * SPDX-License-Identifier:     BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2016-2018 Linaro Limited
  */
 
 /*-
@@ -87,7 +85,7 @@ struct cuckoo_table_key_value {
 };
 
 /** @internal bucket structure
- *  Put the elements with defferent keys but a same signature
+ *  Put the elements with different keys but a same signature
  *  into a bucket, and each bucket has at most HASH_BUCKET_ENTRIES
  *  elements.
  */

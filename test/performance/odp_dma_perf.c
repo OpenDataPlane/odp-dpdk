@@ -54,9 +54,6 @@ enum {
 #define MAX_SEGS 1024U
 #define MAX_WORKERS 24
 
-#define MIN(a, b)  (((a) < (b)) ? (a) : (b))
-#define MAX(a, b)  (((a) < (b)) ? (b) : (a))
-
 #define GIGAS 1000000000
 #define MEGAS 1000000
 #define KILOS 1000
@@ -156,7 +153,7 @@ typedef struct {
 	/* Wait and handle finished transfer. */
 	void (*wait_fn)(sd_t *sd, stats_t *stats);
 	/* Handle all unfinished transfers after main test has been stopped. */
-	void (*drain_fn)(void);
+	void (*drain_fn)(sd_t *sd);
 	/* Free any resources that might have been allocated during setup phase. */
 	void (*free_fn)(const sd_t *sd);
 } test_api_t;
@@ -250,48 +247,46 @@ static void print_usage(void)
 	printf("\n"
 	       "DMA performance test. Load DMA subsystem from several workers.\n"
 	       "\n"
-	       "Examples:\n"
-	       "    " PROG_NAME "\n"
-	       "    " PROG_NAME " -s 10240\n"
-	       "    " PROG_NAME " -t 0 -i 1 -o 1 -s 51200 -S 1 -f 64 -T 10\n"
-	       "    " PROG_NAME " -t 1 -i 10 -o 10 -s 4096 -S 0 -m 1 -f 10 -c 4 -p 1\n"
+	       "Usage: " PROG_NAME " [OPTIONS]\n"
 	       "\n"
-	       "Usage: " PROG_NAME " [options]\n"
+	       "  E.g. " PROG_NAME "\n"
+	       "       " PROG_NAME " -s 10240\n"
+	       "       " PROG_NAME " -t 0 -i 1 -o 1 -s 51200 -S 1 -f 64 -T 10\n"
+	       "       " PROG_NAME " -t 1 -i 10 -o 10 -s 4096 -S 0 -m 1 -f 10 -c 4 -p 1\n"
 	       "\n"
-	       "  -t, --trs_type            Transfer type for test data. %u by default.\n"
-	       "                            Types:\n"
-	       "                                0: synchronous\n"
-	       "                                1: asynchronous\n"
-	       "  -i, --num_in_seg          Number of input segments to transfer. 0 means the\n"
-	       "                            maximum count supported by the implementation. %u by\n"
-	       "                            default.\n"
-	       "  -o, --num_out_seg         Number of output segments to transfer to. 0 means\n"
-	       "                            the maximum count supported by the implementation.\n"
-	       "                            %u by default.\n"
-	       "  -s, --in_seg_len	    Input segment length in bytes. 0 length means\n"
-	       "                            maximum segment length supported by implementation.\n"
-	       "                            The actual maximum might be limited by what type of\n"
-	       "                            data is transferred (packet/memory).\n"
-	       "                            %u by default.\n"
-	       "  -S, --in_seg_type         Input segment data type. %u by default.\n"
-	       "                            Types:\n"
-	       "                                0: packet\n"
-	       "                                1: memory\n"
-	       "  -m, --compl_mode          Completion mode for transfers. %u by default.\n"
-	       "                            Modes:\n"
-	       "                                0: poll\n"
-	       "                                1: event\n"
-	       "  -f, --max_in_flight       Max transfers in-flight per session. 0 means the\n"
-	       "                            maximum supported by tester/implementation. %u by\n"
-	       "                            default.\n"
-	       "  -T, --time_sec            Time in seconds to run. 0 means infinite. %u by\n"
-	       "                            default.\n"
-	       "  -c, --worker_count        Amount of workers. %u by default.\n"
-	       "  -p, --policy              DMA session policy. %u by default.\n"
-	       "                            Policies:\n"
-	       "                                0: One session shared by workers\n"
-	       "                                1: One session per worker\n"
-	       "  -h, --help                This help.\n"
+	       "Optional OPTIONS:\n"
+	       "\n"
+	       "  -t, --trs_type      Transfer type for test data. %u by default.\n"
+	       "                      Types:\n"
+	       "                          0: synchronous\n"
+	       "                          1: asynchronous\n"
+	       "  -i, --num_in_seg    Number of input segments to transfer. 0 means the maximum\n"
+	       "                      count supported by the implementation. %u by default.\n"
+	       "  -o, --num_out_seg   Number of output segments to transfer to. 0 means the\n"
+	       "                      maximum count supported by the implementation. %u by\n"
+	       "                      default.\n"
+	       "  -s, --in_seg_len    Input segment length in bytes. 0 length means the maximum\n"
+	       "                      segment length supported by the implementation. The actual\n"
+	       "                      maximum might be limited by what type of data is\n"
+	       "                      transferred (packet/memory). %u by default.\n"
+	       "  -S, --in_seg_type   Input segment data type. %u by default.\n"
+	       "                      Types:\n"
+	       "                          0: packet\n"
+	       "                          1: memory\n"
+	       "  -m, --compl_mode    Completion mode for transfers. %u by default.\n"
+	       "                      Modes:\n"
+	       "                          0: poll\n"
+	       "                          1: event\n"
+	       "  -f, --max_in_flight Maximum transfers in-flight per session. 0 means the\n"
+	       "                      maximum supported by the tester/implementation. %u by\n"
+	       "                      default.\n"
+	       "  -T, --time_sec      Time in seconds to run. 0 means infinite. %u by default.\n"
+	       "  -c, --worker_count  Amount of workers. %u by default.\n"
+	       "  -p, --policy        DMA session policy. %u by default.\n"
+	       "                      Policies:\n"
+	       "                          0: One session shared by workers\n"
+	       "                          1: One session per worker\n"
+	       "  -h, --help          This help.\n"
 	       "\n", DEF_TRS_TYPE, DEF_SEG_CNT, DEF_SEG_CNT, DEF_LEN, DEF_SEG_TYPE, DEF_MODE,
 	       DEF_INFLIGHT, DEF_TIME, DEF_WORKERS, DEF_POLICY);
 }
@@ -316,7 +311,7 @@ static parse_result_t check_options(prog_config_t *config)
 		return PRS_NOK;
 	}
 
-	max_workers = MIN(odp_thread_count_max() - 1, MAX_WORKERS);
+	max_workers = ODPH_MIN(odp_thread_count_max() - 1, MAX_WORKERS);
 
 	if (config->num_workers <= 0 || config->num_workers > max_workers) {
 		ODPH_ERR("Invalid thread count: %d (min: 1, max: %d)\n", config->num_workers,
@@ -366,7 +361,7 @@ static parse_result_t check_options(prog_config_t *config)
 			      config->num_out_segs + config->src_seg_len *
 			      config->num_in_segs % config->num_out_segs;
 
-	max_seg_len = MAX(config->src_seg_len, config->dst_seg_len);
+	max_seg_len = ODPH_MAX(config->src_seg_len, config->dst_seg_len);
 
 	if (max_seg_len > dma_capa.max_seg_len) {
 		ODPH_ERR("Unsupported total DMA segment length: %u (max: %u)\n", max_seg_len,
@@ -424,7 +419,7 @@ static parse_result_t check_options(prog_config_t *config)
 		config->compl_mode_mask |= mode_map[config->compl_mode];
 	}
 
-	max_trs = MIN(dma_capa.max_transfers, MAX_SEGS);
+	max_trs = ODPH_MIN(dma_capa.max_transfers, MAX_SEGS);
 
 	if (config->num_inflight == 0U)
 		config->num_inflight = max_trs;
@@ -437,7 +432,7 @@ static parse_result_t check_options(prog_config_t *config)
 
 	max_in = config->num_in_segs * config->num_inflight;
 	max_out = config->num_out_segs * config->num_inflight;
-	max_segs = MAX(max_in, max_out);
+	max_segs = ODPH_MAX(max_in, max_out);
 
 	if (max_segs > MAX_SEGS) {
 		ODPH_ERR("Unsupported input/output * inflight segment combination: %u (max: %u)\n",
@@ -692,7 +687,7 @@ static void configure_packet_dma_transfer(sd_t *sd)
 			seg = &start_dst_seg[j];
 			seg->packet = pkt;
 			seg->offset = 0U;
-			seg->len = MIN(len, sd->dma.dst_seg_len);
+			seg->len = ODPH_MIN(len, sd->dma.dst_seg_len);
 			len -= sd->dma.dst_seg_len;
 		}
 
@@ -771,7 +766,7 @@ static void configure_address_dma_transfer(sd_t *sd)
 		for (uint32_t j = 0U; j < sd->dma.num_out_segs; ++j, ++z) {
 			seg = &start_dst_seg[j];
 			seg->addr = (uint8_t *)sd->seg.dst + z * sd->dma.dst_seg_len;
-			seg->len = MIN(len, sd->dma.dst_seg_len);
+			seg->len = ODPH_MIN(len, sd->dma.dst_seg_len);
 			len -= sd->dma.dst_seg_len;
 		}
 
@@ -811,17 +806,17 @@ static void run_transfer(odp_dma_t handle, trs_info_t *info, stats_t *stats)
 		++stats->start_errs;
 	} else {
 		trs_tm = end_tm - start_tm;
-		stats->max_trs_tm = MAX(trs_tm, stats->max_trs_tm);
-		stats->min_trs_tm = MIN(trs_tm, stats->min_trs_tm);
+		stats->max_trs_tm = ODPH_MAX(trs_tm, stats->max_trs_tm);
+		stats->min_trs_tm = ODPH_MIN(trs_tm, stats->min_trs_tm);
 		stats->trs_tm += trs_tm;
 		trs_cc = odp_cpu_cycles_diff(end_cc, start_cc);
-		stats->max_trs_cc = MAX(trs_cc, stats->max_trs_cc);
-		stats->min_trs_cc = MIN(trs_cc, stats->min_trs_cc);
+		stats->max_trs_cc = ODPH_MAX(trs_cc, stats->max_trs_cc);
+		stats->min_trs_cc = ODPH_MIN(trs_cc, stats->min_trs_cc);
 		stats->trs_cc += trs_cc;
 		++stats->trs_cnt;
 		start_cc_diff = odp_cpu_cycles_diff(end_cc, start_cc);
-		stats->max_start_cc = MAX(start_cc_diff, stats->max_start_cc);
-		stats->min_start_cc = MIN(start_cc_diff, stats->min_start_cc);
+		stats->max_start_cc = ODPH_MAX(start_cc_diff, stats->max_start_cc);
+		stats->min_start_cc = ODPH_MIN(start_cc_diff, stats->min_start_cc);
 		stats->start_cc += start_cc_diff;
 		++stats->start_cnt;
 
@@ -896,8 +891,8 @@ static void poll_transfer(odp_dma_t handle, trs_info_t *info, stats_t *stats)
 
 		++info->trs_poll_cnt;
 		wait_cc = odp_cpu_cycles_diff(end_cc, start_cc);
-		stats->max_wait_cc = MAX(wait_cc, stats->max_wait_cc);
-		stats->min_wait_cc = MIN(wait_cc, stats->min_wait_cc);
+		stats->max_wait_cc = ODPH_MAX(wait_cc, stats->max_wait_cc);
+		stats->min_wait_cc = ODPH_MIN(wait_cc, stats->min_wait_cc);
 		stats->wait_cc += wait_cc;
 		++stats->wait_cnt;
 
@@ -905,12 +900,12 @@ static void poll_transfer(odp_dma_t handle, trs_info_t *info, stats_t *stats)
 			return;
 
 		trs_tm = odp_time_global_strict_ns() - info->trs_start_tm;
-		stats->max_trs_tm = MAX(trs_tm, stats->max_trs_tm);
-		stats->min_trs_tm = MIN(trs_tm, stats->min_trs_tm);
+		stats->max_trs_tm = ODPH_MAX(trs_tm, stats->max_trs_tm);
+		stats->min_trs_tm = ODPH_MIN(trs_tm, stats->min_trs_tm);
 		stats->trs_tm += trs_tm;
 		trs_cc = odp_cpu_cycles_diff(odp_cpu_cycles(), info->trs_start_cc);
-		stats->max_trs_cc = MAX(trs_cc, stats->max_trs_cc);
-		stats->min_trs_cc = MIN(trs_cc, stats->min_trs_cc);
+		stats->max_trs_cc = ODPH_MAX(trs_cc, stats->max_trs_cc);
+		stats->min_trs_cc = ODPH_MIN(trs_cc, stats->min_trs_cc);
 		stats->trs_cc += trs_cc;
 		stats->trs_poll_cnt += info->trs_poll_cnt;
 		++stats->trs_cnt;
@@ -934,8 +929,8 @@ static void poll_transfer(odp_dma_t handle, trs_info_t *info, stats_t *stats)
 			info->trs_start_cc = start_cc;
 			info->trs_poll_cnt = 0U;
 			start_cc_diff = odp_cpu_cycles_diff(end_cc, start_cc);
-			stats->max_start_cc = MAX(start_cc_diff, stats->max_start_cc);
-			stats->min_start_cc = MIN(start_cc_diff, stats->min_start_cc);
+			stats->max_start_cc = ODPH_MAX(start_cc_diff, stats->max_start_cc);
+			stats->min_start_cc = ODPH_MIN(start_cc_diff, stats->min_start_cc);
 			stats->start_cc += start_cc_diff;
 			++stats->start_cnt;
 			info->is_running = true;
@@ -1076,17 +1071,17 @@ static void wait_compl_event(sd_t *sd, stats_t *stats)
 	odp_dma_compl_result(odp_dma_compl_from_event(ev), &res);
 	info = res.user_ptr;
 	trs_tm = odp_time_global_strict_ns() - info->trs_start_tm;
-	stats->max_trs_tm = MAX(trs_tm, stats->max_trs_tm);
-	stats->min_trs_tm = MIN(trs_tm, stats->min_trs_tm);
+	stats->max_trs_tm = ODPH_MAX(trs_tm, stats->max_trs_tm);
+	stats->min_trs_tm = ODPH_MIN(trs_tm, stats->min_trs_tm);
 	stats->trs_tm += trs_tm;
 	trs_cc = odp_cpu_cycles_diff(odp_cpu_cycles(), info->trs_start_cc);
-	stats->max_trs_cc = MAX(trs_cc, stats->max_trs_cc);
-	stats->min_trs_cc = MIN(trs_cc, stats->min_trs_cc);
+	stats->max_trs_cc = ODPH_MAX(trs_cc, stats->max_trs_cc);
+	stats->min_trs_cc = ODPH_MIN(trs_cc, stats->min_trs_cc);
 	stats->trs_cc += trs_cc;
 	++stats->trs_cnt;
 	wait_cc = odp_cpu_cycles_diff(end_cc, start_cc);
-	stats->max_wait_cc = MAX(wait_cc, stats->max_wait_cc);
-	stats->min_wait_cc = MIN(wait_cc, stats->min_wait_cc);
+	stats->max_wait_cc = ODPH_MAX(wait_cc, stats->max_wait_cc);
+	stats->min_wait_cc = ODPH_MIN(wait_cc, stats->min_wait_cc);
 	stats->wait_cc += wait_cc;
 	++stats->wait_cnt;
 
@@ -1106,14 +1101,14 @@ static void wait_compl_event(sd_t *sd, stats_t *stats)
 		info->trs_start_tm = start_tm;
 		info->trs_start_cc = start_cc;
 		start_cc_diff = odp_cpu_cycles_diff(end_cc, start_cc);
-		stats->max_start_cc = MAX(start_cc_diff, stats->max_start_cc);
-		stats->min_start_cc = MIN(start_cc_diff, stats->min_start_cc);
+		stats->max_start_cc = ODPH_MAX(start_cc_diff, stats->max_start_cc);
+		stats->min_start_cc = ODPH_MIN(start_cc_diff, stats->min_start_cc);
 		stats->start_cc += start_cc_diff;
 		++stats->start_cnt;
 	}
 }
 
-static void drain_compl_events(void)
+static void drain_compl_events(ODP_UNUSED sd_t *sd)
 {
 	odp_event_t ev;
 
@@ -1122,6 +1117,25 @@ static void drain_compl_events(void)
 
 		if (ev == ODP_EVENT_INVALID)
 			break;
+	}
+}
+
+static void drain_poll_transfers(sd_t *sd)
+{
+	const uint32_t count = sd->dma.num_inflight;
+	trs_info_t *infos = sd->dma.infos, *info;
+	odp_dma_t handle = sd->dma.handle;
+	int rc;
+
+	for (uint32_t i = 0U; i < count; ++i) {
+		info = &infos[i];
+
+		if (info->is_running) {
+			do {
+				rc = odp_dma_transfer_done(handle, info->compl_param.transfer_id,
+							   NULL);
+			} while (rc == 0);
+		}
 	}
 }
 
@@ -1149,7 +1163,7 @@ static void setup_api(prog_config_t *config)
 			config->api.bootstrap_fn = NULL;
 			config->api.wait_fn = config->num_workers == 1 || config->policy == MANY ?
 						poll_transfers_mt_unsafe : poll_transfers_mt_safe;
-			config->api.drain_fn = NULL;
+			config->api.drain_fn = drain_poll_transfers;
 		} else {
 			config->api.session_cfg_fn = configure_event_compl_session;
 			config->api.compl_fn = configure_event_compl;
@@ -1247,7 +1261,7 @@ static int transfer(void *args)
 	thr_config->stats.tot_tm = end_tm - start_tm;
 
 	if (api->drain_fn != NULL)
-		api->drain_fn();
+		api->drain_fn(sd);
 
 out:
 	odp_barrier_wait(&prog_config->term_barrier);
@@ -1401,10 +1415,10 @@ static void print_stats(const prog_config_t *config)
 		tot_trs_tm += stats->trs_tm;
 		tot_trs_cc += stats->trs_cc;
 		tot_trs_cnt += stats->trs_cnt;
-		tot_min_tm = MIN(tot_min_tm, stats->min_trs_tm);
-		tot_max_tm = MAX(tot_max_tm, stats->max_trs_tm);
-		tot_min_cc = MIN(tot_min_cc, stats->min_trs_cc);
-		tot_max_cc = MAX(tot_max_cc, stats->max_trs_cc);
+		tot_min_tm = ODPH_MIN(tot_min_tm, stats->min_trs_tm);
+		tot_max_tm = ODPH_MAX(tot_max_tm, stats->max_trs_tm);
+		tot_min_cc = ODPH_MIN(tot_min_cc, stats->min_trs_cc);
+		tot_max_cc = ODPH_MAX(tot_max_cc, stats->max_trs_cc);
 
 		printf("    worker %d:\n", i);
 		printf("        successful transfers: %" PRIu64 "\n"

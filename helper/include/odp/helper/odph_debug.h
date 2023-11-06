@@ -1,9 +1,6 @@
-/* Copyright (c) 2015-2018, Linaro Limited
- * Copyright (c) 2019, Nokia
- *
- * All rights reserved.
- *
- * SPDX-License-Identifier:     BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2015-2018 Linaro Limited
+ * Copyright (c) 2019 Nokia
  */
 
 /**
@@ -30,8 +27,11 @@ extern "C" {
 #pragma GCC diagnostic ignored "-Wgnu-zero-variadic-macro-arguments"
 #endif
 
-/** @addtogroup odph_debug ODPH DEBUG
- *  @{
+/**
+ * @defgroup odph_debug ODPH DEBUG
+ * Debug logging
+ *
+ * @{
  */
 
 /**

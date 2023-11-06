@@ -19,6 +19,7 @@
 #include <odp_macros_internal.h>
 #include <odp_shm_internal.h>
 
+#include <stdio.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/syscall.h>
@@ -550,6 +551,10 @@ void odp_shm_print_all(void)
 	}
 
 	odp_spinlock_unlock(&shm_tbl->lock);
+
+	_ODP_PRINT("\nDPDK memzones\n-------------\n");
+	rte_memzone_dump(stdout);
+	_ODP_PRINT("\n");
 }
 
 void odp_shm_print(odp_shm_t shm)

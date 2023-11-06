@@ -1114,8 +1114,6 @@ int main(int argc, char **argv)
 		thr_param[i].thr_type = ODP_THREAD_WORKER;
 	}
 
-	odph_thread_create(thread_tbl, &thr_common, thr_param, num_workers);
-
 	/* Start packet receive and transmit */
 	for (i = 0; i < if_count; ++i) {
 		odp_pktio_t pktio;
@@ -1128,6 +1126,8 @@ int main(int argc, char **argv)
 			exit(EXIT_FAILURE);
 		}
 	}
+
+	odph_thread_create(thread_tbl, &thr_common, thr_param, num_workers);
 
 	ret = print_speed_stats(num_workers, gbl_args->stats,
 				gbl_args->appl.time, gbl_args->appl.accuracy);

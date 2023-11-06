@@ -349,6 +349,29 @@ static odp_queue_t queue_create(const char *name,
 	return handle;
 }
 
+static int queue_create_multi(const char *name[], const odp_queue_param_t param[],
+			      odp_bool_t share_param, odp_queue_t queue[], int num)
+{
+	int i;
+
+	_ODP_ASSERT(param != NULL);
+	_ODP_ASSERT(queue != NULL);
+	_ODP_ASSERT(num > 0);
+
+	for (i = 0; i < num; i++) {
+		odp_queue_t cur_queue;
+		const char *cur_name = name != NULL ? name[i] : NULL;
+		const odp_queue_param_t *cur_param = share_param ? &param[0] : &param[i];
+
+		cur_queue =  queue_create(cur_name, cur_param);
+		if (cur_queue == ODP_QUEUE_INVALID)
+			return (i == 0) ? -1 : i;
+
+		queue[i] = cur_queue;
+	}
+	return i;
+}
+
 void _odp_sched_queue_set_status(uint32_t queue_index, int status)
 {
 	queue_entry_t *queue = qentry_from_index(queue_index);
@@ -423,6 +446,23 @@ static int queue_destroy(odp_queue_t handle)
 	UNLOCK(queue);
 
 	return 0;
+}
+
+static int queue_destroy_multi(odp_queue_t handle[], int num)
+{
+	int i;
+
+	_ODP_ASSERT(handle != NULL);
+	_ODP_ASSERT(num > 0);
+
+	for (i = 0; i < num; i++) {
+		int ret = queue_destroy(handle[i]);
+
+		if (ret)
+			return (i == 0) ? ret : i;
+	}
+
+	return i;
 }
 
 static int queue_context_set(odp_queue_t handle, void *context,
@@ -1177,7 +1217,9 @@ static odp_event_t queue_api_deq(odp_queue_t handle)
 /* API functions */
 _odp_queue_api_fn_t _odp_queue_basic_api = {
 	.queue_create = queue_create,
+	.queue_create_multi = queue_create_multi,
 	.queue_destroy = queue_destroy,
+	.queue_destroy_multi = queue_destroy_multi,
 	.queue_lookup = queue_lookup,
 	.queue_capability = queue_capability,
 	.queue_context_set = queue_context_set,

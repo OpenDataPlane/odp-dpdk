@@ -1,8 +1,6 @@
-/* Copyright (c) 2014-2018, Linaro Limited
- * Copyright (c) 2021, Nokia
- * All rights reserved.
- *
- * SPDX-License-Identifier:     BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2014-2018 Linaro Limited
+ * Copyright (c) 2021 Nokia
  */
 
 
@@ -21,8 +19,9 @@ extern "C" {
 
 #include <odp_api.h>
 
-/** @addtogroup odph_header ODPH HEADER
- *  @{
+/**
+ * @addtogroup odph_protocols
+ * @{
  */
 
 #define ODPH_ESPHDR_LEN      8    /**< IPSec ESP header length */
@@ -38,10 +37,6 @@ typedef struct ODP_PACKED {
 	uint8_t    iv[];     /**< Initialization vector */
 } odph_esphdr_t;
 
-/** @internal Compile time assert */
-ODP_STATIC_ASSERT(sizeof(odph_esphdr_t) == ODPH_ESPHDR_LEN,
-		  "ODPH_ESPHDR_T__SIZE_ERROR");
-
 /**
  * IPSec ESP trailer
  */
@@ -50,10 +45,6 @@ typedef struct ODP_PACKED {
 	uint8_t next_header;  /**< Next header protocol */
 	uint8_t icv[];        /**< Integrity Check Value (optional) */
 } odph_esptrl_t;
-
-/** @internal Compile time assert */
-ODP_STATIC_ASSERT(sizeof(odph_esptrl_t) == ODPH_ESPTRL_LEN,
-		  "ODPH_ESPTRL_T__SIZE_ERROR");
 
 /**
  * IPSec AH header
@@ -67,9 +58,16 @@ typedef struct ODP_PACKED {
 	uint8_t    icv[];        /**< Integrity Check Value */
 } odph_ahhdr_t;
 
-/** @internal Compile time assert */
+/** @cond _ODP_HIDE_FROM_DOXYGEN_ */
+ODP_STATIC_ASSERT(sizeof(odph_esphdr_t) == ODPH_ESPHDR_LEN,
+		  "ODPH_ESPHDR_T__SIZE_ERROR");
+
+ODP_STATIC_ASSERT(sizeof(odph_esptrl_t) == ODPH_ESPTRL_LEN,
+		  "ODPH_ESPTRL_T__SIZE_ERROR");
+
 ODP_STATIC_ASSERT(sizeof(odph_ahhdr_t) == ODPH_AHHDR_LEN,
 		  "ODPH_AHHDR_T__SIZE_ERROR");
+/** @endcond */
 
 /**
  * Check IPSEC algorithm support

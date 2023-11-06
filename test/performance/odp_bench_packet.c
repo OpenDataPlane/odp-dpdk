@@ -1,5 +1,5 @@
 /* Copyright (c) 2017-2018, Linaro Limited
- * Copyright (c) 2022, Nokia
+ * Copyright (c) 2022-2023, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -24,8 +24,7 @@
 #include <odp_api.h>
 #include <odp/helper/odph_api.h>
 
-/** Minimum number of packet data bytes in the first segment */
-#define PKT_POOL_SEG_LEN 128
+#include "bench_common.h"
 
 /** Packet user area size in bytes */
 #define PKT_POOL_UAREA_SIZE 8
@@ -36,11 +35,11 @@
 /** Maximum test packet size */
 #define TEST_MAX_PKT_SIZE 2048
 
-/** Number of test runs per individual benchmark */
+/** Number of API function calls per test case */
 #define TEST_REPEAT_COUNT 1000
 
-/** Number of times to run tests for each packet size */
-#define TEST_SIZE_RUN_COUNT 10
+/** Number of rounds per test case */
+#define TEST_ROUNDS 10u
 
 /** Maximum burst size for *_multi operations */
 #define TEST_MAX_BURST 64
@@ -66,17 +65,14 @@
 #define NO_PATH(file_name) (strrchr((file_name), '/') ? \
 			    strrchr((file_name), '/') + 1 : (file_name))
 
-#define BENCH_INFO(run, init, term, name) \
-	{#run, run, init, term, name}
+#define BENCH_INFO(run_fn, init_fn, term_fn, alt_name) \
+	{.name = #run_fn, .run = run_fn, .init = init_fn, .term = term_fn, .desc = alt_name}
 
 ODP_STATIC_ASSERT((TEST_ALIGN_OFFSET + TEST_ALIGN_LEN) <= TEST_MIN_PKT_SIZE,
 		  "Invalid_alignment");
 
-/** Warm up round packet size */
-#define WARM_UP TEST_MIN_PKT_SIZE
-
 /** Test packet sizes */
-const uint32_t test_packet_len[] = {WARM_UP, TEST_MIN_PKT_SIZE, 128, 256, 512,
+const uint32_t test_packet_len[] = {TEST_MIN_PKT_SIZE, 128, 256, 512,
 				    1024, 1518, TEST_MAX_PKT_SIZE};
 
 /**
@@ -86,35 +82,9 @@ typedef struct {
 	int bench_idx;   /** Benchmark index to run indefinitely */
 	int burst_size;  /** Burst size for *_multi operations */
 	int cache_size;  /** Pool cache size */
+	int time;        /** Measure time vs. CPU cycles */
+	uint32_t rounds; /** Rounds per test case */
 } appl_args_t;
-
-/**
- * Initialize benchmark resources
- */
-typedef void (*bench_init_fn_t)(void);
-
-/**
- * Run benchmark
- *
- * @retval >0 on success
- * */
-typedef int (*bench_run_fn_t)(void);
-
-/**
- * Release benchmark resources
- */
-typedef void (*bench_term_fn_t)(void);
-
-/**
- * Benchmark data
- */
-typedef struct {
-	const char *name;
-	bench_run_fn_t run;
-	bench_init_fn_t init;
-	bench_term_fn_t term;
-	const char *desc;
-} bench_info_t;
 
 /**
  * Grouping of all global data
@@ -122,14 +92,10 @@ typedef struct {
 typedef struct {
 	/** Application (parsed) arguments */
 	appl_args_t appl;
+	/** Common benchmark suite data */
+	bench_suite_t suite;
 	/** Packet pool */
 	odp_pool_t pool;
-	/** Benchmark functions */
-	bench_info_t *bench;
-	/** Number of benchmark functions */
-	int num_bench;
-	/** Break worker loop if set to 1 */
-	odp_atomic_u32_t exit_thread;
 	struct {
 		/** Test packet length */
 		uint32_t len;
@@ -160,8 +126,6 @@ typedef struct {
 	odp_time_t ts_tbl[TEST_REPEAT_COUNT];
 	/** Array for storing test data */
 	uint8_t data_tbl[TEST_REPEAT_COUNT][TEST_MAX_PKT_SIZE];
-	/** Benchmark run failed */
-	uint8_t bench_failed;
 } args_t;
 
 /** Global pointer to args */
@@ -171,35 +135,7 @@ static void sig_handler(int signo ODP_UNUSED)
 {
 	if (gbl_args == NULL)
 		return;
-	odp_atomic_store_u32(&gbl_args->exit_thread, 1);
-}
-
-/**
- * Run given benchmark indefinitely
- */
-static void run_indef(args_t *args, int idx)
-{
-	const char *desc;
-
-	desc = args->bench[idx].desc != NULL ?
-			args->bench[idx].desc : args->bench[idx].name;
-
-	printf("Running odp_%s test indefinitely\n", desc);
-
-	while (!odp_atomic_load_u32(&gbl_args->exit_thread)) {
-		int ret;
-
-		if (args->bench[idx].init != NULL)
-			args->bench[idx].init();
-
-		ret = args->bench[idx].run();
-
-		if (args->bench[idx].term != NULL)
-			args->bench[idx].term();
-
-		if (!ret)
-			ODPH_ABORT("Benchmark %s failed\n", desc);
-	}
+	odp_atomic_store_u32(&gbl_args->suite.exit_worker, 1);
 }
 
 /**
@@ -207,96 +143,38 @@ static void run_indef(args_t *args, int idx)
  */
 static int run_benchmarks(void *arg)
 {
-	int i, j, k;
+	int i;
 	args_t *args = arg;
-	int num_sizes = sizeof(test_packet_len) / sizeof(test_packet_len[0]);
-	double results[gbl_args->num_bench][num_sizes];
+	bench_suite_t *suite = &args->suite;
+	int num_sizes = ODPH_ARRAY_SIZE(test_packet_len);
+	double results[num_sizes][suite->num_bench];
 
 	memset(results, 0, sizeof(results));
 
-	printf("\nRunning benchmarks (cycles per call)\n"
-	       "------------------------------------\n");
-
 	for (i = 0; i < num_sizes; i++) {
-		uint64_t tot_cycles = 0;
-
-		printf("\nPacket length: %6d bytes\n"
-		       "---------------------------\n", test_packet_len[i]);
+		printf("Packet length: %6d bytes", test_packet_len[i]);
 
 		gbl_args->pkt.len = test_packet_len[i];
 
-		for (j = 0, k = 1; j < gbl_args->num_bench; k++) {
-			int ret;
-			uint64_t c1, c2;
-			const char *desc;
+		suite->result = results[i];
 
-			if (args->appl.bench_idx &&
-			    (j + 1) != args->appl.bench_idx) {
-				j++;
-				continue;
-			} else if (args->appl.bench_idx &&
-				   (j + 1) == args->appl.bench_idx) {
-				run_indef(args, j);
-				return 0;
-			}
-
-			desc = args->bench[j].desc != NULL ?
-					args->bench[j].desc :
-					args->bench[j].name;
-
-			if (args->bench[j].init != NULL)
-				args->bench[j].init();
-
-			c1 = odp_cpu_cycles();
-			ret = args->bench[j].run();
-			c2 = odp_cpu_cycles();
-
-			if (args->bench[j].term != NULL)
-				args->bench[j].term();
-
-			if (!ret) {
-				ODPH_ERR("Benchmark %s failed\n", desc);
-				args->bench_failed = 1;
-				return -1;
-			}
-
-			tot_cycles += odp_cpu_cycles_diff(c2, c1);
-
-			if (k >= TEST_SIZE_RUN_COUNT) {
-				double cycles;
-
-				/** Each benchmark runs internally
-				 *  TEST_REPEAT_COUNT times. */
-				cycles = ((double)tot_cycles) /
-					 (TEST_SIZE_RUN_COUNT *
-					  TEST_REPEAT_COUNT);
-				results[j][i] = cycles;
-
-				printf("odp_%-26s: %8.1f\n", desc, cycles);
-
-				j++;
-				k = 1;
-				tot_cycles = 0;
-			}
-		}
+		bench_run(suite);
 	}
-	printf("\n%-30s", "Benchmark / packet_size [B]");
-	for (i = 0; i < num_sizes; i++) {
-		if (i == 0)
-			printf("      WARM UP  ");
-		else
-			printf("%8.1d  ", test_packet_len[i]);
-	}
+
+	printf("\n%-35s", "Benchmark / packet_size [B]");
+	for (i = 0; i < num_sizes; i++)
+		printf("%8.1d  ", test_packet_len[i]);
+
 	printf("\n---------------------------------");
 	for (i = 0; i < num_sizes; i++)
 		printf("----------");
 
-	for (i = 0; i < gbl_args->num_bench; i++) {
-		printf("\n[%02d] odp_%-26s", i + 1, args->bench[i].desc != NULL ?
-		       args->bench[i].desc : args->bench[i].name);
+	for (i = 0; i < suite->num_bench; i++) {
+		printf("\n[%02d] odp_%-26s", i + 1, suite->bench[i].desc != NULL ?
+		       suite->bench[i].desc : suite->bench[i].name);
 
-		for (j = 0; j < num_sizes; j++)
-			printf("%8.1f  ", results[i][j]);
+		for (int j = 0; j < num_sizes; j++)
+			printf("%8.1f  ", results[j][i]);
 	}
 	printf("\n\n");
 	return 0;
@@ -1466,7 +1344,7 @@ static int packet_parse_multi(void)
 }
 
 /**
- * Prinf usage information
+ * Print usage information
  */
 static void usage(char *progname)
 {
@@ -1480,8 +1358,10 @@ static void usage(char *progname)
 	       "  -b, --burst <num>       Test packet burst size.\n"
 	       "  -c, --cache_size <num>  Pool cache size.\n"
 	       "  -i, --index <idx>       Benchmark index to run indefinitely.\n"
+	       "  -r, --rounds <num>      Run each test case 'num' times (default %u).\n"
+	       "  -t, --time <opt>        Time measurement. 0: measure CPU cycles (default), 1: measure time\n"
 	       "  -h, --help              Display help and exit.\n\n"
-	       "\n", NO_PATH(progname), NO_PATH(progname));
+	       "\n", NO_PATH(progname), NO_PATH(progname), TEST_ROUNDS);
 }
 
 /**
@@ -1498,16 +1378,20 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 	static const struct option longopts[] = {
 		{"burst", required_argument, NULL, 'b'},
 		{"cache_size", required_argument, NULL, 'c'},
-		{"help", no_argument, NULL, 'h'},
 		{"index", required_argument, NULL, 'i'},
+		{"rounds", required_argument, NULL, 'r'},
+		{"time", required_argument, NULL, 't'},
+		{"help", no_argument, NULL, 'h'},
 		{NULL, 0, NULL, 0}
 	};
 
-	static const char *shortopts =  "c:b:i:h";
+	static const char *shortopts =  "c:b:i:r:t:h";
 
 	appl_args->bench_idx = 0; /* Run all benchmarks */
 	appl_args->burst_size = TEST_DEF_BURST;
 	appl_args->cache_size = -1;
+	appl_args->rounds = TEST_ROUNDS;
+	appl_args->time = 0;
 
 	while (1) {
 		opt = getopt_long(argc, argv, shortopts, longopts, &long_index);
@@ -1522,21 +1406,33 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 		case 'b':
 			appl_args->burst_size = atoi(optarg);
 			break;
+		case 'i':
+			appl_args->bench_idx = atoi(optarg);
+			break;
+		case 'r':
+			appl_args->rounds = atoi(optarg);
+			break;
+		case 't':
+			appl_args->time = atoi(optarg);
+			break;
 		case 'h':
 			usage(argv[0]);
 			exit(EXIT_SUCCESS);
 			break;
-		case 'i':
-			appl_args->bench_idx = atoi(optarg);
-			break;
 		default:
-			break;
+			usage(argv[0]);
+			exit(EXIT_FAILURE);
 		}
 	}
 
 	if (appl_args->burst_size < 1 ||
 	    appl_args->burst_size > TEST_MAX_BURST) {
 		printf("Invalid burst size (max %d)\n", TEST_MAX_BURST);
+		exit(EXIT_FAILURE);
+	}
+
+	if (appl_args->rounds < 1) {
+		printf("Invalid number test rounds: %d\n", appl_args->rounds);
 		exit(EXIT_FAILURE);
 	}
 
@@ -1669,7 +1565,7 @@ int main(int argc, char *argv[])
 	odp_pool_param_t params;
 	odp_instance_t instance;
 	odp_init_t init_param;
-	uint32_t pkt_num;
+	uint32_t pkt_num, seg_len;
 	uint8_t ret;
 
 	/* Let helper collect its own arguments (e.g. --odph_proc) */
@@ -1711,13 +1607,17 @@ int main(int argc, char *argv[])
 	}
 
 	memset(gbl_args, 0, sizeof(args_t));
-	odp_atomic_init_u32(&gbl_args->exit_thread, 0);
-
-	gbl_args->bench = test_suite;
-	gbl_args->num_bench = sizeof(test_suite) / sizeof(test_suite[0]);
 
 	/* Parse and store the application arguments */
 	parse_args(argc, argv, &gbl_args->appl);
+
+	bench_suite_init(&gbl_args->suite);
+	gbl_args->suite.bench = test_suite;
+	gbl_args->suite.num_bench = ODPH_ARRAY_SIZE(test_suite);
+	gbl_args->suite.indef_idx = gbl_args->appl.bench_idx;
+	gbl_args->suite.rounds = gbl_args->appl.rounds;
+	gbl_args->suite.repeat_count = TEST_REPEAT_COUNT;
+	gbl_args->suite.measure_time = !!gbl_args->appl.time;
 
 	/* Print both system and application information */
 	print_info(NO_PATH(argv[0]), &gbl_args->appl);
@@ -1749,10 +1649,6 @@ int main(int argc, char *argv[])
 		   capa.pkt.max_len < 2 * TEST_MAX_PKT_SIZE) {
 		ODPH_ERR("Error: packet length not supported.\n");
 		exit(EXIT_FAILURE);
-	} else if (capa.pkt.max_seg_len &&
-		   capa.pkt.max_seg_len < PKT_POOL_SEG_LEN) {
-		ODPH_ERR("Error: segment length not supported.\n");
-		exit(EXIT_FAILURE);
 	} else if (capa.pkt.max_uarea_size &&
 		   capa.pkt.max_uarea_size < PKT_POOL_UAREA_SIZE) {
 		ODPH_ERR("Error: user area size not supported.\n");
@@ -1763,9 +1659,16 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 
+	seg_len = TEST_MAX_PKT_SIZE;
+	if (capa.pkt.max_seg_len && capa.pkt.max_seg_len < seg_len) {
+		seg_len = capa.pkt.max_seg_len;
+		printf("\nWarn: allocated packets may be segmented (min seg_len=%" PRIu32 ")\n\n",
+		       seg_len);
+	}
+
 	/* Create packet pool */
 	odp_pool_param_init(&params);
-	params.pkt.seg_len = PKT_POOL_SEG_LEN;
+	params.pkt.seg_len = seg_len;
 	/* Using packet length as twice the TEST_MAX_PKT_SIZE as some
 	 * test cases (packet_ref_pkt) might allocate a bigger
 	 * packet than TEST_MAX_PKT_SIZE.
@@ -1784,14 +1687,16 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 
-	printf("CPU:             %i\n", odp_cpumask_first(&cpumask));
-	printf("CPU mask:        %s\n", cpumaskstr);
-	printf("Burst size:      %d\n", gbl_args->appl.burst_size);
-	printf("Bench repeat:    %d\n", TEST_REPEAT_COUNT);
+	printf("CPU:               %i\n", odp_cpumask_first(&cpumask));
+	printf("CPU mask:          %s\n", cpumaskstr);
+	printf("Burst size:        %d\n", gbl_args->appl.burst_size);
+	printf("Bench repeat:      %d\n", TEST_REPEAT_COUNT);
+	printf("Measurement unit:  %s\n", gbl_args->appl.time ? "nsec" : "CPU cycles");
+	printf("Test rounds:       %u\n", gbl_args->appl.rounds);
 	if (gbl_args->appl.cache_size < 0)
-		printf("Pool cache size: default\n");
+		printf("Pool cache size:   default\n");
 	else
-		printf("Pool cache size: %d\n", gbl_args->appl.cache_size);
+		printf("Pool cache size:   %d\n", gbl_args->appl.cache_size);
 
 	odp_pool_print(gbl_args->pool);
 
@@ -1821,7 +1726,7 @@ int main(int argc, char *argv[])
 
 	odph_thread_join(&worker_thread, 1);
 
-	ret = gbl_args->bench_failed;
+	ret = gbl_args->suite.retval;
 
 	if (odp_pool_destroy(gbl_args->pool)) {
 		ODPH_ERR("Error: pool destroy\n");

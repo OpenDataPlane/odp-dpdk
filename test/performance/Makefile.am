@@ -6,6 +6,7 @@ EXECUTABLES = odp_atomic_perf \
 	      odp_bench_buffer \
 	      odp_bench_misc \
 	      odp_bench_packet \
+	      odp_bench_pktio_sp \
 	      odp_bench_timer \
 	      odp_crc \
 	      odp_lock_perf \
@@ -13,10 +14,13 @@ EXECUTABLES = odp_atomic_perf \
 	      odp_pktio_perf \
 	      odp_pool_perf \
 	      odp_queue_perf \
-	      odp_random
+	      odp_stash_perf \
+	      odp_random \
+	      odp_stress
 
 COMPILE_ONLY = odp_cpu_bench \
 	       odp_crypto \
+	       odp_dmafwd \
 	       odp_dma_perf \
 	       odp_ipsec \
 	       odp_l2fwd \
@@ -26,7 +30,6 @@ COMPILE_ONLY = odp_cpu_bench \
 	       odp_sched_perf \
 	       odp_sched_pktio \
 	       odp_scheduling \
-	       odp_stress \
 	       odp_timer_perf
 
 if LIBCONFIG
@@ -46,7 +49,8 @@ TESTSCRIPTS = odp_cpu_bench_run.sh \
 	      odp_timer_perf_run.sh
 
 if ODP_PKTIO_PCAP
-TESTSCRIPTS += odp_pktio_ordered_run.sh
+TESTSCRIPTS += odp_dmafwd_run.sh \
+	       odp_pktio_ordered_run.sh
 endif
 
 TEST_EXTENSIONS = .sh
@@ -58,13 +62,15 @@ endif
 bin_PROGRAMS = $(EXECUTABLES) $(COMPILE_ONLY)
 
 odp_atomic_perf_SOURCES = odp_atomic_perf.c
-odp_bench_buffer_SOURCES = odp_bench_buffer.c
-odp_bench_misc_SOURCES = odp_bench_misc.c
-odp_bench_packet_SOURCES = odp_bench_packet.c
-odp_bench_timer_SOURCES = odp_bench_timer.c
+odp_bench_buffer_SOURCES = odp_bench_buffer.c bench_common.c bench_common.h
+odp_bench_misc_SOURCES = odp_bench_misc.c bench_common.c bench_common.h
+odp_bench_packet_SOURCES = odp_bench_packet.c bench_common.c bench_common.h
+odp_bench_pktio_sp_SOURCES = odp_bench_pktio_sp.c bench_common.c bench_common.h
+odp_bench_timer_SOURCES = odp_bench_timer.c bench_common.c bench_common.h
 odp_cpu_bench_SOURCES = odp_cpu_bench.c
 odp_crc_SOURCES = odp_crc.c
 odp_crypto_SOURCES = odp_crypto.c
+odp_dmafwd_SOURCES = odp_dmafwd.c
 odp_dma_perf_SOURCES = odp_dma_perf.c
 odp_ipsec_SOURCES = odp_ipsec.c
 odp_lock_perf_SOURCES = odp_lock_perf.c
