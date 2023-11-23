@@ -308,6 +308,19 @@ static int dpdk_maxlen_set(pktio_entry_t *pktio_entry, uint32_t maxlen_input,
 	return ret;
 }
 
+static int get_eth_overhead(const struct rte_eth_dev_info *dev_info)
+{
+	uint32_t eth_overhead;
+
+	if (dev_info->max_mtu != UINT16_MAX &&
+	    dev_info->max_rx_pktlen > dev_info->max_mtu)
+		eth_overhead = dev_info->max_rx_pktlen - dev_info->max_mtu;
+	else
+		eth_overhead = RTE_ETHER_HDR_LEN + RTE_ETHER_CRC_LEN;
+
+	return eth_overhead;
+}
+
 static int dpdk_setup_eth_dev(pktio_entry_t *pktio_entry, const struct rte_eth_dev_info *dev_info)
 {
 	int ret;
@@ -371,7 +384,7 @@ static int dpdk_setup_eth_dev(pktio_entry_t *pktio_entry, const struct rte_eth_d
 	eth_conf.rxmode.mtu =
 #endif
 		rte_pktmbuf_data_room_size(pool->rte_mempool) -
-		2 * 4 - RTE_PKTMBUF_HEADROOM;
+		get_eth_overhead(dev_info) - RTE_PKTMBUF_HEADROOM;
 
 	ret = rte_eth_dev_configure(pkt_dpdk->port_id,
 				    pktio_entry->num_in_queue,
