@@ -49,14 +49,14 @@ AS_IF([test "x$DPDK_SHARED" = "xyes"], [dnl
       # static linking flags will need -ldpdk
       DPDK_LIBS_LT="$DPDK_LDFLAGS $DPDK_LIB $DPDK_LIBS"
     fi
-    DPDK_LIBS="-Wl,--no-as-needed,-ldpdk,--as-needed,`echo $DPDK_LIBS | sed -e 's/ /,/g'`"
+    DPDK_LIBS="-Wl,--no-as-needed,-ldpdk,--as-needed,`echo $DPDK_LIBS | sed -e 's/ /,/g' -e 's/,*$/,/'`"
     DPDK_LIBS="$DPDK_LDFLAGS $DPDK_RPATH $DPDK_LIBS"
     # link libodp-linux with -ldpdk
     DPDK_LIBS_LIBODP="$DPDK_LIBS"
 ], [dnl
     # build long list of libraries for applications, which should not be
     # rearranged by libtool
-    DPDK_LIBS_LT="`echo $DPDK_LIBS | sed -e 's/^/-Wc,/' -e 's/ /,/g'`"
+    DPDK_LIBS_LT="`echo $DPDK_LIBS | sed -e 's/^/-Wc,/' -e 's/ /,/g' -e 's/,*$/,/'`"
     DPDK_LIBS_LT="$DPDK_LDFLAGS $DPDK_LIB $DPDK_LIBS_LT $DPDK_LIBS"
     # static linking flags follow the suite
     DPDK_LIBS="$DPDK_LDFLAGS $DPDK_LIB $DPDK_LIBS"
