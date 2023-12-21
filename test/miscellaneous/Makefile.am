@@ -8,10 +8,7 @@ endif
 odp_api_from_cpp_SOURCES = odp_api_from_cpp.cpp
 
 noinst_PROGRAMS = odp_api_headers
-odp_api_headers_CFLAGS = $(AM_CFLAGS)
-if ODP_ABI_COMPAT
-odp_api_headers_CFLAGS += -Wconversion
-endif
+odp_api_headers_CFLAGS = $(AM_CFLAGS) -Wconversion
 odp_api_headers_SOURCES = odp_api_headers.c
 
 PKGCONFIG = PKG_CONFIG_PATH=$(libdir)/pkgconfig:$$PKG_CONFIG_PATH pkg-config --cflags --libs
