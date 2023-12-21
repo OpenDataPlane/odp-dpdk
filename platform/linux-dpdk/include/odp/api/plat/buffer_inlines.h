@@ -115,6 +115,12 @@ _ODP_INLINE void odp_buffer_free_multi(const odp_buffer_t buf[], int num)
 	mp_pending = mbuf_tbl[0]->pool;
 	num_pending = 1;
 
+/*
+ * num_pending is less than or equal to num, but GCC 13 is not able figure that out, so we have to
+ * ignore array-bounds warnings in the rte_mempool_put_bulk() calls.
+ */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Warray-bounds"
 	for (int i = 1; i < num; i++) {
 		struct rte_mbuf *mbuf = (struct rte_mbuf *)buf[i];
 
@@ -128,6 +134,7 @@ _ODP_INLINE void odp_buffer_free_multi(const odp_buffer_t buf[], int num)
 		}
 	}
 	rte_mempool_put_bulk(mp_pending, (void **)mbuf_tbl, num_pending);
+#pragma GCC diagnostic pop
 }
 
 _ODP_INLINE int odp_buffer_is_valid(odp_buffer_t buf)
