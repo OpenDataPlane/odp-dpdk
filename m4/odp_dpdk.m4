@@ -241,6 +241,10 @@ if test "x$use_pkg_config" = "xyes"; then
     if grep -q "librte_net_pcap" <<< "$DPDK_STATIC_LIBS"; then
         have_pmd_pcap=yes
     fi
+
+    # Include dpdk headers with -isystem instead of -I, to avoid a potentially
+    # large number of warnings.
+    DPDK_CFLAGS=$(echo $DPDK_CFLAGS | sed "s/-I/-isystem /")
 fi
 ])
 
