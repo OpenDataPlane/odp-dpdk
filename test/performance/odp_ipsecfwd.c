@@ -507,7 +507,7 @@ static inline const pktio_t *lookup_and_apply(odp_packet_t pkt, odph_table_t fwd
 	const uint32_t l3_off = odp_packet_l3_offset(pkt);
 	odph_ipv4hdr_t ipv4;
 	uint32_t dst_ip, src_ip;
-	fwd_entry_t *fwd;
+	fwd_entry_t *fwd = NULL;
 	odph_ethhdr_t eth;
 
 	if (odp_packet_copy_to_mem(pkt, l3_off, ODPH_IPV4HDR_LEN, &ipv4) < 0)
