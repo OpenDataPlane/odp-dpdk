@@ -67,7 +67,7 @@ typedef struct {
 	odp_spinlock_t init_lock;
 	/** Per thread state */
 	sched_scalable_thread_state_t thread_state[MAXTHREADS];
-	uint16_t poll_count[ODP_CONFIG_PKTIO_ENTRIES];
+	uint16_t poll_count[CONFIG_PKTIO_ENTRIES];
 	/* Scheduler interface config options (not used in fast path) */
 	schedule_config_t config_if;
 } sched_global_t;
@@ -713,7 +713,7 @@ static void pktio_start(int pktio_idx,
 	queue_entry_t *qentry;
 	sched_elem_t *elem;
 
-	_ODP_ASSERT(pktio_idx < ODP_CONFIG_PKTIO_ENTRIES);
+	_ODP_ASSERT(pktio_idx < CONFIG_PKTIO_ENTRIES);
 	for (i = 0; i < num_in_queue; i++) {
 		rxq = in_queue_idx[i];
 		_ODP_ASSERT(rxq < ODP_PKTIN_MAX_QUEUES);
@@ -1221,7 +1221,6 @@ static int schedule_multi(odp_queue_t *from, uint64_t wait, odp_event_t ev[],
 	sched_scalable_thread_state_t *ts;
 	int n;
 	odp_time_t start;
-	odp_time_t delta;
 	odp_time_t deadline;
 
 	ts = _odp_sched_ts;
@@ -1262,8 +1261,7 @@ static int schedule_multi(odp_queue_t *from, uint64_t wait, odp_event_t ev[],
 	if (odp_likely(n > 0))
 		return n;
 
-	delta = odp_time_local_from_ns(wait);
-	deadline = odp_time_sum(start, delta);
+	deadline = odp_time_add_ns(start, wait);
 
 	while (odp_time_cmp(deadline, odp_time_local()) > 0) {
 		n = _schedule(from, ev, num);
@@ -1281,7 +1279,6 @@ static odp_event_t schedule(odp_queue_t *from, uint64_t wait)
 	sched_scalable_thread_state_t *ts;
 	int n;
 	odp_time_t start;
-	odp_time_t delta;
 	odp_time_t deadline;
 
 	ts = _odp_sched_ts;
@@ -1324,8 +1321,7 @@ static odp_event_t schedule(odp_queue_t *from, uint64_t wait)
 	if (odp_likely(n > 0))
 		return ev;
 
-	delta = odp_time_local_from_ns(wait);
-	deadline = odp_time_sum(start, delta);
+	deadline = odp_time_add_ns(start, wait);
 
 	while (odp_time_cmp(deadline, odp_time_local()) > 0) {
 		n = _schedule(from, &ev, num);

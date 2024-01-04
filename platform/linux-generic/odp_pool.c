@@ -61,9 +61,12 @@ ODP_STATIC_ASSERT(CONFIG_PACKET_SEG_LEN_MIN >= 256,
 ODP_STATIC_ASSERT(CONFIG_PACKET_SEG_SIZE < 0xffff,
 		  "Segment size must be less than 64k (16 bit offsets)");
 
+ODP_STATIC_ASSERT(CONFIG_INTERNAL_POOLS < CONFIG_POOLS,
+		  "Internal pool count needs to be less than total configured pool count");
+
 /* Thread local variables */
 typedef struct pool_local_t {
-	pool_cache_t *cache[ODP_CONFIG_POOLS];
+	pool_cache_t *cache[CONFIG_POOLS];
 	int thr_id;
 
 } pool_local_t;
@@ -145,11 +148,14 @@ static inline int cache_available(pool_t *pool, odp_pool_stats_t *stats)
 	uint64_t cached = 0;
 	const uint16_t first = stats->thread.first;
 	const uint16_t last = stats->thread.last;
+	const odp_bool_t cache_available = pool->params.stats.bit.cache_available;
 	const odp_bool_t per_thread = pool->params.stats.bit.thread_cache_available;
+	const int max_threads = odp_thread_count_max();
 	uint16_t out_idx = 0;
+	int i, idx_limit;
 
 	if (per_thread) {
-		if (first > last || last >= odp_thread_count_max()) {
+		if (first > last || last >= max_threads) {
 			_ODP_ERR("Bad thread ids: first=%" PRIu16 " last=%" PRIu16 "\n",
 				 first, last);
 			return -1;
@@ -161,7 +167,15 @@ static inline int cache_available(pool_t *pool, odp_pool_stats_t *stats)
 		}
 	}
 
-	for (int i = 0; i < ODP_THREAD_COUNT_MAX; i++) {
+	if (cache_available) {
+		i = 0;
+		idx_limit = max_threads;
+	} else {
+		i = first;
+		idx_limit = last + 1;
+	}
+
+	for (; i < idx_limit; i++) {
 		uint32_t cur = odp_atomic_load_u32(&pool->local_cache[i].cache_num);
 
 		if (per_thread && i >= first && i <= last)
@@ -170,7 +184,7 @@ static inline int cache_available(pool_t *pool, odp_pool_stats_t *stats)
 		cached += cur;
 	}
 
-	if (pool->params.stats.bit.cache_available)
+	if (cache_available)
 		stats->cache_available = cached;
 
 	return 0;
@@ -179,8 +193,9 @@ static inline int cache_available(pool_t *pool, odp_pool_stats_t *stats)
 static inline uint64_t cache_total_available(pool_t *pool)
 {
 	uint64_t cached = 0;
+	const int max_threads = odp_thread_count_max();
 
-	for (int i = 0; i < ODP_THREAD_COUNT_MAX; i++)
+	for (int i = 0; i < max_threads; i++)
 		cached += odp_atomic_load_u32(&pool->local_cache[i].cache_num);
 
 	return cached;
@@ -328,7 +343,7 @@ int _odp_pool_init_global(void)
 		return -1;
 	}
 
-	for (i = 0; i < ODP_CONFIG_POOLS; i++) {
+	for (i = 0; i < CONFIG_POOLS; i++) {
 		pool_t *pool = _odp_pool_entry_from_idx(i);
 
 		LOCK_INIT(&pool->lock);
@@ -357,7 +372,7 @@ int _odp_pool_term_global(void)
 	if (_odp_pool_glb == NULL)
 		return 0;
 
-	for (i = 0; i < ODP_CONFIG_POOLS; i++) {
+	for (i = 0; i < CONFIG_POOLS; i++) {
 		pool = _odp_pool_entry_from_idx(i);
 
 		LOCK(&pool->lock);
@@ -385,7 +400,7 @@ int _odp_pool_init_local(void)
 
 	memset(&local, 0, sizeof(pool_local_t));
 
-	for (i = 0; i < ODP_CONFIG_POOLS; i++) {
+	for (i = 0; i < CONFIG_POOLS; i++) {
 		pool           = _odp_pool_entry_from_idx(i);
 		local.cache[i] = &pool->local_cache[thr_id];
 		cache_init(local.cache[i]);
@@ -399,7 +414,7 @@ int _odp_pool_term_local(void)
 {
 	int i;
 
-	for (i = 0; i < ODP_CONFIG_POOLS; i++) {
+	for (i = 0; i < CONFIG_POOLS; i++) {
 		pool_t *pool = _odp_pool_entry_from_idx(i);
 
 		cache_flush(local.cache[i], pool);
@@ -416,7 +431,7 @@ static pool_t *reserve_pool(uint32_t shmflags, uint8_t pool_ext, uint32_t num)
 	pool_t *pool;
 	char ring_name[ODP_POOL_NAME_LEN];
 
-	for (i = 0; i < ODP_CONFIG_POOLS; i++) {
+	for (i = 0; i < CONFIG_POOLS; i++) {
 		pool = _odp_pool_entry_from_idx(i);
 
 		LOCK(&pool->lock);
@@ -756,7 +771,7 @@ odp_pool_t _odp_pool_create(const char *name, const odp_pool_param_t *params,
 	}
 
 	/* Validate requested buffer alignment */
-	if (align > ODP_CONFIG_BUFFER_ALIGN_MAX ||
+	if (align > CONFIG_BUFFER_ALIGN_MAX ||
 	    align != _ODP_ROUNDDOWN_POWER2(align, align)) {
 		_ODP_ERR("Bad align requirement\n");
 		return ODP_POOL_INVALID;
@@ -1166,6 +1181,7 @@ odp_pool_t odp_pool_create(const char *name, const odp_pool_param_t *params)
 int odp_pool_destroy(odp_pool_t pool_hdl)
 {
 	pool_t *pool = _odp_pool_entry(pool_hdl);
+	const int max_threads = odp_thread_count_max();
 	int i;
 
 	if (pool == NULL)
@@ -1183,7 +1199,7 @@ int odp_pool_destroy(odp_pool_t pool_hdl)
 		pool->mem_src_ops->unbind(pool->mem_src_data);
 
 	/* Make sure local caches are empty */
-	for (i = 0; i < ODP_THREAD_COUNT_MAX; i++)
+	for (i = 0; i < max_threads; i++)
 		cache_flush(&pool->local_cache[i], pool);
 
 	if (pool->pool_ext == 0)
@@ -1205,7 +1221,7 @@ odp_pool_t odp_pool_lookup(const char *name)
 	uint32_t i;
 	pool_t *pool;
 
-	for (i = 0; i < ODP_CONFIG_POOLS; i++) {
+	for (i = 0; i < CONFIG_POOLS; i++) {
 		pool = _odp_pool_entry_from_idx(i);
 
 		LOCK(&pool->lock);
@@ -1463,8 +1479,8 @@ int odp_pool_capability(odp_pool_capability_t *capa)
 {
 	odp_pool_stats_opt_t supported_stats;
 	uint32_t max_seg_len = CONFIG_PACKET_MAX_SEG_LEN;
-	/* Reserve one for internal usage */
-	int max_pools = ODP_CONFIG_POOLS - 1;
+	/* Reserve pools for internal usage */
+	unsigned int max_pools = CONFIG_POOLS - CONFIG_INTERNAL_POOLS;
 
 	memset(capa, 0, sizeof(odp_pool_capability_t));
 
@@ -1483,7 +1499,7 @@ int odp_pool_capability(odp_pool_capability_t *capa)
 
 	/* Buffer pools */
 	capa->buf.max_pools = max_pools;
-	capa->buf.max_align = ODP_CONFIG_BUFFER_ALIGN_MAX;
+	capa->buf.max_align = CONFIG_BUFFER_ALIGN_MAX;
 	capa->buf.max_size  = MAX_SIZE;
 	capa->buf.max_num   = CONFIG_POOL_MAX_NUM;
 	capa->buf.max_uarea_size = MAX_UAREA_SIZE;
@@ -1614,7 +1630,7 @@ void odp_pool_print_all(void)
 	_ODP_PRINT("-----------------\n");
 	_ODP_PRINT(" idx %-*s type   free    tot  cache  buf_len  ext\n", col_width, "name");
 
-	for (i = 0; i < ODP_CONFIG_POOLS; i++) {
+	for (i = 0; i < CONFIG_POOLS; i++) {
 		pool_t *pool = _odp_pool_entry_from_idx(i);
 
 		LOCK(&pool->lock);
@@ -1666,13 +1682,12 @@ uint64_t odp_pool_to_u64(odp_pool_t hdl)
 
 unsigned int odp_pool_max_index(void)
 {
-	return ODP_CONFIG_POOLS - 1;
+	return CONFIG_POOLS - 1;
 }
 
 int odp_pool_stats(odp_pool_t pool_hdl, odp_pool_stats_t *stats)
 {
 	pool_t *pool;
-	uint16_t first, last;
 
 	if (odp_unlikely(pool_hdl == ODP_POOL_INVALID)) {
 		_ODP_ERR("Invalid pool handle\n");
@@ -1684,14 +1699,9 @@ int odp_pool_stats(odp_pool_t pool_hdl, odp_pool_stats_t *stats)
 	}
 
 	pool = _odp_pool_entry(pool_hdl);
-	first = stats->thread.first;
-	last = stats->thread.last;
 
-	memset(stats, 0, sizeof(odp_pool_stats_t));
-
-	/* Restore input parameters */
-	stats->thread.first = first;
-	stats->thread.last = last;
+	/* Zero everything else but per thread statistics */
+	memset(stats, 0, offsetof(odp_pool_stats_t, thread));
 
 	if (pool->params.stats.bit.available)
 		stats->available = ring_ptr_len(&pool->ring->hdr);
@@ -1800,7 +1810,7 @@ static pool_t *find_pool(_odp_event_hdr_t *event_hdr)
 	int i;
 	uint8_t *ptr = (uint8_t *)event_hdr;
 
-	for (i = 0; i < ODP_CONFIG_POOLS; i++) {
+	for (i = 0; i < CONFIG_POOLS; i++) {
 		pool_t *pool = _odp_pool_entry_from_idx(i);
 
 		if (pool->reserved == 0)
@@ -1877,7 +1887,7 @@ int odp_pool_ext_capability(odp_pool_type_t type, odp_pool_ext_capability_t *cap
 	memset(capa, 0, sizeof(odp_pool_ext_capability_t));
 
 	capa->type           = type;
-	capa->max_pools      = ODP_CONFIG_POOLS - 1;
+	capa->max_pools      = CONFIG_POOLS - CONFIG_INTERNAL_POOLS;
 	capa->min_cache_size = 0;
 	capa->max_cache_size = CONFIG_POOL_CACHE_MAX_SIZE;
 	capa->stats.all      = supported_stats.all;

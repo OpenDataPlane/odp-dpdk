@@ -20,9 +20,20 @@ extern "C" {
 #define CONFIG_NUM_CPU_IDS 256
 
 /*
+ * Maximum number of packet IO resources
+ */
+#define CONFIG_PKTIO_ENTRIES 64
+
+/*
+ * Pools reserved for internal usage, 1 for IPsec status events and one per packet
+ * I/O for TX completion
+ */
+#define CONFIG_INTERNAL_POOLS (1 + CONFIG_PKTIO_ENTRIES)
+
+/*
  * Maximum number of pools.
  */
-#define ODP_CONFIG_POOLS 32
+#define CONFIG_POOLS 128
 
 /*
  * Queues reserved for ODP internal use
@@ -69,17 +80,12 @@ extern "C" {
 #define CONFIG_MAX_STASHES 2048
 
 /*
- * Maximum number of packet IO resources
- */
-#define ODP_CONFIG_PKTIO_ENTRIES 64
-
-/*
  * Maximum buffer alignment
  *
  * This defines the maximum supported buffer alignment. Requests for values
  * above this will fail.
  */
-#define ODP_CONFIG_BUFFER_ALIGN_MAX (4 * 1024)
+#define CONFIG_BUFFER_ALIGN_MAX (4 * 1024)
 
 /*
  * Default packet headroom
@@ -138,7 +144,7 @@ extern "C" {
  * are reserved for per ODP module global data and one block per packet I/O is
  * reserved for TX completion usage.
  */
-#define CONFIG_INTERNAL_SHM_BLOCKS ((ODP_CONFIG_POOLS * 3) + 20 + ODP_CONFIG_PKTIO_ENTRIES)
+#define CONFIG_INTERNAL_SHM_BLOCKS ((CONFIG_POOLS * 3) + 20 + CONFIG_PKTIO_ENTRIES)
 
 /*
  * Maximum number of shared memory blocks.

@@ -39,7 +39,8 @@ static void print_usage(void)
 	       "  -s, --shm          Create a SHM and call odp_shm_print()\n"
 	       "  -p, --pool         Create various types of pools and call odp_pool_print()\n"
 	       "  -q, --queue        Create various types of queues and call odp_queue_print()\n"
-	       "  -i, --interface    Create packet IO interface (loop) and call odp_pktio_print()\n"
+	       "  -i, --interface    Create packet IO interface (loop), and call both odp_pktio_print()\n"
+	       "                     and odp_pktio_extra_stats_print()\n"
 	       "  -I, --ipsec        Call odp_ipsec_print()\n"
 	       "  -t, --timer        Call timer pool, timer and timeout print functions\n"
 	       "  -a, --stash        Create stash and call odp_stash_print()\n"
@@ -342,6 +343,9 @@ static int pktio_debug(void)
 	printf("\n");
 	odp_pktio_print(pktio);
 
+	printf("\n");
+	odp_pktio_extra_stats_print(pktio);
+
 	if (odp_pktio_close(pktio)) {
 		ODPH_ERR("Pktio close failed\n");
 		return -1;
@@ -380,6 +384,7 @@ static int timer_debug(void)
 	uint64_t tick;
 	uint64_t max_tmo = ODP_TIME_SEC_IN_NS;
 	uint64_t res     = 100 * ODP_TIME_MSEC_IN_NS;
+	int started = 0;
 
 	odp_pool_param_init(&pool_param);
 	pool_param.type = ODP_POOL_TIMEOUT;
@@ -430,7 +435,10 @@ static int timer_debug(void)
 		return -1;
 	}
 
-	odp_timer_pool_start();
+	if (odp_timer_pool_start_multi(&timer_pool, 1) != 1) {
+		ODPH_ERR("Timer pool start failed\n");
+		return -1;
+	}
 
 	odp_queue_param_init(&queue_param);
 	if (timer_capa.queue_type_sched)
@@ -458,16 +466,17 @@ static int timer_debug(void)
 	start_param.tick = tick;
 	start_param.tmo_ev = event;
 
-	if (odp_timer_start(timer, &start_param) != ODP_TIMER_SUCCESS)
+	if (odp_timer_start(timer, &start_param) == ODP_TIMER_SUCCESS)
+		started = 1;
+	else
 		ODPH_ERR("Timer start failed.\n");
 
 	printf("\n");
 	odp_timer_print(timer);
 
-	event = odp_timer_free(timer);
-
-	if (event == ODP_EVENT_INVALID) {
-		ODPH_ERR("Timer free failed.\n");
+	if (started && odp_timer_cancel(timer, &event) != ODP_TIMER_SUCCESS) {
+		ODPH_ERR("Timer cancel failed\n");
+		return -1;
 	} else {
 		timeout = odp_timeout_from_event(event);
 
@@ -475,6 +484,11 @@ static int timer_debug(void)
 		odp_timeout_print(timeout);
 
 		odp_timeout_free(timeout);
+	}
+
+	if (odp_timer_free(timer)) {
+		ODPH_ERR("Timer free failed\n");
+		return -1;
 	}
 
 	odp_timer_pool_destroy(timer_pool);

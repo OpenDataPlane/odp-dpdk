@@ -9,8 +9,6 @@
 #include "odp_classification_testsuites.h"
 #include "classification.h"
 
-#define PMR_SET_NUM	5
-
 /* Limit handle array allocation from stack to about 256kB */
 #define MAX_HANDLES     (32 * 1024)
 
@@ -56,9 +54,6 @@ static void cls_create_cos(void)
 	odp_cls_cos_param_init(&cls_param);
 	cls_param.pool = pool;
 	cls_param.queue = queue;
-#if ODP_DEPRECATED_API
-	cls_param.drop_policy = ODP_COS_DROP_POOL;
-#endif
 
 	cos = odp_cls_cos_create(NULL, &cls_param);
 	CU_ASSERT(odp_cos_to_u64(cos) != odp_cos_to_u64(ODP_COS_INVALID));
@@ -203,9 +198,6 @@ static void cls_destroy_cos(void)
 	odp_cls_cos_param_init(&cls_param);
 	cls_param.pool = pool;
 	cls_param.queue = queue;
-#if ODP_DEPRECATED_API
-	cls_param.drop_policy = ODP_COS_DROP_POOL;
-#endif
 
 	cos = odp_cls_cos_create(name, &cls_param);
 	CU_ASSERT_FATAL(cos != ODP_COS_INVALID);
@@ -253,9 +245,6 @@ static void cls_create_pmr_match(void)
 	odp_cls_cos_param_init(&cls_param);
 	cls_param.pool = pool;
 	cls_param.queue = queue;
-#if ODP_DEPRECATED_API
-	cls_param.drop_policy = ODP_COS_DROP_POOL;
-#endif
 
 	cos = odp_cls_cos_create("pmr_match", &cls_param);
 	CU_ASSERT(cos != ODP_COS_INVALID);
@@ -330,7 +319,7 @@ static void cls_max_pmr_from_default_action(int drop)
 
 	CU_ASSERT_FATAL(num_cos > 1);
 
-	num_pmr = num_cos - 1;
+	num_pmr = capa.max_pmr_per_cos;
 
 	odp_cos_t cos[num_cos];
 	odp_queue_t queue[num_cos];
@@ -388,8 +377,10 @@ static void cls_max_pmr_from_default_action(int drop)
 	for (i = 0; i < num_pmr; i++) {
 		pmr[i] = odp_cls_pmr_create(&pmr_param, 1, default_cos, cos[i + 1]);
 
-		if (pmr[i] == ODP_PMR_INVALID)
+		if (pmr[i] == ODP_PMR_INVALID) {
+			ODPH_ERR("odp_cls_pmr_create() failed %u / %u\n", i + 1, num_pmr);
 			break;
+		}
 
 		val++;
 		pmr_created++;
@@ -397,6 +388,8 @@ static void cls_max_pmr_from_default_action(int drop)
 
 	printf("\n    Number of CoS created: %u\n    Number of PMR created: %u\n", cos_created,
 	       pmr_created);
+
+	CU_ASSERT(pmr_created == num_pmr);
 
 	for (i = 0; i < pmr_created; i++)
 		CU_ASSERT(odp_cls_pmr_destroy(pmr[i]) == 0);
@@ -455,6 +448,8 @@ static void cls_create_pmr_multi(void)
 	CU_ASSERT_FATAL(num_cos > 1);
 
 	num_pmr = num_cos - 1;
+	if (num_pmr > capa.max_pmr)
+		num_pmr = capa.max_pmr;
 
 	odp_cos_t src_cos[num_cos];
 	odp_cos_t cos[num_cos];
@@ -561,9 +556,7 @@ static void cls_cos_set_queue(void)
 	odp_cls_cos_param_init(&cls_param);
 	cls_param.pool = pool;
 	cls_param.queue = queue;
-#if ODP_DEPRECATED_API
-	cls_param.drop_policy = ODP_COS_DROP_POOL;
-#endif
+
 	cos_queue = odp_cls_cos_create(cosname, &cls_param);
 	CU_ASSERT_FATAL(cos_queue != ODP_COS_INVALID);
 
@@ -605,9 +598,7 @@ static void cls_cos_set_pool(void)
 	odp_cls_cos_param_init(&cls_param);
 	cls_param.pool = pool;
 	cls_param.queue = queue;
-#if ODP_DEPRECATED_API
-	cls_param.drop_policy = ODP_COS_DROP_POOL;
-#endif
+
 	cos = odp_cls_cos_create(cosname, &cls_param);
 	CU_ASSERT_FATAL(cos != ODP_COS_INVALID);
 
@@ -625,50 +616,11 @@ static void cls_cos_set_pool(void)
 	odp_pool_destroy(cos_pool);
 }
 
-#if ODP_DEPRECATED_API
-
-static void cls_cos_set_drop(void)
-{
-	int retval;
-	char cosname[ODP_COS_NAME_LEN];
-	odp_cos_t cos_drop;
-	odp_queue_t queue;
-	odp_pool_t pool;
-	odp_cls_cos_param_t cls_param;
-
-	pool = pool_create("cls_basic_pool");
-	CU_ASSERT_FATAL(pool != ODP_POOL_INVALID);
-
-	queue = queue_create("cls_basic_queue", true);
-	CU_ASSERT_FATAL(queue != ODP_QUEUE_INVALID);
-
-	sprintf(cosname, "CoSDrop");
-	odp_cls_cos_param_init(&cls_param);
-	cls_param.pool = pool;
-	cls_param.queue = queue;
-	cls_param.drop_policy = ODP_COS_DROP_POOL;
-	cos_drop = odp_cls_cos_create(cosname, &cls_param);
-	CU_ASSERT_FATAL(cos_drop != ODP_COS_INVALID);
-
-	retval = odp_cos_drop_set(cos_drop, ODP_COS_DROP_POOL);
-	CU_ASSERT(retval == 0);
-	CU_ASSERT(ODP_COS_DROP_POOL == odp_cos_drop(cos_drop));
-
-	retval = odp_cos_drop_set(cos_drop, ODP_COS_DROP_NEVER);
-	CU_ASSERT(retval == 0);
-	CU_ASSERT(ODP_COS_DROP_NEVER == odp_cos_drop(cos_drop));
-	odp_cos_destroy(cos_drop);
-	odp_pool_destroy(pool);
-	odp_queue_destroy(queue);
-}
-
-#endif
-
 static void cls_pmr_composite_create(void)
 {
+	odp_cls_capability_t capa;
 	odp_pmr_t pmr_composite;
 	int retval;
-	odp_pmr_param_t pmr_terms[PMR_SET_NUM];
 	odp_cos_t default_cos;
 	odp_cos_t cos;
 	odp_queue_t default_queue;
@@ -678,9 +630,11 @@ static void cls_pmr_composite_create(void)
 	odp_pool_t pkt_pool;
 	odp_cls_cos_param_t cls_param;
 	odp_pktio_t pktio;
+	uint32_t max_terms_per_pmr;
 	uint16_t val = 1024;
 	uint16_t mask = 0xffff;
-	int i;
+
+	CU_ASSERT_FATAL(odp_cls_capability(&capa) == 0);
 
 	pkt_pool = pool_create("pkt_pool");
 	CU_ASSERT_FATAL(pkt_pool != ODP_POOL_INVALID);
@@ -700,14 +654,14 @@ static void cls_pmr_composite_create(void)
 	odp_cls_cos_param_init(&cls_param);
 	cls_param.pool = pool;
 	cls_param.queue = queue;
-#if ODP_DEPRECATED_API
-	cls_param.drop_policy = ODP_COS_DROP_POOL;
-#endif
 
 	cos = odp_cls_cos_create("pmr_match", &cls_param);
 	CU_ASSERT(cos != ODP_COS_INVALID);
 
-	for (i = 0; i < PMR_SET_NUM; i++) {
+	max_terms_per_pmr = capa.max_terms_per_pmr;
+	odp_pmr_param_t pmr_terms[max_terms_per_pmr];
+
+	for (uint32_t i = 0; i < max_terms_per_pmr; i++) {
 		odp_cls_pmr_param_init(&pmr_terms[i]);
 		pmr_terms[i].term = ODP_PMR_TCP_DPORT;
 		pmr_terms[i].match.value = &val;
@@ -716,8 +670,7 @@ static void cls_pmr_composite_create(void)
 		pmr_terms[i].val_sz = sizeof(val);
 	}
 
-	pmr_composite = odp_cls_pmr_create(pmr_terms, PMR_SET_NUM,
-					   default_cos, cos);
+	pmr_composite = odp_cls_pmr_create(pmr_terms, max_terms_per_pmr, default_cos, cos);
 	CU_ASSERT(odp_pmr_to_u64(pmr_composite) !=
 		  odp_pmr_to_u64(ODP_PMR_INVALID));
 
@@ -793,9 +746,6 @@ odp_testinfo_t classification_suite_basic[] = {
 	ODP_TEST_INFO(cls_max_pmr_from_default_drop),
 	ODP_TEST_INFO(cls_max_pmr_from_default_enqueue),
 	ODP_TEST_INFO(cls_cos_set_queue),
-#if ODP_DEPRECATED_API
-	ODP_TEST_INFO(cls_cos_set_drop),
-#endif
 	ODP_TEST_INFO(cls_cos_set_pool),
 	ODP_TEST_INFO(cls_pmr_composite_create),
 	ODP_TEST_INFO_CONDITIONAL(cls_create_cos_with_hash_queues, check_capa_cos_hashing),
