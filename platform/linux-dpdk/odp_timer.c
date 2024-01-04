@@ -1271,7 +1271,7 @@ uint64_t odp_timeout_to_u64(odp_timeout_t tmo)
 	return (uint64_t)(uintptr_t)tmo;
 }
 
-int odp_timeout_fresh(odp_timeout_t tmo)
+int ODP_DEPRECATE(odp_timeout_fresh)(odp_timeout_t tmo)
 {
 	timer_entry_t *timer;
 	odp_timeout_hdr_t *timeout_hdr = timeout_to_hdr(tmo);
