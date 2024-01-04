@@ -918,30 +918,18 @@ odp_timer_t odp_timer_alloc(odp_timer_pool_t tp,
 	return (odp_timer_t)timer;
 }
 
-odp_event_t odp_timer_free(odp_timer_t timer_hdl)
+int odp_timer_free(odp_timer_t timer_hdl)
 {
-	odp_event_t ev;
 	timer_entry_t *timer = timer_from_hdl(timer_hdl);
 	timer_pool_t *timer_pool = timer->timer_pool;
 	uint32_t timer_idx = timer->timer_idx;
 
-retry:
 	odp_ticketlock_lock(&timer->lock);
 
-	if (timer->state == TICKING) {
-		_ODP_DBG("Freeing active timer.\n");
-
-		if (timer_global->ops.stop(&timer->rte_timer)) {
-			/* Another core runs timer callback function. */
-			odp_ticketlock_unlock(&timer->lock);
-			goto retry;
-		}
-
-		ev = timer->tmo_event;
-		timer->tmo_event = ODP_EVENT_INVALID;
-		timer->state = NOT_TICKING;
-	} else {
-		ev = ODP_EVENT_INVALID;
+	if (odp_unlikely(timer->state == TICKING)) {
+		odp_ticketlock_unlock(&timer->lock);
+		_ODP_ERR("Timer is active\n");
+		return -1;
 	}
 
 	/* Remove timer from queue */
@@ -958,7 +946,7 @@ retry:
 	ring_u32_enq(&timer_pool->free_timer.ring_hdr,
 		     timer_pool->free_timer.ring_mask, timer_idx);
 
-	return ev;
+	return 0;
 }
 
 static inline odp_timeout_hdr_t *timeout_to_hdr(odp_timeout_t tmo)
