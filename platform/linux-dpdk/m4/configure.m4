@@ -10,6 +10,7 @@ m4_include([platform/linux-dpdk/m4/odp_libconfig.m4])
 m4_include([platform/linux-dpdk/m4/odp_openssl.m4])
 m4_include([platform/linux-dpdk/m4/odp_pcapng.m4])
 m4_include([platform/linux-dpdk/m4/odp_scheduler.m4])
+m4_include([platform/linux-dpdk/m4/odp_wfe.m4])
 
 ODP_EVENT_VALIDATION
 ODP_PTHREAD
@@ -73,9 +74,10 @@ AS_VAR_APPEND([PLAT_CFG_TEXT], ["
 	event_validation:       ${enable_event_validation}
 	openssl:                ${with_openssl}
 	openssl_rand:           ${openssl_rand}
-	pcap:			${have_pmd_pcap}
-	pcapng:			${have_pcapng}
-	default_config_path:	${default_config_path}"])
+	pcap:                   ${have_pmd_pcap}
+	pcapng:                 ${have_pcapng}
+	wfe_locks:              ${use_wfe_locks}
+	default_config_path:    ${default_config_path}"])
 
 ODP_CHECK_CFLAG([-Wno-error=cast-align])
 
