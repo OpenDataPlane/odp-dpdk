@@ -1066,18 +1066,6 @@ retry:
 	return ODP_TIMER_SUCCESS;
 }
 
-int ODP_DEPRECATE(odp_timer_set_abs)(odp_timer_t timer_hdl, uint64_t abs_tick,
-				     odp_event_t *tmo_ev)
-{
-	return timer_set(timer_hdl, abs_tick, tmo_ev, 1);
-}
-
-int ODP_DEPRECATE(odp_timer_set_rel)(odp_timer_t timer_hdl, uint64_t rel_tick,
-				     odp_event_t *tmo_ev)
-{
-	return timer_set(timer_hdl, rel_tick, tmo_ev, 0);
-}
-
 int odp_timer_start(odp_timer_t timer, const odp_timer_start_t *start_param)
 {
 	odp_event_t tmo_ev = start_param->tmo_ev;
