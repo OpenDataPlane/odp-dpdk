@@ -814,13 +814,6 @@ uint64_t odp_timer_ns_to_tick(odp_timer_pool_t tp, uint64_t ns)
 	return ticks;
 }
 
-uint64_t odp_timer_current_tick(odp_timer_pool_t tp)
-{
-	(void)tp;
-
-	return rte_get_timer_cycles();
-}
-
 int odp_timer_sample_ticks(odp_timer_pool_t tp[], uint64_t tick[], uint64_t clk_count[], int num)
 {
 	uint64_t now;
