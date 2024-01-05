@@ -9,6 +9,7 @@
 
 #include <odp/api/event.h>
 #include <odp/api/hints.h>
+#include <odp/api/time_types.h>
 #include <odp/api/timer_types.h>
 
 #include <odp/api/plat/debug_inlines.h>
@@ -32,6 +33,7 @@
 	#define odp_timeout_from_event __odp_timeout_from_event
 	#define odp_timeout_from_event_multi __odp_timeout_from_event_multi
 	#define odp_timeout_to_event __odp_timeout_to_event
+	#define odp_timer_tick_to_ns __odp_timer_tick_to_ns
 #else
 	#define _ODP_INLINE
 #endif
@@ -80,6 +82,22 @@ _ODP_INLINE void odp_timeout_from_event_multi(odp_timeout_t tmo[], const odp_eve
 _ODP_INLINE odp_event_t odp_timeout_to_event(odp_timeout_t tmo)
 {
 	return (odp_event_t)tmo;
+}
+
+_ODP_INLINE uint64_t odp_timer_tick_to_ns(odp_timer_pool_t tp ODP_UNUSED, uint64_t ticks)
+{
+	uint64_t nsec;
+	uint64_t sec = 0;
+	const uint64_t freq_hz = _odp_timer_glob.freq_hz;
+
+	if (ticks >= freq_hz) {
+		sec   = ticks / freq_hz;
+		ticks = ticks - sec * freq_hz;
+	}
+
+	nsec = (ODP_TIME_SEC_IN_NS * ticks) / freq_hz;
+
+	return (sec * ODP_TIME_SEC_IN_NS) + nsec;
 }
 
 /** @endcond */
