@@ -1,5 +1,5 @@
 /* Copyright (c) 2018, Linaro Limited
- * Copyright (c) 2019-2023, Nokia
+ * Copyright (c) 2019-2024, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -748,6 +748,19 @@ odp_timer_pool_t odp_timer_pool_create(const char *name,
 void odp_timer_pool_start(void)
 {
 	/* Nothing to do */
+}
+
+int odp_timer_pool_start_multi(odp_timer_pool_t timer_pool[], int num)
+{
+	_ODP_ASSERT(timer_pool != NULL);
+	_ODP_ASSERT(num > 0);
+	if (ODP_DEBUG) {
+		for (int i = 0; i < num; i++)
+			_ODP_ASSERT(timer_pool[i] != ODP_TIMER_POOL_INVALID);
+	}
+
+	/* Nothing to do here, timer pools are started by the create call. */
+	return num;
 }
 
 void odp_timer_pool_destroy(odp_timer_pool_t tp)
