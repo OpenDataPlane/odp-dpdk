@@ -621,7 +621,7 @@ static inline uint16_t input_cached(odp_event_t out_ev[], unsigned int max_num,
 static inline int schedule_loop(odp_queue_t *out_queue, uint64_t wait,
 				odp_event_t out_ev[], unsigned int max_num)
 {
-	odp_time_t next, wtime;
+	odp_time_t next;
 	struct rte_event ev[max_num];
 	int first = 1;
 	uint16_t num_deq;
@@ -669,8 +669,7 @@ static inline int schedule_loop(odp_queue_t *out_queue, uint64_t wait,
 				return 0;
 
 			if (first) {
-				wtime = odp_time_local_from_ns(wait);
-				next = odp_time_sum(odp_time_local(), wtime);
+				next = odp_time_add_ns(odp_time_local(), wait);
 				first = 0;
 				continue;
 			}
