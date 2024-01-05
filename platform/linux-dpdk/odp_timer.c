@@ -198,6 +198,9 @@ _odp_timeout_inline_offset ODP_ALIGNED_CACHE = {
 	.uarea_addr = offsetof(odp_timeout_hdr_t, uarea_addr)
 };
 
+/* Global data for inline functions */
+_odp_timer_global_t _odp_timer_glob;
+
 #include <odp/visibility_end.h>
 
 static void timer_cb(struct rte_timer *rte_timer, void *arg ODP_UNUSED)
@@ -393,6 +396,13 @@ int _odp_timer_init_global(const odp_init_t *params)
 		timer_global->ops.stop = timer_stop;
 		timer_global->ops.manage = timer_manage;
 		timer_global->ops.reset = timer_reset;
+	}
+
+	_odp_timer_glob.freq_hz = rte_get_timer_hz();
+	if (_odp_timer_glob.freq_hz == 0) {
+		_ODP_ERR("Reading timer frequency failed\n");
+		odp_shm_free(shm);
+		return -1;
 	}
 
 	return 0;
@@ -777,23 +787,6 @@ void odp_timer_pool_destroy(odp_timer_pool_t tp)
 		odp_global_rw->inline_timers = false;
 
 	odp_ticketlock_unlock(&timer_global->lock);
-}
-
-uint64_t odp_timer_tick_to_ns(odp_timer_pool_t tp, uint64_t ticks)
-{
-	uint64_t nsec;
-	uint64_t freq_hz = rte_get_timer_hz();
-	uint64_t sec = 0;
-	(void)tp;
-
-	if (ticks >= freq_hz) {
-		sec   = ticks / freq_hz;
-		ticks = ticks - sec * freq_hz;
-	}
-
-	nsec = (SEC_IN_NS * ticks) / freq_hz;
-
-	return (sec * SEC_IN_NS) + nsec;
 }
 
 uint64_t odp_timer_ns_to_tick(odp_timer_pool_t tp, uint64_t ns)
