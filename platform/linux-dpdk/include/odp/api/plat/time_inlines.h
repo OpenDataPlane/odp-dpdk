@@ -1,5 +1,5 @@
 /* Copyright (c) 2018, Linaro Limited
- * Copyright (c) 2020-2023, Nokia
+ * Copyright (c) 2020-2024, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -21,8 +21,9 @@
 /** @cond _ODP_HIDE_FROM_DOXYGEN_ */
 
 typedef struct _odp_time_global_t {
-	uint64_t        start_cycles;
 	uint64_t        freq_hz;
+	uint64_t        start_cycles;
+	uint64_t        start_ns;
 
 } _odp_time_global_t;
 
@@ -32,7 +33,7 @@ static inline odp_time_t _odp_time_cur(void)
 {
 	odp_time_t time;
 
-	time.u64 = rte_get_timer_cycles() - _odp_time_glob.start_cycles;
+	time.u64 = rte_get_timer_cycles();
 
 	return time;
 }
@@ -42,7 +43,7 @@ static inline odp_time_t _odp_time_cur_strict(void)
 	odp_time_t time;
 
 	rte_mb();
-	time.u64 = rte_get_timer_cycles() - _odp_time_glob.start_cycles;
+	time.u64 = rte_get_timer_cycles();
 
 	return time;
 }
@@ -108,7 +109,7 @@ static inline odp_time_t _odp_time_from_ns(uint64_t ns)
 	#define odp_time_sum __odp_time_sum
 	#define odp_time_wait_ns __odp_time_wait_ns
 	#define odp_time_wait_until __odp_time_wait_until
-
+	#define odp_time_startup __odp_time_startup
 #else
 	#define _ODP_INLINE
 #endif
@@ -246,6 +247,12 @@ _ODP_INLINE void odp_time_wait_ns(uint64_t ns)
 _ODP_INLINE void odp_time_wait_until(odp_time_t time)
 {
 	_odp_time_wait_until(time);
+}
+
+_ODP_INLINE void odp_time_startup(odp_time_startup_t *startup)
+{
+	startup->global.u64 = _odp_time_glob.start_cycles;
+	startup->global_ns = _odp_time_glob.start_ns;
 }
 
 /** @endcond */
