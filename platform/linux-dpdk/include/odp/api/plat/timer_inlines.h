@@ -34,6 +34,7 @@
 	#define odp_timeout_from_event_multi __odp_timeout_from_event_multi
 	#define odp_timeout_to_event __odp_timeout_to_event
 	#define odp_timer_tick_to_ns __odp_timer_tick_to_ns
+	#define odp_timer_ns_to_tick __odp_timer_ns_to_tick
 #else
 	#define _ODP_INLINE
 #endif
@@ -98,6 +99,23 @@ _ODP_INLINE uint64_t odp_timer_tick_to_ns(odp_timer_pool_t tp ODP_UNUSED, uint64
 	nsec = (ODP_TIME_SEC_IN_NS * ticks) / freq_hz;
 
 	return (sec * ODP_TIME_SEC_IN_NS) + nsec;
+}
+
+_ODP_INLINE uint64_t odp_timer_ns_to_tick(odp_timer_pool_t tp ODP_UNUSED, uint64_t ns)
+{
+	uint64_t ticks;
+	uint64_t sec = 0;
+	const uint64_t freq_hz = _odp_timer_glob.freq_hz;
+
+	if (ns >= ODP_TIME_SEC_IN_NS) {
+		sec = ns / ODP_TIME_SEC_IN_NS;
+		ns  = ns - sec * ODP_TIME_SEC_IN_NS;
+	}
+
+	ticks  = sec * freq_hz;
+	ticks += (ns * freq_hz) / ODP_TIME_SEC_IN_NS;
+
+	return ticks;
 }
 
 /** @endcond */

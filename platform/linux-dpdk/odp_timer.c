@@ -47,9 +47,6 @@
 #define EXPIRED     1
 #define TICKING     2
 
-/* One second in nanoseconds */
-#define SEC_IN_NS ((uint64_t)1000000000)
-
 /* Maximum number of timer pools */
 #define MAX_TIMER_POOLS  8
 
@@ -789,24 +786,6 @@ void odp_timer_pool_destroy(odp_timer_pool_t tp)
 	odp_ticketlock_unlock(&timer_global->lock);
 }
 
-uint64_t odp_timer_ns_to_tick(odp_timer_pool_t tp, uint64_t ns)
-{
-	uint64_t ticks;
-	uint64_t freq_hz = rte_get_timer_hz();
-	uint64_t sec = 0;
-	(void)tp;
-
-	if (ns >= SEC_IN_NS) {
-		sec = ns / SEC_IN_NS;
-		ns  = ns - sec * SEC_IN_NS;
-	}
-
-	ticks  = sec * freq_hz;
-	ticks += (ns * freq_hz) / SEC_IN_NS;
-
-	return ticks;
-}
-
 int odp_timer_sample_ticks(odp_timer_pool_t tp[], uint64_t tick[], uint64_t clk_count[], int num)
 {
 	uint64_t now;
@@ -856,9 +835,10 @@ int odp_timer_pool_info(odp_timer_pool_t tp,
 	info->name       = timer_pool->name;
 
 	info->tick_info.freq.integer = freq_hz;
-	info->tick_info.nsec.integer = SEC_IN_NS / freq_hz;
-	if (SEC_IN_NS % freq_hz) {
-		info->tick_info.nsec.numer = SEC_IN_NS - (info->tick_info.nsec.integer * freq_hz);
+	info->tick_info.nsec.integer = ODP_TIME_SEC_IN_NS / freq_hz;
+	if (ODP_TIME_SEC_IN_NS % freq_hz) {
+		info->tick_info.nsec.numer = ODP_TIME_SEC_IN_NS - (info->tick_info.nsec.integer *
+								   freq_hz);
 		info->tick_info.nsec.denom = freq_hz;
 	}
 	/* Leave source clock information to zero as there is no direct link
