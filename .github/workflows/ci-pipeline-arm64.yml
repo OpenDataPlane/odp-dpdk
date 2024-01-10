@@ -257,28 +257,6 @@ jobs:
       - if: ${{ failure() }}
         uses: ./.github/actions/run-failure-log
 
-  Run_dpdk-19_11:
-    if: ${{ github.repository == 'OpenDataPlane/odp-dpdk' }}
-    runs-on: [self-hosted, ARM64]
-    steps:
-      - uses: OpenDataPlane/action-clean-up@main
-      - uses: actions/checkout@v3
-      - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}" -e ARCH="${ARCH}"
-               -e CONF="${CONF}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-native-dpdk_19.11 /odp/scripts/ci/check.sh
-      - if: ${{ failure() }}
-        uses: ./.github/actions/run-failure-log
-
-  Run_dpdk-20_11:
-    if: ${{ github.repository == 'OpenDataPlane/odp-dpdk' }}
-    runs-on: [self-hosted, ARM64]
-    steps:
-      - uses: OpenDataPlane/action-clean-up@main
-      - uses: actions/checkout@v3
-      - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}" -e ARCH="${ARCH}"
-               -e CONF="${CONF}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-native-dpdk_20.11 /odp/scripts/ci/check.sh
-      - if: ${{ failure() }}
-        uses: ./.github/actions/run-failure-log
-
   Run_dpdk-21_11:
     if: ${{ github.repository == 'OpenDataPlane/odp-dpdk' }}
     runs-on: [self-hosted, ARM64]
