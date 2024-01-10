@@ -1,5 +1,5 @@
 Copyright (c) 2018-2019, Linaro Limited
-Copyright (c) 2019-2023, Nokia
+Copyright (c) 2019-2024, Nokia
 All rights reserved.
 
 SPDX-License-Identifier:        BSD-3-Clause
@@ -19,8 +19,8 @@ Prerequisites and considerations:
 - it's also possible to use odp-dpdk for evaluation purposes without a DPDK
   compatible NIC, using the pcap poll mode driver
 - DPDK code must be downloaded, configured and compiled, details below
-- ODP-DPDK has been compiled and tested on an x86 host with Ubuntu 18.04 LTS
-  (4.15.0 kernel).
+- ODP-DPDK has been compiled and tested on an x86 host with Ubuntu 22.04 LTS
+  (5.15.0 kernel).
 - DPDK only works on a selected range of network cards. The list of known and
   supported devices can be found in the DPDK documentation:
       https://doc.dpdk.org/guides/nics/index.html
@@ -36,44 +36,12 @@ cmds below for Ubuntu, where it has been compiled and tested.
 On Ubuntu install pcap development library:
     sudo apt-get install libpcap-dev
 
-Right now ODP-DPDK supports DPDK v19.11, v20.11, v21.11, and v22.11 (recommended version).
+Right now ODP-DPDK supports DPDK v21.11 and v22.11 (recommended version).
 
-Compile DPDK 19.11
-------------------
+Compile DPDK
+------------
 Fetch the DPDK code:
-    git clone https://dpdk.org/git/dpdk-stable --branch 19.11 --depth 1 ./<dpdk-dir>
-
-This has to be done only once:
-    cd <dpdk-dir>
-    make config T=x86_64-native-linuxapp-gcc O=x86_64-native-linuxapp-gcc
-
-Enable pcap pmd to use ODP-DPDK without DPDK supported NIC's:
-    cd <dpdk-dir>/x86_64-native-linuxapp-gcc
-    sed -ri 's,(CONFIG_RTE_LIBRTE_PMD_PCAP=).*,\1y,' .config
-
-Enable openssl crypto pmd to use openssl with odp-dpdk:
-    sed -ri 's,(CONFIG_RTE_LIBRTE_PMD_OPENSSL=).*,\1y,' .config
-
-Optionally, add more queues to eventdev:
-    sed -ri 's,(CONFIG_RTE_EVENT_MAX_QUEUES_PER_DEV=).*,\1255,' .config
-
-Now return to parent directory and build DPDK:
-    cd ..
-
-The last step depends on whether ODP shared libraries will be built with this
-deployment of DPDK:
-SHARED libraries:
-    make install T=x86_64-native-linuxapp-gcc DESTDIR=./install EXTRA_CFLAGS="-fPIC"
-
-STATIC libraries:
-    make install T=x86_64-native-linuxapp-gcc DESTDIR=./install
-
-This only ensures building DPDK, but traffic is not tested with this build yet.
-
-Compile DPDK from v20.11 onwards
---------------------------------
-Fetch the DPDK code:
-    git clone https://dpdk.org/git/dpdk-stable --branch 20.11 --depth 1 ./<dpdk-dir>
+    git clone https://dpdk.org/git/dpdk-stable --branch 22.11 --depth 1 ./<dpdk-dir>
 
 Prepare the build directory:
     cd <dpdk-dir>
@@ -98,14 +66,11 @@ path with the --with-dpdk-path option.
     ./bootstrap
 
 The following step depends on whether ODP shared libraries are to be built.
-SHARED libraries (requires building DPDK with -fPIC, see above):
-    ./configure --with-dpdk-path=<dpdk-dir>/install
+SHARED libraries:
+    ./configure --enable-dpdk-shared
 
 STATIC libraries (better performance):
-    ./configure --with-dpdk-path=<dpdk-dir>/install --disable-shared
-
-Starting from DPDK 20.11, --with-dpdk-path option is not used anymore:
-    ./configure
+    ./configure --disable-shared
 
 Or, if DPDK was not installed to the default location, set PKG_CONFIG_PATH:
     PKG_CONFIG_PATH=<dpdk-dir>/install/lib/x86_64-linux-gnu/pkgconfig ./configure
@@ -223,7 +188,7 @@ rte_eal_[mp_]remote_launch(), but not through ODP API's. Nevertheless,
 odp_local_init() makes sure for the rest of the DPDK libraries ODP threads look
 like proper DPDK threads.
 
-Exaple how to run an ODP-DPDK L2 forwarding application:
+Example how to run an ODP-DPDK L2 forwarding application:
 
     sudo ./odp_l2fwd -i 0,1 -c 2
 
@@ -298,27 +263,11 @@ Get the Intel Multi-Buffer Crypto library from
 https://github.com/intel/intel-ipsec-mb and follow the README from the repo on
 how to build the library.
 
-Building DPDK 19.11
--------------------
-Follow the instructions from "Compile DPDK" section and make sure to enable the
-necessary crypto PMDs:
-E.g.
-# Compile PMD for AESNI backed device
-sed -ri 's,(CONFIG_RTE_LIBRTE_PMD_AESNI_MB=).*,\1y,' .config
-
-# Compile PMD for AESNI GCM device
-sed -ri 's,(CONFIG_RTE_LIBRTE_PMD_AESNI_GCM=).*,\1y,' .config
-
-# Compile PMD for SNOW 3G device
-sed -ri 's,(CONFIG_RTE_LIBRTE_PMD_SNOW3G=).*,\1y,' .config
-
-AESNI_MULTI_BUFFER_LIB_PATH=/path-to/Intel-multi-buffer-crypto/ \
-	make install T=x86_64-native-linuxapp-gcc DESTDIR=./install EXTRA_CFLAGS="-fPIC"
-
-Building DPDK 20.11
--------------------
-If libIPSec_MB has been installed outside the normal search paths,
-configure the compiler and linker options with
+Building DPDK
+-------------
+Follow the instructions from "Compile DPDK" section. If libIPSec_MB has been
+installed outside the normal search paths, configure the compiler and linker
+options with:
 
 meson configure -Dc_args=-I/path-to/Intel-multi-buffer-crypto/include \
       -Dc_link_args=-L/path-to/Intel-multi-buffer-crypto/lib
@@ -341,7 +290,7 @@ yet tested in the ODP CI.
 To use eventdev one must set ODP_SCHEDULER environment variable to "eventdev"
 and provide the necessary platform parameters to DPDK.
 
-Refer to DPDK event device driver documentation for platform defails:
+Refer to DPDK event device driver documentation for platform details:
 https://doc.dpdk.org/guides/eventdevs/index.html
 
 In case of the standard software eventdev implementation one must enable a DPDK
