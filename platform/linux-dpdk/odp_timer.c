@@ -1136,8 +1136,10 @@ int odp_timer_periodic_ack(odp_timer_t timer_hdl, odp_event_t tmo_ev)
 
 	abs_tick = timer->periodic_ticks;
 
-	if (odp_unlikely(abs_tick == PERIODIC_CANCELLED))
+	if (odp_unlikely(abs_tick == PERIODIC_CANCELLED)) {
+		timer->tmo_event = ODP_EVENT_INVALID;
 		return 2;
+	}
 
 	acc = (uint64_t)timer->periodic_ticks_frac_acc + (uint64_t)timer->periodic_ticks_frac;
 
