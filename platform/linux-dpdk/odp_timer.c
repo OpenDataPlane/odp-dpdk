@@ -932,10 +932,9 @@ static inline odp_timeout_hdr_t *timeout_to_hdr(odp_timeout_t tmo)
 	return (odp_timeout_hdr_t *)(uintptr_t)tmo;
 }
 
-static inline int timer_set(odp_timer_t timer_hdl, uint64_t tick,
-			    odp_event_t *event, int absolute)
+static inline int timer_set(odp_timer_t timer_hdl, uint64_t tick, odp_event_t event, int absolute)
 {
-	odp_event_t old_ev, tmo_event;
+	odp_event_t tmo_event;
 	uint64_t cur_tick, rel_tick, abs_tick;
 	timer_entry_t *timer = timer_from_hdl(timer_hdl);
 	int num_retry = 0;
@@ -964,12 +963,20 @@ retry:
 
 	odp_ticketlock_lock(&timer->lock);
 
-	if (timer->tmo_event == ODP_EVENT_INVALID)
-		if (event == NULL || (event && *event == ODP_EVENT_INVALID)) {
+	if (timer->tmo_event == ODP_EVENT_INVALID) {
+		if (odp_unlikely(event == ODP_EVENT_INVALID)) {
 			odp_ticketlock_unlock(&timer->lock);
 			/* Event missing, or timer already expired and
 			 * enqueued the event. */
 			return ODP_TIMER_FAIL;
+		}
+	} else {
+		/* Check that timer was not active */
+		if (odp_unlikely(event != ODP_EVENT_INVALID)) {
+			_ODP_ERR("Timer was already active\n");
+			odp_ticketlock_unlock(&timer->lock);
+			return ODP_TIMER_FAIL;
+		}
 	}
 
 	if (odp_unlikely(timer_global->ops.reset(&timer->rte_timer, rel_tick,
@@ -1006,14 +1013,8 @@ retry:
 		return ODP_TIMER_FAIL;
 	}
 
-	if (event) {
-		old_ev = timer->tmo_event;
-
-		if (*event != ODP_EVENT_INVALID)
-			timer->tmo_event = *event;
-
-		*event = old_ev;
-	}
+	if (event != ODP_EVENT_INVALID)
+		timer->tmo_event = event;
 
 	tmo_event    = timer->tmo_event;
 	timer->tick  = abs_tick;
@@ -1038,15 +1039,9 @@ int odp_timer_start(odp_timer_t timer, const odp_timer_start_t *start_param)
 	int abs = start_param->tick_type == ODP_TIMER_TICK_ABS;
 	int ret;
 
-	ret = timer_set(timer, start_param->tick, &tmo_ev, abs);
+	ret = timer_set(timer, start_param->tick, tmo_ev, abs);
 	if (odp_unlikely(ret != ODP_TIMER_SUCCESS))
 		return ret;
-
-	/* Check that timer was not active */
-	if (odp_unlikely(tmo_ev != ODP_EVENT_INVALID)) {
-		_ODP_ERR("Timer was active already\n");
-		odp_event_free(tmo_ev);
-	}
 
 	return ODP_TIMER_SUCCESS;
 }
@@ -1056,7 +1051,7 @@ int odp_timer_restart(odp_timer_t timer, const odp_timer_start_t *start_param)
 	int abs = start_param->tick_type == ODP_TIMER_TICK_ABS;
 
 	/* Reset timer without changing the event */
-	return timer_set(timer, start_param->tick, NULL, abs);
+	return timer_set(timer, start_param->tick, ODP_EVENT_INVALID, abs);
 }
 
 int odp_timer_periodic_start(odp_timer_t timer_hdl,
@@ -1108,15 +1103,9 @@ int odp_timer_periodic_start(odp_timer_t timer_hdl,
 		absolute = 1;
 	}
 
-	ret = timer_set(timer_hdl, first_tick, &tmo_ev, absolute);
+	ret = timer_set(timer_hdl, first_tick, tmo_ev, absolute);
 	if (odp_unlikely(ret != ODP_TIMER_SUCCESS))
 		return ret;
-
-	/* Check that timer was not active */
-	if (odp_unlikely(tmo_ev != ODP_EVENT_INVALID)) {
-		_ODP_ERR("Timer was active already\n");
-		odp_event_free(tmo_ev);
-	}
 
 	return ODP_TIMER_SUCCESS;
 }
@@ -1154,7 +1143,7 @@ int odp_timer_periodic_ack(odp_timer_t timer_hdl, odp_event_t tmo_ev)
 	abs_tick += timeout_hdr->expiration;
 	timeout_hdr->expiration = abs_tick;
 
-	ret = timer_set(timer_hdl, abs_tick, NULL, 1);
+	ret = timer_set(timer_hdl, abs_tick, ODP_EVENT_INVALID, 1);
 	if (odp_likely(ret == ODP_TIMER_SUCCESS))
 		return 0;
 
