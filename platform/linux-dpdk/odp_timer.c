@@ -1232,9 +1232,12 @@ int odp_timer_periodic_cancel(odp_timer_t timer_hdl)
 	/* Timer successfully cancelled, so send the final event manually. */
 	if (ret == 0 && timer->state == TICKING) {
 		timer->state = NOT_TICKING;
+		timer->tmo_event = ODP_EVENT_INVALID;
 		if (odp_unlikely(odp_queue_enq(timer->queue, event))) {
 			_ODP_ERR("Failed to enqueue final timeout event\n");
 			_odp_event_free(event);
+			odp_ticketlock_unlock(&timer->lock);
+			return -1;
 		}
 	}
 
