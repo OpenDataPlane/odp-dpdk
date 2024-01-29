@@ -579,7 +579,10 @@ static int timer_capability(appl_args_t *appl_args)
 			return -1;
 		}
 
-		odp_timer_pool_start();
+		if (odp_timer_pool_start_multi(&pool, 1) != 1) {
+			ODPH_ERR("odp_timer_pool_start_multi() failed for clock source: %d\n", i);
+			return -1;
+		}
 
 		ret = odp_timer_pool_info(pool, info);
 		if (ret) {
@@ -984,8 +987,9 @@ int main(int argc, char **argv)
 	printf("\n");
 	printf("  CLASSIFIER\n");
 	printf("    supported_terms:        0x%" PRIx64 "\n", cls_capa.supported_terms.all_bits);
-	printf("    max_pmr_terms:          %u\n", cls_capa.max_pmr_terms);
-	printf("    available_pmr_terms:    %u\n", cls_capa.available_pmr_terms);
+	printf("    max_pmr:                %u\n", cls_capa.max_pmr);
+	printf("    max_pmr_per_cos:        %u\n", cls_capa.max_pmr_per_cos);
+	printf("    max_terms_per_pmr:      %u\n", cls_capa.max_terms_per_pmr);
 	printf("    max_cos:                %u\n", cls_capa.max_cos);
 	printf("    max_hash_queues:        %u\n", cls_capa.max_hash_queues);
 	printf("    hash_protocols:         0x%x\n", cls_capa.hash_protocols.all_bits);

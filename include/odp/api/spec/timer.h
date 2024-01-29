@@ -17,7 +17,6 @@
 extern "C" {
 #endif
 
-#include <odp/api/deprecated.h>
 #include <odp/api/timer_types.h>
 #include <odp/api/event_types.h>
 #include <odp/api/pool_types.h>
@@ -114,6 +113,10 @@ void odp_timer_pool_param_init(odp_timer_pool_param_t *param);
  * The use of pool name is optional. Unique names are not required. Use odp_timer_pool_param_init()
  * to initialize timer pool parameters into their default values.
  *
+ * After creation a timer pool can be either started (see odp_timer_pool_start_multi()) or
+ * destroyed. The returned pool handle cannot be used with any other APIs, except
+ * odp_timer_pool_to_u64(), before the pool is successfully started.
+ *
  * Periodic timer expiration frequency is a multiple of the timer pool base frequency
  * (odp_timer_pool_param_t::base_freq_hz). Depending on implementation, the base frequency may need
  * to be selected carefully with respect to the timer pool source clock frequency. Use
@@ -137,8 +140,29 @@ odp_timer_pool_t odp_timer_pool_create(const char *name, const odp_timer_pool_pa
  * The purpose of this call is to coordinate the creation of multiple timer
  * pools that may use the same underlying HW resources.
  * This function may be called multiple times.
+ *
+ * @deprecated Use odp_timer_pool_start_multi() instead
  */
 void odp_timer_pool_start(void);
+
+/**
+ * Start timer pools
+ *
+ * Start given timer pools. After a pool has been successfully started the pool handle can be used
+ * with other APIs. Each timer pool can be started only once.
+ *
+ * Returns 'num' when all given timer pools have been successfully started. If the return value
+ * N < 'num', only the first N pools started successfully and at least some of the remaining ones
+ * failed to start. In case of a negative return value, none of the pools were started. The
+ * unstarted timer pools cannot be used anymore (can only be destroyed).
+ *
+ * @param timer_pool  Array of timer pool handles
+ * @param num         Number of pools to start
+ *
+ * @retval  num on success
+ * @retval <num on failure
+ */
+int odp_timer_pool_start_multi(odp_timer_pool_t timer_pool[], int num);
 
 /**
  * Destroy a timer pool
@@ -174,10 +198,14 @@ uint64_t odp_timer_ns_to_tick(odp_timer_pool_t timer_pool, uint64_t ns);
  * Current tick value
  *
  * Returns the current tick value of the timer pool. Timer tick is an implementation defined unit
- * of time. Timer tick value increments with a constant, timer pool specific frequency. Tick
- * frequency may be equal or higher than the requested timer pool resolution. The frequency can be
- * checked with odp_timer_pool_info(). Tick value increments with implementation specific step
- * sizes. The value will not wrap around in at least 10 years from the ODP instance startup.
+ * of time. Ticks and related nanosecond values are timer pool specific. Those may not start from
+ * zero, but are guaranteed not to wrap around in at least 10 years from the ODP instance startup.
+ *
+ * Timer tick value increments with a constant, timer pool specific frequency. Tick frequency may
+ * be equal or higher than the requested timer pool resolution. The frequency can be checked with
+ * odp_timer_pool_info(). Tick value increments with implementation specific step sizes.
+ *
+ * Use odp_timer_sample_ticks() to determine offset between tick values of two or more timer pools.
  *
  * @param timer_pool  Timer pool
  *
@@ -247,19 +275,21 @@ odp_timer_t odp_timer_alloc(odp_timer_pool_t timer_pool, odp_queue_t queue, cons
 /**
  * Free a timer
  *
- * Free (destroy) a timer, reclaiming associated resources.
- * The timeout event for an active timer will be returned.
- * The timeout event for an expired timer will not be returned. It is the
- * responsibility of the application to handle this timeout when it is received.
+ * Frees a previously allocated timer. The timer must be inactive when calling this function.
+ * In other words, the application must cancel an active single shot timer (odp_timer_cancel())
+ * successfully or wait it to expire before freeing it. Similarly for an active periodic timer, the
+ * application must cancel it (odp_timer_periodic_cancel()) and receive the last event from
+ * the timer (odp_timer_periodic_ack()) before freeing it.
  *
- * A periodic timer must be cancelled successfully before freeing it.
+ * The call returns failure only on non-recoverable errors. Application must not use the timer
+ * handle anymore after the call, regardless of the return value.
  *
- * @param timer      Timer
+ * @param timer       Timer
  *
- * @return Event handle of timeout event
- * @retval ODP_EVENT_INVALID on failure
+ * @retval 0 on success
+ * @retval <0 on failure
  */
-odp_event_t odp_timer_free(odp_timer_t timer);
+int odp_timer_free(odp_timer_t timer);
 
 /**
  * Start a timer
@@ -389,71 +419,6 @@ int odp_timer_periodic_ack(odp_timer_t timer, odp_event_t tmo_ev);
 int odp_timer_periodic_cancel(odp_timer_t timer);
 
 /**
- * Set (or reset) a timer with absolute expiration time
- *
- * This function sets a timer to expire at a specific time. If the timer is
- * already running (set and not yet expired), the function updates (resets) it
- * with a new expiration time and optionally with a new event. A successful
- * reset operation with a new event outputs the old event. A failed reset
- * operation does not modify the timer.
- *
- * The user provided event can be of any event type, but only ODP_EVENT_TIMEOUT
- * type events (odp_timeout_t) carry timeout specific metadata. Furthermore,
- * timer performance may have been optimized for that event type. When the timer
- * expires, the event is enqueued to the destination queue of the timer.
- *
- * @param         timer    Timer
- * @param         abs_tick Absolute expiration time in timer ticks
- * @param[in,out] tmo_ev   Pointer to an event handle. The event is enqueued
- *                         when the timer expires. Use NULL when resetting the
- *                         timer without changing the event. When resetting the
- *                         timer with a new event, a successful operation
- *                         outputs the old event here.
- *
- * @retval ODP_TIMER_SUCCESS  Success
- * @retval ODP_TIMER_TOO_NEAR Failure. Expiration time is too near to
- *                            the current time.
- * @retval ODP_TIMER_TOO_FAR  Failure. Expiration time is too far from
- *                            the current time.
- * @retval ODP_TIMER_FAIL     Failure. Set operation: No event provided.
- *                            Reset operation: Too late to reset the timer.
- *
- * @see odp_timer_set_rel(), odp_timer_alloc(), odp_timer_cancel()
- *
- * @deprecated Use odp_timer_start() or odp_timer_restart() instead
- */
-int ODP_DEPRECATE(odp_timer_set_abs)(odp_timer_t timer, uint64_t abs_tick, odp_event_t *tmo_ev);
-
-/**
- * Set (or reset) a timer with relative expiration time
- *
- * Like odp_timer_set_abs(), but the expiration time is relative to the current
- * time: expiration tick = odp_timer_current_tick() + 'rel_tick'.
- *
- * @param         timer    Timer
- * @param         rel_tick Expiration time relative to current time of
- *                         the timer pool in timer ticks
- * @param[in,out] tmo_ev   Pointer to an event handle. The event is enqueued
- *                         when the timer expires. Use NULL when resetting the
- *                         timer without changing the event. When resetting the
- *                         timer with a new event, a successful operation
- *                         outputs the old event here.
- *
- * @retval ODP_TIMER_SUCCESS  Success
- * @retval ODP_TIMER_TOO_NEAR Failure. Expiration time is too near to
- *                            the current time.
- * @retval ODP_TIMER_TOO_FAR  Failure. Expiration time is too far from
- *                            the current time.
- * @retval ODP_TIMER_FAIL     Failure. Set operation: No event provided.
- *                            Reset operation: Too late to reset the timer.
- *
- * @see odp_timer_set_abs(), odp_timer_alloc(), odp_timer_cancel()
- *
- * @deprecated Use odp_timer_start() or odp_timer_restart() instead
- */
-int ODP_DEPRECATE(odp_timer_set_rel)(odp_timer_t timer, uint64_t rel_tick, odp_event_t *tmo_ev);
-
-/**
  * Cancel a timer
  *
  * Cancels a previously started single shot timer. A successful operation (#ODP_TIMER_SUCCESS)
@@ -513,8 +478,10 @@ odp_event_t odp_timeout_to_event(odp_timeout_t tmo);
  * @param tmo Timeout handle
  * @retval 1 Timeout is fresh
  * @retval 0 Timeout is stale
+ *
+ * @deprecated The function will be removed in a future API version.
  */
-int odp_timeout_fresh(odp_timeout_t tmo);
+int ODP_DEPRECATE(odp_timeout_fresh)(odp_timeout_t tmo);
 
 /**
  * Return timer handle for the timeout

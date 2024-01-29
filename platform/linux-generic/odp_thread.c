@@ -257,7 +257,27 @@ int odp_thread_count(void)
 	return thread_globals->num;
 }
 
+int odp_thread_control_count(void)
+{
+	return thread_globals->num_control;
+}
+
+int odp_thread_worker_count(void)
+{
+	return thread_globals->num_worker;
+}
+
 int odp_thread_count_max(void)
+{
+	return thread_globals->num_max;
+}
+
+int odp_thread_control_count_max(void)
+{
+	return thread_globals->num_max;
+}
+
+int odp_thread_worker_count_max(void)
 {
 	return thread_globals->num_max;
 }

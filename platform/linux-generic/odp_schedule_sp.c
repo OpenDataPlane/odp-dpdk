@@ -38,7 +38,7 @@
 
 #define NUM_THREAD        ODP_THREAD_COUNT_MAX
 #define NUM_QUEUE         CONFIG_MAX_SCHED_QUEUES
-#define NUM_PKTIO         ODP_CONFIG_PKTIO_ENTRIES
+#define NUM_PKTIO         CONFIG_PKTIO_ENTRIES
 #define NUM_ORDERED_LOCKS 1
 #define NUM_STATIC_GROUP  3
 #define NUM_GROUP         (NUM_STATIC_GROUP + 9)
@@ -683,8 +683,7 @@ static int schedule_multi(odp_queue_t *from, uint64_t wait,
 				continue;
 
 			if (update_t1) {
-				t1 = odp_time_sum(odp_time_local(),
-						  odp_time_local_from_ns(wait));
+				t1 = odp_time_add_ns(odp_time_local(), wait);
 				update_t1 = 0;
 				continue;
 			}
@@ -800,6 +799,11 @@ static odp_schedule_group_t schedule_group_create(const char *name,
 		if (!sched_group->s.group[i].allocated) {
 			char *grp_name = sched_group->s.group[i].name;
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Warray-bounds"
+#if __GNUC__ >= 13
+#pragma GCC diagnostic ignored "-Wstringop-overflow"
+#endif
 			if (name == NULL) {
 				grp_name[0] = 0;
 			} else {
@@ -807,6 +811,7 @@ static odp_schedule_group_t schedule_group_create(const char *name,
 					ODP_SCHED_GROUP_NAME_LEN - 1);
 				grp_name[ODP_SCHED_GROUP_NAME_LEN - 1] = 0;
 			}
+#pragma GCC diagnostic pop
 
 			odp_thrmask_copy(&sched_group->s.group[i].mask, thrmask);
 			sched_group->s.group[i].allocated = 1;

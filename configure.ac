@@ -3,8 +3,8 @@ AC_PREREQ([2.5])
 # ODP API version
 ##########################################################################
 m4_define([odp_version_generation], [1])
-m4_define([odp_version_major],     [42])
-m4_define([odp_version_minor],      [1])
+m4_define([odp_version_major],     [43])
+m4_define([odp_version_minor],      [0])
 m4_define([odp_version_patch],      [0])
 
 m4_define([odp_version_api],
@@ -27,7 +27,7 @@ AC_SUBST(ODP_VERSION_API)
 # Helper library version
 ##########################################################################
 m4_define([odph_version_generation], [1])
-m4_define([odph_version_major], [4])
+m4_define([odph_version_major], [5])
 m4_define([odph_version_minor], [0])
 
 m4_define([odph_version],
@@ -120,6 +120,7 @@ AS_IF([test "$GCC" == yes],
       AS_IF([test `$CC -dumpversion | cut -d '.' -f 1` -ge 10],
 	    ODP_CHECK_CFLAG([-Wno-error=array-bounds])
 	    ODP_CHECK_CFLAG([-Wno-error=stringop-overflow])
+	    ODP_CHECK_CXXFLAG([-Wno-error=stringop-overflow])
       )
 )
 

@@ -1,5 +1,5 @@
 /* Copyright (c) 2013-2018, Linaro Limited
- * Copyright (c) 2019-2022, Nokia
+ * Copyright (c) 2019-2023, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -17,7 +17,6 @@
 #include <odp/api/atomic.h>
 #include <odp/api/cpu.h>
 #include <odp/api/debug.h>
-#include <odp/api/deprecated.h>
 #include <odp/api/event.h>
 #include <odp/api/hints.h>
 #include <odp/api/pool.h>
@@ -170,7 +169,6 @@ typedef struct {
 typedef struct timer_pool_s {
 	/* Put frequently accessed fields in the first cache line */
 	uint64_t nsec_per_scan;
-	odp_time_t start_time;
 	odp_atomic_u64_t cur_tick;/* Current tick value */
 	uint64_t min_rel_tck;
 	uint64_t max_rel_tck;
@@ -184,7 +182,12 @@ typedef struct timer_pool_s {
 	odp_timer_pool_param_t param;
 	char name[ODP_TIMER_POOL_NAME_LEN];
 	timer_t timerid;
-	int notify_overrun;
+	/*
+	 * Timer pool overrun notification (debug print). Initialize to 0
+	 * (don't notify). When value is 0 and a timer is started, set to 1
+	 * (notify). When notification is done, set to 2 (don't notify).
+	 */
+	odp_atomic_u32_t notify_overrun;
 	int owner;
 	pthread_t thr_pthread; /* pthread_t of timer thread */
 	pid_t thr_pid; /* gettid() for timer thread */
@@ -576,14 +579,20 @@ static odp_event_t timer_set_unused(timer_pool_t *tp, uint32_t idx)
 	return old_event;
 }
 
-static inline odp_event_t timer_free(timer_pool_t *tp, uint32_t idx)
+int odp_timer_free(odp_timer_t hdl)
 {
+	timer_pool_t *tp = handle_to_tp(hdl);
+	uint32_t idx = handle_to_idx(hdl, tp);
 	_odp_timer_t *tim = &tp->timers[idx];
 	tick_buf_t *tb = &tp->tick_buf[idx];
 
 	/* Free the timer by setting timer state to unused and
 	 * grab any timeout event */
 	odp_event_t old_event = timer_set_unused(tp, idx);
+	if (old_event != ODP_EVENT_INVALID) {
+		_ODP_ERR("Timer is active\n");
+		return -1;
+	}
 
 	/* Remove timer from queue */
 	_odp_queue_fn->timer_rem(tim->queue);
@@ -602,7 +611,7 @@ static inline odp_event_t timer_free(timer_pool_t *tp, uint32_t idx)
 	tp->num_alloc--;
 	odp_spinlock_unlock(&tp->lock);
 
-	return old_event;
+	return 0;
 }
 
 static odp_event_t timer_cancel(timer_pool_t *tp, uint32_t idx)
@@ -779,22 +788,6 @@ static inline void timer_pool_scan(timer_pool_t *tp, uint64_t tick)
  * Inline timer processing
  *****************************************************************************/
 
-static inline uint64_t time_nsec(timer_pool_t *tp, odp_time_t now)
-{
-	odp_time_t start = tp->start_time;
-
-	return odp_time_diff_ns(now, start);
-}
-
-static inline uint64_t current_nsec(timer_pool_t *tp)
-{
-	odp_time_t now;
-
-	now = odp_time_global();
-
-	return time_nsec(tp, now);
-}
-
 static inline void timer_pool_scan_inline(int num, odp_time_t now)
 {
 	timer_pool_t *tp;
@@ -819,7 +812,7 @@ static inline void timer_pool_scan_inline(int num, odp_time_t now)
 				continue;
 		}
 
-		nsec     = time_nsec(tp, now);
+		nsec     = odp_time_to_ns(now);
 		new_tick = nsec / tp->nsec_per_scan;
 		old_tick = odp_atomic_load_u64(&tp->cur_tick);
 		diff = new_tick - old_tick;
@@ -828,14 +821,15 @@ static inline void timer_pool_scan_inline(int num, odp_time_t now)
 			continue;
 
 		if (odp_atomic_cas_u64(&tp->cur_tick, &old_tick, new_tick)) {
-			if (tp->notify_overrun && diff > 1) {
+			if (ODP_DEBUG_PRINT && odp_atomic_load_u32(&tp->notify_overrun) == 1 &&
+			    diff > 1) {
 				if (old_tick == 0) {
 					_ODP_DBG("Timer pool (%s) missed %" PRIi64 " scans in start up\n",
 						 tp->name, diff - 1);
 				} else {
 					_ODP_DBG("Timer pool (%s) resolution too high: %" PRIi64 " scans missed\n",
 						 tp->name, diff - 1);
-					tp->notify_overrun = 0;
+					odp_atomic_store_u32(&tp->notify_overrun, 2);
 				}
 			}
 			timer_pool_scan(tp, nsec);
@@ -896,12 +890,12 @@ static inline void timer_run_posix(timer_pool_t *tp)
 	uint64_t nsec;
 	int overrun;
 
-	if (tp->notify_overrun) {
+	if (ODP_DEBUG_PRINT && odp_atomic_load_u32(&tp->notify_overrun) == 1) {
 		overrun = timer_getoverrun(tp->timerid);
 		if (overrun) {
 			_ODP_DBG("\n\t%d ticks overrun on timer pool \"%s\", timer resolution too high\n",
 				 overrun, tp->name);
-			tp->notify_overrun = 0;
+			odp_atomic_store_u32(&tp->notify_overrun, 2);
 		}
 	}
 
@@ -911,7 +905,7 @@ static inline void timer_run_posix(timer_pool_t *tp)
 	for (i = 0; i < 32; i += ODP_CACHE_LINE_SIZE / sizeof(array[0]))
 		__builtin_prefetch(&array[i], 0, 0);
 
-	nsec = current_nsec(tp);
+	nsec = odp_time_global_ns();
 	timer_pool_scan(tp, nsec);
 }
 
@@ -1089,6 +1083,12 @@ static void posix_timer_start(timer_pool_t *tp)
 	 * processed. Warm up helps avoiding overrun on the first timeout. */
 	while (odp_atomic_load_acq_u32(&tp->thr_ready) == 0)
 		sched_yield();
+
+	if (ODP_DEBUG_PRINT) {
+		uint32_t old_val = 0;
+
+		odp_atomic_cas_u32(&tp->notify_overrun, &old_val, 1);
+	}
 }
 
 static odp_timer_pool_t timer_pool_new(const char *name, const odp_timer_pool_param_t *param)
@@ -1234,8 +1234,8 @@ static odp_timer_pool_t timer_pool_new(const char *name, const odp_timer_pool_pa
 	}
 	tp->num_alloc = 0;
 	odp_atomic_init_u32(&tp->high_wm, 0);
+	odp_atomic_init_u32(&tp->notify_overrun, 0);
 	tp->first_free = 0;
-	tp->notify_overrun = 1;
 	tp->owner = -1;
 
 	if (param->priv)
@@ -1259,7 +1259,6 @@ static odp_timer_pool_t timer_pool_new(const char *name, const odp_timer_pool_pa
 	}
 	tp->tp_idx = tp_idx;
 	odp_spinlock_init(&tp->lock);
-	tp->start_time = odp_time_global();
 
 	odp_ticketlock_lock(&timer_global->lock);
 
@@ -1452,23 +1451,28 @@ void odp_timer_pool_start(void)
 	/* Nothing to do here, timer pools are started by the create call */
 }
 
+int odp_timer_pool_start_multi(odp_timer_pool_t timer_pool[], int num)
+{
+	_ODP_ASSERT(timer_pool != NULL);
+	_ODP_ASSERT(num > 0);
+	if (ODP_DEBUG) {
+		for (int i = 0; i < num; i++)
+			_ODP_ASSERT(timer_pool[i] != ODP_TIMER_POOL_INVALID);
+	}
+
+	/* Nothing to do here, timer pools are started by the create call. */
+	return num;
+}
+
 void odp_timer_pool_destroy(odp_timer_pool_t tpid)
 {
 	odp_timer_pool_del(timer_pool_from_hdl(tpid));
 }
 
-uint64_t odp_timer_current_tick(odp_timer_pool_t tpid)
-{
-	timer_pool_t *tp = timer_pool_from_hdl(tpid);
-
-	return current_nsec(tp);
-}
-
 int odp_timer_sample_ticks(odp_timer_pool_t timer_pool[], uint64_t tick[], uint64_t clk_count[],
 			   int num)
 {
-	timer_pool_t *tp[MAX_TIMER_POOLS];
-	odp_time_t now;
+	uint64_t nsec;
 	int i;
 
 	if (num <= 0 || num > MAX_TIMER_POOLS) {
@@ -1481,14 +1485,12 @@ int odp_timer_sample_ticks(odp_timer_pool_t timer_pool[], uint64_t tick[], uint6
 			_ODP_ERR("Invalid timer pool\n");
 			return -1;
 		}
-
-		tp[i] = timer_pool_from_hdl(timer_pool[i]);
 	}
 
-	now = odp_time_global();
+	nsec = odp_time_global_ns();
 
 	for (i = 0; i < num; i++) {
-		tick[i] = time_nsec(tp[i], now);
+		tick[i] = nsec;
 
 		if (clk_count)
 			clk_count[i] = tick[i];
@@ -1545,52 +1547,11 @@ odp_timer_t odp_timer_alloc(odp_timer_pool_t tpid, odp_queue_t queue, const void
 	return timer_alloc(tp, queue, user_ptr);
 }
 
-odp_event_t odp_timer_free(odp_timer_t hdl)
-{
-	timer_pool_t *tp = handle_to_tp(hdl);
-	uint32_t idx = handle_to_idx(hdl, tp);
-
-	return timer_free(tp, idx);
-}
-
-int ODP_DEPRECATE(odp_timer_set_abs)(odp_timer_t hdl, uint64_t abs_tck, odp_event_t *tmo_ev)
-{
-	timer_pool_t *tp = handle_to_tp(hdl);
-	uint64_t cur_tick = current_nsec(tp);
-	uint32_t idx = handle_to_idx(hdl, tp);
-
-	if (odp_unlikely(abs_tck < cur_tick + tp->min_rel_tck))
-		return ODP_TIMER_TOO_NEAR;
-	if (odp_unlikely(abs_tck > cur_tick + tp->max_rel_tck))
-		return ODP_TIMER_TOO_FAR;
-	if (timer_reset(idx, abs_tck, tmo_ev, tp))
-		return ODP_TIMER_SUCCESS;
-	else
-		return ODP_TIMER_FAIL;
-}
-
-int ODP_DEPRECATE(odp_timer_set_rel)(odp_timer_t hdl, uint64_t rel_tck, odp_event_t *tmo_ev)
-{
-	timer_pool_t *tp = handle_to_tp(hdl);
-	uint64_t cur_tick = current_nsec(tp);
-	uint64_t abs_tck = cur_tick + rel_tck;
-	uint32_t idx = handle_to_idx(hdl, tp);
-
-	if (odp_unlikely(rel_tck < tp->min_rel_tck))
-		return ODP_TIMER_TOO_NEAR;
-	if (odp_unlikely(rel_tck > tp->max_rel_tck))
-		return ODP_TIMER_TOO_FAR;
-	if (timer_reset(idx, abs_tck, tmo_ev, tp))
-		return ODP_TIMER_SUCCESS;
-	else
-		return ODP_TIMER_FAIL;
-}
-
 int odp_timer_start(odp_timer_t timer, const odp_timer_start_t *start_param)
 {
 	uint64_t abs_tick, rel_tick;
 	timer_pool_t *tp = handle_to_tp(timer);
-	uint64_t cur_tick = current_nsec(tp);
+	uint64_t cur_tick = odp_time_global_ns();
 	uint32_t idx = handle_to_idx(timer, tp);
 	odp_event_t tmo_ev = start_param->tmo_ev;
 
@@ -1620,6 +1581,12 @@ int odp_timer_start(odp_timer_t timer, const odp_timer_start_t *start_param)
 		odp_event_free(tmo_ev);
 	}
 
+	if (ODP_DEBUG_PRINT) {
+		uint32_t old_val = 0;
+
+		odp_atomic_cas_u32(&tp->notify_overrun, &old_val, 1);
+	}
+
 	return ODP_TIMER_SUCCESS;
 }
 
@@ -1627,7 +1594,7 @@ int odp_timer_restart(odp_timer_t timer, const odp_timer_start_t *start_param)
 {
 	uint64_t abs_tick, rel_tick;
 	timer_pool_t *tp = handle_to_tp(timer);
-	uint64_t cur_tick = current_nsec(tp);
+	uint64_t cur_tick = odp_time_global_ns();
 	uint32_t idx = handle_to_idx(timer, tp);
 
 	if (start_param->tick_type == ODP_TIMER_TICK_ABS) {
@@ -1658,7 +1625,7 @@ int odp_timer_periodic_start(odp_timer_t timer, const odp_timer_periodic_start_t
 {
 	uint64_t abs_tick, period_ns;
 	timer_pool_t *tp = handle_to_tp(timer);
-	uint64_t cur_tick = current_nsec(tp);
+	uint64_t cur_tick = odp_time_global_ns();
 	uint32_t idx = handle_to_idx(timer, tp);
 	odp_event_t tmo_ev = start_param->tmo_ev;
 	_odp_timer_t *tim = &tp->timers[idx];
@@ -1832,7 +1799,7 @@ uint64_t odp_timeout_to_u64(odp_timeout_t tmo)
 	return _odp_pri(tmo);
 }
 
-int odp_timeout_fresh(odp_timeout_t tmo)
+int ODP_DEPRECATE(odp_timeout_fresh)(odp_timeout_t tmo)
 {
 	const odp_timeout_hdr_t *hdr = timeout_hdr(tmo);
 	odp_timer_t hdl = hdr->timer;

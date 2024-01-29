@@ -11,25 +11,49 @@ env:
   OS: ubuntu_20.04
 
 jobs:
-  Build:
+  Build_gcc:
     if: ${{ github.repository == 'OpenDataPlane/odp-dpdk' }}
     runs-on: [self-hosted, ARM64]
     strategy:
       fail-fast: false
       matrix:
-        cc: [gcc, clang]
-        conf: ['', 'CFLAGS=-O3', 'CFLAGS=-O1', 'CFLAGS=-O0 --enable-debug=full', 'CFLAGS=-Os', 'CFLAGS=-pedantic',
-               '--enable-lto', '--enable-lto --enable-abi-compat', '--enable-pcapng-support']
-        exclude:
-          - cc: clang
-            conf: '--enable-lto'
-          - cc: clang
-            conf: '--enable-lto --enable-abi-compat'
+        conf: ['',
+               'CFLAGS=-O3',
+               'CFLAGS=-O1',
+               'CFLAGS=-O0 --enable-debug=full',
+               'CFLAGS=-Os',
+               'CFLAGS=-pedantic',
+               '--enable-lto',
+               '--enable-lto --enable-abi-compat',
+               '--enable-pcapng-support']
     steps:
       - uses: OpenDataPlane/action-clean-up@main
       - uses: actions/checkout@v3
-      - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${{matrix.cc}}"
+      - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC=gcc
                -e CONF="${{matrix.conf}}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-native /odp/scripts/ci/build_${ARCH}.sh
+      - if: ${{ failure() }}
+        uses: ./.github/actions/build-failure-log
+
+  Build_clang:
+    if: ${{ github.repository == 'OpenDataPlane/odp-dpdk' }}
+    runs-on: [self-hosted, ARM64]
+    strategy:
+      fail-fast: false
+      matrix:
+        conf: ['',
+               'CFLAGS=-O3',
+               'CFLAGS=-O1',
+               'CFLAGS=-O0 --enable-debug=full',
+               'CFLAGS=-Os',
+               'CFLAGS=-pedantic',
+               '--enable-pcapng-support',
+               '--without-openssl --without-pcap',
+               '--enable-wfe-locks']
+    steps:
+      - uses: OpenDataPlane/action-clean-up@main
+      - uses: actions/checkout@v3
+      - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC=clang
+                -e CONF="${{matrix.conf}}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-native /odp/scripts/ci/build_${ARCH}.sh
       - if: ${{ failure() }}
         uses: ./.github/actions/build-failure-log
 
@@ -59,7 +83,7 @@ jobs:
       fail-fast: false
       matrix:
         cc: [gcc, clang]
-        os: ['ubuntu_18.04', 'rocky_linux_8']
+        os: ['rocky_linux_8']
     steps:
       - uses: OpenDataPlane/action-clean-up@main
       - uses: actions/checkout@v3
@@ -113,27 +137,49 @@ jobs:
       - if: ${{ failure() }}
         uses: ./.github/actions/run-failure-log
 
-  Run:
+  Run_gcc:
     if: ${{ github.repository == 'OpenDataPlane/odp-dpdk' }}
     runs-on: [self-hosted, ARM64]
     strategy:
       fail-fast: false
       matrix:
-        cc: [gcc, clang]
-        conf: ['', '--enable-abi-compat', '--enable-deprecated --enable-helper-deprecated --enable-debug=full',
+        conf: ['',
+               '--enable-abi-compat',
+               '--enable-deprecated --enable-helper-deprecated --enable-debug=full',
                '--enable-dpdk-zero-copy --disable-static-applications',
                '--disable-host-optimization --enable-event-validation=warn',
                '--disable-host-optimization --enable-abi-compat',
-               '--without-openssl --without-pcap']
+               '--without-openssl --without-pcap',
+               '--enable-wfe-locks']
     steps:
       - uses: OpenDataPlane/action-clean-up@main
       - uses: actions/checkout@v3
-      - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${{matrix.cc}}" -e ARCH="${ARCH}"
-               -e CXX=g++-10 -e CONF="${{matrix.conf}}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-native /odp/scripts/ci/check.sh
+      - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC=gcc -e ARCH="${ARCH}"
+               -e CONF="${{matrix.conf}}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-native /odp/scripts/ci/check.sh
       - if: ${{ failure() }}
         uses: ./.github/actions/run-failure-log
       - if: ${{ success() }}
         uses: ./.github/actions/dump-log
+
+  Run_clang:
+    if: ${{ github.repository == 'OpenDataPlane/odp-dpdk' }}
+    runs-on: [self-hosted, ARM64]
+    strategy:
+      fail-fast: false
+      matrix:
+        conf: ['',
+               '--enable-abi-compat',
+               '--enable-deprecated --enable-helper-deprecated --enable-debug=full',
+               '--enable-dpdk-zero-copy --disable-static-applications',
+               '--disable-host-optimization --enable-event-validation=warn',
+               '--disable-host-optimization --enable-abi-compat']
+    steps:
+      - uses: OpenDataPlane/action-clean-up@main
+      - uses: actions/checkout@v3
+      - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC=clang -e ARCH="${ARCH}"
+               -e CONF="${{matrix.conf}}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-native /odp/scripts/ci/check.sh
+      - if: ${{ failure() }}
+        uses: ./.github/actions/run-failure-log
 
   Run_CFLAGS:
     if: ${{ github.repository == 'OpenDataPlane/odp-dpdk' }}
@@ -157,7 +203,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ['ubuntu_18.04', 'ubuntu_22.04']
+        os: ['ubuntu_22.04']
     steps:
       - uses: OpenDataPlane/action-clean-up@main
       - uses: actions/checkout@v3
