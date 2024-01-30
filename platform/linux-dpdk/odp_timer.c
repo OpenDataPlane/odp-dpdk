@@ -1,5 +1,5 @@
 /* Copyright (c) 2018, Linaro Limited
- * Copyright (c) 2019-2023, Nokia
+ * Copyright (c) 2019-2024, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -46,9 +46,6 @@
 #define NOT_TICKING 0
 #define EXPIRED     1
 #define TICKING     2
-
-/* One second in nanoseconds */
-#define SEC_IN_NS ((uint64_t)1000000000)
 
 /* Maximum number of timer pools */
 #define MAX_TIMER_POOLS  8
@@ -197,6 +194,9 @@ _odp_timeout_inline_offset ODP_ALIGNED_CACHE = {
 	.user_ptr = offsetof(odp_timeout_hdr_t, user_ptr),
 	.uarea_addr = offsetof(odp_timeout_hdr_t, uarea_addr)
 };
+
+/* Global data for inline functions */
+_odp_timer_global_t _odp_timer_glob;
 
 #include <odp/visibility_end.h>
 
@@ -393,6 +393,13 @@ int _odp_timer_init_global(const odp_init_t *params)
 		timer_global->ops.stop = timer_stop;
 		timer_global->ops.manage = timer_manage;
 		timer_global->ops.reset = timer_reset;
+	}
+
+	_odp_timer_glob.freq_hz = rte_get_timer_hz();
+	if (_odp_timer_glob.freq_hz == 0) {
+		_ODP_ERR("Reading timer frequency failed\n");
+		odp_shm_free(shm);
+		return -1;
 	}
 
 	return 0;
@@ -750,6 +757,19 @@ void odp_timer_pool_start(void)
 	/* Nothing to do */
 }
 
+int odp_timer_pool_start_multi(odp_timer_pool_t timer_pool[], int num)
+{
+	_ODP_ASSERT(timer_pool != NULL);
+	_ODP_ASSERT(num > 0);
+	if (ODP_DEBUG) {
+		for (int i = 0; i < num; i++)
+			_ODP_ASSERT(timer_pool[i] != ODP_TIMER_POOL_INVALID);
+	}
+
+	/* Nothing to do here, timer pools are started by the create call. */
+	return num;
+}
+
 void odp_timer_pool_destroy(odp_timer_pool_t tp)
 {
 	timer_pool_t *timer_pool = timer_pool_from_hdl(tp);
@@ -764,48 +784,6 @@ void odp_timer_pool_destroy(odp_timer_pool_t tp)
 		odp_global_rw->inline_timers = false;
 
 	odp_ticketlock_unlock(&timer_global->lock);
-}
-
-uint64_t odp_timer_tick_to_ns(odp_timer_pool_t tp, uint64_t ticks)
-{
-	uint64_t nsec;
-	uint64_t freq_hz = rte_get_timer_hz();
-	uint64_t sec = 0;
-	(void)tp;
-
-	if (ticks >= freq_hz) {
-		sec   = ticks / freq_hz;
-		ticks = ticks - sec * freq_hz;
-	}
-
-	nsec = (SEC_IN_NS * ticks) / freq_hz;
-
-	return (sec * SEC_IN_NS) + nsec;
-}
-
-uint64_t odp_timer_ns_to_tick(odp_timer_pool_t tp, uint64_t ns)
-{
-	uint64_t ticks;
-	uint64_t freq_hz = rte_get_timer_hz();
-	uint64_t sec = 0;
-	(void)tp;
-
-	if (ns >= SEC_IN_NS) {
-		sec = ns / SEC_IN_NS;
-		ns  = ns - sec * SEC_IN_NS;
-	}
-
-	ticks  = sec * freq_hz;
-	ticks += (ns * freq_hz) / SEC_IN_NS;
-
-	return ticks;
-}
-
-uint64_t odp_timer_current_tick(odp_timer_pool_t tp)
-{
-	(void)tp;
-
-	return rte_get_timer_cycles();
 }
 
 int odp_timer_sample_ticks(odp_timer_pool_t tp[], uint64_t tick[], uint64_t clk_count[], int num)
@@ -857,9 +835,10 @@ int odp_timer_pool_info(odp_timer_pool_t tp,
 	info->name       = timer_pool->name;
 
 	info->tick_info.freq.integer = freq_hz;
-	info->tick_info.nsec.integer = SEC_IN_NS / freq_hz;
-	if (SEC_IN_NS % freq_hz) {
-		info->tick_info.nsec.numer = SEC_IN_NS - (info->tick_info.nsec.integer * freq_hz);
+	info->tick_info.nsec.integer = ODP_TIME_SEC_IN_NS / freq_hz;
+	if (ODP_TIME_SEC_IN_NS % freq_hz) {
+		info->tick_info.nsec.numer = ODP_TIME_SEC_IN_NS - (info->tick_info.nsec.integer *
+								   freq_hz);
 		info->tick_info.nsec.denom = freq_hz;
 	}
 	/* Leave source clock information to zero as there is no direct link
@@ -918,30 +897,18 @@ odp_timer_t odp_timer_alloc(odp_timer_pool_t tp,
 	return (odp_timer_t)timer;
 }
 
-odp_event_t odp_timer_free(odp_timer_t timer_hdl)
+int odp_timer_free(odp_timer_t timer_hdl)
 {
-	odp_event_t ev;
 	timer_entry_t *timer = timer_from_hdl(timer_hdl);
 	timer_pool_t *timer_pool = timer->timer_pool;
 	uint32_t timer_idx = timer->timer_idx;
 
-retry:
 	odp_ticketlock_lock(&timer->lock);
 
-	if (timer->state == TICKING) {
-		_ODP_DBG("Freeing active timer.\n");
-
-		if (timer_global->ops.stop(&timer->rte_timer)) {
-			/* Another core runs timer callback function. */
-			odp_ticketlock_unlock(&timer->lock);
-			goto retry;
-		}
-
-		ev = timer->tmo_event;
-		timer->tmo_event = ODP_EVENT_INVALID;
-		timer->state = NOT_TICKING;
-	} else {
-		ev = ODP_EVENT_INVALID;
+	if (odp_unlikely(timer->state == TICKING)) {
+		odp_ticketlock_unlock(&timer->lock);
+		_ODP_ERR("Timer is active\n");
+		return -1;
 	}
 
 	/* Remove timer from queue */
@@ -958,7 +925,7 @@ retry:
 	ring_u32_enq(&timer_pool->free_timer.ring_hdr,
 		     timer_pool->free_timer.ring_mask, timer_idx);
 
-	return ev;
+	return 0;
 }
 
 static inline odp_timeout_hdr_t *timeout_to_hdr(odp_timeout_t tmo)
@@ -966,10 +933,9 @@ static inline odp_timeout_hdr_t *timeout_to_hdr(odp_timeout_t tmo)
 	return (odp_timeout_hdr_t *)(uintptr_t)tmo;
 }
 
-static inline int timer_set(odp_timer_t timer_hdl, uint64_t tick,
-			    odp_event_t *event, int absolute)
+static inline int timer_set(odp_timer_t timer_hdl, uint64_t tick, odp_event_t event, int absolute)
 {
-	odp_event_t old_ev, tmo_event;
+	odp_event_t tmo_event;
 	uint64_t cur_tick, rel_tick, abs_tick;
 	timer_entry_t *timer = timer_from_hdl(timer_hdl);
 	int num_retry = 0;
@@ -998,12 +964,20 @@ retry:
 
 	odp_ticketlock_lock(&timer->lock);
 
-	if (timer->tmo_event == ODP_EVENT_INVALID)
-		if (event == NULL || (event && *event == ODP_EVENT_INVALID)) {
+	if (timer->tmo_event == ODP_EVENT_INVALID) {
+		if (odp_unlikely(event == ODP_EVENT_INVALID)) {
 			odp_ticketlock_unlock(&timer->lock);
 			/* Event missing, or timer already expired and
 			 * enqueued the event. */
 			return ODP_TIMER_FAIL;
+		}
+	} else {
+		/* Check that timer was not active */
+		if (odp_unlikely(event != ODP_EVENT_INVALID)) {
+			_ODP_ERR("Timer was already active\n");
+			odp_ticketlock_unlock(&timer->lock);
+			return ODP_TIMER_FAIL;
+		}
 	}
 
 	if (odp_unlikely(timer_global->ops.reset(&timer->rte_timer, rel_tick,
@@ -1040,14 +1014,8 @@ retry:
 		return ODP_TIMER_FAIL;
 	}
 
-	if (event) {
-		old_ev = timer->tmo_event;
-
-		if (*event != ODP_EVENT_INVALID)
-			timer->tmo_event = *event;
-
-		*event = old_ev;
-	}
+	if (event != ODP_EVENT_INVALID)
+		timer->tmo_event = event;
 
 	tmo_event    = timer->tmo_event;
 	timer->tick  = abs_tick;
@@ -1066,33 +1034,15 @@ retry:
 	return ODP_TIMER_SUCCESS;
 }
 
-int ODP_DEPRECATE(odp_timer_set_abs)(odp_timer_t timer_hdl, uint64_t abs_tick,
-				     odp_event_t *tmo_ev)
-{
-	return timer_set(timer_hdl, abs_tick, tmo_ev, 1);
-}
-
-int ODP_DEPRECATE(odp_timer_set_rel)(odp_timer_t timer_hdl, uint64_t rel_tick,
-				     odp_event_t *tmo_ev)
-{
-	return timer_set(timer_hdl, rel_tick, tmo_ev, 0);
-}
-
 int odp_timer_start(odp_timer_t timer, const odp_timer_start_t *start_param)
 {
 	odp_event_t tmo_ev = start_param->tmo_ev;
 	int abs = start_param->tick_type == ODP_TIMER_TICK_ABS;
 	int ret;
 
-	ret = timer_set(timer, start_param->tick, &tmo_ev, abs);
+	ret = timer_set(timer, start_param->tick, tmo_ev, abs);
 	if (odp_unlikely(ret != ODP_TIMER_SUCCESS))
 		return ret;
-
-	/* Check that timer was not active */
-	if (odp_unlikely(tmo_ev != ODP_EVENT_INVALID)) {
-		_ODP_ERR("Timer was active already\n");
-		odp_event_free(tmo_ev);
-	}
 
 	return ODP_TIMER_SUCCESS;
 }
@@ -1102,7 +1052,7 @@ int odp_timer_restart(odp_timer_t timer, const odp_timer_start_t *start_param)
 	int abs = start_param->tick_type == ODP_TIMER_TICK_ABS;
 
 	/* Reset timer without changing the event */
-	return timer_set(timer, start_param->tick, NULL, abs);
+	return timer_set(timer, start_param->tick, ODP_EVENT_INVALID, abs);
 }
 
 int odp_timer_periodic_start(odp_timer_t timer_hdl,
@@ -1154,15 +1104,9 @@ int odp_timer_periodic_start(odp_timer_t timer_hdl,
 		absolute = 1;
 	}
 
-	ret = timer_set(timer_hdl, first_tick, &tmo_ev, absolute);
+	ret = timer_set(timer_hdl, first_tick, tmo_ev, absolute);
 	if (odp_unlikely(ret != ODP_TIMER_SUCCESS))
 		return ret;
-
-	/* Check that timer was not active */
-	if (odp_unlikely(tmo_ev != ODP_EVENT_INVALID)) {
-		_ODP_ERR("Timer was active already\n");
-		odp_event_free(tmo_ev);
-	}
 
 	return ODP_TIMER_SUCCESS;
 }
@@ -1182,8 +1126,10 @@ int odp_timer_periodic_ack(odp_timer_t timer_hdl, odp_event_t tmo_ev)
 
 	abs_tick = timer->periodic_ticks;
 
-	if (odp_unlikely(abs_tick == PERIODIC_CANCELLED))
+	if (odp_unlikely(abs_tick == PERIODIC_CANCELLED)) {
+		timer->tmo_event = ODP_EVENT_INVALID;
 		return 2;
+	}
 
 	acc = (uint64_t)timer->periodic_ticks_frac_acc + (uint64_t)timer->periodic_ticks_frac;
 
@@ -1198,7 +1144,7 @@ int odp_timer_periodic_ack(odp_timer_t timer_hdl, odp_event_t tmo_ev)
 	abs_tick += timeout_hdr->expiration;
 	timeout_hdr->expiration = abs_tick;
 
-	ret = timer_set(timer_hdl, abs_tick, NULL, 1);
+	ret = timer_set(timer_hdl, abs_tick, ODP_EVENT_INVALID, 1);
 	if (odp_likely(ret == ODP_TIMER_SUCCESS))
 		return 0;
 
@@ -1275,9 +1221,12 @@ int odp_timer_periodic_cancel(odp_timer_t timer_hdl)
 	/* Timer successfully cancelled, so send the final event manually. */
 	if (ret == 0 && timer->state == TICKING) {
 		timer->state = NOT_TICKING;
+		timer->tmo_event = ODP_EVENT_INVALID;
 		if (odp_unlikely(odp_queue_enq(timer->queue, event))) {
 			_ODP_ERR("Failed to enqueue final timeout event\n");
 			_odp_event_free(event);
+			odp_ticketlock_unlock(&timer->lock);
+			return -1;
 		}
 	}
 
@@ -1296,7 +1245,7 @@ uint64_t odp_timeout_to_u64(odp_timeout_t tmo)
 	return (uint64_t)(uintptr_t)tmo;
 }
 
-int odp_timeout_fresh(odp_timeout_t tmo)
+int ODP_DEPRECATE(odp_timeout_fresh)(odp_timeout_t tmo)
 {
 	timer_entry_t *timer;
 	odp_timeout_hdr_t *timeout_hdr = timeout_to_hdr(tmo);

@@ -58,14 +58,14 @@
 #define POOL_NAME_FORMAT "%" PRIu64 "-%d-%s"
 
 /* Define a practical limit for contiguous memory allocations */
-#define MAX_SIZE   (CONFIG_PACKET_SEG_SIZE - ODP_CONFIG_BUFFER_ALIGN_MIN)
+#define MAX_SIZE   (CONFIG_PACKET_SEG_SIZE - CONFIG_BUFFER_ALIGN_MIN)
 
 /* Maximum packet user area size */
 #define MAX_UAREA_SIZE 2048
 
 #define ROUNDUP_DIV(a, b) (((a) + ((b) - 1)) / (b))
 
-ODP_STATIC_ASSERT(CONFIG_INTERNAL_POOLS < ODP_CONFIG_POOLS,
+ODP_STATIC_ASSERT(CONFIG_INTERNAL_POOLS < CONFIG_POOLS,
 		  "Internal pool count needs to be less than total configured pool count");
 
 /* The pool table ptr - resides in shared memory */
@@ -116,7 +116,7 @@ static pool_t *find_pool(_odp_event_hdr_t *event_hdr)
 {
 	int i;
 
-	for (i = 0; i < ODP_CONFIG_POOLS; i++) {
+	for (i = 0; i < CONFIG_POOLS; i++) {
 		pool_t *pool = _odp_pool_entry_from_idx(i);
 		struct mem_cb_arg_t args;
 
@@ -182,7 +182,7 @@ int _odp_pool_init_global(void)
 		return -1;
 	}
 
-	for (i = 0; i < ODP_CONFIG_POOLS; i++) {
+	for (i = 0; i < CONFIG_POOLS; i++) {
 		pool_t *pool = _odp_pool_entry_from_idx(i);
 
 		LOCK_INIT(&pool->lock);
@@ -251,7 +251,7 @@ int odp_pool_capability(odp_pool_capability_t *capa)
 {
 	odp_pool_stats_opt_t supported_stats;
 	/* Reserve pools for internal usage */
-	unsigned int max_pools = ODP_CONFIG_POOLS - CONFIG_INTERNAL_POOLS;
+	unsigned int max_pools = CONFIG_POOLS - CONFIG_INTERNAL_POOLS;
 
 	memset(capa, 0, sizeof(odp_pool_capability_t));
 
@@ -262,7 +262,7 @@ int odp_pool_capability(odp_pool_capability_t *capa)
 
 	/* Buffer pools */
 	capa->buf.max_pools = max_pools;
-	capa->buf.max_align = ODP_CONFIG_BUFFER_ALIGN_MAX;
+	capa->buf.max_align = CONFIG_BUFFER_ALIGN_MAX;
 	capa->buf.max_size  = MAX_SIZE;
 	capa->buf.max_num   = CONFIG_POOL_MAX_NUM;
 	capa->buf.max_uarea_size   = MAX_UAREA_SIZE;
@@ -272,7 +272,7 @@ int odp_pool_capability(odp_pool_capability_t *capa)
 	capa->buf.stats.all = supported_stats.all;
 
 	/* Packet pools */
-	capa->pkt.max_align        = ODP_CONFIG_BUFFER_ALIGN_MIN;
+	capa->pkt.max_align        = CONFIG_BUFFER_ALIGN_MIN;
 	capa->pkt.max_pools        = max_pools;
 	capa->pkt.max_len          = CONFIG_PACKET_MAX_SEG_LEN;
 	capa->pkt.max_num	   = _odp_pool_glb->config.pkt_max_num;
@@ -586,7 +586,7 @@ static pool_t *get_unused_pool(void)
 {
 	pool_t *pool;
 
-	for (int i = 0; i < ODP_CONFIG_POOLS; i++) {
+	for (int i = 0; i < CONFIG_POOLS; i++) {
 		pool = _odp_pool_entry_from_idx(i);
 		LOCK(&pool->lock);
 
@@ -684,7 +684,7 @@ odp_pool_t _odp_pool_create(const char *name, const odp_pool_param_t *params,
 		cache_size = params->buf.cache_size;
 		priv_size = get_mbuf_priv_size(sizeof(odp_buffer_hdr_t));
 		align = params->buf.align > 0 ? params->buf.align : ODP_CACHE_LINE_SIZE;
-		align = _ODP_MAX(align, (uint32_t)ODP_CONFIG_BUFFER_ALIGN_MIN);
+		align = _ODP_MAX(align, (uint32_t)CONFIG_BUFFER_ALIGN_MIN);
 		data_size = _ODP_ROUNDUP_ALIGN(params->buf.size + trailer, align);
 		uarea_size = params->buf.uarea_size;
 		priv_data.event_type = ODP_EVENT_BUFFER;
@@ -693,8 +693,8 @@ odp_pool_t _odp_pool_create(const char *name, const odp_pool_param_t *params,
 		num = params->pkt.num;
 		cache_size = params->pkt.cache_size;
 		priv_size = get_mbuf_priv_size(sizeof(odp_packet_hdr_t));
-		align = params->pkt.align > 0 ? params->pkt.align : ODP_CONFIG_BUFFER_ALIGN_MIN;
-		align = _ODP_MAX(align, (uint32_t)ODP_CONFIG_BUFFER_ALIGN_MIN);
+		align = params->pkt.align > 0 ? params->pkt.align : CONFIG_BUFFER_ALIGN_MIN;
+		align = _ODP_MAX(align, (uint32_t)CONFIG_BUFFER_ALIGN_MIN);
 		data_size = _ODP_MAX(params->pkt.seg_len, (uint32_t)CONFIG_PACKET_SEG_LEN_MIN);
 		data_size = _ODP_MAX(data_size, params->pkt.len);
 
@@ -793,7 +793,7 @@ odp_pool_t odp_pool_lookup(const char *name)
 	uint32_t i;
 	pool_t *pool;
 
-	for (i = 0; i < ODP_CONFIG_POOLS; i++) {
+	for (i = 0; i < CONFIG_POOLS; i++) {
 		pool = _odp_pool_entry_from_idx(i);
 
 		LOCK(&pool->lock);
@@ -877,7 +877,7 @@ void odp_pool_print_all(void)
 	_ODP_PRINT("-----------------\n");
 	_ODP_PRINT(" idx %-*s type   free    tot  cache  elt_len  ext\n", col_width, "name");
 
-	for (i = 0; i < ODP_CONFIG_POOLS; i++) {
+	for (i = 0; i < CONFIG_POOLS; i++) {
 		pool_t *pool = _odp_pool_entry_from_idx(i);
 
 		LOCK(&pool->lock);
@@ -1002,13 +1002,12 @@ uint64_t odp_pool_to_u64(odp_pool_t hdl)
 
 unsigned int odp_pool_max_index(void)
 {
-	return ODP_CONFIG_POOLS - 1;
+	return CONFIG_POOLS - 1;
 }
 
 int odp_pool_stats(odp_pool_t pool_hdl, odp_pool_stats_t *stats)
 {
 	pool_t *pool;
-	uint16_t first, last;
 
 	if (odp_unlikely(pool_hdl == ODP_POOL_INVALID)) {
 		_ODP_ERR("Invalid pool handle\n");
@@ -1020,14 +1019,9 @@ int odp_pool_stats(odp_pool_t pool_hdl, odp_pool_stats_t *stats)
 	}
 
 	pool = _odp_pool_entry(pool_hdl);
-	first = stats->thread.first;
-	last = stats->thread.last;
 
-	memset(stats, 0, sizeof(odp_pool_stats_t));
-
-	/* Restore input parameters */
-	stats->thread.first = first;
-	stats->thread.last = last;
+	/* Zero everything else but per thread statistics */
+	memset(stats, 0, offsetof(odp_pool_stats_t, thread));
 
 	if (pool->params.stats.bit.available)
 		stats->available = rte_mempool_avail_count(pool->rte_mempool);
@@ -1109,7 +1103,7 @@ int odp_pool_ext_capability(odp_pool_type_t type,
 	memset(capa, 0, sizeof(odp_pool_ext_capability_t));
 
 	capa->type = type;
-	capa->max_pools = ODP_CONFIG_POOLS - CONFIG_INTERNAL_POOLS;
+	capa->max_pools = CONFIG_POOLS - CONFIG_INTERNAL_POOLS;
 	capa->min_cache_size = 0;
 	capa->max_cache_size = RTE_MEMPOOL_CACHE_MAX_SIZE;
 	capa->stats.all = supported_stats.all;
@@ -1221,7 +1215,7 @@ odp_pool_t odp_pool_ext_create(const char *name,
 	}
 
 	/* Find an unused buffer pool slot and initialize it as requested */
-	for (i = 0; i < ODP_CONFIG_POOLS; i++) {
+	for (i = 0; i < CONFIG_POOLS; i++) {
 		uint32_t num;
 		struct rte_mempool *mp;
 

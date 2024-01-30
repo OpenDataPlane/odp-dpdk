@@ -165,13 +165,7 @@ static void test_abs_timeouts(int thr, test_globals_t *gbls)
 		tick = odp_timeout_tick(tmo);
 		ttp = odp_timeout_user_ptr(tmo);
 		ttp->ev = ev;
-		if (!odp_timeout_fresh(tmo)) {
-			/* Not the expected expiration tick, timer has
-			 * been reset or cancelled or freed */
-			ODPH_ABORT("Unexpected timeout received (timer "
-				   "%" PRIu64 ", tick %" PRIu64 ")\n",
-				   odp_timer_to_u64(ttp->tim), tick);
-		}
+
 		ODPH_DBG("  [%i] timeout, tick %" PRIu64 "\n", thr, tick);
 
 		uint32_t rx_num = odp_atomic_fetch_dec_u32(&gbls->remain);
@@ -456,7 +450,11 @@ int main(int argc, char *argv[])
 		ODPH_ERR("Timer pool create failed.\n");
 		goto err;
 	}
-	odp_timer_pool_start();
+
+	if (odp_timer_pool_start_multi(&gbls->tp, 1) != 1) {
+		ODPH_ERR("Timer pool start failed\n");
+		return -1;
+	}
 
 	odp_shm_print_all();
 	(void)odp_timer_pool_info(gbls->tp, &tpinfo);

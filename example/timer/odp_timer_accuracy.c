@@ -197,6 +197,7 @@ static int parse_options(int argc, char *argv[], test_opt_t *test_opt)
 
 	memset(test_opt, 0, sizeof(*test_opt));
 
+	test_opt->cpu_count = 1;
 	test_opt->period_ns = 200 * ODP_TIME_MSEC_IN_NS;
 	test_opt->res_ns    = 0;
 	test_opt->res_hz    = 0;
@@ -670,7 +671,11 @@ static int create_timers(test_global_t *test_global)
 		return -1;
 	}
 
-	odp_timer_pool_start();
+	if (odp_timer_pool_start_multi(&timer_pool, 1) != 1) {
+		ODPH_ERR("Timer pool start failed\n");
+		return -1;
+	}
+
 	odp_timer_pool_print(timer_pool);
 
 	/* Spend some time so that current tick would not be zero */
@@ -805,7 +810,6 @@ static int destroy_timers(test_global_t *test_global)
 {
 	uint64_t i, alloc_timers;
 	odp_timer_t timer;
-	odp_event_t ev;
 	int ret = 0;
 
 	alloc_timers = test_global->opt.alloc_timers;
@@ -816,10 +820,10 @@ static int destroy_timers(test_global_t *test_global)
 		if (timer == ODP_TIMER_INVALID)
 			break;
 
-		ev = odp_timer_free(timer);
-
-		if (ev != ODP_EVENT_INVALID)
-			odp_event_free(ev);
+		if (odp_timer_free(timer)) {
+			printf("Timer free failed: %" PRIu64 "\n", i);
+			ret = -1;
+		}
 	}
 
 	if (test_global->timer_pool != ODP_TIMER_POOL_INVALID)

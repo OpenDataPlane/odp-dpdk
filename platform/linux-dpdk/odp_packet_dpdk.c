@@ -186,7 +186,7 @@ const pktio_if_ops_t * const _odp_pktio_if_ops[]  = {
 	NULL
 };
 
-extern void *pktio_entry_ptr[ODP_CONFIG_PKTIO_ENTRIES];
+extern void *pktio_entry_ptr[CONFIG_PKTIO_ENTRIES];
 
 static uint32_t mtu_get_pkt_dpdk(pktio_entry_t *pktio_entry);
 

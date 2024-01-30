@@ -1,5 +1,5 @@
 /* Copyright (c) 2018, Linaro Limited
- * Copyright (c) 2020-2023, Nokia
+ * Copyright (c) 2020-2024, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
@@ -21,8 +21,9 @@
 /** @cond _ODP_HIDE_FROM_DOXYGEN_ */
 
 typedef struct _odp_time_global_t {
-	uint64_t        start_cycles;
 	uint64_t        freq_hz;
+	uint64_t        start_cycles;
+	uint64_t        start_ns;
 
 } _odp_time_global_t;
 
@@ -32,7 +33,7 @@ static inline odp_time_t _odp_time_cur(void)
 {
 	odp_time_t time;
 
-	time.u64 = rte_get_timer_cycles() - _odp_time_glob.start_cycles;
+	time.u64 = rte_get_timer_cycles();
 
 	return time;
 }
@@ -42,7 +43,7 @@ static inline odp_time_t _odp_time_cur_strict(void)
 	odp_time_t time;
 
 	rte_mb();
-	time.u64 = rte_get_timer_cycles() - _odp_time_glob.start_cycles;
+	time.u64 = rte_get_timer_cycles();
 
 	return time;
 }
@@ -104,10 +105,11 @@ static inline odp_time_t _odp_time_from_ns(uint64_t ns)
 	#define odp_time_cmp __odp_time_cmp
 	#define odp_time_diff __odp_time_diff
 	#define odp_time_diff_ns __odp_time_diff_ns
+	#define odp_time_add_ns __odp_time_add_ns
 	#define odp_time_sum __odp_time_sum
 	#define odp_time_wait_ns __odp_time_wait_ns
 	#define odp_time_wait_until __odp_time_wait_until
-
+	#define odp_time_startup __odp_time_startup
 #else
 	#define _ODP_INLINE
 #endif
@@ -206,6 +208,15 @@ _ODP_INLINE uint64_t odp_time_diff_ns(odp_time_t t2, odp_time_t t1)
 	return odp_time_to_ns(time);
 }
 
+_ODP_INLINE odp_time_t odp_time_add_ns(odp_time_t time, uint64_t ns)
+{
+	odp_time_t t = _odp_time_from_ns(ns);
+
+	t.u64 += time.u64;
+
+	return t;
+}
+
 _ODP_INLINE odp_time_t odp_time_sum(odp_time_t t1, odp_time_t t2)
 {
 	odp_time_t time;
@@ -236,6 +247,12 @@ _ODP_INLINE void odp_time_wait_ns(uint64_t ns)
 _ODP_INLINE void odp_time_wait_until(odp_time_t time)
 {
 	_odp_time_wait_until(time);
+}
+
+_ODP_INLINE void odp_time_startup(odp_time_startup_t *startup)
+{
+	startup->global.u64 = _odp_time_glob.start_cycles;
+	startup->global_ns = _odp_time_glob.start_ns;
 }
 
 /** @endcond */

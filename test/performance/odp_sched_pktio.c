@@ -1081,10 +1081,10 @@ static int stop_pktios(test_global_t *test_global)
 	return ret;
 }
 
-static void empty_queues(void)
+static void empty_queues(uint64_t wait_ns)
 {
 	odp_event_t ev;
-	uint64_t wait_time = odp_schedule_wait_time(ODP_TIME_SEC_IN_NS / 2);
+	uint64_t wait_time = odp_schedule_wait_time(wait_ns);
 
 	/* Drop all events from all queues */
 	while (1) {
@@ -1284,11 +1284,14 @@ static int create_timers(test_global_t *test_global)
 		return -1;
 	}
 
+	if (odp_timer_pool_start_multi(&timer_pool, 1) != 1) {
+		ODPH_ERR("Timer pool start failed\n");
+		return -1;
+	}
+
 	test_global->timer.timer_pool = timer_pool;
 	tick = odp_timer_ns_to_tick(timer_pool, timeout_ns);
 	test_global->timer.timeout_tick = tick;
-
-	odp_timer_pool_start();
 
 	for (i = 0; i < num_pktio; i++) {
 		for (j = 0; j < num_queue; j++) {
@@ -1365,7 +1368,6 @@ static int start_timers(test_global_t *test_global)
 static void destroy_timers(test_global_t *test_global)
 {
 	int i, j;
-	odp_event_t event;
 	odp_timer_t timer;
 	int num_pktio = test_global->opt.num_pktio;
 	int num_queue = test_global->opt.num_pktio_queue;
@@ -1375,6 +1377,9 @@ static void destroy_timers(test_global_t *test_global)
 	if (timer_pool == ODP_TIMER_POOL_INVALID)
 		return;
 
+	/* Wait any remaining timers to expire */
+	empty_queues(2000 * test_global->opt.timeout_us);
+
 	for (i = 0; i < num_pktio; i++) {
 		for (j = 0; j < num_queue; j++) {
 			timer = test_global->timer.timer[i][j];
@@ -1382,10 +1387,8 @@ static void destroy_timers(test_global_t *test_global)
 			if (timer == ODP_TIMER_INVALID)
 				break;
 
-			event = odp_timer_free(timer);
-
-			if (event != ODP_EVENT_INVALID)
-				odp_event_free(event);
+			if (odp_timer_free(timer))
+				printf("Timer free failed: %i, %i\n", i, j);
 		}
 	}
 
@@ -1552,7 +1555,7 @@ int main(int argc, char *argv[])
 
 quit:
 	stop_pktios(test_global);
-	empty_queues();
+	empty_queues(ODP_TIME_SEC_IN_NS / 2);
 	close_pktios(test_global);
 	destroy_pipeline_queues(test_global);
 	destroy_timers(test_global);

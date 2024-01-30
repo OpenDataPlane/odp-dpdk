@@ -47,10 +47,17 @@ typedef struct {
 	/* Common benchmark suite data */
 	bench_suite_t suite;
 
-	/* Test case input / output data */
+	/* Time stamp 1 */
 	odp_time_t t1[REPEAT_COUNT];
+	/* Time stamp 2 */
 	odp_time_t t2[REPEAT_COUNT];
+	/* Resulting time stamp */
 	odp_time_t t3[REPEAT_COUNT];
+
+	odp_time_t global_short[REPEAT_COUNT];
+	odp_time_t global_long[REPEAT_COUNT];
+
+	/* Integer input / output data */
 	uint64_t   a1[REPEAT_COUNT];
 	uint64_t   a2[REPEAT_COUNT];
 	uint32_t   b1[REPEAT_COUNT];
@@ -253,6 +260,19 @@ static int time_diff_ns(void)
 	return i;
 }
 
+static int time_add_ns(void)
+{
+	int i;
+	odp_time_t *t1 = gbl_args->t1;
+	odp_time_t *t3 = gbl_args->t3;
+	uint64_t *a1 = gbl_args->a1;
+
+	for (i = 0; i < REPEAT_COUNT; i++)
+		t3[i] = odp_time_add_ns(t1[i], a1[i]);
+
+	return i;
+}
+
 static int time_sum(void)
 {
 	int i;
@@ -266,14 +286,28 @@ static int time_sum(void)
 	return i;
 }
 
-static int time_to_ns(void)
+static int time_to_ns_short(void)
 {
 	int i;
-	odp_time_t *t1 = gbl_args->t1;
+	odp_time_t *t = gbl_args->global_short;
 	uint64_t res = 0;
 
 	for (i = 0; i < REPEAT_COUNT; i++)
-		res += odp_time_to_ns(t1[i]);
+		res += odp_time_to_ns(t[i]);
+
+	gbl_args->suite.dummy += res;
+
+	return i;
+}
+
+static int time_to_ns_long(void)
+{
+	int i;
+	odp_time_t *t = gbl_args->global_long;
+	uint64_t res = 0;
+
+	for (i = 0; i < REPEAT_COUNT; i++)
+		res += odp_time_to_ns(t[i]);
 
 	gbl_args->suite.dummy += res;
 
@@ -337,6 +371,20 @@ static int time_global_res(void)
 
 	for (i = 0; i < REPEAT_COUNT; i++)
 		a1[i] = odp_time_global_res();
+
+	return i;
+}
+
+static int time_startup(void)
+{
+	int i;
+	uint64_t *a1 = gbl_args->a1;
+	odp_time_startup_t startup;
+
+	for (i = 0; i < REPEAT_COUNT; i++) {
+		odp_time_startup(&startup);
+		a1[i] = startup.global_ns;
+	}
 
 	return i;
 }
@@ -697,13 +745,16 @@ bench_info_t test_suite[] = {
 	BENCH_INFO(time_diff, init_time_global, 0, "time_diff (global)"),
 	BENCH_INFO(time_diff, init_time_local, 0, "time_diff (local)"),
 	BENCH_INFO(time_diff_ns, init_time_global, 0, NULL),
+	BENCH_INFO(time_add_ns, init_time_global, 0, NULL),
 	BENCH_INFO(time_sum, init_time_global, 0, NULL),
-	BENCH_INFO(time_to_ns, init_time_global, 0, NULL),
+	BENCH_INFO(time_to_ns_short, NULL, 0, "time_to_ns (short)"),
+	BENCH_INFO(time_to_ns_long, NULL, 0, "time_to_ns (long)"),
 	BENCH_INFO(time_local_from_ns, init_time_global, 0, NULL),
 	BENCH_INFO(time_global_from_ns, init_time_global, 0, NULL),
 	BENCH_INFO(time_cmp, init_time_global, 0, NULL),
 	BENCH_INFO(time_local_res, NULL, 0, NULL),
 	BENCH_INFO(time_global_res, NULL, 0, NULL),
+	BENCH_INFO(time_startup, NULL, 0, NULL),
 	BENCH_INFO(cpu_id, NULL, 0, NULL),
 	BENCH_INFO(cpu_count, NULL, 0, NULL),
 	BENCH_INFO(cpu_hz, NULL, 1, NULL),
@@ -884,6 +935,8 @@ int main(int argc, char *argv[])
 		gbl_args->t1[i] = ODP_TIME_NULL;
 		gbl_args->t2[i] = ODP_TIME_NULL;
 		gbl_args->t3[i] = ODP_TIME_NULL;
+		gbl_args->global_short[i] = odp_time_global_from_ns(ODP_TIME_MSEC_IN_NS);
+		gbl_args->global_long[i]  = odp_time_global_from_ns(10 * ODP_TIME_SEC_IN_NS);
 		gbl_args->a1[i] = i;
 		gbl_args->a2[i] = i;
 		gbl_args->b1[i] = i;

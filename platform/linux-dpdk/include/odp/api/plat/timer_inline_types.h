@@ -31,6 +31,14 @@ typedef struct _odp_timeout_inline_offset_t {
 
 extern const _odp_timeout_inline_offset_t _odp_timeout_inline_offset;
 
+/* Timer global data */
+typedef struct _odp_timer_global_t {
+	uint64_t freq_hz;
+
+} _odp_timer_global_t;
+
+extern _odp_timer_global_t _odp_timer_glob;
+
 /** @endcond */
 
 #ifdef __cplusplus

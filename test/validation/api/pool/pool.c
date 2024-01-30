@@ -1324,7 +1324,7 @@ static void pool_test_pool_statistics(odp_pool_type_t pool_type)
 	odp_pool_stats_selected_t selected;
 	odp_pool_param_t param;
 	odp_pool_stats_opt_t supported;
-	uint32_t i, j, num_pool, num_obj, cache_size;
+	uint32_t i, j, num_pool, num_obj, cache_size, num_thr;
 	uint32_t max_pools = 2;
 	uint16_t first = 0;
 	uint16_t last = ODP_POOL_MAX_THREAD_STATS - 1;
@@ -1407,9 +1407,14 @@ static void pool_test_pool_statistics(odp_pool_type_t pool_type)
 		uint32_t num_events = 0;
 		uint32_t num_fails = 0;
 
+		memset(&stats, 0xff, sizeof(odp_pool_stats_t));
+		memset(&selected, 0xff, sizeof(odp_pool_stats_selected_t));
+
 		CU_ASSERT_FATAL(odp_pool_stats_reset(pool[i]) == 0);
+
 		stats.thread.first = first;
 		stats.thread.last = last;
+		num_thr = last - first + 1;
 		CU_ASSERT_FATAL(odp_pool_stats(pool[i], &stats) == 0);
 		CU_ASSERT_FATAL(odp_pool_stats_selected(pool[i], &selected, &supported) == 0);
 
@@ -1440,8 +1445,11 @@ static void pool_test_pool_statistics(odp_pool_type_t pool_type)
 
 		CU_ASSERT(stats.thread.first == first);
 		CU_ASSERT(stats.thread.last == last);
-		for (j = 0; j < ODP_POOL_MAX_THREAD_STATS; j++)
-			CU_ASSERT(stats.thread.cache_available[j] <= stats.cache_available);
+
+		if (supported.bit.thread_cache_available) {
+			for (j = 0; j < num_thr; j++)
+				CU_ASSERT(stats.thread.cache_available[j] <= stats.cache_available);
+		}
 
 		/* Allocate the events */
 		for (j = 0; j < num_allocs; j++) {
@@ -1487,26 +1495,31 @@ static void pool_test_pool_statistics(odp_pool_type_t pool_type)
 			if (supported.bit.cache_available)
 				CU_ASSERT(selected.cache_available <= num_obj - num_events);
 
-			while (first_id < odp_thread_count_max()) {
-				stats.thread.first = first_id;
-				stats.thread.last = last_id;
-				CU_ASSERT_FATAL(odp_pool_stats(pool[i], &stats) == 0);
+			if (supported.bit.thread_cache_available) {
+				while (first_id < odp_thread_count_max()) {
+					memset(&stats, 0xff, sizeof(odp_pool_stats_t));
 
-				for (int i = 0; i < ODP_POOL_MAX_THREAD_STATS; i++) {
-					uint64_t cached = stats.thread.cache_available[i];
+					stats.thread.first = first_id;
+					stats.thread.last = last_id;
+					num_thr = last_id - first_id + 1;
+					CU_ASSERT_FATAL(odp_pool_stats(pool[i], &stats) == 0);
 
-					CU_ASSERT(cached <= num_obj - num_events);
-					total_cached += cached;
-				}
-				first_id = last_id + 1;
-				last_id += ODP_POOL_MAX_THREAD_STATS;
-				if (last_id >= odp_thread_count_max())
-					last_id = odp_thread_count_max() - 1;
-			};
+					for (uint32_t k = 0; k < num_thr; k++) {
+						uint64_t cached = stats.thread.cache_available[k];
 
-			if (supported.bit.cache_available && supported.bit.thread_cache_available &&
-			    ODP_POOL_MAX_THREAD_STATS >= odp_thread_count_max())
-				CU_ASSERT(stats.cache_available == total_cached);
+						CU_ASSERT(cached <= num_obj - num_events);
+						total_cached += cached;
+					}
+					first_id = last_id + 1;
+					last_id += ODP_POOL_MAX_THREAD_STATS;
+					if (last_id >= odp_thread_count_max())
+						last_id = odp_thread_count_max() - 1;
+				};
+
+				if (supported.bit.cache_available &&
+				    ODP_POOL_MAX_THREAD_STATS >= odp_thread_count_max())
+					CU_ASSERT(stats.cache_available == total_cached);
+			}
 		}
 
 		CU_ASSERT(num_events == num_obj);
@@ -1515,8 +1528,12 @@ static void pool_test_pool_statistics(odp_pool_type_t pool_type)
 		/* Allow implementation some time to update counters */
 		odp_time_wait_ns(ODP_TIME_MSEC_IN_NS);
 
+		memset(&stats, 0xff, sizeof(odp_pool_stats_t));
+		memset(&selected, 0xff, sizeof(odp_pool_stats_selected_t));
+
 		stats.thread.first = first;
 		stats.thread.last = last;
+		num_thr = last - first + 1;
 		CU_ASSERT_FATAL(odp_pool_stats(pool[i], &stats) == 0);
 		CU_ASSERT_FATAL(odp_pool_stats_selected(pool[i], &selected, &supported) == 0);
 
@@ -1528,8 +1545,10 @@ static void pool_test_pool_statistics(odp_pool_type_t pool_type)
 		CU_ASSERT(stats.cache_available == 0);
 		if (supported.bit.cache_available)
 			CU_ASSERT(selected.cache_available == 0);
-		for (j = 0; j < ODP_POOL_MAX_THREAD_STATS; j++)
-			CU_ASSERT(stats.thread.cache_available[j] == 0);
+		if (supported.bit.thread_cache_available) {
+			for (j = 0; j < num_thr; j++)
+				CU_ASSERT(stats.thread.cache_available[j] == 0);
+		}
 		if (supported.bit.alloc_ops) {
 			CU_ASSERT(stats.alloc_ops > 0 && stats.alloc_ops <= num_allocs);
 			CU_ASSERT(selected.alloc_ops > 0 && selected.alloc_ops <= num_allocs);
@@ -1587,8 +1606,9 @@ static void pool_test_pool_statistics(odp_pool_type_t pool_type)
 			printf("  cache_available: %" PRIu64 "\n", stats.cache_available);
 			printf("  cache_alloc_ops: %" PRIu64 "\n", stats.cache_alloc_ops);
 			printf("  cache_free_ops:  %" PRIu64 "\n", stats.cache_free_ops);
-			printf("  thread.cache_available[0]: %" PRIu64 "\n",
-			       stats.thread.cache_available[0]);
+			if (supported.bit.thread_cache_available)
+				printf("  thread.cache_available[0]: %" PRIu64 "\n",
+				       stats.thread.cache_available[0]);
 		}
 
 		CU_ASSERT_FATAL(odp_pool_stats_reset(pool[i]) == 0);

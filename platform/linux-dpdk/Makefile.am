@@ -113,6 +113,7 @@ odpapiabiarchinclude_HEADERS += \
 		  include-abi/odp/api/abi/std_types.h \
 		  include-abi/odp/api/abi/sync.h \
 		  include-abi/odp/api/abi/thread.h \
+		  include-abi/odp/api/abi/thread_types.h \
 		  include-abi/odp/api/abi/thrmask.h \
 		  include-abi/odp/api/abi/ticketlock.h \
 		  include-abi/odp/api/abi/time.h \
@@ -296,7 +297,9 @@ odpapiabiarchinclude_HEADERS += arch/default/odp/api/abi/atomic_generic.h \
 				arch/default/odp/api/abi/cpu_generic.h \
 				arch/arm/odp/api/abi/cpu_inlines.h \
 				arch/arm/odp/api/abi/cpu.h \
-				arch/default/odp/api/abi/sync_inlines.h
+				arch/default/odp/api/abi/sync_inlines.h \
+				arch/default/odp/api/abi/wait_until_generic.h \
+				arch/default/odp/api/abi/wait_until.h
 endif
 noinst_HEADERS += arch/arm/odp_atomic.h \
 		  arch/arm/odp_cpu.h \
@@ -324,7 +327,9 @@ odpapiabiarchinclude_HEADERS += arch/default/odp/api/abi/atomic_generic.h \
 				arch/default/odp/api/abi/cpu_generic.h \
 				arch/aarch64/odp/api/abi/cpu_inlines.h \
 				arch/aarch64/odp/api/abi/cpu.h \
-				arch/aarch64/odp/api/abi/sync_inlines.h
+				arch/aarch64/odp/api/abi/sync_inlines.h \
+				arch/default/odp/api/abi/wait_until_generic.h \
+				arch/aarch64/odp/api/abi/wait_until.h
 endif
 noinst_HEADERS += arch/aarch64/odp_atomic.h \
 		  arch/aarch64/odp_cpu.h \
@@ -346,7 +351,9 @@ odpapiabiarchinclude_HEADERS += arch/default/odp/api/abi/atomic_generic.h \
 				arch/default/odp/api/abi/cpu_generic.h \
 				arch/default/odp/api/abi/cpu_inlines.h \
 				arch/default/odp/api/abi/cpu.h \
-				arch/default/odp/api/abi/sync_inlines.h
+				arch/default/odp/api/abi/sync_inlines.h \
+				arch/default/odp/api/abi/wait_until_generic.h \
+				arch/default/odp/api/abi/wait_until.h
 endif
 noinst_HEADERS += arch/default/odp_atomic.h \
 		  arch/default/odp_cpu.h \
@@ -366,7 +373,9 @@ odpapiabiarchinclude_HEADERS += arch/default/odp/api/abi/atomic_generic.h \
 				arch/default/odp/api/abi/cpu_generic.h \
 				arch/default/odp/api/abi/cpu_inlines.h \
 				arch/powerpc/odp/api/abi/cpu.h \
-				arch/default/odp/api/abi/sync_inlines.h
+				arch/default/odp/api/abi/sync_inlines.h \
+				arch/default/odp/api/abi/wait_until_generic.h \
+				arch/default/odp/api/abi/wait_until.h
 endif
 noinst_HEADERS += arch/default/odp_atomic.h \
 		  arch/default/odp_cpu.h \
@@ -388,7 +397,9 @@ odpapiabiarchinclude_HEADERS += arch/default/odp/api/abi/atomic_generic.h \
 				arch/default/odp/api/abi/atomic_inlines.h \
 				arch/x86/odp/api/abi/cpu_inlines.h \
 				arch/x86/odp/api/abi/cpu.h \
-				arch/x86/odp/api/abi/sync_inlines.h
+				arch/x86/odp/api/abi/sync_inlines.h \
+				arch/default/odp/api/abi/wait_until_generic.h \
+				arch/default/odp/api/abi/wait_until.h
 endif
 noinst_HEADERS += arch/x86/cpu_flags.h \
 		  arch/x86/odp_cpu.h \

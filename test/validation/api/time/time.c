@@ -25,6 +25,7 @@
 #define TIME_TOLERANCE_NS	1000000
 #define TIME_TOLERANCE_CI_NS	40000000
 #define GLOBAL_SHM_NAME		"GlobalTimeTest"
+#define YEAR_IN_NS              (365 * 24 * ODP_TIME_HOUR_IN_NS)
 
 static uint64_t local_res;
 static uint64_t global_res;
@@ -145,6 +146,35 @@ static void time_test_constants(void)
 	CU_ASSERT(ns == ODP_TIME_USEC_IN_NS);
 }
 
+static void time_test_startup_time(void)
+{
+	odp_time_startup_t startup;
+	uint64_t ns1, ns2, ns3;
+	odp_time_t time;
+
+	memset(&startup, 0, sizeof(odp_time_startup_t));
+
+	odp_time_startup(&startup);
+	ns1 = startup.global_ns;
+	ns2 = odp_time_to_ns(startup.global);
+
+	CU_ASSERT(UINT64_MAX - ns1 >= 10 * YEAR_IN_NS);
+	CU_ASSERT(UINT64_MAX - ns2 >= 10 * YEAR_IN_NS);
+
+	time = odp_time_global();
+	ns3  = odp_time_to_ns(time);
+	CU_ASSERT(odp_time_cmp(time, startup.global) > 0);
+
+	time = odp_time_global_from_ns(10 * YEAR_IN_NS);
+	time = odp_time_sum(startup.global, time);
+	CU_ASSERT(odp_time_cmp(time, startup.global) > 0);
+
+	printf("\n");
+	printf("    Startup time in nsec: %" PRIu64 "\n", ns1);
+	printf("    Startup time to nsec: %" PRIu64 "\n", ns2);
+	printf("    Nsec since startup:   %" PRIu64 "\n\n", ns3 - startup.global_ns);
+}
+
 static void time_test_res(time_res_cb time_res, uint64_t *res)
 {
 	uint64_t rate;
@@ -225,6 +255,7 @@ static void time_test_monotony(void)
 	uint64_t gs_ns1, gs_ns2, gs_ns3;
 	uint64_t ns1, ns2, ns3;
 	uint64_t s_ns1, s_ns2, s_ns3;
+	uint64_t limit;
 
 	l_t1   = odp_time_local();
 	ls_t1  = odp_time_local_strict();
@@ -276,12 +307,13 @@ static void time_test_monotony(void)
 	s_ns2 = odp_time_to_ns(ls_t2);
 	s_ns3 = odp_time_to_ns(ls_t3);
 
-	/* Time counting starts from zero. Assuming that the ODP instance has run
-	 * less than 10 minutes before running this test case. */
-	CU_ASSERT(ns1    < 10 * ODP_TIME_MIN_IN_NS);
-	CU_ASSERT(s_ns1  < 10 * ODP_TIME_MIN_IN_NS);
-	CU_ASSERT(l_ns1  < 10 * ODP_TIME_MIN_IN_NS);
-	CU_ASSERT(ls_ns1 < 10 * ODP_TIME_MIN_IN_NS);
+	/* Time should not wrap in at least 10 years from ODP start. Ignoring delay from start up
+	 * and other test cases, which should be few seconds. */
+	limit = 10 * YEAR_IN_NS;
+	CU_ASSERT(UINT64_MAX - ns1    > limit);
+	CU_ASSERT(UINT64_MAX - s_ns1  > limit);
+	CU_ASSERT(UINT64_MAX - l_ns1  > limit);
+	CU_ASSERT(UINT64_MAX - ls_ns1 > limit);
 
 	/* Time stamp */
 	CU_ASSERT(ns2 > ns1);
@@ -321,12 +353,13 @@ static void time_test_monotony(void)
 	s_ns2 = odp_time_to_ns(gs_t2);
 	s_ns3 = odp_time_to_ns(gs_t3);
 
-	/* Time counting starts from zero. Assuming that the ODP instance has run
-	 * less than 10 minutes before running this test case. */
-	CU_ASSERT(ns1    < 10 * ODP_TIME_MIN_IN_NS);
-	CU_ASSERT(s_ns1  < 10 * ODP_TIME_MIN_IN_NS);
-	CU_ASSERT(g_ns1  < 10 * ODP_TIME_MIN_IN_NS);
-	CU_ASSERT(gs_ns1 < 10 * ODP_TIME_MIN_IN_NS);
+	/* Time should not wrap in at least 10 years from ODP start. Ignoring delay from start up
+	 * and other test cases, which should be few seconds. */
+	limit = 10 * YEAR_IN_NS;
+	CU_ASSERT(UINT64_MAX - ns1    > limit);
+	CU_ASSERT(UINT64_MAX - s_ns1  > limit);
+	CU_ASSERT(UINT64_MAX - g_ns1  > limit);
+	CU_ASSERT(UINT64_MAX - gs_ns1 > limit);
 
 	/* Time stamp */
 	CU_ASSERT(ns2 > ns1);
@@ -540,7 +573,7 @@ static void time_test_sum(time_cb time_cur,
 			  uint64_t res)
 {
 	odp_time_t sum, t1, t2;
-	uint64_t nssum, ns1, ns2, ns;
+	uint64_t nssum, ns1, ns2, ns, diff;
 	uint64_t upper_limit, lower_limit;
 
 	/* sum timestamp and interval */
@@ -574,6 +607,27 @@ static void time_test_sum(time_cb time_cur,
 	/* test on 0 */
 	sum = odp_time_sum(t2, ODP_TIME_NULL);
 	CU_ASSERT(odp_time_cmp(t2, sum) == 0);
+
+	/* test add nsec */
+	ns = ODP_TIME_SEC_IN_NS;
+	upper_limit = ns + 2 * res;
+	lower_limit = ns - 2 * res;
+
+	t1 = time_cur();
+	t2 = odp_time_add_ns(t1, ns);
+
+	CU_ASSERT(odp_time_cmp(t2, t1) > 0);
+
+	diff = odp_time_diff_ns(t2, t1);
+	CU_ASSERT((diff <= upper_limit) && (diff >= lower_limit));
+
+	t1 = ODP_TIME_NULL;
+	t2 = odp_time_add_ns(t1, ns);
+
+	CU_ASSERT(odp_time_cmp(t2, t1) > 0);
+
+	diff = odp_time_diff_ns(t2, t1);
+	CU_ASSERT((diff <= upper_limit) && (diff >= lower_limit));
 }
 
 static void time_test_local_sum(void)
@@ -704,7 +758,7 @@ static void time_test_accuracy(time_cb time_cur,
 	wait = odp_time_sum(t1[0], sec);
 	for (i = 0; i < 5; i++) {
 		odp_time_wait_until(wait);
-		wait = odp_time_sum(wait, sec);
+		wait = odp_time_add_ns(wait, ODP_TIME_SEC_IN_NS);
 	}
 
 	i = clock_gettime(CLOCK_MONOTONIC, &ts2);
@@ -914,6 +968,7 @@ static void time_test_global_sync_control(void)
 
 odp_testinfo_t time_suite_time[] = {
 	ODP_TEST_INFO(time_test_constants),
+	ODP_TEST_INFO(time_test_startup_time),
 	ODP_TEST_INFO(time_test_local_res),
 	ODP_TEST_INFO(time_test_local_conversion),
 	ODP_TEST_INFO(time_test_local_cmp),

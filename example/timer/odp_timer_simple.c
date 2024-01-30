@@ -82,7 +82,12 @@ int main(int argc ODP_UNUSED, char *argv[] ODP_UNUSED)
 		goto err;
 	}
 
-	odp_timer_pool_start();
+	if (odp_timer_pool_start_multi(&timer_pool, 1) != 1) {
+		ODPH_ERR("Timer pool start failed\n");
+		ret += 1;
+		goto err;
+	}
+
 	/* Configure scheduler */
 	odp_schedule_config(NULL);
 
@@ -159,18 +164,24 @@ int main(int argc ODP_UNUSED, char *argv[] ODP_UNUSED)
 	}
 
 	/* Destroy created resources */
-	rc += odp_timer_cancel(tim, &ev);
-	rc += -(odp_timer_free(tim) == ODP_EVENT_INVALID);
 	odp_event_free(ev);
 
-	ret += odp_queue_destroy(queue);
+	if (odp_timer_free(tim))
+		ret++;
+
+	if (odp_queue_destroy(queue))
+		ret++;
 err:
 	odp_timer_pool_destroy(timer_pool);
 err_tp:
-	ret += odp_pool_destroy(timeout_pool);
-	ret += odp_term_local();
+	if (odp_pool_destroy(timeout_pool))
+		ret++;
+
+	if (odp_term_local())
+		ret++;
 err_local:
-	ret += odp_term_global(instance);
+	if (odp_term_global(instance))
+		ret++;
 err_global:
 	return ret;
 }

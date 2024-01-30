@@ -26,7 +26,7 @@ extern "C" {
 /*
  * Maximum number of packet IO resources
  */
-#define ODP_CONFIG_PKTIO_ENTRIES 64
+#define CONFIG_PKTIO_ENTRIES 64
 
 /*
  * Maximum number of DMA sessions
@@ -37,12 +37,12 @@ extern "C" {
  * Pools reserved for internal usage, 1 for IPsec status events, one per packet
  * I/O for TX completion and one per DMA session
  */
-#define CONFIG_INTERNAL_POOLS (1 + ODP_CONFIG_PKTIO_ENTRIES + CONFIG_MAX_DMA_SESSIONS)
+#define CONFIG_INTERNAL_POOLS (1 + CONFIG_PKTIO_ENTRIES + CONFIG_MAX_DMA_SESSIONS)
 
 /*
  * Maximum number of pools
  */
-#define ODP_CONFIG_POOLS 256
+#define CONFIG_POOLS 256
 
 /*
  * Queues reserved for ODP internal use
@@ -89,7 +89,7 @@ extern "C" {
  * This defines the minimum supported buffer alignment. Requests for values
  * below this will be rounded up to this value.
  */
-#define ODP_CONFIG_BUFFER_ALIGN_MIN 16
+#define CONFIG_BUFFER_ALIGN_MIN 16
 
 /*
  * Maximum buffer alignment
@@ -97,7 +97,7 @@ extern "C" {
  * This defines the maximum supported buffer alignment. Requests for values
  * above this will fail.
  */
-#define ODP_CONFIG_BUFFER_ALIGN_MAX (4 * 1024)
+#define CONFIG_BUFFER_ALIGN_MAX (4 * 1024)
 
 /*
  * Default packet tailroom
@@ -134,7 +134,7 @@ extern "C" {
 #define CONFIG_PACKET_MAX_SEG_LEN (CONFIG_PACKET_SEG_SIZE - \
 				   RTE_PKTMBUF_HEADROOM - \
 				   CONFIG_PACKET_TAILROOM - \
-				   ODP_CONFIG_BUFFER_ALIGN_MIN)
+				   CONFIG_BUFFER_ALIGN_MIN)
 
 /*
  * Number of shared memory blocks reserved for implementation internal use.
@@ -143,7 +143,7 @@ extern "C" {
  * module global data, and one block per packet I/O is reserved for TX
  * completion usage.
  */
-#define CONFIG_INTERNAL_SHM_BLOCKS (ODP_CONFIG_POOLS + 20 + ODP_CONFIG_PKTIO_ENTRIES)
+#define CONFIG_INTERNAL_SHM_BLOCKS (CONFIG_POOLS + 20 + CONFIG_PKTIO_ENTRIES)
 
 /*
  * Maximum number of shared memory blocks.
