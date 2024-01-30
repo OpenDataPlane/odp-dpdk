@@ -34,10 +34,10 @@ extern "C" {
 #define CONFIG_MAX_DMA_SESSIONS 32
 
 /*
- * Pools reserved for internal usage, 1 for IPsec status events, one per packet
- * I/O for TX completion and one per DMA session
+ * Pools reserved for internal usage, 1 for IPsec status events and one per packet
+ * I/O for TX completion
  */
-#define CONFIG_INTERNAL_POOLS (1 + CONFIG_PKTIO_ENTRIES + CONFIG_MAX_DMA_SESSIONS)
+#define CONFIG_INTERNAL_POOLS (1 + CONFIG_PKTIO_ENTRIES)
 
 /*
  * Maximum number of pools

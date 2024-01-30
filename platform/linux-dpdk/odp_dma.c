@@ -69,31 +69,24 @@ typedef struct {
 
 typedef int32_t (*trs_fn_t)(int16_t dev_id, const odp_dma_transfer_param_t *trs_param);
 
-typedef struct {
+typedef struct transfer_s {
+	TAILQ_ENTRY(transfer_s) q;
+
 	void *user_ptr;
 	odp_event_t ev;
-	odp_queue_t q;
+	odp_queue_t queue;
 	uint16_t idx;
 	int8_t status;
 	uint8_t is_m_none;
 } transfer_t;
 
-typedef struct infl_s {
-	TAILQ_ENTRY(infl_s) q;
-
-	transfer_t *trs;
-	odp_buffer_t buf;
-} infl_t;
-
 typedef struct ODP_ALIGNED_CACHE {
+	TAILQ_HEAD(transfers_s, transfer_s) infl_trs;
+
 	odp_ticketlock_t lock;
 	odp_stash_t trs_stash;
-	odp_pool_t infl_bufs;
 	trs_fn_t trs_fn;
 	odp_dma_param_t dma_param;
-
-	TAILQ_HEAD(infls_s, infl_s) infl_trs;
-
 	int32_t latest_idx;
 	int16_t dev_id;
 	uint8_t max_deq;
@@ -359,24 +352,6 @@ static odp_stash_t create_trs_stash(transfer_t trs[], odp_stash_op_mode_t mode, 
 	return stash;
 }
 
-static odp_pool_t create_infl_pool(uint32_t num)
-{
-	odp_pool_param_t pool_param;
-	odp_pool_t pool;
-
-	odp_pool_param_init(&pool_param);
-	pool_param.type = ODP_POOL_BUFFER;
-	pool_param.buf.num = num;
-	pool_param.buf.size = sizeof(infl_t);
-	pool_param.buf.cache_size = 0U;
-	pool = odp_pool_create("_odp_dma_inflight", &pool_param);
-
-	if (pool == ODP_POOL_INVALID)
-		_ODP_ERR("Pool create failed\n");
-
-	return pool;
-}
-
 static odp_bool_t configure_dma_dev(uint32_t dev_id, uint16_t num_desc)
 {
 	const struct rte_dma_conf dev_config = {
@@ -430,12 +405,6 @@ static void destroy_trs_stash(odp_stash_t stash)
 
 	if (odp_stash_destroy(stash))
 		_ODP_ERR("Stash destroy failed\n");
-}
-
-static void destroy_infl_pool(odp_pool_t pool)
-{
-	if (odp_pool_destroy(pool) == -1)
-		_ODP_ERR("Pool destroy failed\n");
 }
 
 static inline rte_iova_t get_iova(odp_dma_data_format_t format, const odp_dma_seg_t *seg)
@@ -557,16 +526,7 @@ odp_dma_t odp_dma_create(const char *name, const odp_dma_param_t *param)
 		return ODP_DMA_INVALID;
 	}
 
-	session->infl_bufs = create_infl_pool(_odp_dma_glb->dev_info.max_transfers);
-
-	if (session->infl_bufs == ODP_POOL_INVALID) {
-		destroy_trs_stash(session->trs_stash);
-		session->is_active = 0;
-		return ODP_DMA_INVALID;
-	}
-
 	if (!configure_dma_dev(session->dev_id, _odp_dma_glb->dev_info.dev.max_desc)) {
-		destroy_infl_pool(session->infl_bufs);
 		destroy_trs_stash(session->trs_stash);
 		session->is_active = 0;
 		return ODP_DMA_INVALID;
@@ -609,7 +569,6 @@ int odp_dma_destroy(odp_dma_t dma)
 	}
 
 	(void)rte_dma_stop(session->dev_id);
-	destroy_infl_pool(session->infl_bufs);
 	destroy_trs_stash(session->trs_stash);
 	session->is_active = 0;
 	odp_ticketlock_unlock(&session->lock);
@@ -766,38 +725,38 @@ int odp_dma_transfer_multi(odp_dma_t dma, const odp_dma_transfer_param_t *trs_pa
 	return i;
 }
 
-static inline void free_ord_entry(struct infls_s *head, infl_t *entry, dma_session_t *session)
+static inline void free_ord_entry(struct transfers_s *head, transfer_t *entry,
+				  dma_session_t *session)
 {
 	TAILQ_REMOVE(head, entry, q);
-	odp_dma_transfer_id_free((odp_dma_t)session, (odp_dma_transfer_id_t)(uintptr_t)entry->trs);
-	odp_buffer_free(entry->buf);
+	odp_dma_transfer_id_free((odp_dma_t)session, (odp_dma_transfer_id_t)(uintptr_t)entry);
 }
 
 static int get_ordered_evs(dma_session_t *session, odp_queue_t queue, _odp_event_hdr_t **ev_hdr,
 			   int num)
 {
-	infl_t *e;
+	transfer_t *e;
 	int num_evs = 0;
 	odp_dma_result_t *res;
 
-	for (e = session->infl_trs.tqh_first; e != NULL; e = e->q.tqe_next) {
-		if (session->dma_param.order != ODP_DMA_ORDER_NONE && e->trs->q != queue &&
-		    e->trs->status == 0)
+	TAILQ_FOREACH(e, &session->infl_trs, q) {
+		if (session->dma_param.order != ODP_DMA_ORDER_NONE && e->queue != queue &&
+		    e->status == 0)
 			break;
 
-		if (e->trs->is_m_none && e->trs->status != 0) {
+		if (e->is_m_none && e->status != 0) {
 			free_ord_entry(&session->infl_trs, e, session);
 			continue;
 		}
 
-		if (e->trs->q != queue || e->trs->status == 0)
+		if (e->queue != queue || e->status == 0)
 			continue;
 
 		if (num - num_evs) {
-			res = odp_buffer_addr((odp_buffer_t)(uintptr_t)e->trs->ev);
-			res->success = e->trs->status == 1;
-			res->user_ptr = e->trs->user_ptr;
-			ev_hdr[num_evs++] = _odp_event_hdr(e->trs->ev);
+			res = odp_buffer_addr((odp_buffer_t)(uintptr_t)e->ev);
+			res->success = e->status == 1;
+			res->user_ptr = e->user_ptr;
+			ev_hdr[num_evs++] = _odp_event_hdr(e->ev);
 			free_ord_entry(&session->infl_trs, e, session);
 		} else {
 			break;
@@ -826,11 +785,9 @@ int odp_dma_transfer_start(odp_dma_t dma, const odp_dma_transfer_param_t *trs_pa
 			   const odp_dma_compl_param_t *compl_param)
 {
 	dma_session_t *session = dma_session_from_handle(dma);
-	odp_buffer_t buf;
 	odp_dma_transfer_id_t id = ODP_DMA_TRANSFER_ID_INVALID;
 	int32_t idx;
 	transfer_t *trs;
-	infl_t *entry;
 
 	_ODP_ASSERT(dma != ODP_DMA_INVALID);
 	_ODP_ASSERT(trs_param != NULL);
@@ -842,18 +799,11 @@ int odp_dma_transfer_start(odp_dma_t dma, const odp_dma_transfer_param_t *trs_pa
 		    trs_param->num_dst <= _odp_dma_glb->dev_info.dev.max_sges);
 	_ODP_ASSERT(get_transfer_len(trs_param) != 0U);
 
-	buf = odp_buffer_alloc(session->infl_bufs);
-
-	if (odp_unlikely(buf == ODP_BUFFER_INVALID))
-		return 0;
-
 	if (compl_param->compl_mode != ODP_DMA_COMPL_POLL) {
 		id = odp_dma_transfer_id_alloc(dma);
 
-		if (odp_unlikely(id == ODP_DMA_TRANSFER_ID_INVALID)) {
-			odp_buffer_free(buf);
+		if (odp_unlikely(id == ODP_DMA_TRANSFER_ID_INVALID))
 			return 0;
-		}
 	}
 
 	LOCK_IF(session->is_mt, &session->lock);
@@ -863,7 +813,6 @@ int odp_dma_transfer_start(odp_dma_t dma, const odp_dma_transfer_param_t *trs_pa
 		if (compl_param->compl_mode != ODP_DMA_COMPL_POLL)
 			odp_dma_transfer_id_free(dma, id);
 
-		odp_buffer_free(buf);
 		UNLOCK_IF(session->is_mt, &session->lock);
 		return idx == -1 ? 0 : -1;
 	}
@@ -873,18 +822,18 @@ int odp_dma_transfer_start(odp_dma_t dma, const odp_dma_transfer_param_t *trs_pa
 
 		trs = trs_from_id(compl_param->transfer_id);
 		trs->ev = ODP_EVENT_INVALID;
-		trs->q = ODP_QUEUE_INVALID;
+		trs->queue = ODP_QUEUE_INVALID;
 	} else {
 		trs = trs_from_id(id);
 		trs->ev = ODP_EVENT_INVALID;
-		trs->q = ODP_QUEUE_INVALID;
+		trs->queue = ODP_QUEUE_INVALID;
 
 		if (compl_param->compl_mode == ODP_DMA_COMPL_EVENT) {
 			_ODP_ASSERT(compl_param->event != ODP_EVENT_INVALID);
 			_ODP_ASSERT(compl_param->queue != ODP_QUEUE_INVALID);
 
 			trs->ev = compl_param->event;
-			trs->q = compl_param->queue;
+			trs->queue = compl_param->queue;
 		}
 	}
 
@@ -892,10 +841,7 @@ int odp_dma_transfer_start(odp_dma_t dma, const odp_dma_transfer_param_t *trs_pa
 	trs->idx = idx;
 	trs->status = 0;
 	trs->is_m_none = compl_param->compl_mode == ODP_DMA_COMPL_NONE;
-	entry = odp_buffer_addr(buf);
-	entry->trs = trs;
-	entry->buf = buf;
-	TAILQ_INSERT_TAIL(&session->infl_trs, entry, q);
+	TAILQ_INSERT_TAIL(&session->infl_trs, trs, q);
 	session->trs_map[idx] = trs;
 	UNLOCK_IF(session->is_mt, &session->lock);
 
@@ -938,30 +884,28 @@ int odp_dma_transfer_start_multi(odp_dma_t dma, const odp_dma_transfer_param_t *
 
 static int8_t get_ordered_polled(dma_session_t *session, const transfer_t *trs)
 {
-	infl_t *e;
+	transfer_t *e;
 	int8_t status = -1;
 
-	for (e = session->infl_trs.tqh_first; e != NULL; e = e->q.tqe_next) {
-		if (session->dma_param.order != ODP_DMA_ORDER_NONE && e->trs != trs &&
-		    e->trs->status == 0) {
+	TAILQ_FOREACH(e, &session->infl_trs, q) {
+		if (session->dma_param.order != ODP_DMA_ORDER_NONE && e != trs &&
+		    e->status == 0) {
 			status = 0;
 			break;
 		}
 
-		if (e->trs->is_m_none && e->trs->status != 0) {
+		if (e->is_m_none && e->status != 0) {
 			free_ord_entry(&session->infl_trs, e, session);
 			continue;
 		}
 
-		if (e->trs != trs)
+		if (e != trs)
 			continue;
 
-		status = e->trs->status;
+		status = e->status;
 
-		if (status != 0) {
+		if (status != 0)
 			TAILQ_REMOVE(&session->infl_trs, e, q);
-			odp_buffer_free(e->buf);
-		}
 
 		break;
 	}
