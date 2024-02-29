@@ -1,13 +1,13 @@
-/* Copyright (c) 2017-2018, Linaro Limited
- * All rights reserved.
- *
- * SPDX-License-Identifier:	 BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2017-2018 Linaro Limited
  */
 
 /**
- * @file
+ * @example odp_ipfragreass.c
  *
- * @example odp_ipfragreass.c  ODP IPv4 lock-free fragmentation and reassembly
+ * IPv4 lock-free fragmentation and reassembly example application
+ *
+ * @cond _ODP_HIDE_FROM_DOXYGEN_
  */
 
 #include <stdio.h>

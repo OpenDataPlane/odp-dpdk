@@ -1,11 +1,16 @@
-/* Copyright 2015 EZchip Semiconductor Ltd. All Rights Reserved.
- *
- * Copyright (c) 2015-2018, Linaro Limited
- * Copyright (c) 2022, Marvell
- * All rights reserved.
- *
- * SPDX-License-Identifier: BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2015 EZchip Semiconductor Ltd.
+ * Copyright (c) 2015-2018 Linaro Limited
+ * Copyright (c) 2022 Marvell
  */
+
+ /**
+  * @example odp_traffic_mgmt.c
+  *
+  * Traffic manager API example application
+  *
+  * @cond _ODP_HIDE_FROM_DOXYGEN_
+  */
 
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
@@ -287,7 +292,7 @@ static uint32_t next_rand_byte;
 static odp_atomic_u32_t atomic_pkts_into_tm;
 static odp_atomic_u32_t atomic_pkts_from_tm;
 
-static uint32_t g_num_pkts_to_send = 1000;
+static uint32_t g_num_pkts_to_send = 100;
 static uint8_t  g_print_tm_stats   = TRUE;
 
 static void tester_egress_fcn(odp_packet_t odp_pkt);
@@ -632,20 +637,19 @@ static int create_and_config_tm(void)
 	tm_shaper_max_burst = tm_capa.per_level[0].max_burst;
 
 	for (level = 1; level < tm_capa.max_levels; level++) {
-		odp_tm_level_capabilities_t *per_level =
-			&tm_capa.per_level[level];
+		odp_tm_level_capabilities_t *level_capa = &tm_capa.per_level[level];
 
-		if (per_level->min_rate > tm_shaper_min_rate)
-			tm_shaper_min_rate = per_level->min_rate;
+		if (level_capa->min_rate > tm_shaper_min_rate)
+			tm_shaper_min_rate = level_capa->min_rate;
 
-		if (per_level->min_burst > tm_shaper_min_burst)
-			tm_shaper_min_burst = per_level->min_burst;
+		if (level_capa->min_burst > tm_shaper_min_burst)
+			tm_shaper_min_burst = level_capa->min_burst;
 
-		if (per_level->max_rate < tm_shaper_max_rate)
-			tm_shaper_max_rate = per_level->max_rate;
+		if (level_capa->max_rate < tm_shaper_max_rate)
+			tm_shaper_max_rate = level_capa->max_rate;
 
-		if (per_level->max_burst < tm_shaper_max_burst)
-			tm_shaper_max_burst = per_level->max_burst;
+		if (level_capa->max_burst < tm_shaper_max_burst)
+			tm_shaper_max_burst = level_capa->max_burst;
 	}
 
 	if (tm_shaper_min_rate > tm_shaper_max_rate ||

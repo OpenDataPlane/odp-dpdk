@@ -1,9 +1,8 @@
 #!/bin/sh
 #
-# Copyright (c) 2015-2018, Linaro Limited
-# All rights reserved.
-#
-# SPDX-License-Identifier:	BSD-3-Clause
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2015-2018 Linaro Limited
+# Copyright (c) 2023 Nokia
 #
 
 # directories where test binary can be found:
@@ -17,31 +16,23 @@ PATH=$(dirname $0):$PATH
 PATH=$(dirname $0)/../../../../platform/linux-generic/test/pktio_ipc:$PATH
 PATH=.:$PATH
 
-RUNTIME1=3
-RUNTIME2=1
-TIMEOUT=3
-if [ "${TEST}" = "coverage" ]; then
-	RUNTIME1=30
-	RUNTIME2=15
-	TIMEOUT=20
-fi
+STARTTIME=30
+RUNTIME=1
 
 run()
 {
 	local ret=0
 
 	echo "==== run pktio_ipc1 then pktio_ipc2 ===="
-	pktio_ipc1${EXEEXT} -t ${RUNTIME1} &
+	pktio_ipc1${EXEEXT} -s ${STARTTIME} -t ${RUNTIME} &
 	IPC_PID=$!
 
-	pktio_ipc2${EXEEXT} -p ${IPC_PID} -t ${RUNTIME2}
+	pktio_ipc2${EXEEXT} -p ${IPC_PID}  -s ${STARTTIME} -t ${RUNTIME}
 	ret=$?
-	# pktio_ipc1 should do clean up and exit just
-	# after pktio_ipc2 exited. If it does not happen
-	# kill him in test.
-	sleep ${TIMEOUT}
+
 	(kill ${IPC_PID} 2>&1 > /dev/null ) > /dev/null
 	if [ $? -eq 0 ]; then
+		wait $IPC_PID
 		echo "pktio_ipc1${EXEEXT} was killed"
 		ls -l /dev/shm/${UID}/odp* 2> /dev/null
 		rm -rf /dev/shm/${UID}/odp-${IPC_PID}* 2>&1 > /dev/null
@@ -58,16 +49,15 @@ run()
 	fi
 
 	echo "==== run pktio_ipc2 then pktio_ipc1 ===="
-	pktio_ipc2${EXEEXT} -t ${RUNTIME1} &
+	pktio_ipc2${EXEEXT}  -s ${STARTTIME} -t ${RUNTIME} &
 	IPC_PID=$!
 
-	pktio_ipc1${EXEEXT} -p ${IPC_PID} -t ${RUNTIME2}
+	pktio_ipc1${EXEEXT} -p ${IPC_PID}  -s ${STARTTIME} -t ${RUNTIME}
 	ret=$?
-	# pktio_ipc2 do not exit on pktio_ipc1 disconnect
-	# wait until it exits cleanly
-	sleep ${TIMEOUT}
+
 	(kill ${IPC_PID} 2>&1 > /dev/null ) > /dev/null
 	if [ $? -eq 0 ]; then
+		wait $IPC_PID
 		echo "pktio_ipc2${EXEEXT} was killed"
 		ls -l /dev/shm/${UID}/odp* 2> /dev/null
 		rm -rf /dev/shm/${UID}/odp-${IPC_PID}* 2>&1 > /dev/null

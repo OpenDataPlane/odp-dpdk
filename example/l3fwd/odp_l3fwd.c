@@ -1,7 +1,13 @@
-/* Copyright (c) 2016-2018, Linaro Limited
- * All rights reserved.
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2016-2018 Linaro Limited
+ */
+
+/**
+ * @example odp_l3fwd.c
  *
- * SPDX-License-Identifier:     BSD-3-Clause
+ * L3 forwarding example application
+ *
+ * @cond _ODP_HIDE_FROM_DOXYGEN_
  */
 
 #include <stdlib.h>

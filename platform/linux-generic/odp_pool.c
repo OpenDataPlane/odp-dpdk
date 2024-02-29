@@ -495,6 +495,7 @@ static void init_event_hdr(pool_t *pool, _odp_event_hdr_t *event_hdr, uint32_t e
 	event_hdr->index.event  = event_index;
 	event_hdr->type         = type;
 	event_hdr->event_type   = type;
+	event_hdr->subtype      = ODP_EVENT_NO_SUBTYPE;
 	event_hdr->pool         = _odp_pool_handle(pool);
 
 	/* Store base values for fast init */
@@ -542,7 +543,6 @@ static void init_event_hdr(pool_t *pool, _odp_event_hdr_t *event_hdr, uint32_t e
 
 static void init_buffers(pool_t *pool)
 {
-	uint64_t i;
 	_odp_event_hdr_t *event_hdr;
 	odp_buffer_hdr_t *buf_hdr;
 	odp_packet_hdr_t *pkt_hdr;
@@ -566,7 +566,7 @@ static void init_buffers(pool_t *pool)
 	mask = pool->ring_mask;
 	type = pool->type;
 
-	for (i = 0; i < pool->num + skipped_blocks ; i++) {
+	for (uint64_t i = 0; i < pool->num + skipped_blocks ; i++) {
 		int skip = 0;
 		addr = &pool->base_addr[i * pool->block_size];
 
@@ -1257,6 +1257,10 @@ int odp_pool_info(odp_pool_t pool_hdl, odp_pool_info_t *info)
 		info->dma_pool_param.uarea_size = pool->params.buf.uarea_size;
 		info->dma_pool_param.cache_size = pool->params.buf.cache_size;
 
+	} else if (pool->type_2 == ODP_POOL_ML_COMPL) {
+		info->ml_pool_param.num        = pool->params.buf.num;
+		info->ml_pool_param.uarea_size = pool->params.buf.uarea_size;
+		info->ml_pool_param.cache_size = pool->params.buf.cache_size;
 	} else {
 		info->params = pool->params;
 	}
@@ -1371,11 +1375,11 @@ static inline void event_free_to_pool(pool_t *pool,
 		if (odp_unlikely((uint32_t)num > cache_num))
 			burst = cache_num;
 
-		_odp_event_hdr_t *event_hdr[burst];
+		_odp_event_hdr_t *ev_hdr[burst];
 
-		cache_pop(cache, event_hdr, burst);
+		cache_pop(cache, ev_hdr, burst);
 
-		ring_ptr_enq_multi(ring, mask, (void **)event_hdr, burst);
+		ring_ptr_enq_multi(ring, mask, (void **)ev_hdr, burst);
 		if (CONFIG_POOL_STATISTICS && pool->params.stats.bit.free_ops)
 			odp_atomic_inc_u64(&pool->stats.free_ops);
 	}
@@ -1559,6 +1563,8 @@ static const char *get_long_type_str(odp_pool_type_t type)
 		return "vector";
 	case ODP_POOL_DMA_COMPL:
 		return "dma completion";
+	case ODP_POOL_ML_COMPL:
+		return "ml completion";
 	default:
 		return "unknown";
 	}
@@ -1577,6 +1583,8 @@ static const char *get_short_type_str(odp_pool_type_t type)
 		return "V";
 	case ODP_POOL_DMA_COMPL:
 		return "D";
+	case ODP_POOL_ML_COMPL:
+		return "M";
 	default:
 		return "-";
 	}
@@ -1875,6 +1883,7 @@ int odp_pool_ext_capability(odp_pool_type_t type, odp_pool_ext_capability_t *cap
 	case ODP_POOL_TIMEOUT:
 	case ODP_POOL_VECTOR:
 	case ODP_POOL_DMA_COMPL:
+	case ODP_POOL_ML_COMPL:
 		memset(capa, 0, sizeof(odp_pool_ext_capability_t));
 		return 0;
 	default:

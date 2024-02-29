@@ -1,7 +1,13 @@
-/* Copyright (c) 2020-2022, Nokia
- * All rights reserved.
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2020-2022 Nokia
+ */
+
+/**
+ * @example odp_debug.c
  *
- * SPDX-License-Identifier:     BSD-3-Clause
+ * This example application demonstrates the usage of various debug print functions of ODP API.
+ *
+ * @cond _ODP_HIDE_FROM_DOXYGEN_
  */
 
 #include <stdlib.h>
@@ -14,6 +20,8 @@
 #include <odp_api.h>
 #include <odp/helper/odph_api.h>
 
+#define MAX_NAME_LEN 128
+
 typedef struct test_global_t {
 	int system;
 	int shm;
@@ -23,6 +31,7 @@ typedef struct test_global_t {
 	int ipsec;
 	int timer;
 	int stash;
+	char pktio_name[MAX_NAME_LEN];
 
 } test_global_t;
 
@@ -35,35 +44,37 @@ static void print_usage(void)
 	       "are called when no options are given.\n"
 	       "\n"
 	       "OPTIONS:\n"
-	       "  -S, --system       Call odp_sys_info_print() and odp_sys_config_print()\n"
-	       "  -s, --shm          Create a SHM and call odp_shm_print()\n"
-	       "  -p, --pool         Create various types of pools and call odp_pool_print()\n"
-	       "  -q, --queue        Create various types of queues and call odp_queue_print()\n"
-	       "  -i, --interface    Create packet IO interface (loop), and call both odp_pktio_print()\n"
-	       "                     and odp_pktio_extra_stats_print()\n"
-	       "  -I, --ipsec        Call odp_ipsec_print()\n"
-	       "  -t, --timer        Call timer pool, timer and timeout print functions\n"
-	       "  -a, --stash        Create stash and call odp_stash_print()\n"
-	       "  -h, --help         Display help and exit.\n\n");
+	       "  -S, --system            Call odp_sys_info_print() and odp_sys_config_print()\n"
+	       "  -s, --shm               Create a SHM and call odp_shm_print()\n"
+	       "  -p, --pool              Create various types of pools and call odp_pool_print()\n"
+	       "  -q, --queue             Create various types of queues and call odp_queue_print()\n"
+	       "  -i, --interface <name>  Start a packet IO interface, and call odp_pktio_print(),\n"
+	       "                          odp_pktio_extra_stats_print(), etc. Uses loop interface by default.\n"
+	       "  -I, --ipsec             Call odp_ipsec_print()\n"
+	       "  -t, --timer             Call timer pool, timer and timeout print functions\n"
+	       "  -a, --stash             Create stash and call odp_stash_print()\n"
+	       "  -h, --help              Display help and exit.\n\n");
 }
 
 static int parse_options(int argc, char *argv[], test_global_t *global)
 {
 	int opt, long_index;
+	char *str;
+	uint32_t str_len = 0;
 
 	const struct option longopts[] = {
 		{"system",      no_argument,       NULL, 'S'},
 		{"shm",         no_argument,       NULL, 's'},
 		{"pool",        no_argument,       NULL, 'p'},
 		{"queue",       no_argument,       NULL, 'q'},
-		{"interface",   no_argument,       NULL, 'i'},
+		{"interface",   required_argument, NULL, 'i'},
 		{"ipsec",       no_argument,       NULL, 'I'},
 		{"timer",       no_argument,       NULL, 't'},
 		{"stash",       no_argument,       NULL, 'a'},
 		{"help",        no_argument,       NULL, 'h'},
 		{NULL, 0, NULL, 0}
 	};
-	const char *shortopts =  "+SspqiItah";
+	const char *shortopts =  "+Sspqi:Itah";
 	int ret = 0;
 
 	while (1) {
@@ -87,6 +98,11 @@ static int parse_options(int argc, char *argv[], test_global_t *global)
 			break;
 		case 'i':
 			global->pktio = 1;
+			str = optarg;
+			str_len = strlen(str);
+
+			if (str_len && str_len < MAX_NAME_LEN)
+				strcpy(global->pktio_name, str);
 			break;
 		case 'I':
 			global->ipsec = 1;
@@ -102,6 +118,11 @@ static int parse_options(int argc, char *argv[], test_global_t *global)
 			print_usage();
 			return -1;
 		}
+	}
+
+	if (global->pktio && (str_len == 0 || str_len >= MAX_NAME_LEN)) {
+		ODPH_ERR("Bad interface name length: %u\n", str_len);
+		ret = -1;
 	}
 
 	return ret;
@@ -314,11 +335,13 @@ static int queue_debug(void)
 	return 0;
 }
 
-static int pktio_debug(void)
+static int pktio_debug(test_global_t *global)
 {
 	odp_pool_t pool;
 	odp_pool_param_t pool_param;
 	odp_pktio_t pktio;
+	odp_pktio_link_info_t info;
+	uint8_t mac[ODPH_ETHADDR_LEN];
 	int pkt_len = 100;
 
 	odp_pool_param_init(&pool_param);
@@ -333,11 +356,66 @@ static int pktio_debug(void)
 		return -1;
 	}
 
-	pktio = odp_pktio_open("loop", pool, NULL);
+	pktio = odp_pktio_open(global->pktio_name, pool, NULL);
 
 	if (pktio == ODP_PKTIO_INVALID) {
 		ODPH_ERR("Pktio open failed\n");
 		return -1;
+	}
+
+	/* Start interface with default config */
+	if (odp_pktin_queue_config(pktio, NULL)) {
+		ODPH_ERR("Packet input queue config failed\n");
+		return -1;
+	}
+
+	if (odp_pktout_queue_config(pktio, NULL)) {
+		ODPH_ERR("Packet output queue config failed\n");
+		return -1;
+	}
+
+	if (odp_pktio_start(pktio)) {
+		ODPH_ERR("Pktio start failed\n");
+		return -1;
+	}
+
+	printf("\nWaiting link up");
+
+	/* Wait max 5 seconds for link up */
+	for (int i = 0; i < 25; i++) {
+		if (odp_pktio_link_status(pktio) == ODP_PKTIO_LINK_STATUS_UP)
+			break;
+
+		odp_time_wait_ns(200 * ODP_TIME_MSEC_IN_NS);
+		printf(".");
+		fflush(NULL);
+	}
+
+	printf("\n\n");
+
+	printf("Packet IO\n---------\n");
+	printf("  index:         %i\n", odp_pktio_index(pktio));
+	printf("  handle:        0x%" PRIx64 "\n", odp_pktio_to_u64(pktio));
+
+	if (odp_pktio_mac_addr(pktio, mac, ODPH_ETHADDR_LEN) == ODPH_ETHADDR_LEN) {
+		printf("  mac address:   %02x:%02x:%02x:%02x:%02x:%02x\n", mac[0], mac[1], mac[2],
+		       mac[3], mac[4], mac[5]);
+	}
+
+	printf("  input maxlen:  %u\n", odp_pktin_maxlen(pktio));
+	printf("  output maxlen: %u\n", odp_pktout_maxlen(pktio));
+	printf("  promisc mode:  %i\n", odp_pktio_promisc_mode(pktio));
+	printf("  timestamp res: %" PRIu64 " Hz\n\n", odp_pktio_ts_res(pktio));
+
+	if (odp_pktio_link_info(pktio, &info) == 0) {
+		printf("Link info\n---------\n");
+		printf("  auto neg:  %i\n", info.autoneg);
+		printf("  duplex:    %i\n", info.duplex);
+		printf("  media:     %s\n", info.media);
+		printf("  pause_rx:  %i\n", info.pause_rx);
+		printf("  pause_tx:  %i\n", info.pause_tx);
+		printf("  speed:     %u Mbit/s\n", info.speed);
+		printf("  status:    %i\n", info.status);
 	}
 
 	printf("\n");
@@ -345,6 +423,11 @@ static int pktio_debug(void)
 
 	printf("\n");
 	odp_pktio_extra_stats_print(pktio);
+
+	if (odp_pktio_stop(pktio)) {
+		ODPH_ERR("Pktio stop failed\n");
+		return -1;
+	}
 
 	if (odp_pktio_close(pktio)) {
 		ODPH_ERR("Pktio close failed\n");
@@ -562,6 +645,7 @@ int main(int argc, char *argv[])
 		global->ipsec   = 1;
 		global->timer   = 1;
 		global->stash   = 1;
+		strcpy(global->pktio_name, "loop");
 	} else {
 		if (parse_options(argc, argv, global))
 			exit(EXIT_FAILURE);
@@ -606,7 +690,7 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 
-	if (global->pktio && pktio_debug()) {
+	if (global->pktio && pktio_debug(global)) {
 		ODPH_ERR("Packet debug failed.\n");
 		exit(EXIT_FAILURE);
 	}

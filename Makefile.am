@@ -6,6 +6,7 @@ if PLATFORM_IS_LINUX_GENERIC
 PLATFORM_DIR = platform/linux-generic
 PLATFORM_DUMPCONF_DIR = platform/linux-generic/dumpconfig
 PLATFORM_TEST_DIR = platform/linux-generic/test
+PLATFORM_EXAMPLE_DIR = platform/linux-generic/example
 endif
 if PLATFORM_IS_LINUX_DPDK
 PLATFORM_DIR = platform/linux-dpdk
@@ -30,6 +31,7 @@ endif
 
 if WITH_EXAMPLES
 SUBDIRS += example
+SUBDIRS += $(PLATFORM_EXAMPLE_DIR)
 endif
 
 if WITH_TESTS

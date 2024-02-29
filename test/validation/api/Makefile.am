@@ -1,6 +1,8 @@
-ODP_MODULES = atomic \
+ODP_MODULES = align \
+	      atomic \
 	      barrier \
 	      buffer \
+	      byteorder \
 	      chksum \
 	      classification \
 	      comp \
@@ -10,9 +12,11 @@ ODP_MODULES = atomic \
 	      errno \
 	      event \
 	      hash \
+	      hints \
 	      init \
 	      ipsec \
 	      lock \
+	      ml \
 	      queue \
 	      packet \
 	      pktio \
@@ -31,12 +35,14 @@ ODP_MODULES = atomic \
 SUBDIRS = $(ODP_MODULES)
 
 include $(top_srcdir)/test/Makefile.inc
-TESTS_ENVIRONMENT += TEST_DIR=${top_builddir}/test/validation
+TESTS_ENVIRONMENT += TEST_DIR=${top_builddir}/test/validation/api
 
 TESTS = \
+	align/align_main$(EXEEXT) \
 	atomic/atomic_main$(EXEEXT) \
 	barrier/barrier_main$(EXEEXT) \
 	buffer/buffer_main$(EXEEXT) \
+	byteorder/byteorder_main$(EXEEXT) \
 	chksum/chksum_main$(EXEEXT) \
 	classification/classification_main$(EXEEXT) \
 	comp/comp_main$(EXEEXT) \
@@ -46,20 +52,22 @@ TESTS = \
 	errno/errno_main$(EXEEXT) \
 	event/event_main$(EXEEXT) \
 	hash/hash_main$(EXEEXT) \
-	init/init_defaults$(EXEEXT) \
-	init/init_abort$(EXEEXT) \
-	init/init_log$(EXEEXT) \
-	init/init_log_thread$(EXEEXT) \
-	init/init_num_thr$(EXEEXT) \
-	init/init_feature_enabled$(EXEEXT) \
-	init/init_feature_disabled$(EXEEXT) \
-	init/init_test_param_init$(EXEEXT) \
-	init/init_test_term_abnormal$(EXEEXT) \
-	ipsec/ipsec_sync$(EXEEXT) \
-	ipsec/ipsec_async$(EXEEXT) \
-	ipsec/ipsec_inline_in$(EXEEXT) \
-	ipsec/ipsec_inline_out$(EXEEXT) \
+	hints/hints_main$(EXEEXT) \
+	init/init_defaults.sh \
+	init/init_abort.sh \
+	init/init_log.sh \
+	init/init_log_thread.sh \
+	init/init_num_thr.sh \
+	init/init_feature_enabled.sh \
+	init/init_feature_disabled.sh \
+	init/init_test_param_init.sh \
+	init/init_test_term_abnormal.sh \
+	ipsec/ipsec_sync.sh \
+	ipsec/ipsec_async.sh \
+	ipsec/ipsec_inline_in.sh \
+	ipsec/ipsec_inline_out.sh \
 	lock/lock_main$(EXEEXT) \
+	ml/ml_main$(EXEEXT) \
 	packet/packet_main$(EXEEXT) \
 	pktio/pktio_main$(EXEEXT) \
 	pool/pool_main$(EXEEXT) \

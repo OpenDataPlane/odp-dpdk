@@ -17,9 +17,11 @@ AC_CONFIG_FILES([test/common/Makefile
 		 test/miscellaneous/Makefile
 		 test/performance/Makefile
 		 test/validation/Makefile
+		 test/validation/api/align/Makefile
 		 test/validation/api/atomic/Makefile
 		 test/validation/api/barrier/Makefile
 		 test/validation/api/buffer/Makefile
+		 test/validation/api/byteorder/Makefile
 		 test/validation/api/chksum/Makefile
 		 test/validation/api/classification/Makefile
 		 test/validation/api/comp/Makefile
@@ -29,10 +31,12 @@ AC_CONFIG_FILES([test/common/Makefile
 		 test/validation/api/errno/Makefile
 		 test/validation/api/event/Makefile
 		 test/validation/api/hash/Makefile
+		 test/validation/api/hints/Makefile
 		 test/validation/api/init/Makefile
 		 test/validation/api/ipsec/Makefile
 		 test/validation/api/lock/Makefile
 		 test/validation/api/Makefile
+		 test/validation/api/ml/Makefile
 		 test/validation/api/packet/Makefile
 		 test/validation/api/pktio/Makefile
 		 test/validation/api/pool/Makefile

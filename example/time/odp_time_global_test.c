@@ -1,7 +1,13 @@
-/* Copyright (c) 2015-2018, Linaro Limited
- * All rights reserved.
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2015-2018 Linaro Limited
+ */
+
+/**
+ * @example odp_time_global_test.c
  *
- * SPDX-License-Identifier:     BSD-3-Clause
+ * Time API test application
+ *
+ * @cond _ODP_HIDE_FROM_DOXYGEN_
  */
 
 #include <inttypes.h>

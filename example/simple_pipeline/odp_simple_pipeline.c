@@ -1,8 +1,17 @@
-/* Copyright (c) 2019, Nokia
- * All rights reserved.
- *
- * SPDX-License-Identifier:     BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2019 Nokia
  */
+
+ /**
+  * @example odp_simple_pipeline.c
+  *
+  * Simple pipeline example application which receives packets from one
+  * interface and passes them through 0-N worker stages before outputting them
+  * from a second network interface. The RX, worker, and TX stages are connected
+  * using plain queues and each stage is run on a separate CPU thread.
+  *
+  * @cond _ODP_HIDE_FROM_DOXYGEN_
+  */
 
 #include <stdlib.h>
 #include <stdio.h>

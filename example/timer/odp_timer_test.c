@@ -1,7 +1,13 @@
-/* Copyright (c) 2013-2018, Linaro Limited
- * All rights reserved.
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2013-2018 Linaro Limited
+ */
+
+/**
+ * @example odp_timer_test.c
  *
- * SPDX-License-Identifier:     BSD-3-Clause
+ * Timer test application
+ *
+ * @cond _ODP_HIDE_FROM_DOXYGEN_
  */
 
 #include <string.h>
@@ -161,7 +167,7 @@ static void test_abs_timeouts(int thr, test_globals_t *gbls)
 			ODPH_ABORT("Unexpected event type (%u) received\n",
 				   odp_event_type(ev));
 		}
-		odp_timeout_t tmo = odp_timeout_from_event(ev);
+		tmo = odp_timeout_from_event(ev);
 		tick = odp_timeout_tick(tmo);
 		ttp = odp_timeout_user_ptr(tmo);
 		ttp->ev = ev;
@@ -178,7 +184,10 @@ static void test_abs_timeouts(int thr, test_globals_t *gbls)
 			continue;
 
 		odp_event_free(ttp->ev);
-		odp_timer_free(ttp->tim);
+
+		if (odp_timer_free(ttp->tim))
+			ODPH_ABORT("Timer free failed (%" PRIu64 ")\n", odp_timer_to_u64(ttp->tim));
+
 		ttp = NULL;
 	}
 

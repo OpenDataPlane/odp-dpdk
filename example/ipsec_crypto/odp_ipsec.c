@@ -1,14 +1,14 @@
-/* Copyright (c) 2013-2018, Linaro Limited
- * Copyright (c) 2021-2022, Nokia
- * All rights reserved.
- *
- * SPDX-License-Identifier:     BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2013-2018 Linaro Limited
+ * Copyright (c) 2021-2022 Nokia
  */
 
 /**
- * @file
+ * @example ipsec_crypto/odp_ipsec.c
  *
- * @example odp_example_ipsec.c  ODP basic packet IO cross connect with IPsec test application
+ * IPsec example application using ODP crypto API
+ *
+ * @cond _ODP_HIDE_FROM_DOXYGEN_
  */
 
 /* enable strtok */
@@ -975,10 +975,10 @@ pkt_disposition_e do_ipsec_out_seq(odp_packet_t *pkt,
 		esp->seq_no = odp_cpu_to_be_32((*ctx->ipsec.esp_seq)++);
 	}
 	if (ctx->ipsec.tun_hdr_offset) {
-		odph_ipv4hdr_t *ip;
+		odph_ipv4hdr_t *ip_tun;
 
-		ip = (odph_ipv4hdr_t *)(ctx->ipsec.tun_hdr_offset + buf);
-		ip->id = odp_cpu_to_be_16((*ctx->ipsec.tun_hdr_id)++);
+		ip_tun = (odph_ipv4hdr_t *)(ctx->ipsec.tun_hdr_offset + buf);
+		ip_tun->id = odp_cpu_to_be_16((*ctx->ipsec.tun_hdr_id)++);
 	}
 
 	/* Issue crypto request */
