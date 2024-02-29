@@ -218,9 +218,9 @@ static inline struct rte_mbuf *pkt_to_mbuf(odp_packet_t  pkt)
 	return (struct rte_mbuf *)(uintptr_t)pkt;
 }
 
-static inline void packet_subtype_set(odp_packet_t pkt, int ev)
+static inline void packet_subtype_set(odp_packet_t pkt, int subtype)
 {
-	packet_hdr(pkt)->event_hdr.subtype = ev;
+	packet_hdr(pkt)->event_hdr.subtype = subtype;
 }
 
 /**
@@ -236,7 +236,9 @@ static inline void packet_init(odp_packet_hdr_t *pkt_hdr, odp_pktio_t input)
 	pkt_hdr->p.l3_offset        = ODP_PACKET_OFFSET_INVALID;
 	pkt_hdr->p.l4_offset        = ODP_PACKET_OFFSET_INVALID;
 
-	pkt_hdr->event_hdr.subtype = ODP_EVENT_PACKET_BASIC;
+	if (odp_unlikely(pkt_hdr->event_hdr.subtype != ODP_EVENT_PACKET_BASIC))
+		pkt_hdr->event_hdr.subtype = ODP_EVENT_PACKET_BASIC;
+
 	pkt_hdr->input = input;
 }
 
