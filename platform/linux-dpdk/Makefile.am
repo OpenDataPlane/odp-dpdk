@@ -13,6 +13,7 @@ AM_CPPFLAGS +=  -I$(top_srcdir)/platform/$(with_platform)/arch/@ARCH_DIR@
 AM_CPPFLAGS +=  -I$(top_srcdir)/platform/$(with_platform)/arch/default
 
 AM_CPPFLAGS +=  $(OPENSSL_CPPFLAGS)
+AM_CPPFLAGS +=  $(ORT_CPPFLAGS)
 
 AM_CFLAGS +=  $(DPDK_CFLAGS)
 AM_CFLAGS +=  $(LIBCONFIG_CFLAGS)
@@ -137,6 +138,7 @@ noinst_HEADERS = \
 		  ${top_srcdir}/platform/linux-generic/include/odp_classification_internal.h \
 		  include/odp_eventdev_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_forward_typedefs_internal.h \
+		  ${top_srcdir}/platform/linux-generic/include/odp_ml_fp16.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_global_data.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_init_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_ipsec_internal.h \
@@ -218,6 +220,8 @@ __LIB__libodp_dpdk_la_SOURCES = \
 			   ../linux-generic/odp_ipsec_sad.c \
 			   ../linux-generic/odp_name_table.c \
 			   ../linux-generic/odp_libconfig.c \
+			   ../linux-generic/odp_ml_fp16.c \
+			   ../linux-generic/odp_ml_quantize.c \
 			   odp_packet.c \
 			   odp_packet_dpdk.c \
 			   ../linux-generic/odp_packet_vector.c \
@@ -255,6 +259,14 @@ __LIB__libodp_dpdk_la_SOURCES = \
 			   ../linux-generic/odp_traffic_mngr.c \
 			   ../linux-generic/odp_version.c \
 			   ../linux-generic/odp_weak.c
+
+if WITH_ML
+__LIB__libodp_dpdk_la_SOURCES += \
+			   ../linux-generic/odp_ml.c
+else
+__LIB__libodp_dpdk_la_SOURCES += \
+			   ../linux-generic/odp_ml_null.c
+endif
 
 if ODP_ABI_COMPAT
 __LIB__libodp_dpdk_la_SOURCES += \
@@ -416,6 +428,7 @@ __LIB__libodp_dpdk_la_LIBADD += $(LIBCONFIG_LIBS)
 __LIB__libodp_dpdk_la_LIBADD += $(DPDK_LIBS_LIBODP)
 __LIB__libodp_dpdk_la_LIBADD += $(PTHREAD_LIBS)
 __LIB__libodp_dpdk_la_LIBADD += $(TIMER_LIBS)
+__LIB__libodp_dpdk_la_LIBADD += $(ORT_LIBS)
 
 CHECK_GLOBALS_REGEX = " (odp_|_odp_|_deprecated_odp_|miniz_|mz_|tdefl_|tinfl_|mp_hdlr_init_odp_pool_ops)"
 

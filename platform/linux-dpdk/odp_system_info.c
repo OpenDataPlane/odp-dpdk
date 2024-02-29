@@ -552,5 +552,8 @@ void odp_sys_config_print(void)
 	_ODP_PRINT("CONFIG_POOLS:                  %i\n", CONFIG_POOLS);
 	_ODP_PRINT("CONFIG_POOL_MAX_NUM:           %i\n", CONFIG_POOL_MAX_NUM);
 	_ODP_PRINT("CONFIG_IPSEC_MAX_NUM_SA:       %i\n", CONFIG_IPSEC_MAX_NUM_SA);
+	_ODP_PRINT("CONFIG_ML_MAX_MODELS:          %i\n", CONFIG_ML_MAX_MODELS);
+	_ODP_PRINT("CONFIG_ML_MAX_INPUTS:          %i\n", CONFIG_ML_MAX_INPUTS);
+	_ODP_PRINT("CONFIG_ML_MAX_OUTPUTS:         %i\n", CONFIG_ML_MAX_OUTPUTS);
 	_ODP_PRINT("\n");
 }

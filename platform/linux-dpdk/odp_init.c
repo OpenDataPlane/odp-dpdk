@@ -59,6 +59,7 @@ enum init_stage {
 	IPSEC_SAD_INIT,
 	IPSEC_INIT,
 	DMA_INIT,
+	ML_INIT,
 	ALL_INIT      /* All init stages completed */
 };
 
@@ -103,6 +104,7 @@ static void disable_features(odp_global_data_ro_t *global_ro,
 
 	global_ro->disable.traffic_mngr = init_param->not_used.feat.tm;
 	global_ro->disable.compress = init_param->not_used.feat.compress;
+	global_ro->disable.ml = init_param->not_used.feat.ml;
 }
 
 static int read_pci_config(char **pci_cmd)
@@ -331,6 +333,13 @@ static int term_global(enum init_stage stage)
 
 	switch (stage) {
 	case ALL_INIT:
+	case ML_INIT:
+		if (_odp_ml_term_global()) {
+			_ODP_ERR("ODP ML term failed.\n");
+			rc = -1;
+		}
+		/* Fall through */
+
 	case DMA_INIT:
 		if (_odp_dma_term_global()) {
 			_ODP_ERR("ODP DMA term failed.\n");
@@ -688,6 +697,12 @@ int odp_init_global(odp_instance_t *instance,
 		goto init_failed;
 	}
 	stage = DMA_INIT;
+
+	if (_odp_ml_init_global()) {
+		_ODP_ERR("ODP ML init failed.\n");
+		goto init_failed;
+	}
+	stage = ML_INIT;
 
 	/* Dummy support for single instance */
 	*instance = (odp_instance_t)odp_global_ro.main_pid;
