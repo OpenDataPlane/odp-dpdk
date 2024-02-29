@@ -626,6 +626,7 @@ static void init_obj_priv_data(struct rte_mempool *mp ODP_UNUSED, void *arg, voi
 	event_hdr->hdr.pool = _odp_pool_handle(pool);
 	event_hdr->hdr.type = priv_data->type;
 	event_hdr->hdr.event_type = priv_data->event_type;
+	event_hdr->hdr.subtype = ODP_EVENT_NO_SUBTYPE;
 
 	switch (priv_data->type) {
 	case ODP_POOL_BUFFER:
@@ -1361,6 +1362,7 @@ static void init_ext_obj(struct rte_mempool *mp, void *arg, void *mbuf, unsigned
 	event_hdr->hdr.pool = _odp_pool_handle(pool);
 	event_hdr->hdr.type = mb_ctor_arg->type;
 	event_hdr->hdr.event_type = mb_ctor_arg->event_type;
+	event_hdr->hdr.subtype = ODP_EVENT_NO_SUBTYPE;
 
 	switch (mb_ctor_arg->type) {
 	case ODP_POOL_BUFFER:
