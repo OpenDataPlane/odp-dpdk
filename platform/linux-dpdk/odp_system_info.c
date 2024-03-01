@@ -27,7 +27,6 @@
 #include <odp_packet_internal.h>
 
 #include <errno.h>
-#include <pthread.h>
 #include <string.h>
 #include <stdio.h>
 #include <inttypes.h>
