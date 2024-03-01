@@ -707,12 +707,11 @@ static int cipher_gen_capability(const struct rte_crypto_param_range *key_size,
 
 	for (uint32_t key_len = key_size_min; key_len <= key_size_max;
 	     key_len += key_inc) {
-		for (uint32_t iv_size = iv_size_min;
-		     iv_size <= iv_size_max; iv_size += iv_inc) {
+		for (uint32_t iv_len = iv_size_min; iv_len <= iv_size_max; iv_len += iv_inc) {
 			odp_crypto_cipher_capability_t capa;
 
 			capa.key_len = key_len;
-			capa.iv_len = iv_size;
+			capa.iv_len = iv_len;
 			capa.bit_mode = false;
 
 			idx = cipher_capa_insert(src, &capa, idx, num_copy);
@@ -918,14 +917,14 @@ static int auth_gen_capability(const struct rte_crypto_param_range *key_size,
 		for (uint16_t key_len = key_size_min;
 		     key_len <= key_size_max;
 		     key_len += key_inc) {
-			for (uint16_t iv_size = iv_size_min;
-			     iv_size <= iv_size_max;
-			     iv_size += iv_inc) {
+			for (uint16_t iv_len = iv_size_min;
+			     iv_len <= iv_size_max;
+			     iv_len += iv_inc) {
 				odp_crypto_auth_capability_t capa;
 
 				capa.digest_len = digest_len;
 				capa.key_len = key_len;
-				capa.iv_len = iv_size;
+				capa.iv_len = iv_len;
 				capa.bit_mode = false;
 				capa.aad_len.min = aad_size->min;
 				capa.aad_len.max = aad_size->max;
