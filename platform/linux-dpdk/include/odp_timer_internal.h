@@ -24,6 +24,8 @@
 
 #include <rte_config.h>
 
+#include <stdint.h>
+
 /**
  * Internal Timeout header
  */
@@ -56,10 +58,13 @@ ODP_STATIC_ASSERT(sizeof(odp_timeout_hdr_t) <= 3 * RTE_CACHE_LINE_SIZE,
 void _odp_timer_run_inline(int dec);
 
 /* Static inline wrapper to minimize modification of schedulers. */
-static inline void timer_run(int dec)
+static inline uint64_t timer_run(int dec)
 {
 	if (odp_global_rw->inline_timers)
 		_odp_timer_run_inline(dec);
+
+	/* Time to the next timeout not available with DPDK timers */
+	return UINT64_MAX;
 }
 
 #endif
