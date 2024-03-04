@@ -96,6 +96,8 @@ AM_CONDITIONAL([PLATFORM_IS_LINUX_DPDK],
 AC_CONFIG_FILES([platform/linux-dpdk/Makefile
 		 platform/linux-dpdk/libodp-dpdk.pc
 		 platform/linux-dpdk/dumpconfig/Makefile
+		 platform/linux-dpdk/example/Makefile
+		 platform/linux-dpdk/example/ml/Makefile
 		 platform/linux-dpdk/test/Makefile
 		 platform/linux-dpdk/test/example/Makefile
 		 platform/linux-dpdk/test/example/classifier/Makefile
