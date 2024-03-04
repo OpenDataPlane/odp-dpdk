@@ -1,0 +1,1 @@
+../../../../../linux-generic/test/validation/api/ml/gen_models.sh
