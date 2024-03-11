@@ -31,26 +31,52 @@
  */
 #define CONFIG_DMBSTR
 
-/*
- * Use ARM event signalling mechanism
- * Event signalling minimises spinning (busy waiting) which decreases
- * cache coherency traffic when spinning on shared locations (thus faster and
- * more scalable) and enables the CPU to enter a sleep state (lower power
- * consumption).
- */
-/* #define CONFIG_WFE */
-
-static inline void _odp_dmb(void)
+static inline uint64_t lld(uint64_t *var, int mm)
 {
-	__asm__ volatile("dmb" : : : "memory");
+	uint64_t old;
+
+	__asm__ volatile("ldrexd %0, %H0, [%1]"
+			 : "=&r" (old)
+			 : "r" (var)
+			 : );
+	/* Barrier after an acquiring load */
+	if (mm == __ATOMIC_ACQUIRE)
+		__asm__ volatile("dmb" : : : "memory");
+	return old;
 }
 
-#define _odp_release_barrier(ro) \
-	__atomic_thread_fence(__ATOMIC_RELEASE)
+/* Return 0 on success, 1 on failure */
+static inline uint32_t scd(uint64_t *var, uint64_t neu, int mm)
+{
+	uint32_t ret;
 
-#include "odp_llsc.h"
-#include "odp_atomic.h"
-#include "odp_cpu_idling.h"
+	/* Barrier before a releasing store */
+	if (mm == __ATOMIC_RELEASE)
+		__asm__ volatile("dmb" : : : "memory");
+	__asm__ volatile("strexd %0, %1, %H1, [%2]"
+			 : "=&r" (ret)
+			 : "r" (neu), "r" (var)
+			 : );
+	return ret;
+}
+
+#ifdef CONFIG_DMBSTR
+
+#define atomic_store_release(loc, val, ro)		\
+do {							\
+	__atomic_thread_fence(__ATOMIC_RELEASE);	\
+	__atomic_store_n(loc, val, __ATOMIC_RELAXED);	\
+} while (0)
+
+#else
+
+#define atomic_store_release(loc, val, ro) \
+	__atomic_store_n(loc, val, __ATOMIC_RELEASE)
+
+#endif  /* CONFIG_DMBSTR */
+
+#include "../default/odp_atomic.h"
+#include "../default/odp_wait_until.h"
 
 #ifdef __ARM_FEATURE_UNALIGNED
 #define _ODP_UNALIGNED 1

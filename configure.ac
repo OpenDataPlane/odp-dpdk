@@ -3,7 +3,7 @@ AC_PREREQ([2.5])
 # ODP API version
 ##########################################################################
 m4_define([odp_version_generation], [1])
-m4_define([odp_version_major],     [43])
+m4_define([odp_version_major],     [44])
 m4_define([odp_version_minor],      [0])
 m4_define([odp_version_patch],      [0])
 
@@ -113,6 +113,7 @@ ODP_CHECK_CFLAG([-Wundef])
 ODP_CHECK_CFLAG([-Wwrite-strings])
 ODP_CHECK_CFLAG([-Wformat-truncation=0])
 ODP_CHECK_CFLAG([-Wformat-overflow=0])
+ODP_CHECK_CFLAG([-Wshadow=local])
 
 # GCC 10 sometimes gets confused about object sizes and gives bogus warnings.
 # Make the affected warnings generate only warnings, not errors.

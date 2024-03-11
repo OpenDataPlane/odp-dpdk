@@ -4,6 +4,14 @@
  * SPDX-License-Identifier:     BSD-3-Clause
  */
 
+/**
+ * @example odp_bench_timer.c
+ *
+ * Microbenchmark application for timer API functions
+ *
+ * @cond _ODP_HIDE_FROM_DOXYGEN_
+ */
+
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE /* Needed for sigaction */
 #endif
@@ -695,8 +703,12 @@ exit:
 	if (gbl_args->pool != ODP_POOL_INVALID)
 		odp_pool_destroy(gbl_args->pool);
 
-	if (gbl_args->timer != ODP_TIMER_INVALID)
-		odp_timer_free(gbl_args->timer);
+	if (gbl_args->timer != ODP_TIMER_INVALID) {
+		if (odp_timer_free(gbl_args->timer)) {
+			ODPH_ERR("Timer free failed\n");
+			exit(EXIT_FAILURE);
+		}
+	}
 
 	if (gbl_args->timer_pool != ODP_TIMER_POOL_INVALID)
 		odp_timer_pool_destroy(gbl_args->timer_pool);

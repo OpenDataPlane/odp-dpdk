@@ -11,7 +11,7 @@ jobs:
   Checkpatch:
     runs-on: ubuntu-20.04
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Install dependencies
@@ -22,13 +22,13 @@ jobs:
         if: github.event_name == 'pull_request'
         env:
           CHECKPATCH_COMMAND: ./scripts/checkpatch.pl
-        uses: webispy/checkpatch-action@v8
+        uses: webispy/checkpatch-action@v9
       - name: Check push
         if: github.event_name == 'push' && github.ref != 'refs/heads/master'
         run: |
           AFTER=${{ github.event.after }}
           BEFORE=${{ github.event.before }}
-          if [ -z "${BEFORE//0}" ] || [ -z "${AFTER//0}" ]; then
+          if [ -z "${BEFORE//0}" ] || [ -z "${AFTER//0}" ] || ${{ github.event.forced }}; then
             COMMIT_RANGE=""
           else
             COMMIT_RANGE="${BEFORE}..${AFTER}"
@@ -38,7 +38,7 @@ jobs:
   Documentation:
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Install dependencies
         run: |
           sudo apt update
@@ -72,7 +72,7 @@ jobs:
                '--enable-lto --enable-abi-compat',
                '--enable-pcapng-support']
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC=gcc
                -e CONF="${{matrix.conf}}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH} /odp/scripts/ci/build_${ARCH}.sh
       - if: ${{ failure() }}
@@ -92,7 +92,7 @@ jobs:
                '--enable-pcapng-support',
                '--without-openssl --without-pcap']
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC=clang
                 -e CONF="${{matrix.conf}}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH} /odp/scripts/ci/build_${ARCH}.sh
       - if: ${{ failure() }}
@@ -109,7 +109,7 @@ jobs:
         cc_ver: [9, 10, 11, 12]
         conf: ['', '--enable-lto']
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="gcc-${{matrix.cc_ver}}" -e CXX="g++-${{matrix.cc_ver}}"
                -e CONF="${CONF} ${{matrix.conf}}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-static /odp/scripts/ci/build_static.sh
       - if: ${{ failure() }}
@@ -127,7 +127,7 @@ jobs:
         conf: ['', '--enable-abi-compat', 'CFLAGS=-march=armv8.2-a', 'CFLAGS=-march=armv8-a+lse',
                '--enable-wfe-locks']
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${{matrix.cc}}"
                -e CONF="${CONF} ${{matrix.conf}}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH} /odp/scripts/ci/build_${ARCH}.sh
       - if: ${{ failure() }}
@@ -143,7 +143,7 @@ jobs:
       matrix:
         conf: ['', '--enable-abi-compat']
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}"
                -e CONF="${CONF} ${{matrix.conf}}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH} /odp/scripts/ci/build_${ARCH}.sh
       - if: ${{ failure() }}
@@ -160,7 +160,7 @@ jobs:
         cc: [gcc, clang]
         conf: ['', '--enable-abi-compat']
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${{matrix.cc}}"
                -e CONF="${{matrix.conf}}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH} /odp/scripts/ci/build_${ARCH}.sh
       - if: ${{ failure() }}
@@ -175,7 +175,7 @@ jobs:
         os: ['centos_7', 'rocky_linux_8']
         conf: ['--enable-abi-compat']
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${{matrix.cc}}"
                -e CONF="${{matrix.conf}}" $CONTAINER_NAMESPACE/odp-ci-${{matrix.os}}-${ARCH} /odp/scripts/ci/build_${ARCH}.sh
       - if: ${{ failure() }}
@@ -191,7 +191,7 @@ jobs:
         cc_ver: [7, 8]
         conf: ['', '--enable-abi-compat']
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="gcc-${{matrix.cc_ver}}" -e CXX="g++-${{matrix.cc_ver}}"
                -e CONF="${{matrix.conf}}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH} /odp/scripts/ci/build_${ARCH}.sh
       - if: ${{ failure() }}
@@ -207,7 +207,7 @@ jobs:
         cc_ver: [10, 11, 12, 13]
         conf: ['', '--enable-abi-compat']
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="gcc-${{matrix.cc_ver}}" -e CXX="g++-${{matrix.cc_ver}}"
                -e CONF="${{matrix.conf}}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH} /odp/scripts/ci/build_${ARCH}.sh
       - if: ${{ failure() }}
@@ -216,7 +216,7 @@ jobs:
   Build_out-of-tree:
     runs-on: ubuntu-20.04
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}"
               -e CONF="${CONF}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH} /odp/scripts/ci/out_of_tree.sh
       - if: ${{ failure() }}
@@ -227,7 +227,7 @@ jobs:
     env:
       CONF: "--with-platform=linux-generic"
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}" -e ODP_LIB_NAME="libodp-linux"
                -e CONF="${CONF}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH} /odp/scripts/ci/build_${ARCH}.sh
       - if: ${{ failure() }}
@@ -240,7 +240,7 @@ jobs:
       matrix:
         conf: ['--enable-user-guides', '--enable-user-guides --enable-abi-compat']
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       # Ignore distcheck failure (caused by the first 'make check' run unmounting huge pages)
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${{matrix.cc}}"
              -e CONF="${{matrix.conf}}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH} /odp/scripts/ci/distcheck.sh || true
@@ -260,7 +260,7 @@ jobs:
                '--disable-host-optimization --enable-abi-compat',
                '--without-openssl --without-pcap']
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC=gcc -e ARCH="${ARCH}"
                -e CONF="${{matrix.conf}}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH} /odp/scripts/ci/check.sh
       - if: ${{ failure() }}
@@ -280,7 +280,7 @@ jobs:
                '--disable-host-optimization --enable-event-validation=warn',
                '--disable-host-optimization --enable-abi-compat']
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC=clang -e ARCH="${ARCH}"
                -e CONF="${{matrix.conf}}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH} /odp/scripts/ci/check.sh
       - if: ${{ failure() }}
@@ -294,7 +294,7 @@ jobs:
         cc: [gcc, clang]
         os: ['ubuntu_22.04']
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${{matrix.cc}}" -e ARCH="${ARCH}"
                -e CONF="${CONF}" $CONTAINER_NAMESPACE/odp-ci-${{matrix.os}}-${ARCH} /odp/scripts/ci/check.sh
       - if: ${{ failure() }}
@@ -303,7 +303,7 @@ jobs:
   Run_sched_config:
     runs-on: ubuntu-20.04
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}" -e ARCH="${ARCH}"
                -e CONF="${CONF}" -e ODP_CONFIG_FILE=/odp/platform/linux-dpdk/test/sched-basic.conf $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH} /odp/scripts/ci/check.sh
       - if: ${{ failure() }}
@@ -312,7 +312,7 @@ jobs:
   Run_stash_config:
     runs-on: ubuntu-20.04
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}" -e ARCH="${ARCH}"
                -e CONF="${CONF}" -e ODP_CONFIG_FILE=/odp/platform/linux-dpdk/test/stash-custom.conf $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH} /odp/scripts/ci/check.sh
       - if: ${{ failure() }}
@@ -321,7 +321,7 @@ jobs:
   Run_scheduler_sp:
     runs-on: ubuntu-20.04
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}" -e ARCH="${ARCH}"
                -e CONF="${CONF}" -e ODP_SCHEDULER=sp $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH} /odp/scripts/ci/check.sh
       - if: ${{ failure() }}
@@ -330,7 +330,7 @@ jobs:
   Run_process_mode:
     runs-on: ubuntu-20.04
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}" -e ARCH="${ARCH}"
                -e CONF="${CONF}" -e ODP_CONFIG_FILE=/odp/platform/linux-dpdk/test/process-mode.conf
                -e ODPH_PROC_MODE=1 $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH} /odp/scripts/ci/check.sh
@@ -340,7 +340,7 @@ jobs:
   Run_default_timer:
     runs-on: ubuntu-20.04
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}" -e ARCH="${ARCH}"
                -e ODP_CONFIG_FILE=/odp/platform/linux-dpdk/test/default-timer.conf
                -e CONF="${CONF}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH} /odp/scripts/ci/check_validation.sh
@@ -350,9 +350,18 @@ jobs:
   Run_dpdk-21_11:
     runs-on: ubuntu-20.04
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}" -e ARCH="${ARCH}"
                -e CONF="${CONF}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-dpdk_21.11 /odp/scripts/ci/check.sh
+      - if: ${{ failure() }}
+        uses: ./.github/actions/run-failure-log
+
+  Run_dpdk-23_11:
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}" -e ARCH="${ARCH}"
+                -e CONF="${CONF}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-dpdk_23.11 /odp/scripts/ci/check.sh
       - if: ${{ failure() }}
         uses: ./.github/actions/run-failure-log
 
@@ -363,7 +372,7 @@ jobs:
       matrix:
         driver: [crypto_aesni_mb, crypto_aesni_gcm]
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}" -e ARCH="${ARCH}"
                -e CONF="${CONF}" -e ODP_PLATFORM_PARAMS="--vdev=${{matrix.driver}}"
                -e ODP_CONFIG_FILE=/odp/platform/linux-dpdk/test/crypto.conf

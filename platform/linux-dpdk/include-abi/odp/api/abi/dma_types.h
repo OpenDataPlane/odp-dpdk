@@ -11,7 +11,7 @@ extern "C" {
 
 #include <odp/api/plat/strong_types.h>
 
-/** @ingroup odp_dma
+/** @addtogroup odp_dma
  *  @{
  */
 

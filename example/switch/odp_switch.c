@@ -1,8 +1,14 @@
-/* Copyright (c) 2016-2018, Linaro Limited
- * Copyright (c) 2020, Nokia
- * All rights reserved.
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2016-2018 Linaro Limited
+ * Copyright (c) 2020 Nokia
+ */
+
+/**
+ * @example odp_switch.c
  *
- * SPDX-License-Identifier:     BSD-3-Clause
+ * Minimal learning Ethernet switch example application
+ *
+ * @cond _ODP_HIDE_FROM_DOXYGEN_
  */
 
 #include <stdio.h>

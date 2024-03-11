@@ -18,6 +18,12 @@ test_SCRIPTS = $(dist_check_SCRIPTS)
 SUBDIRS += validation/api/pktio \
 	   example \
 	   performance
+
+if WITH_ML
+TESTS += validation/api/ml/ml_linux$(EXEEXT)
+SUBDIRS += validation/api/ml
+endif
+
 else
 #performance tests refer to pktio_env
 if test_perf

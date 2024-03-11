@@ -13,6 +13,7 @@ AM_CPPFLAGS +=  -I$(top_srcdir)/platform/$(with_platform)/arch/@ARCH_DIR@
 AM_CPPFLAGS +=  -I$(top_srcdir)/platform/$(with_platform)/arch/default
 
 AM_CPPFLAGS +=  $(OPENSSL_CPPFLAGS)
+AM_CPPFLAGS +=  $(ORT_CPPFLAGS)
 
 AM_CFLAGS +=  $(DPDK_CFLAGS)
 AM_CFLAGS +=  $(LIBCONFIG_CFLAGS)
@@ -88,6 +89,7 @@ odpapiabiarchinclude_HEADERS += \
 		  include-abi/odp/api/abi/init.h \
 		  include-abi/odp/api/abi/ipsec.h \
 		  include-abi/odp/api/abi/ipsec_types.h \
+		  include-abi/odp/api/abi/ml_types.h \
 		  include-abi/odp/api/abi/packet.h \
 		  include-abi/odp/api/abi/packet_types.h \
 		  include-abi/odp/api/abi/packet_flags.h \
@@ -136,6 +138,7 @@ noinst_HEADERS = \
 		  ${top_srcdir}/platform/linux-generic/include/odp_classification_internal.h \
 		  include/odp_eventdev_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_forward_typedefs_internal.h \
+		  ${top_srcdir}/platform/linux-generic/include/odp_ml_fp16.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_global_data.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_init_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_ipsec_internal.h \
@@ -217,6 +220,8 @@ __LIB__libodp_dpdk_la_SOURCES = \
 			   ../linux-generic/odp_ipsec_sad.c \
 			   ../linux-generic/odp_name_table.c \
 			   ../linux-generic/odp_libconfig.c \
+			   ../linux-generic/odp_ml_fp16.c \
+			   ../linux-generic/odp_ml_quantize.c \
 			   odp_packet.c \
 			   odp_packet_dpdk.c \
 			   ../linux-generic/odp_packet_vector.c \
@@ -254,6 +259,14 @@ __LIB__libodp_dpdk_la_SOURCES = \
 			   ../linux-generic/odp_traffic_mngr.c \
 			   ../linux-generic/odp_version.c \
 			   ../linux-generic/odp_weak.c
+
+if WITH_ML
+__LIB__libodp_dpdk_la_SOURCES += \
+			   ../linux-generic/odp_ml.c
+else
+__LIB__libodp_dpdk_la_SOURCES += \
+			   ../linux-generic/odp_ml_null.c
+endif
 
 if ODP_ABI_COMPAT
 __LIB__libodp_dpdk_la_SOURCES += \
@@ -301,15 +314,11 @@ odpapiabiarchinclude_HEADERS += arch/default/odp/api/abi/atomic_generic.h \
 				arch/default/odp/api/abi/wait_until_generic.h \
 				arch/default/odp/api/abi/wait_until.h
 endif
-noinst_HEADERS += arch/arm/odp_atomic.h \
-		  arch/arm/odp_cpu.h \
-		  arch/arm/odp_cpu_idling.h \
-		  arch/arm/odp_llsc.h \
+noinst_HEADERS += arch/arm/odp_cpu.h \
 		  arch/default/odp_atomic.h \
 		  arch/default/odp_cpu.h \
-		  arch/default/odp_cpu_idling.h \
-		  arch/default/odp_random.h
-
+		  arch/default/odp_random.h \
+		  arch/default/odp_wait_until.h
 endif
 if ARCH_IS_AARCH64
 __LIB__libodp_dpdk_la_SOURCES += arch/aarch64/odp_atomic.c \
@@ -334,9 +343,8 @@ endif
 noinst_HEADERS += arch/aarch64/odp_atomic.h \
 		  arch/aarch64/odp_cpu.h \
 		  arch/aarch64/cpu_flags.h \
-		  arch/aarch64/odp_cpu_idling.h \
-		  arch/aarch64/odp_llsc.h \
-		  arch/aarch64/odp_random.h
+		  arch/aarch64/odp_random.h \
+		  arch/aarch64/odp_wait_until.h
 endif
 if ARCH_IS_DEFAULT
 __LIB__libodp_dpdk_la_SOURCES += arch/default/odp_atomic.c \
@@ -357,8 +365,8 @@ odpapiabiarchinclude_HEADERS += arch/default/odp/api/abi/atomic_generic.h \
 endif
 noinst_HEADERS += arch/default/odp_atomic.h \
 		  arch/default/odp_cpu.h \
-		  arch/default/odp_cpu_idling.h \
-		  arch/default/odp_random.h
+		  arch/default/odp_random.h \
+		  arch/default/odp_wait_until.h
 endif
 if ARCH_IS_POWERPC
 __LIB__libodp_dpdk_la_SOURCES += arch/default/odp_atomic.c \
@@ -379,8 +387,8 @@ odpapiabiarchinclude_HEADERS += arch/default/odp/api/abi/atomic_generic.h \
 endif
 noinst_HEADERS += arch/default/odp_atomic.h \
 		  arch/default/odp_cpu.h \
-		  arch/default/odp_cpu_idling.h \
-		  arch/default/odp_random.h
+		  arch/default/odp_random.h \
+		  arch/default/odp_wait_until.h
 endif
 if ARCH_IS_X86
 __LIB__libodp_dpdk_la_SOURCES += arch/default/odp_atomic.c \
@@ -406,7 +414,7 @@ noinst_HEADERS += arch/x86/cpu_flags.h \
 		  arch/x86/odp_random.h \
 		  arch/default/odp_atomic.h \
 		  arch/default/odp_cpu.h \
-		  arch/default/odp_cpu_idling.h
+		  arch/default/odp_wait_until.h
 endif
 
 __LIB__libodp_dpdk_la_LIBADD = $(ATOMIC_LIBS)
@@ -415,6 +423,7 @@ __LIB__libodp_dpdk_la_LIBADD += $(LIBCONFIG_LIBS)
 __LIB__libodp_dpdk_la_LIBADD += $(DPDK_LIBS_LIBODP)
 __LIB__libodp_dpdk_la_LIBADD += $(PTHREAD_LIBS)
 __LIB__libodp_dpdk_la_LIBADD += $(TIMER_LIBS)
+__LIB__libodp_dpdk_la_LIBADD += $(ORT_LIBS)
 
 CHECK_GLOBALS_REGEX = " (odp_|_odp_|_deprecated_odp_|miniz_|mz_|tdefl_|tinfl_|mp_hdlr_init_odp_pool_ops)"
 

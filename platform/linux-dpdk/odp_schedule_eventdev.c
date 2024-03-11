@@ -604,8 +604,8 @@ static inline uint16_t input_cached(odp_event_t out_ev[], unsigned int max_num,
 	uint8_t first_queue = _odp_eventdev_local.cache.event[idx].queue_id;
 
 	for (i = 0; i < max_num && _odp_eventdev_local.cache.count; i++) {
-		uint16_t idx = _odp_eventdev_local.cache.idx;
-		struct rte_event *event = &_odp_eventdev_local.cache.event[idx];
+		uint16_t cache_idx = _odp_eventdev_local.cache.idx;
+		struct rte_event *event = &_odp_eventdev_local.cache.event[cache_idx];
 
 		if (odp_unlikely(event->queue_id != first_queue))
 			break;

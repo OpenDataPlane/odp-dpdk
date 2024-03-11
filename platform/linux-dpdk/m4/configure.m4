@@ -11,6 +11,7 @@ m4_include([platform/linux-dpdk/m4/odp_openssl.m4])
 m4_include([platform/linux-dpdk/m4/odp_pcapng.m4])
 m4_include([platform/linux-dpdk/m4/odp_scheduler.m4])
 m4_include([platform/linux-dpdk/m4/odp_wfe.m4])
+m4_include([platform/linux-dpdk/m4/odp_ml.m4])
 
 ODP_EVENT_VALIDATION
 ODP_PTHREAD
@@ -66,7 +67,7 @@ esac
 # Required for experimental rte_event_port_unlinks_in_progress() API
 DPDK_CFLAGS="${DPDK_CFLAGS} -DALLOW_EXPERIMENTAL_API"
 
-AS_VAR_APPEND([PLAT_DEP_LIBS], ["${ATOMIC_LIBS} ${LIBCONFIG_LIBS} ${OPENSSL_LIBS} ${DPDK_LIBS_LT} ${LIBCLI_LIBS}"])
+AS_VAR_APPEND([PLAT_DEP_LIBS], ["${ATOMIC_LIBS} ${LIBCONFIG_LIBS} ${OPENSSL_LIBS} ${DPDK_LIBS_LT} ${LIBCLI_LIBS} ${ORT_LIBS}"])
 
 # Add text to the end of configure with platform specific settings.
 # Make sure it's aligned same as other lines in configure.ac.
@@ -77,6 +78,7 @@ AS_VAR_APPEND([PLAT_CFG_TEXT], ["
 	pcap:                   ${have_pmd_pcap}
 	pcapng:                 ${have_pcapng}
 	wfe_locks:              ${use_wfe_locks}
+	ml_support:             ${ml_support}
 	default_config_path:    ${default_config_path}"])
 
 ODP_CHECK_CFLAG([-Wno-error=cast-align])
@@ -94,6 +96,8 @@ AM_CONDITIONAL([PLATFORM_IS_LINUX_DPDK],
 AC_CONFIG_FILES([platform/linux-dpdk/Makefile
 		 platform/linux-dpdk/libodp-dpdk.pc
 		 platform/linux-dpdk/dumpconfig/Makefile
+		 platform/linux-dpdk/example/Makefile
+		 platform/linux-dpdk/example/ml/Makefile
 		 platform/linux-dpdk/test/Makefile
 		 platform/linux-dpdk/test/example/Makefile
 		 platform/linux-dpdk/test/example/classifier/Makefile
@@ -108,5 +112,6 @@ AC_CONFIG_FILES([platform/linux-dpdk/Makefile
 		 platform/linux-dpdk/test/example/switch/Makefile
 		 platform/linux-dpdk/test/performance/Makefile
 		 platform/linux-dpdk/test/performance/dmafwd/Makefile
+		 platform/linux-dpdk/test/validation/api/ml/Makefile
 		 platform/linux-dpdk/test/validation/api/pktio/Makefile])
 ])

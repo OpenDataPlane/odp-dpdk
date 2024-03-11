@@ -1,7 +1,13 @@
-/* Copyright (c) 2016-2018, Linaro Limited
- * All rights reserved.
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2016-2018 Linaro Limited
+ */
+
+/**
+ * @example odp_l2fwd_simple.c
  *
- * SPDX-License-Identifier:     BSD-3-Clause
+ * Minimal L2 forwarding example application
+ *
+ * @cond _ODP_HIDE_FROM_DOXYGEN_
  */
 
 #include <stdlib.h>

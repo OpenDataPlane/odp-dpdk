@@ -1,9 +1,17 @@
 /* Copyright (c) 2014-2018, Linaro Limited
- * Copyright (c) 2019-2023, Nokia
+ * Copyright (c) 2019-2024, Nokia
  * Copyright (c) 2020-2021, Marvell
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
+ */
+
+/**
+ * @example odp_l2fwd.c
+ *
+ * L2 forwarding example application
+ *
+ * @cond _ODP_HIDE_FROM_DOXYGEN_
  */
 
 /* enable strtok */
@@ -81,7 +89,32 @@ static inline int sched_mode(pktin_mode_t in_mode)
  */
 typedef struct {
 	/* Some extra features (e.g. error checks) have been enabled */
-	int extra_feat;
+	uint8_t extra_feat;
+
+	/* Prefetch packet data */
+	uint8_t prefetch;
+
+	/* Change destination eth addresses */
+	uint8_t dst_change;
+
+	/* Change source eth addresses */
+	uint8_t src_change;
+
+	/* Read packet data in uint64_t words */
+	uint16_t data_rd;
+
+	/* Check packet errors */
+	uint8_t error_check;
+
+	/* Packet copy */
+	uint8_t packet_copy;
+
+	/* Checksum offload */
+	uint8_t chksum;
+
+	/* Print debug info on every packet */
+	uint8_t verbose_pkt;
+
 	unsigned int cpu_count;
 	int if_count;		/* Number of interfaces to be used */
 	int addr_count;		/* Number of dst addresses to be used */
@@ -93,11 +126,6 @@ typedef struct {
 	int time;		/* Time in seconds to run. */
 	int accuracy;		/* Number of seconds to get and print stats */
 	char *if_str;		/* Storage for interface names */
-	int dst_change;		/* Change destination eth addresses */
-	int src_change;		/* Change source eth addresses */
-	int error_check;        /* Check packet errors */
-	int packet_copy;        /* Packet copy */
-	int chksum;             /* Checksum offload */
 	int sched_mode;         /* Scheduler mode */
 	int num_groups;         /* Number of scheduling groups */
 	int group_mode;         /* How threads join groups */
@@ -109,11 +137,12 @@ typedef struct {
 	uint32_t num_vec;       /* Number of vectors per pool */
 	uint64_t vec_tmo_ns;    /* Vector formation timeout in ns */
 	uint32_t vec_size;      /* Vector size */
-	int verbose;		/* Verbose output */
-	uint32_t packet_len;	/* Maximum packet length supported */
-	uint32_t seg_len;	/* Pool segment length */
+	int verbose;            /* Verbose output */
+	uint32_t packet_len;    /* Maximum packet length supported */
+	uint32_t seg_len;       /* Pool segment length */
 	int promisc_mode;       /* Promiscuous mode enabled */
 	int flow_aware;         /* Flow aware scheduling enabled */
+	uint8_t input_ts;       /* Packet input timestamping enabled */
 	int mtu;                /* Interface MTU */
 	int num_prio;
 	odp_schedule_prio_t prio[MAX_PKTIOS]; /* Priority of input queues of an interface */
@@ -131,6 +160,8 @@ typedef union ODP_ALIGNED_CACHE {
 		uint64_t tx_drops;
 		/* Number of failed packet copies */
 		uint64_t copy_fails;
+		/* Dummy sum of packet data */
+		uint64_t dummy_sum;
 	} s;
 
 	uint8_t padding[ODP_CACHE_LINE_SIZE];
@@ -251,6 +282,15 @@ static inline int drop_err_pkts(odp_packet_t pkt_tbl[], unsigned num)
 	return dropped;
 }
 
+static inline void prefetch_data(uint8_t prefetch, odp_packet_t pkt_tbl[], uint32_t num)
+{
+	if (prefetch == 0)
+		return;
+
+	for (uint32_t i = 0; i < num; i++)
+		odp_packet_prefetch(pkt_tbl[i], 0, prefetch * 64);
+}
+
 /*
  * Fill packets' eth addresses according to the destination port
  *
@@ -270,9 +310,6 @@ static inline void fill_eth_addrs(odp_packet_t pkt_tbl[],
 
 	for (i = 0; i < num; ++i) {
 		pkt = pkt_tbl[i];
-
-		odp_packet_prefetch(pkt, 0, ODPH_ETHHDR_LEN);
-
 		eth = odp_packet_data(pkt);
 
 		if (gbl_args->appl.src_change)
@@ -318,6 +355,57 @@ static inline void chksum_insert(odp_packet_t *pkt_tbl, int pkts)
 	}
 }
 
+static void print_packets(odp_packet_t *pkt_tbl, int num)
+{
+	odp_packet_t pkt;
+	uintptr_t data_ptr;
+	uint32_t bit, align;
+
+	for (int i = 0; i < num; i++) {
+		pkt = pkt_tbl[i];
+		data_ptr = (uintptr_t)odp_packet_data(pkt);
+
+		for (bit = 0, align = 1; bit < 32; bit++, align *= 2)
+			if (data_ptr & (0x1 << bit))
+				break;
+
+		printf("  Packet data:    0x%" PRIxPTR "\n"
+		       "  Packet len:     %u\n"
+		       "  Packet seg len: %u\n"
+		       "  Data align:     %u\n"
+		       "  Num segments:   %i\n"
+		       "  Headroom size:  %u\n"
+		       "  User area size: %u\n\n",
+		       data_ptr, odp_packet_len(pkt), odp_packet_seg_len(pkt), align,
+		       odp_packet_num_segs(pkt), odp_packet_headroom(pkt),
+		       odp_packet_user_area_size(pkt));
+	}
+}
+
+static inline void data_rd(odp_packet_t *pkt_tbl, int num, uint16_t rd_words, stats_t *stats)
+{
+	odp_packet_t pkt;
+	uint64_t *data;
+	int i;
+	uint32_t len, words, j;
+	uint64_t sum = 0;
+
+	for (i = 0; i < num; i++) {
+		pkt  = pkt_tbl[i];
+		data = odp_packet_data(pkt);
+		len  = odp_packet_seg_len(pkt);
+
+		words = rd_words;
+		if (rd_words * 8 > len)
+			words = len / 8;
+
+		for (j = 0; j < words; j++)
+			sum += data[j];
+	}
+
+	stats->s.dummy_sum += sum;
+}
+
 static inline int copy_packets(odp_packet_t *pkt_tbl, int pkts)
 {
 	odp_packet_t old_pkt, new_pkt;
@@ -343,21 +431,29 @@ static inline int copy_packets(odp_packet_t *pkt_tbl, int pkts)
 /*
  * Return number of packets remaining in the pkt_tbl
  */
-static inline int process_extra_features(odp_packet_t *pkt_tbl, int pkts,
-					 stats_t *stats)
+static inline int process_extra_features(const appl_args_t *appl_args, odp_packet_t *pkt_tbl,
+					 int pkts, stats_t *stats)
 {
-	if (odp_unlikely(gbl_args->appl.extra_feat)) {
-		if (gbl_args->appl.packet_copy) {
+	if (odp_unlikely(appl_args->extra_feat)) {
+		uint16_t rd_words = appl_args->data_rd;
+
+		if (appl_args->verbose_pkt)
+			print_packets(pkt_tbl, pkts);
+
+		if (rd_words)
+			data_rd(pkt_tbl, pkts, rd_words, stats);
+
+		if (appl_args->packet_copy) {
 			int fails;
 
 			fails = copy_packets(pkt_tbl, pkts);
 			stats->s.copy_fails += fails;
 		}
 
-		if (gbl_args->appl.chksum)
+		if (appl_args->chksum)
 			chksum_insert(pkt_tbl, pkts);
 
-		if (gbl_args->appl.error_check) {
+		if (appl_args->error_check) {
 			int rx_drops;
 
 			/* Drop packets with errors */
@@ -421,6 +517,7 @@ static int run_worker_sched_mode_vector(void *arg)
 	odp_queue_t tx_queue[MAX_PKTIOS];
 	thread_args_t *thr_args = arg;
 	stats_t *stats = &thr_args->stats;
+	const appl_args_t *appl_args = &gbl_args->appl;
 	int use_event_queue = gbl_args->appl.out_mode;
 	pktin_mode_t in_mode = gbl_args->appl.in_mode;
 
@@ -484,7 +581,10 @@ static int run_worker_sched_mode_vector(void *arg)
 				pkts = odp_packet_vector_tbl(pkt_vec, &pkt_tbl);
 			}
 
-			pkts = process_extra_features(pkt_tbl, pkts, stats);
+			prefetch_data(appl_args->prefetch, pkt_tbl, pkts);
+
+			pkts = process_extra_features(appl_args, pkt_tbl, pkts, stats);
+
 			if (odp_unlikely(pkts) == 0) {
 				if (pkt_vec != ODP_PACKET_VECTOR_INVALID)
 					odp_packet_vector_free(pkt_vec);
@@ -567,6 +667,7 @@ static int run_worker_sched_mode(void *arg)
 	char extra_str[EXTRA_STR_LEN];
 	thread_args_t *thr_args = arg;
 	stats_t *stats = &thr_args->stats;
+	const appl_args_t *appl_args = &gbl_args->appl;
 	int use_event_queue = gbl_args->appl.out_mode;
 	pktin_mode_t in_mode = gbl_args->appl.in_mode;
 
@@ -630,7 +731,10 @@ static int run_worker_sched_mode(void *arg)
 
 		odp_packet_from_event_multi(pkt_tbl, ev_tbl, pkts);
 
-		pkts = process_extra_features(pkt_tbl, pkts, stats);
+		prefetch_data(appl_args->prefetch, pkt_tbl, pkts);
+
+		pkts = process_extra_features(appl_args, pkt_tbl, pkts, stats);
+
 		if (odp_unlikely(pkts) == 0)
 			continue;
 
@@ -704,6 +808,7 @@ static int run_worker_plain_queue_mode(void *arg)
 	int pktio = 0;
 	thread_args_t *thr_args = arg;
 	stats_t *stats = &thr_args->stats;
+	const appl_args_t *appl_args = &gbl_args->appl;
 	int use_event_queue = gbl_args->appl.out_mode;
 	int i;
 
@@ -743,7 +848,10 @@ static int run_worker_plain_queue_mode(void *arg)
 
 		odp_packet_from_event_multi(pkt_tbl, event, pkts);
 
-		pkts = process_extra_features(pkt_tbl, pkts, stats);
+		prefetch_data(appl_args->prefetch, pkt_tbl, pkts);
+
+		pkts = process_extra_features(appl_args, pkt_tbl, pkts, stats);
+
 		if (odp_unlikely(pkts) == 0)
 			continue;
 
@@ -801,6 +909,7 @@ static int run_worker_direct_mode(void *arg)
 	int pktio = 0;
 	thread_args_t *thr_args = arg;
 	stats_t *stats = &thr_args->stats;
+	const appl_args_t *appl_args = &gbl_args->appl;
 	int use_event_queue = gbl_args->appl.out_mode;
 
 	thr = odp_thread_id();
@@ -835,7 +944,10 @@ static int run_worker_direct_mode(void *arg)
 		if (odp_unlikely(pkts <= 0))
 			continue;
 
-		pkts = process_extra_features(pkt_tbl, pkts, stats);
+		prefetch_data(appl_args->prefetch, pkt_tbl, pkts);
+
+		pkts = process_extra_features(appl_args, pkt_tbl, pkts, stats);
+
 		if (odp_unlikely(pkts) == 0)
 			continue;
 
@@ -960,6 +1072,14 @@ static int create_pktio(const char *dev, int idx, int num_rx, int num_tx, odp_po
 	}
 
 	odp_pktio_config_init(&config);
+
+	if (gbl_args->appl.input_ts) {
+		if (!pktio_capa.config.pktin.bit.ts_all) {
+			ODPH_ERR("Packet input timestamping not supported: %s\n", dev);
+			return -1;
+		}
+		config.pktin.bit.ts_all = 1;
+	}
 
 	config.parser.layer = ODP_PROTO_LAYER_NONE;
 	if (gbl_args->appl.error_check || gbl_args->appl.chksum)
@@ -1495,6 +1615,10 @@ static void usage(char *progname)
 	       "  -p, --packet_copy       0: Don't copy packet (default)\n"
 	       "                          1: Create and send copy of the received packet.\n"
 	       "                             Free the original packet.\n"
+	       "  -R, --data_rd <num>     Number of packet data words (uint64_t) to read from\n"
+	       "                          every received packet. Number of words is rounded down\n"
+	       "                          to fit into the first segment of a packet. Default\n"
+	       "                          is 0.\n"
 	       "  -y, --pool_per_if       Create a packet (and packet vector) pool per interface.\n"
 	       "                          0: Share a single pool between all interfaces (default)\n"
 	       "                          1: Create a pool per interface\n"
@@ -1511,8 +1635,11 @@ static void usage(char *progname)
 	       "  -l, --packet_len <len>  Maximum length of packets supported (default %d).\n"
 	       "  -L, --seg_len <len>     Packet pool segment length\n"
 	       "                          (default equal to packet length).\n"
+	       "  -F, --prefetch <num>    Prefetch packet data in 64 byte multiples (default 1).\n"
 	       "  -f, --flow_aware        Enable flow aware scheduling.\n"
+	       "  -T, --input_ts          Enable packet input timestamping.\n"
 	       "  -v, --verbose           Verbose output.\n"
+	       "  -V, --verbose_pkt       Print debug information on every received packet.\n"
 	       "  -h, --help              Display help and exit.\n\n"
 	       "\n", DEFAULT_VEC_SIZE, DEFAULT_VEC_TMO, POOL_PKT_LEN);
 }
@@ -1550,6 +1677,7 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 		{"burst_rx", required_argument, NULL, 'b'},
 		{"rx_queues", required_argument, NULL, 'q'},
 		{"packet_copy", required_argument, NULL, 'p'},
+		{"data_rd", required_argument, NULL, 'R'},
 		{"pool_per_if", required_argument, NULL, 'y'},
 		{"num_pkt", required_argument, NULL, 'n'},
 		{"num_vec", required_argument, NULL, 'w'},
@@ -1560,13 +1688,17 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 		{"promisc_mode", no_argument, NULL, 'P'},
 		{"packet_len", required_argument, NULL, 'l'},
 		{"seg_len", required_argument, NULL, 'L'},
+		{"prefetch", required_argument, NULL, 'F'},
 		{"flow_aware", no_argument, NULL, 'f'},
+		{"input_ts", no_argument, NULL, 'T'},
 		{"verbose", no_argument, NULL, 'v'},
+		{"verbose_pkt", no_argument, NULL, 'V'},
 		{"help", no_argument, NULL, 'h'},
 		{NULL, 0, NULL, 0}
 	};
 
-	static const char *shortopts = "+c:t:a:i:m:o:r:d:s:e:k:g:G:I:b:q:p:y:n:l:L:w:x:z:M:uPfvh";
+	static const char *shortopts = "+c:t:a:i:m:o:r:d:s:e:k:g:G:I:"
+				       "b:q:p:R:y:n:l:L:w:x:z:M:F:uPfTvVh";
 
 	appl_args->time = 0; /* loop forever if time to run is 0 */
 	appl_args->accuracy = 1; /* get and print pps stats second */
@@ -1580,6 +1712,7 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 	appl_args->burst_rx = 0;
 	appl_args->rx_queues = 0;
 	appl_args->verbose = 0;
+	appl_args->verbose_pkt = 0;
 	appl_args->chksum = 0; /* don't use checksum offload by default */
 	appl_args->pool_per_if = 0;
 	appl_args->num_pkt = 0;
@@ -1592,7 +1725,10 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 	appl_args->vec_size = 0;
 	appl_args->vec_tmo_ns = 0;
 	appl_args->flow_aware = 0;
+	appl_args->input_ts = 0;
 	appl_args->num_prio = 0;
+	appl_args->prefetch = 1;
+	appl_args->data_rd = 0;
 
 	while (1) {
 		opt = getopt_long(argc, argv, shortopts, longopts, &long_index);
@@ -1764,6 +1900,9 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 		case 'p':
 			appl_args->packet_copy = atoi(optarg);
 			break;
+		case 'R':
+			appl_args->data_rd = atoi(optarg);
+			break;
 		case 'y':
 			appl_args->pool_per_if = atoi(optarg);
 			break;
@@ -1794,11 +1933,20 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 		case 'z':
 			appl_args->vec_tmo_ns = atoi(optarg);
 			break;
+		case 'F':
+			appl_args->prefetch = atoi(optarg);
+			break;
 		case 'f':
 			appl_args->flow_aware = 1;
 			break;
+		case 'T':
+			appl_args->input_ts = 1;
+			break;
 		case 'v':
 			appl_args->verbose = 1;
+			break;
+		case 'V':
+			appl_args->verbose_pkt = 1;
 			break;
 		case 'h':
 			usage(argv[0]);
@@ -1835,16 +1983,13 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 
 	appl_args->extra_feat = 0;
 	if (appl_args->error_check || appl_args->chksum ||
-	    appl_args->packet_copy)
+	    appl_args->packet_copy || appl_args->data_rd || appl_args->verbose_pkt)
 		appl_args->extra_feat = 1;
 
 	optind = 1;		/* reset 'extern optind' from the getopt lib */
 }
 
-/*
- * Print system and application info
- */
-static void print_info(void)
+static void print_options(void)
 {
 	int i;
 	appl_args_t *appl_args = &gbl_args->appl;
@@ -1884,16 +2029,19 @@ static void print_info(void)
 					   "enabled" : "disabled");
 	printf("Flow aware:         %s\n", appl_args->flow_aware ?
 					   "yes" : "no");
+	printf("Input TS:           %s\n", appl_args->input_ts ? "yes" : "no");
 	printf("Burst size:         %i\n", appl_args->burst_rx);
 	printf("RX queues per IF:   %i\n", appl_args->rx_queues);
 	printf("Number of pools:    %i\n", appl_args->pool_per_if ?
 					   appl_args->if_count : 1);
 
 	if (appl_args->extra_feat) {
-		printf("Extra features:     %s%s%s\n",
+		printf("Extra features:     %s%s%s%s%s\n",
 		       appl_args->error_check ? "error_check " : "",
 		       appl_args->chksum ? "chksum " : "",
-		       appl_args->packet_copy ? "packet_copy" : "");
+		       appl_args->packet_copy ? "packet_copy " : "",
+		       appl_args->data_rd ? "data_rd" : "",
+		       appl_args->verbose_pkt ? "verbose_pkt" : "");
 	}
 
 	printf("Num worker threads: %i\n", appl_args->num_workers);
@@ -1906,11 +2054,14 @@ static void print_info(void)
 	else
 		printf("group:              ODP_SCHED_GROUP_WORKER\n");
 
-	printf("Packets per pool:   %u\n", gbl_args->num_pkt);
-	printf("Packet length:      %u\n", gbl_args->pkt_len);
-	printf("Segment length:     %u\n", gbl_args->seg_len);
-	printf("Vectors per pool:   %u\n", gbl_args->vector_num);
-	printf("Vector size:        %u\n", gbl_args->vector_max_size);
+	printf("Packets per pool:   %u\n", appl_args->num_pkt);
+	printf("Packet length:      %u\n", appl_args->packet_len);
+	printf("Segment length:     %u\n", appl_args->seg_len == UINT32_MAX ? 0 :
+	       appl_args->seg_len);
+	printf("Read data:          %u bytes\n", appl_args->data_rd * 8);
+	printf("Prefetch data       %u bytes\n", appl_args->prefetch * 64);
+	printf("Vectors per pool:   %u\n", appl_args->num_vec);
+	printf("Vector size:        %u\n", appl_args->vec_size);
 	printf("Priority per IF:   ");
 
 	for (i = 0; i < appl_args->if_count; i++)
@@ -2099,8 +2250,7 @@ int main(int argc, char *argv[])
 
 	gbl_args->appl.num_workers = num_workers;
 
-	/* Print application information */
-	print_info();
+	print_options();
 
 	for (i = 0; i < num_workers; i++)
 		gbl_args->thread_args[i].thr_idx = i;
@@ -2148,6 +2298,12 @@ int main(int argc, char *argv[])
 		printf("\nWarning: Segment length requested %d configured %d\n",
 		       gbl_args->appl.seg_len, seg_len);
 
+	if (seg_len < gbl_args->appl.data_rd * 8) {
+		ODPH_ERR("Requested data read length %u exceeds maximum segment length %u\n",
+			 gbl_args->appl.data_rd * 8, seg_len);
+			return -1;
+	}
+
 	/* zero means default number of packets */
 	if (gbl_args->appl.num_pkt == 0)
 		num_pkt = DEFAULT_NUM_PKT;
@@ -2169,6 +2325,11 @@ int main(int argc, char *argv[])
 	gbl_args->num_pkt = num_pkt;
 	gbl_args->pkt_len = pkt_len;
 	gbl_args->seg_len = seg_len;
+
+	printf("Resulting pool parameter values:\n");
+	printf("Packets per pool:   %u\n", num_pkt);
+	printf("Packet length:      %u\n", pkt_len);
+	printf("Segment length:     %u\n", seg_len);
 
 	/* Create packet pool */
 	odp_pool_param_init(&params);
@@ -2210,6 +2371,10 @@ int main(int argc, char *argv[])
 		gbl_args->vector_num = params.vector.num;
 		gbl_args->vector_max_size = params.vector.max_size;
 
+		/* Print resulting values */
+		printf("Vectors per pool:   %u\n", gbl_args->vector_num);
+		printf("Vector size:        %u\n", gbl_args->vector_max_size);
+
 		for (i = 0; i < num_vec_pools; i++) {
 			vec_pool_tbl[i] = odp_pool_create("vector pool", &params);
 
@@ -2222,6 +2387,8 @@ int main(int argc, char *argv[])
 				odp_pool_print(vec_pool_tbl[i]);
 		}
 	}
+
+	printf("\n");
 
 	bind_workers();
 

@@ -1,8 +1,8 @@
-/* Copyright (c) 2014-2018, Linaro Limited
- * All rights reserved.
- *
- * SPDX-License-Identifier:     BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2014-2018 Linaro Limited
  */
+
+/** @cond _ODP_HIDE_FROM_DOXYGEN_ */
 
 #ifndef ODP_IPSEC_SA_DB_H_
 #define ODP_IPSEC_SA_DB_H_

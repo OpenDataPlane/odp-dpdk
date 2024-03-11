@@ -1,5 +1,5 @@
 /* Copyright (c) 2014-2018, Linaro Limited
- * Copyright (c) 2020-2023, Nokia
+ * Copyright (c) 2020-2024, Nokia
  * Copyright (c) 2020, Marvell
  * All rights reserved.
  *
@@ -11,6 +11,7 @@
 
 #include <odp/helper/odph_api.h>
 
+#include <inttypes.h>
 #include <stdlib.h>
 #include "parser.h"
 #include "lso.h"
@@ -3303,7 +3304,7 @@ static void pktio_test_pktin_ts(void)
 	odp_packet_t pkt_tbl[TX_BATCH_LEN];
 	uint32_t pkt_seq[TX_BATCH_LEN];
 	uint64_t ns1, ns2;
-	uint64_t res, res_ns;
+	uint64_t res, res_ns, input_delay;
 	odp_time_t ts_prev;
 	odp_time_t ts;
 	int num_rx = 0;
@@ -3366,6 +3367,18 @@ static void pktio_test_pktin_ts(void)
 				       1, TXRX_MODE_SINGLE, ODP_TIME_SEC_IN_NS, false);
 		if (ret != 1)
 			break;
+
+		/* Compare to packet IO time to input timestamp */
+		ts = odp_pktio_time(pktio_rx_info.id, NULL);
+		CU_ASSERT_FATAL(odp_packet_has_ts(pkt_tbl[i]));
+		ts_prev = odp_packet_ts(pkt_tbl[i]);
+		CU_ASSERT(odp_time_cmp(ts, ts_prev) >= 0);
+		input_delay = odp_time_diff_ns(ts, ts_prev);
+		if (input_delay > 100 * ODP_TIME_MSEC_IN_NS) {
+			printf("    Test packet %d input delay: %" PRIu64 "ns\n", i, input_delay);
+			CU_FAIL("Packet input delay too long");
+		}
+
 		odp_time_wait_ns(PKTIO_TS_INTERVAL);
 	}
 	num_rx = i;
@@ -5097,7 +5110,7 @@ static void pktio_test_pktin_event_queue(odp_pktin_mode_t pktin_mode)
 	int num_buf = 0;
 	int num_bad = 0;
 	odp_pktio_t pktio[MAX_NUM_IFACES] = {0};
-	uint64_t wait_sec = odp_schedule_wait_time(ODP_TIME_SEC_IN_NS);
+	uint64_t wait_time = odp_schedule_wait_time(100 * ODP_TIME_MSEC_IN_NS);
 
 	CU_ASSERT_FATAL(num_ifaces >= 1);
 
@@ -5170,9 +5183,9 @@ static void pktio_test_pktin_event_queue(odp_pktin_mode_t pktin_mode)
 
 	/* Receive events */
 	while (1) {
-		/* Break after 1 sec of inactivity */
+		/* Break after a period of inactivity */
 		if (pktin_mode == ODP_PKTIN_MODE_SCHED) {
-			ev = odp_schedule(&from, wait_sec);
+			ev = odp_schedule(&from, wait_time);
 
 			if (ev == ODP_EVENT_INVALID)
 				break;
@@ -5492,7 +5505,7 @@ int main(int argc, char *argv[])
 	int ret;
 
 	/* parse common options: */
-	if (odp_cunit_parse_options(argc, argv))
+	if (odp_cunit_parse_options(&argc, argv))
 		return -1;
 
 	ret = odp_cunit_register(pktio_suites);

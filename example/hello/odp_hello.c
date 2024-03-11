@@ -1,13 +1,16 @@
-/* Copyright (c) 2016-2018, Linaro Limited
- * All rights reserved.
- *
- * SPDX-License-Identifier:     BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2016-2018 Linaro Limited
  */
 
-/* This is a minimal application which demonstrates the startup and shutdown
+/**
+ * @example odp_hello.c
+ *
+ * This is a minimal application which demonstrates the startup and shutdown
  * steps of an ODP application. It can be also used to debug API related
  * build problems, etc. It does not use helpers to minimize dependency to
  * anything else than the ODP API header file.
+ *
+ * @cond _ODP_HIDE_FROM_DOXYGEN_
  */
 
 #include <stdio.h>

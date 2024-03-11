@@ -6,9 +6,11 @@
  */
 
 /**
- * @file
+ * @example odp_bench_packet.c
  *
- * @example odp_bench_packet.c  Microbenchmarks for packet functions
+ * Microbenchmark application for packet API functions
+ *
+ * @cond _ODP_HIDE_FROM_DOXYGEN_
  */
 
 #include <stdlib.h>
@@ -39,7 +41,7 @@
 #define TEST_REPEAT_COUNT 1000
 
 /** Number of rounds per test case */
-#define TEST_ROUNDS 10u
+#define TEST_ROUNDS 2u
 
 /** Maximum burst size for *_multi operations */
 #define TEST_MAX_BURST 64
@@ -1094,6 +1096,27 @@ static int packet_user_area_size(void)
 	return ret;
 }
 
+static int packet_user_flag(void)
+{
+	int i;
+	uint32_t ret = 0;
+
+	for (i = 0; i < TEST_REPEAT_COUNT; i++)
+		ret += !odp_packet_user_flag(gbl_args->pkt_tbl[i]);
+
+	return ret;
+}
+
+static int packet_user_flag_set(void)
+{
+	int i;
+
+	for (i = 0; i < TEST_REPEAT_COUNT; i++)
+		odp_packet_user_flag_set(gbl_args->pkt_tbl[i], 1);
+
+	return i;
+}
+
 static int packet_l2_ptr(void)
 {
 	int i;
@@ -1512,6 +1535,8 @@ bench_info_t test_suite[] = {
 	BENCH_INFO(packet_user_ptr_set, create_packets, free_packets, NULL),
 	BENCH_INFO(packet_user_area, create_packets, free_packets, NULL),
 	BENCH_INFO(packet_user_area_size, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_user_flag, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_user_flag_set, create_packets, free_packets, NULL),
 	BENCH_INFO(packet_l2_ptr, create_packets, free_packets, NULL),
 	BENCH_INFO(packet_l2_offset, create_packets, free_packets, NULL),
 	BENCH_INFO(packet_l2_offset_set, create_packets, free_packets, NULL),

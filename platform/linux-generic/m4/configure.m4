@@ -31,10 +31,11 @@ m4_include([platform/linux-generic/m4/odp_pcapng.m4])
 m4_include([platform/linux-generic/m4/odp_dpdk.m4])
 m4_include([platform/linux-generic/m4/odp_wfe.m4])
 m4_include([platform/linux-generic/m4/odp_xdp.m4])
+m4_include([platform/linux-generic/m4/odp_ml.m4])
 ODP_EVENT_VALIDATION
 ODP_SCHEDULER
 
-AS_VAR_APPEND([PLAT_DEP_LIBS], ["${ATOMIC_LIBS} ${AARCH64CRYPTO_LIBS} ${LIBCONFIG_LIBS} ${OPENSSL_LIBS} ${IPSEC_MB_LIBS} ${DPDK_LIBS_LT} ${LIBCLI_LIBS} ${LIBXDP_LIBS}"])
+AS_VAR_APPEND([PLAT_DEP_LIBS], ["${ATOMIC_LIBS} ${AARCH64CRYPTO_LIBS} ${LIBCONFIG_LIBS} ${OPENSSL_LIBS} ${IPSEC_MB_LIBS} ${DPDK_LIBS_LT} ${LIBCLI_LIBS} ${LIBXDP_LIBS} ${ORT_LIBS}"])
 
 # Add text to the end of configure with platform specific settings.
 # Make sure it's aligned same as other lines in configure.ac.
@@ -46,6 +47,7 @@ AS_VAR_APPEND([PLAT_CFG_TEXT], ["
 	pcap:                   ${have_pcap}
 	pcapng:                 ${have_pcapng}
 	wfe_locks:              ${use_wfe_locks}
+	ml_support:             ${ml_support}
 	default_config_path:    ${default_config_path}"])
 
 # Ignore Clang specific errors about fields with variable sized type not at the
@@ -59,6 +61,8 @@ AM_CONDITIONAL([PLATFORM_IS_LINUX_GENERIC],
 AC_CONFIG_FILES([platform/linux-generic/Makefile
 		 platform/linux-generic/libodp-linux.pc
 		 platform/linux-generic/dumpconfig/Makefile
+		 platform/linux-generic/example/Makefile
+		 platform/linux-generic/example/ml/Makefile
 		 platform/linux-generic/test/Makefile
 		 platform/linux-generic/test/example/Makefile
 		 platform/linux-generic/test/example/classifier/Makefile
@@ -73,6 +77,7 @@ AC_CONFIG_FILES([platform/linux-generic/Makefile
 		 platform/linux-generic/test/example/switch/Makefile
 		 platform/linux-generic/test/validation/api/shmem/Makefile
 		 platform/linux-generic/test/validation/api/pktio/Makefile
+		 platform/linux-generic/test/validation/api/ml/Makefile
 		 platform/linux-generic/test/performance/Makefile
 		 platform/linux-generic/test/performance/dmafwd/Makefile
 		 platform/linux-generic/test/pktio_ipc/Makefile])

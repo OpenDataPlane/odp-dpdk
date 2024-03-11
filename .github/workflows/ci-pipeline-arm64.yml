@@ -28,7 +28,7 @@ jobs:
                '--enable-pcapng-support']
     steps:
       - uses: OpenDataPlane/action-clean-up@main
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC=gcc
                -e CONF="${{matrix.conf}}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-native /odp/scripts/ci/build_${ARCH}.sh
       - if: ${{ failure() }}
@@ -51,7 +51,7 @@ jobs:
                '--enable-wfe-locks']
     steps:
       - uses: OpenDataPlane/action-clean-up@main
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC=clang
                 -e CONF="${{matrix.conf}}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-native /odp/scripts/ci/build_${ARCH}.sh
       - if: ${{ failure() }}
@@ -70,7 +70,7 @@ jobs:
         conf: ['', '--enable-lto']
     steps:
       - uses: OpenDataPlane/action-clean-up@main
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="gcc-${{matrix.cc_ver}}" -e CXX="g++-${{matrix.cc_ver}}"
                -e CONF="${CONF} ${{matrix.conf}}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-native /odp/scripts/ci/build_static.sh
       - if: ${{ failure() }}
@@ -86,7 +86,7 @@ jobs:
         os: ['rocky_linux_8']
     steps:
       - uses: OpenDataPlane/action-clean-up@main
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${{matrix.cc}}"
                -e CONF="${CONF}" $CONTAINER_NAMESPACE/odp-ci-${{matrix.os}}-${ARCH}-native /odp/scripts/ci/build_${ARCH}.sh
       - if: ${{ failure() }}
@@ -104,7 +104,7 @@ jobs:
         conf: ['', '--enable-abi-compat']
     steps:
       - uses: OpenDataPlane/action-clean-up@main
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="gcc-${{matrix.cc_ver}}" -e CXX="g++-${{matrix.cc_ver}}"
                -e CONF="${{matrix.conf}}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-native /odp/scripts/ci/build_${ARCH}.sh
       - if: ${{ failure() }}
@@ -115,7 +115,7 @@ jobs:
     runs-on: [self-hosted, ARM64]
     steps:
       - uses: OpenDataPlane/action-clean-up@main
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}"
                -e CONF="${CONF}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-native /odp/scripts/ci/out_of_tree.sh
       - if: ${{ failure() }}
@@ -130,7 +130,7 @@ jobs:
         conf: ['--enable-user-guides', '--enable-user-guides --enable-abi-compat']
     steps:
       - uses: OpenDataPlane/action-clean-up@main
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       # Ignore distcheck failure (caused by the first 'make check' run unmounting huge pages)
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${{matrix.cc}}"
                -e CONF="${{matrix.conf}}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-native /odp/scripts/ci/distcheck.sh || true
@@ -153,7 +153,7 @@ jobs:
                '--enable-wfe-locks']
     steps:
       - uses: OpenDataPlane/action-clean-up@main
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC=gcc -e ARCH="${ARCH}"
                -e CONF="${{matrix.conf}}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-native /odp/scripts/ci/check.sh
       - if: ${{ failure() }}
@@ -175,7 +175,7 @@ jobs:
                '--disable-host-optimization --enable-abi-compat']
     steps:
       - uses: OpenDataPlane/action-clean-up@main
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC=clang -e ARCH="${ARCH}"
                -e CONF="${{matrix.conf}}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-native /odp/scripts/ci/check.sh
       - if: ${{ failure() }}
@@ -191,7 +191,7 @@ jobs:
         cflags: ['-march=armv8.2-a -O2', '-march=armv8.2-a+crypto -O2']
     steps:
       - uses: OpenDataPlane/action-clean-up@main
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${{matrix.cc}}" -e ARCH="${ARCH}"
                -e CXX=g++-10 -e CFLAGS="${{matrix.cflags}}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-native /odp/scripts/ci/check.sh
       - if: ${{ failure() }}
@@ -206,7 +206,7 @@ jobs:
         os: ['ubuntu_22.04']
     steps:
       - uses: OpenDataPlane/action-clean-up@main
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}" -e ARCH="${ARCH}"
                -e CONF="${CONF}" $CONTAINER_NAMESPACE/odp-ci-${{matrix.os}}-${ARCH}-native /odp/scripts/ci/check.sh
       - if: ${{ failure() }}
@@ -217,7 +217,7 @@ jobs:
     runs-on: [self-hosted, ARM64]
     steps:
       - uses: OpenDataPlane/action-clean-up@main
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}" -e ARCH="${ARCH}"
                -e CONF="${CONF}" -e ODP_CONFIG_FILE=/odp/platform/linux-dpdk/test/sched-basic.conf $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-native /odp/scripts/ci/check.sh
       - if: ${{ failure() }}
@@ -228,7 +228,7 @@ jobs:
     runs-on: [self-hosted, ARM64]
     steps:
       - uses: OpenDataPlane/action-clean-up@main
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}" -e ARCH="${ARCH}"
                -e CONF="${CONF}" -e ODP_CONFIG_FILE=/odp/platform/linux-dpdk/test/stash-custom.conf $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-native /odp/scripts/ci/check.sh
       - if: ${{ failure() }}
@@ -239,7 +239,7 @@ jobs:
     runs-on: [self-hosted, ARM64]
     steps:
       - uses: OpenDataPlane/action-clean-up@main
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}" -e ARCH="${ARCH}"
                -e CONF="${CONF}" -e ODP_SCHEDULER=sp $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-native /odp/scripts/ci/check.sh
       - if: ${{ failure() }}
@@ -250,7 +250,7 @@ jobs:
     runs-on: [self-hosted, ARM64]
     steps:
       - uses: OpenDataPlane/action-clean-up@main
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}" -e ARCH="${ARCH}"
                -e CONF="${CONF}" -e ODP_CONFIG_FILE=/odp/platform/linux-dpdk/test/process-mode.conf
                -e ODPH_PROC_MODE=1 $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-native /odp/scripts/ci/check.sh
@@ -262,8 +262,19 @@ jobs:
     runs-on: [self-hosted, ARM64]
     steps:
       - uses: OpenDataPlane/action-clean-up@main
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}" -e ARCH="${ARCH}"
                -e CONF="${CONF}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-native-dpdk_21.11 /odp/scripts/ci/check.sh
+      - if: ${{ failure() }}
+        uses: ./.github/actions/run-failure-log
+
+  Run_dpdk-23_11:
+    if: ${{ github.repository == 'OpenDataPlane/odp-dpdk' }}
+    runs-on: [self-hosted, ARM64]
+    steps:
+      - uses: OpenDataPlane/action-clean-up@main
+      - uses: actions/checkout@v4
+      - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}" -e ARCH="${ARCH}"
+                -e CONF="${CONF}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-native-dpdk_23.11 /odp/scripts/ci/check.sh
       - if: ${{ failure() }}
         uses: ./.github/actions/run-failure-log

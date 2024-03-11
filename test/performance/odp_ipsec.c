@@ -6,6 +6,14 @@
  * SPDX-License-Identifier:	BSD-3-Clause
  */
 
+/**
+ * @example odp_ipsec.c
+ *
+ * Performance test application for IPsec APIs
+ *
+ * @cond _ODP_HIDE_FROM_DOXYGEN_
+ */
+
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif /* _GNU_SOURCE */
@@ -1375,8 +1383,6 @@ int main(int argc, char *argv[])
 			run_measure_one_config(&cargs, cargs.alg_config);
 		}
 	} else {
-		unsigned int i;
-
 		for (i = 0; i < ODPH_ARRAY_SIZE(algs_config); i++) {
 			if (cargs.ah &&
 			    algs_config[i].crypto.cipher_alg !=

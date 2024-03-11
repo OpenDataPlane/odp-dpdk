@@ -1,13 +1,13 @@
-/* Copyright (c) 2013-2018, Linaro Limited
- * All rights reserved.
- *
- * SPDX-License-Identifier:     BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2013-2018 Linaro Limited
  */
 
 /**
- * @file
+ * @example ipsec_api/odp_ipsec.c
  *
- * @example odp_example_ipsec.c  ODP basic packet IO cross connect with IPsec test application
+ * IPsec example application using ODP IPsec API
+ *
+ * @cond _ODP_HIDE_FROM_DOXYGEN_
  */
 
 /* enable strtok */

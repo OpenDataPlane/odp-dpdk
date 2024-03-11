@@ -12,6 +12,7 @@
 #include <odp/api/packet.h>
 #include <odp/api/timer.h>
 #include <odp/api/pool.h>
+#include <odp/api/ml.h>
 
 #include <odp_buffer_internal.h>
 #include <odp_ipsec_internal.h>
@@ -36,6 +37,7 @@ const _odp_event_inline_offset_t
 _odp_event_inline_offset ODP_ALIGNED_CACHE = {
 	.event_type = offsetof(_odp_event_hdr_t, hdr.event_type),
 	.base_data  = offsetof(_odp_event_hdr_t, mb.buf_addr),
+	.subtype    = offsetof(_odp_event_hdr_t, hdr.subtype),
 	.flow_id    = offsetof(_odp_event_hdr_t, hdr.flow_id),
 	.pool       = offsetof(_odp_event_hdr_t, hdr.pool),
 	.buf_len    = offsetof(_odp_event_hdr_t, mb.buf_len)
@@ -68,6 +70,9 @@ static inline void event_free(odp_event_t event, _odp_ev_id_t id)
 		break;
 	case ODP_EVENT_DMA_COMPL:
 		odp_dma_compl_free(odp_dma_compl_from_event(event));
+		break;
+	case ODP_EVENT_ML_COMPL:
+		odp_ml_compl_free(odp_ml_compl_from_event(event));
 		break;
 	default:
 		_ODP_ABORT("Invalid event type: %d\n", odp_event_type(event));
@@ -116,6 +121,8 @@ int odp_event_is_valid(odp_event_t event)
 	case ODP_EVENT_PACKET_VECTOR:
 		/* Fall through */
 	case ODP_EVENT_DMA_COMPL:
+		/* Fall through */
+	case ODP_EVENT_ML_COMPL:
 		/* Fall through */
 	case ODP_EVENT_PACKET_TX_COMPL:
 		break;

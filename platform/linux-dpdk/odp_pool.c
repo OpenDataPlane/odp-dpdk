@@ -626,6 +626,7 @@ static void init_obj_priv_data(struct rte_mempool *mp ODP_UNUSED, void *arg, voi
 	event_hdr->hdr.pool = _odp_pool_handle(pool);
 	event_hdr->hdr.type = priv_data->type;
 	event_hdr->hdr.event_type = priv_data->event_type;
+	event_hdr->hdr.subtype = ODP_EVENT_NO_SUBTYPE;
 
 	switch (priv_data->type) {
 	case ODP_POOL_BUFFER:
@@ -852,6 +853,8 @@ static const char *get_short_type_str(odp_pool_type_t type)
 		return "V";
 	case ODP_POOL_DMA_COMPL:
 		return "D";
+	case ODP_POOL_ML_COMPL:
+		return "M";
 	default:
 		return "-";
 	}
@@ -945,6 +948,11 @@ int odp_pool_info(odp_pool_t pool_hdl, odp_pool_info_t *info)
 		info->dma_pool_param.num        = pool->params.buf.num;
 		info->dma_pool_param.uarea_size = pool->params.buf.uarea_size;
 		info->dma_pool_param.cache_size = pool->params.buf.cache_size;
+
+	} else if (pool->type_2 == ODP_POOL_ML_COMPL) {
+		info->ml_pool_param.num        = pool->params.buf.num;
+		info->ml_pool_param.uarea_size = pool->params.buf.uarea_size;
+		info->ml_pool_param.cache_size = pool->params.buf.cache_size;
 
 	} else {
 		info->params = pool->params;
@@ -1091,6 +1099,7 @@ int odp_pool_ext_capability(odp_pool_type_t type,
 	case ODP_POOL_TIMEOUT:
 	case ODP_POOL_VECTOR:
 	case ODP_POOL_DMA_COMPL:
+	case ODP_POOL_ML_COMPL:
 		memset(capa, 0, sizeof(odp_pool_ext_capability_t));
 		return 0;
 	default:
@@ -1361,6 +1370,7 @@ static void init_ext_obj(struct rte_mempool *mp, void *arg, void *mbuf, unsigned
 	event_hdr->hdr.pool = _odp_pool_handle(pool);
 	event_hdr->hdr.type = mb_ctor_arg->type;
 	event_hdr->hdr.event_type = mb_ctor_arg->event_type;
+	event_hdr->hdr.subtype = ODP_EVENT_NO_SUBTYPE;
 
 	switch (mb_ctor_arg->type) {
 	case ODP_POOL_BUFFER:

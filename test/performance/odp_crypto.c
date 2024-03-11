@@ -5,6 +5,14 @@
  * SPDX-License-Identifier:	BSD-3-Clause
  */
 
+/**
+ * @example odp_crypto.c
+ *
+ * Performance test application for crypto APIs
+ *
+ * @cond _ODP_HIDE_FROM_DOXYGEN_
+ */
+
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif /* _GNU_SOURCE */
@@ -1233,7 +1241,7 @@ int main(int argc, char *argv[])
 	odp_pool_capability_t pool_capa;
 	odp_crypto_capability_t crypto_capa;
 	uint32_t max_seg_len;
-	unsigned i;
+	uint32_t i;
 
 	/* Let helper collect its own arguments (e.g. --odph_proc) */
 	argc = odph_parse_options(argc, argv);
@@ -1366,8 +1374,6 @@ int main(int argc, char *argv[])
 			run_measure_one_config(&test_run_arg);
 		}
 	} else {
-		unsigned int i;
-
 		for (i = 0; i < ODPH_ARRAY_SIZE(algs_config); i++) {
 			test_run_arg.crypto_alg_config = algs_config + i;
 			run_measure_one_config(&test_run_arg);

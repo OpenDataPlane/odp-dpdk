@@ -1,14 +1,16 @@
 /* SPDX-License-Identifier: BSD-3-Clause
- * Copyright (c) 2021-2023 Nokia
+ * Copyright (c) 2021-2024 Nokia
  */
 
 /**
- * DMA performance tester
+ * @example odp_dma_perf.c
  *
  * This tester application can be used to profile the performance of an ODP DMA implementation.
  * Tester workflow is simple and consists of issuing as many back-to-back DMA transfers as the
  * implementation allows and then recording key performance statistics (such as function overhead,
  * latencies etc.).
+ *
+ * @cond _ODP_HIDE_FROM_DOXYGEN_
  */
 
 #ifndef _GNU_SOURCE
@@ -107,7 +109,7 @@ typedef struct {
 	odp_dma_transfer_param_t trs_param;
 	odp_dma_compl_param_t compl_param;
 	odp_ticketlock_t lock;
-	uint64_t trs_start_tm;
+	odp_time_t trs_start_tm;
 	uint64_t trs_start_cc;
 	uint64_t trs_poll_cnt;
 	odp_bool_t is_running;
@@ -202,7 +204,7 @@ typedef struct prog_config_s {
 	uint32_t src_seg_len;
 	uint32_t dst_seg_len;
 	uint32_t num_inflight;
-	uint32_t time_sec;
+	double time_sec;
 	uint32_t num_sessions;
 	uint32_t src_cache_size;
 	uint32_t dst_cache_size;
@@ -249,14 +251,14 @@ static void init_config(prog_config_t *config)
 		stats = &config->thread_config[i].stats;
 		memset(sd, 0, sizeof(*sd));
 
-		for (uint32_t i = 0U; i < MAX_SEGS; ++i) {
-			info = &sd->dma.infos[i];
+		for (uint32_t j = 0U; j < MAX_SEGS; ++j) {
+			info = &sd->dma.infos[j];
 			info->compl_param.transfer_id = ODP_DMA_TRANSFER_ID_INVALID;
 			info->compl_param.event = ODP_EVENT_INVALID;
 			info->compl_param.queue = ODP_QUEUE_INVALID;
 			odp_ticketlock_init(&info->lock);
-			sd->seg.src_pkt[i] = ODP_PACKET_INVALID;
-			sd->seg.dst_pkt[i] = ODP_PACKET_INVALID;
+			sd->seg.src_pkt[j] = ODP_PACKET_INVALID;
+			sd->seg.dst_pkt[j] = ODP_PACKET_INVALID;
 		}
 
 		sd->dma.handle = ODP_DMA_INVALID;
@@ -597,7 +599,7 @@ static parse_result_t parse_options(int argc, char **argv, prog_config_t *config
 			config->num_inflight = atoi(optarg);
 			break;
 		case 'T':
-			config->time_sec = atoi(optarg);
+			config->time_sec = atof(optarg);
 			break;
 		case 'c':
 			config->num_workers = atoi(optarg);
@@ -871,20 +873,21 @@ static void free_memory(const sd_t *sd)
 
 static void run_transfer(odp_dma_t handle, trs_info_t *info, stats_t *stats, ver_fn_t ver_fn)
 {
-	uint64_t start_tm, end_tm, start_cc, end_cc, trs_tm, trs_cc, start_cc_diff;
+	odp_time_t start_tm, end_tm;
+	uint64_t start_cc, end_cc, trs_tm, trs_cc;
 	odp_dma_result_t res;
 	int ret;
 
-	start_tm = odp_time_local_strict_ns();
+	start_tm = odp_time_local_strict();
 	start_cc = odp_cpu_cycles();
 	ret = odp_dma_transfer(handle, &info->trs_param, &res);
 	end_cc = odp_cpu_cycles();
-	end_tm = odp_time_local_strict_ns();
+	end_tm = odp_time_local_strict();
 
 	if (odp_unlikely(ret <= 0)) {
 		++stats->start_errs;
 	} else {
-		trs_tm = end_tm - start_tm;
+		trs_tm = odp_time_diff_ns(end_tm, start_tm);
 		stats->max_trs_tm = ODPH_MAX(trs_tm, stats->max_trs_tm);
 		stats->min_trs_tm = ODPH_MIN(trs_tm, stats->min_trs_tm);
 		stats->trs_tm += trs_tm;
@@ -893,10 +896,9 @@ static void run_transfer(odp_dma_t handle, trs_info_t *info, stats_t *stats, ver
 		stats->min_trs_cc = ODPH_MIN(trs_cc, stats->min_trs_cc);
 		stats->trs_cc += trs_cc;
 		++stats->trs_cnt;
-		start_cc_diff = odp_cpu_cycles_diff(end_cc, start_cc);
-		stats->max_start_cc = ODPH_MAX(start_cc_diff, stats->max_start_cc);
-		stats->min_start_cc = ODPH_MIN(start_cc_diff, stats->min_start_cc);
-		stats->start_cc += start_cc_diff;
+		stats->max_start_cc = stats->max_trs_cc;
+		stats->min_start_cc = stats->min_trs_cc;
+		stats->start_cc += trs_cc;
 		++stats->start_cnt;
 
 		if (odp_unlikely(!res.success)) {
@@ -967,7 +969,8 @@ static odp_bool_t configure_poll_compl(sd_t *sd)
 
 static void poll_transfer(sd_t *sd, trs_info_t *info, stats_t *stats)
 {
-	uint64_t start_cc, end_cc, trs_tm, trs_cc, wait_cc, start_tm, start_cc_diff;
+	uint64_t start_cc, end_cc, trs_tm, trs_cc, wait_cc, start_cc_diff;
+	odp_time_t start_tm;
 	odp_dma_t handle = sd->dma.handle;
 	odp_dma_result_t res;
 	int ret;
@@ -992,7 +995,7 @@ static void poll_transfer(sd_t *sd, trs_info_t *info, stats_t *stats)
 		if (ret == 0)
 			return;
 
-		trs_tm = odp_time_global_strict_ns() - info->trs_start_tm;
+		trs_tm = odp_time_diff_ns(odp_time_global_strict(), info->trs_start_tm);
 		stats->max_trs_tm = ODPH_MAX(trs_tm, stats->max_trs_tm);
 		stats->min_trs_tm = ODPH_MIN(trs_tm, stats->min_trs_tm);
 		stats->trs_tm += trs_tm;
@@ -1017,7 +1020,7 @@ static void poll_transfer(sd_t *sd, trs_info_t *info, stats_t *stats)
 		if (sd->prep_trs_fn != NULL)
 			sd->prep_trs_fn(sd, info);
 
-		start_tm = odp_time_global_strict_ns();
+		start_tm = odp_time_global_strict();
 		start_cc = odp_cpu_cycles();
 		ret = odp_dma_transfer_start(handle, &info->trs_param, &info->compl_param);
 		end_cc = odp_cpu_cycles();
@@ -1146,7 +1149,8 @@ static odp_bool_t configure_event_compl(sd_t *sd)
 
 static odp_bool_t start_initial_transfers(sd_t *sd)
 {
-	uint64_t start_tm, start_cc;
+	odp_time_t start_tm;
+	uint64_t start_cc;
 	trs_info_t *info;
 	int ret;
 
@@ -1156,7 +1160,7 @@ static odp_bool_t start_initial_transfers(sd_t *sd)
 		if (sd->prep_trs_fn != NULL)
 			sd->prep_trs_fn(sd, info);
 
-		start_tm = odp_time_global_strict_ns();
+		start_tm = odp_time_global_strict();
 		start_cc = odp_cpu_cycles();
 		ret = odp_dma_transfer_start(sd->dma.handle, &info->trs_param, &info->compl_param);
 
@@ -1174,7 +1178,8 @@ static odp_bool_t start_initial_transfers(sd_t *sd)
 
 static void wait_compl_event(sd_t *sd, stats_t *stats)
 {
-	uint64_t start_cc, end_cc, wait_cc, trs_tm, trs_cc, start_tm, start_cc_diff;
+	uint64_t start_cc, end_cc, wait_cc, trs_tm, trs_cc, start_cc_diff;
+	odp_time_t start_tm;
 	odp_event_t ev;
 	odp_dma_result_t res;
 	trs_info_t *info;
@@ -1191,7 +1196,7 @@ static void wait_compl_event(sd_t *sd, stats_t *stats)
 
 	odp_dma_compl_result(odp_dma_compl_from_event(ev), &res);
 	info = res.user_ptr;
-	trs_tm = odp_time_global_strict_ns() - info->trs_start_tm;
+	trs_tm = odp_time_diff_ns(odp_time_global_strict(), info->trs_start_tm);
 	stats->max_trs_tm = ODPH_MAX(trs_tm, stats->max_trs_tm);
 	stats->min_trs_tm = ODPH_MIN(trs_tm, stats->min_trs_tm);
 	stats->trs_tm += trs_tm;
@@ -1218,7 +1223,7 @@ static void wait_compl_event(sd_t *sd, stats_t *stats)
 	if (sd->prep_trs_fn != NULL)
 		sd->prep_trs_fn(sd, info);
 
-	start_tm = odp_time_global_strict_ns();
+	start_tm = odp_time_global_strict();
 	start_cc = odp_cpu_cycles();
 	ret = odp_dma_transfer_start(sd->dma.handle, &info->trs_param, &info->compl_param);
 	end_cc = odp_cpu_cycles();
@@ -1241,7 +1246,7 @@ static void drain_compl_events(ODP_UNUSED sd_t *sd)
 	odp_event_t ev;
 
 	while (true) {
-		ev = odp_schedule(NULL, odp_schedule_wait_time(ODP_TIME_SEC_IN_NS));
+		ev = odp_schedule(NULL, odp_schedule_wait_time(100 * ODP_TIME_MSEC_IN_NS));
 
 		if (ev == ODP_EVENT_INVALID)
 			break;
@@ -1250,7 +1255,8 @@ static void drain_compl_events(ODP_UNUSED sd_t *sd)
 
 static void run_memcpy(trs_info_t *info, stats_t *stats, ver_fn_t ver_fn)
 {
-	uint64_t start_tm, end_tm, start_cc, end_cc, trs_tm, trs_cc, start_cc_diff;
+	odp_time_t start_tm;
+	uint64_t start_cc, end_cc, trs_tm, trs_cc;
 	const odp_dma_transfer_param_t *param = &info->trs_param;
 	uint32_t tot_len, src_len, dst_len, min_len, len, i = 0U, j = 0U, src_off = 0U,
 	dst_off = 0U, src_rem, dst_rem;
@@ -1265,7 +1271,7 @@ static void run_memcpy(trs_info_t *info, stats_t *stats, ver_fn_t ver_fn)
 	dst_len = param->dst_seg->len;
 	min_len = ODPH_MIN(src_len, dst_len);
 	len = min_len;
-	start_tm = odp_time_local_strict_ns();
+	start_tm = odp_time_local_strict();
 	start_cc = odp_cpu_cycles();
 
 	while (tot_len > 0U) {
@@ -1295,8 +1301,7 @@ static void run_memcpy(trs_info_t *info, stats_t *stats, ver_fn_t ver_fn)
 	}
 
 	end_cc = odp_cpu_cycles();
-	end_tm = odp_time_local_strict_ns();
-	trs_tm = end_tm - start_tm;
+	trs_tm = odp_time_diff_ns(odp_time_local_strict(), start_tm);
 	stats->max_trs_tm = ODPH_MAX(trs_tm, stats->max_trs_tm);
 	stats->min_trs_tm = ODPH_MIN(trs_tm, stats->min_trs_tm);
 	stats->trs_tm += trs_tm;
@@ -1305,10 +1310,9 @@ static void run_memcpy(trs_info_t *info, stats_t *stats, ver_fn_t ver_fn)
 	stats->min_trs_cc = ODPH_MIN(trs_cc, stats->min_trs_cc);
 	stats->trs_cc += trs_cc;
 	++stats->trs_cnt;
-	start_cc_diff = odp_cpu_cycles_diff(end_cc, start_cc);
-	stats->max_start_cc = ODPH_MAX(start_cc_diff, stats->max_start_cc);
-	stats->min_start_cc = ODPH_MIN(start_cc_diff, stats->min_start_cc);
-	stats->start_cc += start_cc_diff;
+	stats->max_start_cc = stats->max_trs_cc;
+	stats->min_start_cc = stats->min_trs_cc;
+	stats->start_cc += trs_cc;
 	++stats->start_cnt;
 	++stats->completed;
 
@@ -1548,7 +1552,7 @@ static int transfer(void *args)
 	stats_t *stats = &thr_config->stats;
 	test_api_t *api = &prog_conf->api;
 	odp_thrmask_t mask;
-	uint64_t start_tm, end_tm;
+	odp_time_t start_tm;
 
 	odp_barrier_wait(&prog_config->init_barrier);
 
@@ -1562,13 +1566,12 @@ static int transfer(void *args)
 		}
 	}
 
-	start_tm = odp_time_local_strict_ns();
+	start_tm = odp_time_local_strict();
 
 	while (odp_atomic_load_u32(&prog_config->is_running))
 		api->wait_fn(sd, stats);
 
-	end_tm = odp_time_local_strict_ns();
-	thr_config->stats.tot_tm = end_tm - start_tm;
+	thr_config->stats.tot_tm = odp_time_diff_ns(odp_time_local_strict(), start_tm);
 
 	if (api->drain_fn != NULL)
 		api->drain_fn(sd);
@@ -1690,7 +1693,7 @@ static void print_humanised(uint64_t value, const char *type)
 	else if (value > MEGAS)
 		printf("%.2f M%s\n", (double)value / MEGAS, type);
 	else if (value > KILOS)
-		printf("%.2f K%s\n", (double)value / KILOS, type);
+		printf("%.2f k%s\n", (double)value / KILOS, type);
 	else
 		printf("%" PRIu64 " %s\n", value, type);
 }
@@ -1700,8 +1703,8 @@ static void print_stats(const prog_config_t *config)
 	const stats_t *stats;
 	uint64_t data_cnt = config->num_in_segs * config->src_seg_len, tot_completed = 0U,
 	tot_tm = 0U, tot_trs_tm = 0U, tot_trs_cc = 0U, tot_trs_cnt = 0U, tot_min_tm = UINT64_MAX,
-	tot_max_tm = 0U, tot_min_cc = UINT64_MAX, tot_max_cc = 0U, avg_start_cc, avg_wait_cc,
-	avg_tot_tm;
+	tot_max_tm = 0U, tot_min_cc = UINT64_MAX, tot_max_cc = 0U, avg_start_cc, avg_wait_cc;
+	double avg_tot_tm;
 
 	printf("\n======================\n\n"
 	       "DMA performance test done\n\n"
@@ -1769,11 +1772,12 @@ static void print_stats(const prog_config_t *config)
 			       stats->trs_cnt > 0U ? stats->trs_cc / stats->trs_cnt : 0U,
 			       stats->trs_cnt > 0U ? stats->min_trs_cc : 0U,
 			       stats->trs_cnt > 0U ? stats->max_trs_cc : 0U);
-			print_humanised(stats->completed / (stats->tot_tm / ODP_TIME_SEC_IN_NS),
+			print_humanised(stats->completed /
+					((double)stats->tot_tm / ODP_TIME_SEC_IN_NS),
 					"OPS");
 			printf("            speed:                       ");
 			print_humanised(stats->completed * data_cnt /
-					(stats->tot_tm / ODP_TIME_SEC_IN_NS), "B/s");
+					((double)stats->tot_tm / ODP_TIME_SEC_IN_NS), "B/s");
 		}
 
 		avg_start_cc = stats->start_cnt > 0U ? stats->start_cc / stats->start_cnt : 0U;
@@ -1816,7 +1820,7 @@ static void print_stats(const prog_config_t *config)
 		printf("\n");
 	}
 
-	avg_tot_tm = tot_tm / config->num_workers / ODP_TIME_SEC_IN_NS;
+	avg_tot_tm = (double)tot_tm / config->num_workers / ODP_TIME_SEC_IN_NS;
 	printf("    total:\n"
 	       "        average time per transfer:   %" PRIu64 " (min: %" PRIu64
 	       ", max: %" PRIu64 ") ns\n"
@@ -1913,8 +1917,12 @@ int main(int argc, char **argv)
 		goto out_test;
 	}
 
-	if (prog_conf->time_sec) {
-		sleep(prog_conf->time_sec);
+	if (prog_conf->time_sec > 0.001) {
+		struct timespec ts;
+
+		ts.tv_sec = prog_conf->time_sec;
+		ts.tv_nsec = (prog_conf->time_sec - ts.tv_sec) * ODP_TIME_SEC_IN_NS;
+		nanosleep(&ts, NULL);
 		odp_atomic_store_u32(&prog_conf->is_running, 0U);
 	}
 

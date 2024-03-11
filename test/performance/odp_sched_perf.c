@@ -1,10 +1,23 @@
 /* Copyright (c) 2018, Linaro Limited
- * Copyright (c) 2020-2022, Nokia
+ * Copyright (c) 2020-2024, Nokia
  * All rights reserved.
  *
  * SPDX-License-Identifier:     BSD-3-Clause
  */
 
+/**
+ * @example odp_sched_perf.c
+ *
+ * Performance test application for scheduling
+ *
+ * @cond _ODP_HIDE_FROM_DOXYGEN_
+ */
+
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE /* Needed for sigaction */
+#endif
+
+#include <signal.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
@@ -52,6 +65,9 @@ typedef struct test_options_t {
 	uint32_t ctx_size;
 	uint32_t ctx_rd_words;
 	uint32_t ctx_rw_words;
+	uint32_t uarea_rd;
+	uint32_t uarea_rw;
+	uint32_t uarea_size;
 	uint64_t wait_ns;
 	int      verbose;
 
@@ -88,6 +104,7 @@ typedef struct test_global_t {
 	test_stat_t stat[ODP_THREAD_COUNT_MAX];
 	thread_arg_t thread_arg[ODP_THREAD_COUNT_MAX];
 	odp_atomic_u32_t num_worker;
+	odp_atomic_u32_t exit_threads;
 
 } test_global_t;
 
@@ -95,6 +112,23 @@ typedef struct {
 	odp_queue_t next;
 	odp_atomic_u64_t count;
 } queue_context_t;
+
+static test_global_t *test_globals;
+
+static void sig_handler(int signum ODP_UNUSED)
+{
+	odp_atomic_store_u32(&test_globals->exit_threads, 1);
+}
+
+static int setup_sig_handler(void)
+{
+	struct sigaction action = { .sa_handler = sig_handler };
+
+	if (sigemptyset(&action.sa_mask) || sigaction(SIGINT, &action, NULL))
+		return -1;
+
+	return 0;
+}
 
 static void print_usage(void)
 {
@@ -111,7 +145,8 @@ static void print_usage(void)
 	       "                         the queues are default (or lowest) priority. Default: 0.\n"
 	       "  -d, --num_dummy        Number of empty queues. Default: 0.\n"
 	       "  -e, --num_event        Number of events per queue. Default: 100.\n"
-	       "  -s, --num_sched        Number of events to schedule per thread. Default: 100 000.\n"
+	       "  -s, --num_sched        Number of events to schedule per thread. If zero, the application runs\n"
+	       "                         until SIGINT is received. Default: 100 000.\n"
 	       "  -g, --num_group        Number of schedule groups. Round robins threads and queues into groups.\n"
 	       "                         -1: SCHED_GROUP_WORKER\n"
 	       "                         0:  SCHED_GROUP_ALL (default)\n"
@@ -127,6 +162,8 @@ static void print_usage(void)
 	       "  -l, --ctx_rw_words     Number of queue context words (uint64_t) to modify on every event. Default: 0.\n"
 	       "  -n, --rd_words         Number of event data words (uint64_t) to read before enqueueing it. Default: 0.\n"
 	       "  -m, --rw_words         Number of event data words (uint64_t) to modify before enqueueing it. Default: 0.\n"
+	       "  -u, --uarea_rd         Number of user area words (uint64_t) to read on every event. Default: 0.\n"
+	       "  -U, --uarea_rw         Number of user area words (uint64_t) to modify on every event. Default: 0.\n"
 	       "  -p, --pool_type        Pool type. 0: buffer, 1: packet. Default: 0.\n"
 	       "  -v, --verbose          Verbose output.\n"
 	       "  -h, --help             This help\n"
@@ -159,13 +196,15 @@ static int parse_options(int argc, char *argv[], test_options_t *test_options)
 		{"ctx_rw_words", required_argument, NULL, 'l'},
 		{"rd_words",     required_argument, NULL, 'n'},
 		{"rw_words",     required_argument, NULL, 'm'},
+		{"uarea_rd",     required_argument, NULL, 'u'},
+		{"uarea_rw",     required_argument, NULL, 'U'},
 		{"pool_type",    required_argument, NULL, 'p'},
 		{"verbose",      no_argument,       NULL, 'v'},
 		{"help",         no_argument,       NULL, 'h'},
 		{NULL, 0, NULL, 0}
 	};
 
-	static const char *shortopts = "+c:q:L:H:d:e:s:g:j:b:t:f:a:w:k:l:n:m:p:vh";
+	static const char *shortopts = "+c:q:L:H:d:e:s:g:j:b:t:f:a:w:k:l:n:m:p:u:U:vh";
 
 	test_options->num_cpu    = 1;
 	test_options->num_queue  = 1;
@@ -184,6 +223,8 @@ static int parse_options(int argc, char *argv[], test_options_t *test_options)
 	test_options->ctx_rw_words = 0;
 	test_options->rd_words   = 0;
 	test_options->rw_words   = 0;
+	test_options->uarea_rd   = 0;
+	test_options->uarea_rw   = 0;
 	test_options->wait_ns    = 0;
 	test_options->verbose    = 0;
 
@@ -244,6 +285,12 @@ static int parse_options(int argc, char *argv[], test_options_t *test_options)
 			break;
 		case 'm':
 			test_options->rw_words = atoi(optarg);
+			break;
+		case 'u':
+			test_options->uarea_rd = atoi(optarg);
+			break;
+		case 'U':
+			test_options->uarea_rw = atoi(optarg);
 			break;
 		case 'p':
 			pool_type = atoi(optarg);
@@ -337,6 +384,7 @@ static int parse_options(int argc, char *argv[], test_options_t *test_options)
 		ctx_size = ROUNDUP(ctx_size, ODP_CACHE_LINE_SIZE);
 
 	test_options->ctx_size = ctx_size;
+	test_options->uarea_size = 8 * (test_options->uarea_rd + test_options->uarea_rw);
 
 	return ret;
 }
@@ -377,7 +425,7 @@ static int create_pool(test_global_t *global)
 	odp_pool_capability_t pool_capa;
 	odp_pool_param_t pool_param;
 	odp_pool_t pool;
-	uint32_t max_num, max_size;
+	uint32_t max_num, max_size, max_uarea;
 	test_options_t *test_options = &global->test_options;
 	uint32_t num_cpu   = test_options->num_cpu;
 	uint32_t num_queue = test_options->num_queue;
@@ -395,6 +443,7 @@ static int create_pool(test_global_t *global)
 	uint32_t event_size = 16;
 	int      touch_data = test_options->touch_data;
 	uint32_t ctx_size = test_options->ctx_size;
+	uint32_t uarea_size = test_options->uarea_size;
 
 	if (touch_data) {
 		event_size = test_options->rd_words + test_options->rw_words;
@@ -426,22 +475,22 @@ static int create_pool(test_global_t *global)
 	printf("  max burst size            %u\n", max_burst);
 	printf("  total events              %u\n", tot_event);
 	printf("  event size                %u bytes", event_size);
-	if (touch_data) {
-		printf(" (rd: %u, rw: %u)\n",
-		       8 * test_options->rd_words,
-		       8 * test_options->rw_words);
-	} else {
-		printf("\n");
-	}
+	if (touch_data)
+		printf(" (rd: %u, rw: %u)", 8 * test_options->rd_words, 8 * test_options->rw_words);
+	printf("\n");
 
 	printf("  context size              %u bytes", ctx_size);
 	if (test_options->ctx_rd_words || test_options->ctx_rw_words) {
-		printf(" (rd: %u, rw: %u)\n",
+		printf(" (rd: %u, rw: %u)",
 		       8 * test_options->ctx_rd_words,
 		       8 * test_options->ctx_rw_words);
-	} else {
-		printf("\n");
 	}
+	printf("\n");
+
+	printf("  user area size            %u bytes", uarea_size);
+	if (uarea_size)
+		printf(" (rd: %u, rw: %u)", 8 * test_options->uarea_rd, 8 * test_options->uarea_rw);
+	printf("\n");
 
 	if (odp_pool_capability(&pool_capa)) {
 		ODPH_ERR("Error: pool capa failed\n");
@@ -452,11 +501,12 @@ static int create_pool(test_global_t *global)
 		printf("  pool type                 buffer\n");
 		max_num = pool_capa.buf.max_num;
 		max_size = pool_capa.buf.max_size;
-
+		max_uarea = pool_capa.buf.max_uarea_size;
 	} else {
 		printf("  pool type                 packet\n");
 		max_num = pool_capa.pkt.max_num;
 		max_size = pool_capa.pkt.max_seg_len;
+		max_uarea = pool_capa.pkt.max_uarea_size;
 	}
 
 	if (max_num && tot_event > max_num) {
@@ -469,18 +519,25 @@ static int create_pool(test_global_t *global)
 		return -1;
 	}
 
+	if (uarea_size > max_uarea) {
+		ODPH_ERR("Error: max supported user area size %u\n", max_uarea);
+		return -1;
+	}
+
 	odp_pool_param_init(&pool_param);
 	if (test_options->pool_type == ODP_POOL_BUFFER) {
 		pool_param.type = ODP_POOL_BUFFER;
 		pool_param.buf.num = tot_event;
 		pool_param.buf.size = event_size;
 		pool_param.buf.align = 8;
+		pool_param.buf.uarea_size = uarea_size;
 	} else {
 		pool_param.type = ODP_POOL_PACKET;
 		pool_param.pkt.num = tot_event;
 		pool_param.pkt.len = event_size;
 		pool_param.pkt.seg_len = event_size;
 		pool_param.pkt.align = 8;
+		pool_param.pkt.uarea_size = uarea_size;
 	}
 
 	pool = odp_pool_create("sched perf", &pool_param);
@@ -853,6 +910,28 @@ static int destroy_groups(test_global_t *global)
 	return 0;
 }
 
+static uint64_t rw_uarea(odp_event_t ev[], int num, uint32_t rd_words, uint32_t rw_words)
+{
+	uint64_t *data;
+	int i;
+	uint32_t j;
+	uint64_t sum = 0;
+
+	for (i = 0; i < num; i++) {
+		data = odp_event_user_area(ev[i]);
+
+		for (j = 0; j < rd_words; j++)
+			sum += data[j];
+
+		for (; j < rd_words + rw_words; j++) {
+			sum += data[j];
+			data[j] += 1;
+		}
+	}
+
+	return sum;
+}
+
 static inline uint64_t rw_ctx_data(void *ctx, uint32_t offset,
 				   uint32_t rd_words, uint32_t rw_words)
 {
@@ -921,12 +1000,17 @@ static int test_sched(void *arg)
 	uint32_t ctx_size = test_options->ctx_size;
 	uint32_t ctx_rd_words = test_options->ctx_rd_words;
 	uint32_t ctx_rw_words = test_options->ctx_rw_words;
+	const uint32_t uarea_size = test_options->uarea_size;
+	const uint32_t uarea_rd = test_options->uarea_rd;
+	const uint32_t uarea_rw = test_options->uarea_rw;
 	odp_pool_type_t pool_type = test_options->pool_type;
 	int touch_ctx = ctx_rd_words || ctx_rw_words;
+	odp_atomic_u32_t *exit_threads = &global->exit_threads;
 	uint32_t ctx_offset = 0;
 	uint32_t sched_retries = 0;
 	uint64_t data_sum = 0;
 	uint64_t ctx_sum = 0;
+	uint64_t uarea_sum = 0;
 	uint64_t wait_ns = test_options->wait_ns;
 	odp_event_t ev[max_burst];
 
@@ -981,7 +1065,10 @@ static int test_sched(void *arg)
 	c1 = odp_cpu_cycles();
 	last_retry_ts = t1;
 
-	for (rounds = 0; events < num_sched; rounds++) {
+	for (rounds = 0; odp_likely(!odp_atomic_load_u32(exit_threads)); rounds++) {
+		if (odp_unlikely(num_sched && events >= num_sched))
+			break;
+
 		num = odp_schedule_multi(&queue, ODP_SCHED_NO_WAIT,
 					 ev, max_burst);
 
@@ -989,6 +1076,9 @@ static int test_sched(void *arg)
 			sched_retries = 0;
 			events += num;
 			i = 0;
+
+			if (odp_unlikely(uarea_size))
+				uarea_sum += rw_uarea(ev, num, uarea_rd, uarea_rw);
 
 			if (odp_unlikely(ctx_size)) {
 				queue_context_t *ctx = odp_queue_context(queue);
@@ -1077,7 +1167,7 @@ static int test_sched(void *arg)
 	global->stat[thr].nsec     = nsec;
 	global->stat[thr].cycles   = cycles;
 	global->stat[thr].waits    = waits;
-	global->stat[thr].dummy_sum = data_sum + ctx_sum;
+	global->stat[thr].dummy_sum = data_sum + ctx_sum + uarea_sum;
 	global->stat[thr].failed = ret;
 
 	if (odp_atomic_fetch_dec_u32(&global->num_worker) == 1) {
@@ -1337,10 +1427,17 @@ int main(int argc, char **argv)
 		ODPH_ERR("Error: SHM alloc failed\n");
 		exit(EXIT_FAILURE);
 	}
+	test_globals = global;
 
 	memset(global, 0, sizeof(test_global_t));
 	global->pool = ODP_POOL_INVALID;
 	global->ctx_shm = ODP_SHM_INVALID;
+	odp_atomic_init_u32(&global->exit_threads, 0);
+
+	if (setup_sig_handler()) {
+		ODPH_ERR("Error: signal handler setup failed\n");
+		exit(EXIT_FAILURE);
+	}
 
 	if (parse_options(argc, argv, &global->test_options))
 		return -1;

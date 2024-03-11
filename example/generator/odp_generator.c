@@ -1,7 +1,13 @@
-/* Copyright (c) 2014-2018, Linaro Limited
- * All rights reserved.
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2014-2018 Linaro Limited
+ */
+
+/**
+ * @example odp_generator.c
  *
- * SPDX-License-Identifier:     BSD-3-Clause
+ * Traffic generator and loopback demo application
+ *
+ * @cond _ODP_HIDE_FROM_DOXYGEN_
  */
 
 /** enable strtok */

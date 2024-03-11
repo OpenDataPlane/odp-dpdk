@@ -438,7 +438,7 @@ int _odp_timer_term_local(void)
 
 void _odp_timer_run_inline(int dec)
 {
-	int poll_interval = timer_global->poll_interval;
+	int poll_interval = (dec == TIMER_SCAN_FORCE) ? 0 : timer_global->poll_interval;
 	odp_time_t now;
 	int ret;
 

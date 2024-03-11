@@ -27,7 +27,6 @@
 #include <odp_packet_internal.h>
 
 #include <errno.h>
-#include <pthread.h>
 #include <string.h>
 #include <stdio.h>
 #include <inttypes.h>
@@ -312,8 +311,9 @@ int _odp_system_info_init(void)
 			 num_cpus);
 
 	/* Read and save all CPU frequencies for static mode */
-	for (i = 0; i < CONFIG_NUM_CPU_IDS; i++)
-		odp_global_ro.system_info.cpu_hz[i] = cpu_hz_current(i);
+	if (odp_global_ro.system_info.cpu_hz_static)
+		for (i = 0; i < CONFIG_NUM_CPU_IDS; i++)
+			odp_global_ro.system_info.cpu_hz[i] = cpu_hz_current(i);
 
 	/* By default, read max frequency from a cpufreq file */
 	for (i = 0; i < CONFIG_NUM_CPU_IDS; i++) {
@@ -552,5 +552,8 @@ void odp_sys_config_print(void)
 	_ODP_PRINT("CONFIG_POOLS:                  %i\n", CONFIG_POOLS);
 	_ODP_PRINT("CONFIG_POOL_MAX_NUM:           %i\n", CONFIG_POOL_MAX_NUM);
 	_ODP_PRINT("CONFIG_IPSEC_MAX_NUM_SA:       %i\n", CONFIG_IPSEC_MAX_NUM_SA);
+	_ODP_PRINT("CONFIG_ML_MAX_MODELS:          %i\n", CONFIG_ML_MAX_MODELS);
+	_ODP_PRINT("CONFIG_ML_MAX_INPUTS:          %i\n", CONFIG_ML_MAX_INPUTS);
+	_ODP_PRINT("CONFIG_ML_MAX_OUTPUTS:         %i\n", CONFIG_ML_MAX_OUTPUTS);
 	_ODP_PRINT("\n");
 }

@@ -13,6 +13,7 @@ AM_CPPFLAGS +=  -I$(top_srcdir)/platform/$(with_platform)/arch/default
 AM_CPPFLAGS +=  -I$(top_srcdir)/platform/$(with_platform)/arch/common
 
 AM_CPPFLAGS +=  $(OPENSSL_CPPFLAGS)
+AM_CPPFLAGS +=  $(ORT_CPPFLAGS)
 
 AM_CFLAGS +=  $(AARCH64CRYPTO_CFLAGS)
 AM_CFLAGS +=  $(DPDK_CFLAGS)
@@ -90,6 +91,7 @@ odpapiabiarchinclude_HEADERS += \
 		  include-abi/odp/api/abi/init.h \
 		  include-abi/odp/api/abi/ipsec.h \
 		  include-abi/odp/api/abi/ipsec_types.h \
+		  include-abi/odp/api/abi/ml_types.h \
 		  include-abi/odp/api/abi/packet.h \
 		  include-abi/odp/api/abi/packet_types.h \
 		  include-abi/odp/api/abi/packet_flags.h \
@@ -140,6 +142,7 @@ noinst_HEADERS = \
 		  include/odp_event_validation_internal.h \
 		  include/odp_fdserver_internal.h \
 		  include/odp_forward_typedefs_internal.h \
+		  include/odp_ml_fp16.h \
 		  include/odp_global_data.h \
 		  include/odp_init_internal.h \
 		  include/odp_ipsec_internal.h \
@@ -228,6 +231,8 @@ __LIB__libodp_linux_la_SOURCES = \
 			   odp_ishmphy.c \
 			   odp_ishmpool.c \
 			   odp_libconfig.c \
+			   odp_ml_fp16.c \
+			   odp_ml_quantize.c \
 			   odp_name_table.c \
 			   odp_packet.c \
 			   odp_packet_vector.c \
@@ -297,6 +302,15 @@ __LIB__libodp_linux_la_SOURCES += \
 endif
 endif
 endif
+
+if WITH_ML
+__LIB__libodp_linux_la_SOURCES += \
+			   odp_ml.c
+else
+__LIB__libodp_linux_la_SOURCES += \
+			   odp_ml_null.c
+endif
+
 if ODP_ABI_COMPAT
 __LIB__libodp_linux_la_SOURCES += \
 			   odp_atomic_api.c \
@@ -345,14 +359,11 @@ odpapiabiarchinclude_HEADERS += arch/default/odp/api/abi/atomic_generic.h \
 				arch/default/odp/api/abi/wait_until_generic.h \
 				arch/default/odp/api/abi/wait_until.h
 endif
-noinst_HEADERS += arch/arm/odp_atomic.h \
-		  arch/arm/odp_cpu.h \
-		  arch/arm/odp_cpu_idling.h \
-		  arch/arm/odp_llsc.h \
+noinst_HEADERS += arch/arm/odp_cpu.h \
 		  arch/default/odp_atomic.h \
 		  arch/default/odp_cpu.h \
-		  arch/default/odp_cpu_idling.h \
-		  arch/default/odp_random.h
+		  arch/default/odp_random.h \
+		  arch/default/odp_wait_until.h
 endif
 if ARCH_IS_AARCH64
 __LIB__libodp_linux_la_SOURCES += arch/aarch64/odp_atomic.c \
@@ -380,9 +391,8 @@ endif
 noinst_HEADERS += arch/aarch64/odp_atomic.h \
 		  arch/aarch64/odp_cpu.h \
 		  arch/aarch64/cpu_flags.h \
-		  arch/aarch64/odp_cpu_idling.h \
-		  arch/aarch64/odp_llsc.h \
-		  arch/aarch64/odp_random.h
+		  arch/aarch64/odp_random.h \
+		  arch/aarch64/odp_wait_until.h
 endif
 if ARCH_IS_DEFAULT
 __LIB__libodp_linux_la_SOURCES += arch/default/odp_atomic.c \
@@ -405,8 +415,8 @@ odpapiabiarchinclude_HEADERS += arch/default/odp/api/abi/atomic_generic.h \
 endif
 noinst_HEADERS += arch/default/odp_atomic.h \
 		  arch/default/odp_cpu.h \
-		  arch/default/odp_cpu_idling.h \
-		  arch/default/odp_random.h
+		  arch/default/odp_random.h \
+		  arch/default/odp_wait_until.h
 endif
 if ARCH_IS_POWERPC
 __LIB__libodp_linux_la_SOURCES += arch/default/odp_atomic.c \
@@ -429,8 +439,8 @@ odpapiabiarchinclude_HEADERS += arch/default/odp/api/abi/atomic_generic.h \
 endif
 noinst_HEADERS += arch/default/odp_atomic.h \
 		  arch/default/odp_cpu.h \
-		  arch/default/odp_cpu_idling.h \
-		  arch/default/odp_random.h
+		  arch/default/odp_random.h \
+		  arch/default/odp_wait_until.h
 endif
 if ARCH_IS_X86
 __LIB__libodp_linux_la_SOURCES += arch/default/odp_atomic.c \
@@ -460,7 +470,7 @@ noinst_HEADERS += arch/x86/cpu_flags.h \
 		  arch/x86/odp_random.h \
 		  arch/default/odp_atomic.h \
 		  arch/default/odp_cpu.h \
-		  arch/default/odp_cpu_idling.h
+		  arch/default/odp_wait_until.h
 endif
 
 if ODP_PKTIO_PCAP
@@ -476,6 +486,7 @@ __LIB__libodp_linux_la_LIBADD += $(PTHREAD_LIBS)
 __LIB__libodp_linux_la_LIBADD += $(TIMER_LIBS)
 __LIB__libodp_linux_la_LIBADD += $(LIBXDP_LIBS)
 __LIB__libodp_linux_la_LIBADD += $(IPSEC_MB_LIBS)
+__LIB__libodp_linux_la_LIBADD += $(ORT_LIBS)
 
 if ODP_PKTIO_PCAP
 __LIB__libodp_linux_la_LIBADD += $(PCAP_LIBS)
