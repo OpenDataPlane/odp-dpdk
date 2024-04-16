@@ -73,8 +73,10 @@ extern "C" {
 
 /*
  * Stashes reserved for internal usage
+ *
+ * One stash reserved per DMA session, and one reserved for ML.
  */
-#define CONFIG_INTERNAL_STASHES CONFIG_MAX_DMA_SESSIONS
+#define CONFIG_INTERNAL_STASHES (CONFIG_MAX_DMA_SESSIONS + 1)
 
 /*
  * Maximum number of stashes

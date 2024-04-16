@@ -13,7 +13,6 @@ AM_CPPFLAGS +=  -I$(top_srcdir)/platform/$(with_platform)/arch/@ARCH_DIR@
 AM_CPPFLAGS +=  -I$(top_srcdir)/platform/$(with_platform)/arch/default
 
 AM_CPPFLAGS +=  $(OPENSSL_CPPFLAGS)
-AM_CPPFLAGS +=  $(ORT_CPPFLAGS)
 
 AM_CFLAGS +=  $(DPDK_CFLAGS)
 AM_CFLAGS +=  $(LIBCONFIG_CFLAGS)
@@ -263,7 +262,7 @@ __LIB__libodp_dpdk_la_SOURCES = \
 
 if WITH_ML
 __LIB__libodp_dpdk_la_SOURCES += \
-			   ../linux-generic/odp_ml.c
+			   odp_ml.c
 else
 __LIB__libodp_dpdk_la_SOURCES += \
 			   ../linux-generic/odp_ml_null.c
@@ -424,7 +423,7 @@ __LIB__libodp_dpdk_la_LIBADD += $(LIBCONFIG_LIBS)
 __LIB__libodp_dpdk_la_LIBADD += $(DPDK_LIBS_LIBODP)
 __LIB__libodp_dpdk_la_LIBADD += $(PTHREAD_LIBS)
 __LIB__libodp_dpdk_la_LIBADD += $(TIMER_LIBS)
-__LIB__libodp_dpdk_la_LIBADD += $(ORT_LIBS)
+__LIB__libodp_dpdk_la_LIBADD += $(ML_LIBS)
 
 CHECK_GLOBALS_REGEX = " (odp_|_odp_|_deprecated_odp_|miniz_|mz_|tdefl_|tinfl_|mp_hdlr_init_odp_pool_ops|__odr_asan|__.*get_pc_thunk.*)"
 

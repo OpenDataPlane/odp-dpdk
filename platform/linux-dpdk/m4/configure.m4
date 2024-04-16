@@ -71,7 +71,11 @@ esac
 # Required for experimental rte_event_port_unlinks_in_progress() API
 DPDK_CFLAGS="${DPDK_CFLAGS} -DALLOW_EXPERIMENTAL_API"
 
-AS_VAR_APPEND([PLAT_DEP_LIBS], ["${ATOMIC_LIBS} ${LIBCONFIG_LIBS} ${OPENSSL_LIBS} ${DPDK_LIBS_LT} ${LIBCLI_LIBS} ${ORT_LIBS}"])
+# ML availability check requires DPDK include path, and must therefore be done
+# after DPDK check.
+ODP_ML
+
+AS_VAR_APPEND([PLAT_DEP_LIBS], ["${ATOMIC_LIBS} ${LIBCONFIG_LIBS} ${OPENSSL_LIBS} ${DPDK_LIBS_LT} ${LIBCLI_LIBS} ${ML_LIBS}"])
 
 # Add text to the end of configure with platform specific settings.
 # Make sure it's aligned same as other lines in configure.ac.
