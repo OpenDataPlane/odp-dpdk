@@ -316,16 +316,15 @@ int odp_packet_alloc_multi(odp_pool_t pool_hdl, uint32_t len,
 	return packet_alloc_multi(pool, len, pkt, num);
 }
 
+uint32_t odp_packet_reset_max_len(odp_packet_t pkt)
+{
+	return odp_packet_buf_len(pkt) - RTE_PKTMBUF_HEADROOM;
+}
+
 int odp_packet_reset(odp_packet_t pkt, uint32_t len)
 {
-	if (odp_unlikely(len == 0))
+	if (odp_unlikely(len == 0 || len > odp_packet_reset_max_len(pkt)))
 		return -1;
-
-	if (RTE_PKTMBUF_HEADROOM + len > odp_packet_buf_len(pkt)) {
-		_ODP_DBG("Not enough head room for that packet %d/%d\n",
-			 RTE_PKTMBUF_HEADROOM + len, odp_packet_buf_len(pkt));
-		return -1;
-	}
 
 	return packet_reset(pkt, len);
 }
