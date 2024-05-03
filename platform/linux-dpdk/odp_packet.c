@@ -128,6 +128,14 @@ static inline int num_segments(uint32_t len, uint32_t seg_len)
 	return num;
 }
 
+static inline void packet_reset_md(odp_packet_hdr_t *pkt_hdr, struct rte_mbuf *mb)
+{
+	mb->port = 0xff;
+	mb->vlan_tci = 0;
+
+	packet_init(pkt_hdr, ODP_PKTIO_INVALID);
+}
+
 static inline int packet_reset(odp_packet_t pkt, uint32_t len)
 {
 	odp_packet_hdr_t *const pkt_hdr = packet_hdr(pkt);
@@ -135,12 +143,10 @@ static inline int packet_reset(odp_packet_t pkt, uint32_t len)
 	uint8_t nb_segs = 0;
 	int32_t lenleft = len;
 
-	packet_init(pkt_hdr, ODP_PKTIO_INVALID);
+	packet_reset_md(pkt_hdr, mb);
 
-	mb->port = 0xff;
 	mb->pkt_len = len;
 	mb->data_off = RTE_PKTMBUF_HEADROOM;
-	mb->vlan_tci = 0;
 	nb_segs = 1;
 
 	if (RTE_PKTMBUF_HEADROOM + lenleft <= mb->buf_len) {
@@ -327,6 +333,13 @@ int odp_packet_reset(odp_packet_t pkt, uint32_t len)
 		return -1;
 
 	return packet_reset(pkt, len);
+}
+
+void odp_packet_reset_meta(odp_packet_t pkt)
+{
+	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
+
+	packet_reset_md(pkt_hdr, &pkt_hdr->mb);
 }
 
 int odp_event_filter_packet(const odp_event_t event[],
