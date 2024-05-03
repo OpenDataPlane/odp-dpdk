@@ -30,7 +30,7 @@
 #include <odp_packet_io_internal.h>
 #include <odp_parse_internal.h>
 #include <odp_pool_internal.h>
-#include <odp_print_internal.h>
+#include <odp_string_internal.h>
 
 #include <rte_version.h>
 

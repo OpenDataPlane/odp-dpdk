@@ -149,7 +149,6 @@ noinst_HEADERS = \
 		  ${top_srcdir}/platform/linux-generic/include/odp_name_table_internal.h \
 		  include/odp_packet_io_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_parse_internal.h \
-		  ${top_srcdir}/platform/linux-generic/include/odp_print_internal.h \
 		  include/odp_errno_define.h \
 		  include/odp_event_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_event_validation_internal.h \
@@ -176,6 +175,7 @@ noinst_HEADERS = \
 		  ${top_srcdir}/platform/linux-generic/include/odp_ring_u64_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_schedule_if.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_sorted_list_internal.h \
+		  ${top_srcdir}/platform/linux-generic/include/odp_string_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_sysinfo_internal.h \
 		  include/odp_shm_internal.h \
 		  include/odp_thread_internal.h \
@@ -231,7 +231,6 @@ __LIB__libodp_dpdk_la_SOURCES = \
 			   ../linux-generic/pktio/loop.c \
 			   ../linux-generic/pktio/null.c \
 			   ../linux-generic/odp_pkt_queue.c \
-			   ../linux-generic/odp_print.c \
 			   odp_pool.c \
 			   odp_queue_basic.c \
 			   odp_queue_eventdev.c \
@@ -249,6 +248,7 @@ __LIB__libodp_dpdk_la_SOURCES = \
 			   ../linux-generic/odp_sorted_list.c \
 			   ../linux-generic/odp_stash.c \
 			   ../linux-generic/odp_std.c \
+			   ../linux-generic/odp_string.c \
 			   odp_system_info.c \
 			   ../linux-generic/odp_pcapng.c \
 			   odp_thread.c \
