@@ -101,7 +101,6 @@ AC_CONFIG_FILES([platform/linux-dpdk/Makefile
 		 platform/linux-dpdk/test/Makefile
 		 platform/linux-dpdk/test/example/Makefile
 		 platform/linux-dpdk/test/example/classifier/Makefile
-		 platform/linux-dpdk/test/example/generator/Makefile
 		 platform/linux-dpdk/test/example/ipsec_api/Makefile
 		 platform/linux-dpdk/test/example/ipsec_crypto/Makefile
 		 platform/linux-dpdk/test/example/l2fwd_simple/Makefile
