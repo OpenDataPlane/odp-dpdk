@@ -38,9 +38,9 @@ typedef struct {
 		odp_thrmask_t  control;
 	};
 	odp_atomic_u64_t thrmask_all_epoch;
-	uint32_t       num;
-	uint32_t       num_worker;
-	uint32_t       num_control;
+	odp_atomic_u32_t num;
+	odp_atomic_u32_t num_worker;
+	odp_atomic_u32_t num_control;
 	uint32_t       num_max;
 	odp_spinlock_t lock;
 	odp_shm_t      shm;
@@ -84,6 +84,9 @@ int _odp_thread_init_global(void)
 		return -1;
 
 	memset(thread_globals, 0, sizeof(thread_globals_t));
+	odp_atomic_init_u32(&thread_globals->num, 0);
+	odp_atomic_init_u32(&thread_globals->num_worker, 0);
+	odp_atomic_init_u32(&thread_globals->num_control, 0);
 
 	thread_globals->shm = shm;
 
@@ -100,10 +103,7 @@ int _odp_thread_term_global(void)
 {
 	int ret, num;
 
-	odp_spinlock_lock(&thread_globals->lock);
-	num = thread_globals->num;
-	odp_spinlock_unlock(&thread_globals->lock);
-
+	num = odp_atomic_load_u32(&thread_globals->num);
 	if (num)
 		_ODP_ERR("%u threads have not called odp_term_local().\n", num);
 
@@ -138,7 +138,7 @@ static int alloc_id(odp_thread_type_t type)
 	int thr;
 	odp_thrmask_t *all = &thread_globals->all;
 
-	if (thread_globals->num >= thread_globals->num_max)
+	if (odp_atomic_load_u32(&thread_globals->num) >= thread_globals->num_max)
 		return -1;
 
 	for (thr = 0; thr < (int)thread_globals->num_max; thr++) {
@@ -148,13 +148,13 @@ static int alloc_id(odp_thread_type_t type)
 
 			if (type == ODP_THREAD_WORKER) {
 				odp_thrmask_set(&thread_globals->worker, thr);
-				thread_globals->num_worker++;
+				odp_atomic_inc_u32(&thread_globals->num_worker);
 			} else {
 				odp_thrmask_set(&thread_globals->control, thr);
-				thread_globals->num_control++;
+				odp_atomic_inc_u32(&thread_globals->num_control);
 			}
 
-			thread_globals->num++;
+			odp_atomic_inc_u32(&thread_globals->num);
 			return thr;
 		}
 	}
@@ -177,14 +177,13 @@ static int free_id(int thr)
 
 	if (thread_globals->thr[thr].type == ODP_THREAD_WORKER) {
 		odp_thrmask_clr(&thread_globals->worker, thr);
-		thread_globals->num_worker--;
+		odp_atomic_dec_u32(&thread_globals->num_worker);
 	} else {
 		odp_thrmask_clr(&thread_globals->control, thr);
-		thread_globals->num_control--;
+		odp_atomic_dec_u32(&thread_globals->num_control);
 	}
 
-	thread_globals->num--;
-	return thread_globals->num;
+	return odp_atomic_fetch_dec_u32(&thread_globals->num) - 1;
 }
 
 int _odp_thread_init_local(odp_thread_type_t type)
@@ -286,17 +285,17 @@ int _odp_thread_term_local(void)
 
 int odp_thread_count(void)
 {
-	return thread_globals->num;
+	return odp_atomic_load_u32(&thread_globals->num);
 }
 
 int odp_thread_control_count(void)
 {
-	return thread_globals->num_control;
+	return odp_atomic_load_u32(&thread_globals->num_control);
 }
 
 int odp_thread_worker_count(void)
 {
-	return thread_globals->num_worker;
+	return odp_atomic_load_u32(&thread_globals->num_worker);
 }
 
 int odp_thread_count_max(void)
@@ -320,7 +319,7 @@ int odp_thrmask_worker(odp_thrmask_t *mask)
 
 	odp_spinlock_lock(&thread_globals->lock);
 	odp_thrmask_copy(mask, &thread_globals->worker);
-	num_worker = thread_globals->num_worker;
+	num_worker = odp_atomic_load_u32(&thread_globals->num_worker);
 	odp_spinlock_unlock(&thread_globals->lock);
 	return num_worker;
 
@@ -332,7 +331,7 @@ int odp_thrmask_control(odp_thrmask_t *mask)
 
 	odp_spinlock_lock(&thread_globals->lock);
 	odp_thrmask_copy(mask, &thread_globals->control);
-	num_control = thread_globals->num_control;
+	num_control = odp_atomic_load_u32(&thread_globals->num_control);
 	odp_spinlock_unlock(&thread_globals->lock);
 	return num_control;
 }
