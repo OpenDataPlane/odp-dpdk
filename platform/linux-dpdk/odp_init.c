@@ -26,6 +26,7 @@
 #include <rte_config.h>
 #include <rte_debug.h>
 #include <rte_eal.h>
+#include <rte_errno.h>
 #include <rte_string_fns.h>
 
 enum init_stage {
@@ -268,7 +269,7 @@ static int _odp_init_dpdk(const char *cmdline)
 
 	i = rte_eal_init(dpdk_argc, dpdk_argv);
 	if (i < 0) {
-		_ODP_ERR("Cannot init the Intel DPDK EAL!\n");
+		_ODP_ERR("DPDK EAL init failed: %s\n", rte_strerror(rte_errno));
 		return -1;
 	} else if (i + 1 != dpdk_argc) {
 		_ODP_DBG("Some DPDK args were not processed!\n");
