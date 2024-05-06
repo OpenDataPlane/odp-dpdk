@@ -1,9 +1,7 @@
 #!/usr/bin/python
 
-# Copyright (c) 2015-2018, Linaro Limited
-# All rights reserved.
-#
-# SPDX-License-Identifier:     BSD-3-Clause
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2015-2018 Linaro Limited
 
 # Usage: git-transplant.py [orig dir] [overlay dir] [interval]
 #

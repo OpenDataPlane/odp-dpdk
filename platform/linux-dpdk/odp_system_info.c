@@ -1,15 +1,9 @@
-/* Copyright (c) 2013-2018, Linaro Limited
- * Copyright (c) 2020-2024, Nokia
- * All rights reserved.
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2013-2018 Linaro Limited
+ * Copyright (c) 2020-2024 Nokia
  *
- * SPDX-License-Identifier:     BSD-3-Clause
- */
-
-/*
- *   BSD LICENSE
- *
- *   Copyright(c) 2010-2014 Intel Corporation. All rights reserved.
- *   All rights reserved.
+ * Copyright(c) 2010-2014 Intel Corporation
+ *   - lib/eal/linux/eal_hugepage_info.c
  */
 
 #include <odp_posix_extensions.h>
