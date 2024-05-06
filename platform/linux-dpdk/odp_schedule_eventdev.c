@@ -20,6 +20,7 @@
 #include <odp_eventdev_internal.h>
 #include <odp_packet_io_internal.h>
 #include <odp_schedule_if.h>
+#include <odp_string_internal.h>
 #include <odp_timer_internal.h>
 
 #include <rte_config.h>
@@ -821,13 +822,10 @@ static odp_schedule_group_t schedule_group_create(const char *name,
 		if (!_odp_eventdev_gbl->grp[i].allocated) {
 			char *grp_name = _odp_eventdev_gbl->grp[i].name;
 
-			if (name == NULL) {
+			if (name == NULL)
 				grp_name[0] = 0;
-			} else {
-				strncpy(grp_name, name,
-					ODP_SCHED_GROUP_NAME_LEN - 1);
-				grp_name[ODP_SCHED_GROUP_NAME_LEN - 1] = 0;
-			}
+			else
+				_odp_strcpy(grp_name, name, ODP_SCHED_GROUP_NAME_LEN);
 
 			grp_update_mask(i, mask);
 			group = (odp_schedule_group_t)i;

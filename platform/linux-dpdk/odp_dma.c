@@ -28,6 +28,7 @@
 #include <odp_pool_internal.h>
 #include <odp_queue_if.h>
 #include <odp_schedule_if.h>
+#include <odp_string_internal.h>
 
 #include <rte_dmadev.h>
 #include <rte_mbuf_core.h>
@@ -541,10 +542,8 @@ odp_dma_t odp_dma_create(const char *name, const odp_dma_param_t *param)
 	session->is_mt = param->mt_mode == ODP_DMA_MT_SAFE;
 	session->name[0] = 0;
 
-	if (name) {
-		strncpy(session->name, name, ODP_DMA_NAME_LEN - 1);
-		session->name[ODP_DMA_NAME_LEN - 1] = 0;
-	}
+	if (name)
+		_odp_strcpy(session->name, name, ODP_DMA_NAME_LEN);
 
 	return (odp_dma_t)session;
 }

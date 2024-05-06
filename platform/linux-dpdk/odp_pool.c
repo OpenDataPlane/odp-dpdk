@@ -24,6 +24,7 @@
 #include <odp_macros_internal.h>
 #include <odp_packet_internal.h>
 #include <odp_pool_internal.h>
+#include <odp_string_internal.h>
 #include <odp_timer_internal.h>
 
 #include <rte_config.h>
@@ -677,7 +678,7 @@ odp_pool_t _odp_pool_create(const char *name, const odp_pool_param_t *params,
 	priv_data.type = params->type;
 
 	if (name)
-		strncpy(pool->name, name, ODP_POOL_NAME_LEN - 1);
+		_odp_strcpy(pool->name, name, ODP_POOL_NAME_LEN);
 
 	switch (params->type) {
 	case ODP_POOL_BUFFER:
@@ -1216,12 +1217,10 @@ odp_pool_t odp_pool_ext_create(const char *name,
 	if (check_pool_ext_param(params))
 		return ODP_POOL_INVALID;
 
-	if (name == NULL) {
+	if (name == NULL)
 		pool_name[0] = 0;
-	} else {
-		strncpy(pool_name, name, ODP_POOL_NAME_LEN - 1);
-		pool_name[ODP_POOL_NAME_LEN - 1] = 0;
-	}
+	else
+		_odp_strcpy(pool_name, name, ODP_POOL_NAME_LEN);
 
 	/* Find an unused buffer pool slot and initialize it as requested */
 	for (i = 0; i < CONFIG_POOLS; i++) {

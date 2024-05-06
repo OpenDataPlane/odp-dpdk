@@ -18,6 +18,7 @@
 #include <odp_global_data.h>
 #include <odp_macros_internal.h>
 #include <odp_shm_internal.h>
+#include <odp_string_internal.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -287,8 +288,12 @@ odp_shm_t odp_shm_reserve(const char *name, uint64_t size, uint64_t align,
 	}
 
 	block->mz = mz;
-	snprintf(block->name, ODP_SHM_NAME_LEN, "%s", name);
-	block->name[ODP_SHM_NAME_LEN - 1] = 0;
+
+	if (name == NULL)
+		block->name[0] = 0;
+	else
+		_odp_strcpy(block->name, name, ODP_SHM_NAME_LEN);
+
 	block->type = SHM_TYPE_LOCAL;
 	block->size = size;
 
@@ -334,8 +339,12 @@ odp_shm_t odp_shm_import(const char *remote_name, odp_instance_t odp_inst,
 	block = &shm_tbl->block[idx];
 
 	block->mz = mz;
-	snprintf(block->name, ODP_SHM_NAME_LEN, "%s", local_name);
-	block->name[ODP_SHM_NAME_LEN - 1] = 0;
+
+	if (local_name == NULL)
+		block->name[0] = 0;
+	else
+		_odp_strcpy(block->name, local_name, ODP_SHM_NAME_LEN);
+
 	block->type = SHM_TYPE_REMOTE;
 
 	odp_spinlock_unlock(&shm_tbl->lock);
@@ -481,7 +490,6 @@ static void walk_memzone(const struct rte_memzone *mz, void *arg)
 	odp_system_memblock_t *memblock;
 	int32_t cur = data->blocks;
 	const char *name;
-	int name_len;
 
 	data->info->total_mapped += mz->len;
 	data->blocks++;
@@ -499,12 +507,7 @@ static void walk_memzone(const struct rte_memzone *mz, void *arg)
 		return;
 	memblock = &data->memblock[cur];
 
-	name_len = strlen(name);
-	if (name_len >= ODP_SYSTEM_MEMBLOCK_NAME_LEN)
-		name_len = ODP_SYSTEM_MEMBLOCK_NAME_LEN - 1;
-
-	memcpy(memblock->name, name, name_len);
-	memblock->name[name_len] = 0;
+	_odp_strcpy(memblock->name, name, ODP_SYSTEM_MEMBLOCK_NAME_LEN);
 
 	memblock->addr = (uintptr_t)mz->addr;
 	memblock->used = mz->len;

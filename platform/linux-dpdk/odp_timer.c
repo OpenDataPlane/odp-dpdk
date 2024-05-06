@@ -715,11 +715,8 @@ odp_timer_pool_t odp_timer_pool_create(const char *name,
 	}
 
 	odp_ticketlock_unlock(&timer_global->lock);
-	if (name) {
-		strncpy(timer_pool->name, name,
-			ODP_TIMER_POOL_NAME_LEN);
-		timer_pool->name[ODP_TIMER_POOL_NAME_LEN] = 0;
-	}
+	if (name)
+		_odp_strcpy(timer_pool->name, name, ODP_TIMER_POOL_NAME_LEN);
 
 	timer_pool->param = *param;
 	timer_pool->param.res_ns = res_ns;

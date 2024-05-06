@@ -26,6 +26,7 @@
 #include <odp_packet_internal.h>
 #include <odp_packet_io_internal.h>
 #include <odp_pool_internal.h>
+#include <odp_string_internal.h>
 #include <protocols/eth.h>
 
 #include <rte_config.h>
@@ -1551,8 +1552,7 @@ static int dpdk_extra_stat_info(pktio_entry_t *pktio_entry,
 	num_stats = ret;
 
 	for (i = 0; i < num && i < num_stats; i++)
-		strncpy(info[i].name, xstats_names[i].name,
-			ODP_PKTIO_STATS_EXTRA_NAME_LEN - 1);
+		_odp_strcpy(info[i].name, xstats_names[i].name, ODP_PKTIO_STATS_EXTRA_NAME_LEN);
 
 	return num_stats;
 }
