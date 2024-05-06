@@ -6,6 +6,7 @@
 #include <odp/api/align.h>
 #include <odp/api/buffer.h>
 #include <odp/api/byteorder.h>
+#include <odp/api/cpu.h>
 #include <odp/api/hash.h>
 #include <odp/api/hints.h>
 #include <odp/api/packet.h>
