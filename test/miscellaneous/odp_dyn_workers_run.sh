@@ -12,6 +12,9 @@ TEST_DIR="${TEST_DIR:-$(dirname $0)}"
 BIN=odp_dyn_workers
 DEL=100000000
 
+export ODP0="ODP_PLATFORM_PARAMS=-m 256 --file-prefix odp0 --proc-type auto --no-pci"
+export ODP1="ODP_PLATFORM_PARAMS=-m 256 --file-prefix odp1 --proc-type auto --no-pci"
+
 if [ ${MAX_CPUS} -lt ${REQ_CPUS} ]; then
 	echo "Not enough CPUs (requested ${REQ_CPUS}, available ${MAX_CPUS}). Skipping test."
 	exit 77
