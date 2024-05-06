@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2015 Linaro Limited
+#
+
 ODP_IMPLEMENTATION_NAME="odp-dpdk"
 ODP_LIB_NAME="odp-dpdk"
 
