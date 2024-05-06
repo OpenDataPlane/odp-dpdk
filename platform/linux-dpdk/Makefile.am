@@ -425,7 +425,7 @@ __LIB__libodp_dpdk_la_LIBADD += $(PTHREAD_LIBS)
 __LIB__libodp_dpdk_la_LIBADD += $(TIMER_LIBS)
 __LIB__libodp_dpdk_la_LIBADD += $(ORT_LIBS)
 
-CHECK_GLOBALS_REGEX = " (odp_|_odp_|_deprecated_odp_|miniz_|mz_|tdefl_|tinfl_|mp_hdlr_init_odp_pool_ops)"
+CHECK_GLOBALS_REGEX = " (odp_|_odp_|_deprecated_odp_|miniz_|mz_|tdefl_|tinfl_|mp_hdlr_init_odp_pool_ops|__odr_asan)"
 
 TESTS_ENVIRONMENT = \
 	LIBTOOL="$(LIBTOOL)" \
