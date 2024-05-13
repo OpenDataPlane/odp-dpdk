@@ -792,7 +792,8 @@ static int cipher_aead_capability(odp_cipher_alg_t cipher,
 	if (idx < num_copy)
 		num_copy = idx;
 
-	memcpy(dst, src, num_copy * size);
+	if (dst)
+		memcpy(dst, src, num_copy * size);
 
 	return idx;
 }
@@ -838,7 +839,8 @@ static int cipher_capability(odp_cipher_alg_t cipher,
 	if (idx < num_copy)
 		num_copy = idx;
 
-	memcpy(dst, src, num_copy * size);
+	if (dst)
+		memcpy(dst, src, num_copy * size);
 
 	return idx;
 }
@@ -994,7 +996,8 @@ static int auth_aead_capability(odp_auth_alg_t auth,
 	if (idx < num_copy)
 		num_copy = idx;
 
-	memcpy(dst, src, num_copy * size);
+	if (dst)
+		memcpy(dst, src, num_copy * size);
 
 	return idx;
 }
@@ -1082,7 +1085,8 @@ static int auth_capability(odp_auth_alg_t auth,
 	if (idx < num_copy)
 		num_copy = idx;
 
-	memcpy(dst, src, num_copy * size);
+	if (dst)
+		memcpy(dst, src, num_copy * size);
 
 	return idx;
 }
