@@ -219,6 +219,8 @@ static int _odp_init_dpdk(const char *cmdline)
 		_ODP_ERR("Error reading PCI config\n");
 		return -1;
 	}
+	if (pci_cmd != NULL)
+		pci_str = pci_cmd;
 
 	/* Read any additional EAL command string from config */
 	ealcmdlen = read_eal_cmdstr(&eal_cmd);
@@ -228,14 +230,11 @@ static int _odp_init_dpdk(const char *cmdline)
 			free(pci_cmd);
 		return -1;
 	}
-	cmdlen = snprintf(NULL, 0, "odpdpdk --legacy-mem -m %" PRIu32 " %s ", mem_prealloc,
-			  cmdline) + pcicmdlen + ealcmdlen;
-
-	if (pci_cmd != NULL)
-		pci_str = pci_cmd;
-
 	if (eal_cmd != NULL)
 		eal_str = eal_cmd;
+
+	cmdlen = snprintf(NULL, 0, "odpdpdk --legacy-mem -m %" PRIu32 " %s %s %s",
+			  mem_prealloc, cmdline, pci_str, eal_str);
 
 	char full_cmdline[cmdlen];
 
