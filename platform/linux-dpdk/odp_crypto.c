@@ -754,7 +754,7 @@ static int cipher_aead_capability(odp_cipher_alg_t cipher,
 				  odp_crypto_cipher_capability_t dst[],
 				  int num_copy)
 {
-	odp_crypto_cipher_capability_t src[num_copy];
+	odp_crypto_cipher_capability_t src[_ODP_MAX(num_copy, 1)];
 	int idx = 0, rc = 0;
 	int size = sizeof(odp_crypto_cipher_capability_t);
 
@@ -802,7 +802,7 @@ static int cipher_capability(odp_cipher_alg_t cipher,
 			     odp_crypto_cipher_capability_t dst[],
 			     int num_copy)
 {
-	odp_crypto_cipher_capability_t src[num_copy];
+	odp_crypto_cipher_capability_t src[_ODP_MAX(num_copy, 1)];
 	int idx = 0, rc = 0;
 	int size = sizeof(odp_crypto_cipher_capability_t);
 	uint8_t cdev_id, cdev_count;
@@ -956,7 +956,7 @@ static int auth_aead_capability(odp_auth_alg_t auth,
 				odp_crypto_auth_capability_t dst[],
 				int num_copy)
 {
-	odp_crypto_auth_capability_t src[num_copy];
+	odp_crypto_auth_capability_t src[_ODP_MAX(num_copy, 1)];
 	int idx = 0, rc = 0;
 	int size = sizeof(odp_crypto_auth_capability_t);
 
@@ -1006,7 +1006,7 @@ static int auth_capability(odp_auth_alg_t auth,
 			   odp_crypto_auth_capability_t dst[],
 			   int num_copy)
 {
-	odp_crypto_auth_capability_t src[num_copy];
+	odp_crypto_auth_capability_t src[_ODP_MAX(num_copy, 1)];
 	int idx = 0, rc = 0;
 	int size = sizeof(odp_crypto_auth_capability_t);
 	uint8_t cdev_id, cdev_count;
