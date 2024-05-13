@@ -263,7 +263,8 @@ int odp_pool_capability(odp_pool_capability_t *capa)
 	/* Buffer pools */
 	capa->buf.max_pools = max_pools;
 	capa->buf.max_align = CONFIG_BUFFER_ALIGN_MAX;
-	capa->buf.max_size  = _ODP_ROUNDDOWN_POWER2(CONFIG_PACKET_SEG_SIZE, BUFFER_ALIGN_DEFAULT);
+	capa->buf.max_size  = _ODP_ROUNDDOWN_POWER2(CONFIG_PACKET_SEG_SIZE, BUFFER_ALIGN_DEFAULT) -
+				_ODP_EV_ENDMARK_SIZE;
 	capa->buf.max_num   = CONFIG_POOL_MAX_NUM;
 	capa->buf.max_uarea_size   = MAX_UAREA_SIZE;
 	capa->buf.uarea_persistence = true;
@@ -274,8 +275,8 @@ int odp_pool_capability(odp_pool_capability_t *capa)
 	/* Packet pools */
 	capa->pkt.max_align        = CONFIG_BUFFER_ALIGN_MIN;
 	capa->pkt.max_pools        = max_pools;
-	capa->pkt.max_len          = CONFIG_PACKET_MAX_SEG_LEN;
-	capa->pkt.max_num	   = _odp_pool_glb->config.pkt_max_num;
+	capa->pkt.max_len          = CONFIG_PACKET_MAX_SEG_LEN - _ODP_EV_ENDMARK_SIZE;
+	capa->pkt.max_num          = _odp_pool_glb->config.pkt_max_num;
 	capa->pkt.min_headroom     = RTE_PKTMBUF_HEADROOM;
 	capa->pkt.max_headroom     = RTE_PKTMBUF_HEADROOM;
 	capa->pkt.min_tailroom     = CONFIG_PACKET_TAILROOM;
@@ -656,7 +657,6 @@ static void init_obj_priv_data(struct rte_mempool *mp ODP_UNUSED, void *arg, voi
 		_odp_event_endmark_set(_odp_event_from_mbuf(mb));
 	}
 }
-
 
 odp_pool_t _odp_pool_create(const char *name, const odp_pool_param_t *params,
 			    odp_pool_type_t type_2)
