@@ -1738,9 +1738,11 @@ static void crypto_fill_sym_param(const crypto_session_entry_t *session,
 
 	_ODP_ASSERT(cipher_iv_len == 0 || param->cipher_iv_ptr != NULL);
 	_ODP_ASSERT(auth_iv_len == 0 || param->auth_iv_ptr != NULL);
-	iv_ptr = rte_crypto_op_ctod_offset(op, uint8_t *, IV_OFFSET);
-	memcpy(iv_ptr, param->cipher_iv_ptr, cipher_iv_len);
 
+	if (cipher_iv_len > 0) {
+		iv_ptr = rte_crypto_op_ctod_offset(op, uint8_t *, IV_OFFSET);
+		memcpy(iv_ptr, param->cipher_iv_ptr, cipher_iv_len);
+	}
 	if (odp_unlikely(auth_iv_len > 0)) {
 		iv_ptr = rte_crypto_op_ctod_offset(op, uint8_t *, IV_OFFSET + MAX_IV_LENGTH);
 		memcpy(iv_ptr, param->auth_iv_ptr, auth_iv_len);
