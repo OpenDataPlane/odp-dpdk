@@ -156,7 +156,7 @@ noinst_HEADERS = \
 		  ${top_srcdir}/platform/linux-generic/include/odp_pcapng.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_pkt_queue_internal.h \
 		  include/odp_pool_internal.h \
-		  include/odp_posix_extensions.h \
+		  ${top_srcdir}/platform/linux-generic/include/odp_posix_extensions.h \
 		  include/odp_queue_basic_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_queue_if.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_queue_lf.h \
@@ -184,13 +184,13 @@ noinst_HEADERS = \
 		  ${top_srcdir}/platform/linux-generic/include/odp_traffic_mngr_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_types_internal.h \
 		  include/odp_event_vector_internal.h \
-		  include/protocols/eth.h \
-		  include/protocols/ip.h \
-		  include/protocols/ipsec.h \
-		  include/protocols/sctp.h \
-		  include/protocols/tcp.h \
-		  include/protocols/thash.h \
-		  include/protocols/udp.h \
+		  ${top_srcdir}/platform/linux-generic/include/protocols/eth.h \
+		  ${top_srcdir}/platform/linux-generic/include/protocols/ip.h \
+		  ${top_srcdir}/platform/linux-generic/include/protocols/ipsec.h \
+		  ${top_srcdir}/platform/linux-generic/include/protocols/sctp.h \
+		  ${top_srcdir}/platform/linux-generic/include/protocols/tcp.h \
+		  ${top_srcdir}/platform/linux-generic/include/protocols/thash.h \
+		  ${top_srcdir}/platform/linux-generic/include/protocols/udp.h \
 		  Makefile.inc
 
 BUILT_SOURCES = \
