@@ -127,7 +127,7 @@ typedef struct timer_pool_s {
 	} free_timer;
 
 	odp_timer_pool_param_t param;
-	char name[ODP_TIMER_POOL_NAME_LEN + 1];
+	char name[ODP_TIMER_POOL_NAME_LEN];
 	int used;
 	odp_ticketlock_t lock;
 	uint32_t cur_timers;
