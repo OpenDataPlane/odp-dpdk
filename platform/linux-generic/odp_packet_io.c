@@ -1,8 +1,6 @@
-/* Copyright (c) 2013-2018, Linaro Limited
- * Copyright (c) 2019-2023, Nokia
- * All rights reserved.
- *
- * SPDX-License-Identifier:     BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2013-2018 Linaro Limited
+ * Copyright (c) 2019-2023 Nokia
  */
 
 #include <odp_posix_extensions.h>
@@ -31,6 +29,7 @@
 #include <odp_libconfig_internal.h>
 #include <odp_packet_internal.h>
 #include <odp_packet_io_internal.h>
+#include <odp_string_internal.h>
 #include <odp_pcapng.h>
 #include <odp_queue_if.h>
 #include <odp_schedule_if.h>
@@ -229,8 +228,7 @@ static const char *strip_pktio_type(const char *name, char *type_out)
 		int type_len = if_name - name;
 		char pktio_type[type_len + 1];
 
-		strncpy(pktio_type, name, type_len);
-		pktio_type[type_len] = '\0';
+		_odp_strcpy(pktio_type, name, type_len + 1);
 
 		/* Remove colon */
 		if_name++;
@@ -301,7 +299,7 @@ static odp_pktio_t setup_pktio_entry(const char *name, odp_pool_t pool,
 	uint16_t pktin_frame_offset = pktio_global->config.pktin_frame_offset;
 	int ret = -1;
 
-	if (strlen(name) >= PKTIO_NAME_LEN - 1) {
+	if (strlen(name) >= PKTIO_NAME_LEN) {
 		/* ioctl names limitation */
 		_ODP_ERR("pktio name %s is too long (max: %d chars)\n", name, PKTIO_NAME_LEN - 1);
 		return ODP_PKTIO_INVALID;

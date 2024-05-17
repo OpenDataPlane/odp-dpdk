@@ -1,7 +1,5 @@
-/* Copyright (c) 2021-2023, Nokia
- * All rights reserved.
- *
- * SPDX-License-Identifier:     BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2021-2023 Nokia
  */
 
 #include <odp/api/dma.h>
@@ -23,6 +21,7 @@
 #include <odp_init_internal.h>
 #include <odp_event_internal.h>
 #include <odp_pool_internal.h>
+#include <odp_string_internal.h>
 
 #include <string.h>
 #include <inttypes.h>
@@ -263,10 +262,8 @@ odp_dma_t odp_dma_create(const char *name, const odp_dma_param_t *param)
 
 	session->name[0] = 0;
 
-	if (name) {
-		strncpy(session->name, name, ODP_DMA_NAME_LEN - 1);
-		session->name[ODP_DMA_NAME_LEN - 1] = 0;
-	}
+	if (name)
+		_odp_strcpy(session->name, name, ODP_DMA_NAME_LEN);
 
 	session->dma_param = *param;
 

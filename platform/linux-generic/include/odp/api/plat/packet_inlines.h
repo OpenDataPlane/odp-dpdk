@@ -1,8 +1,6 @@
-/* Copyright (c) 2017-2018, Linaro Limited
- * Copyright (c) 2019-2022, Nokia
- * All rights reserved.
- *
- * SPDX-License-Identifier: BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2017-2018 Linaro Limited
+ * Copyright (c) 2019-2022 Nokia
  */
 
 /**
@@ -14,6 +12,7 @@
 #ifndef _ODP_PLAT_PACKET_INLINES_H_
 #define _ODP_PLAT_PACKET_INLINES_H_
 
+#include <odp/api/cpu.h>
 #include <odp/api/event.h>
 #include <odp/api/hints.h>
 #include <odp/api/packet_types.h>

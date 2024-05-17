@@ -1,9 +1,6 @@
-/* Copyright (c) 2017, ARM Limited. All rights reserved.
- *
- * Copyright (c) 2017-2018, Linaro Limited
- * All rights reserved.
- *
- * SPDX-License-Identifier: BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2017 ARM Limited
+ * Copyright (c) 2017-2018 Linaro Limited
  */
 
 #include <odp/api/align.h>
@@ -35,6 +32,7 @@
 #include <odp_macros_internal.h>
 #include <odp_packet_io_internal.h>
 #include <odp_timer_internal.h>
+#include <odp_string_internal.h>
 
 #include <limits.h>
 #include <stdbool.h>
@@ -1468,7 +1466,7 @@ static odp_schedule_group_t schedule_group_create(const char *name,
 	if (sg == NULL)
 		goto shm_pool_alloc_failed;
 
-	strncpy(sg->name, name ? name : "", ODP_SCHED_GROUP_NAME_LEN - 1);
+	_odp_strcpy(sg->name, name ? name : "", ODP_SCHED_GROUP_NAME_LEN);
 	global->sg_vec[sgi] = sg;
 	memset(sg->thr_actual, 0, sizeof(sg->thr_actual));
 	sg->thr_wanted = bitset_null();

@@ -1,8 +1,6 @@
-/* Copyright (c) 2014-2018, Linaro Limited
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2014-2018 Linaro Limited
  * Copyright (c) 2021-2022 Nokia
- * All rights reserved.
- *
- * SPDX-License-Identifier:	 BSD-3-Clause
  */
 
 #include <malloc.h>
@@ -55,7 +53,7 @@ static void thread_init(void)
 
 	global_shm = odp_shm_lookup(GLOBAL_SHM_NAME);
 	global_mem = odp_shm_addr(global_shm);
-	CU_ASSERT_PTR_NOT_NULL(global_mem);
+	CU_ASSERT(global_mem != NULL);
 }
 
 static void test_atomic_inc_32(void)

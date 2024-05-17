@@ -1,7 +1,5 @@
-/* Copyright (c) 2020-2023, Nokia
- * All rights reserved.
- *
- * SPDX-License-Identifier:     BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2020-2024 Nokia
  */
 
 /**
@@ -38,8 +36,8 @@
 
 #define MAX_WORKERS  (MAX_THREADS - 1)
 
-/* At least one control and two worker threads */
-ODP_STATIC_ASSERT(MAX_WORKERS >= 2, "Too few threads");
+/* At least one control and one worker thread */
+ODP_STATIC_ASSERT(MAX_WORKERS >= 1, "Too few threads");
 
 /* Maximum number of packet IO interfaces */
 #define MAX_PKTIOS        16
@@ -57,16 +55,23 @@ ODP_STATIC_ASSERT(MAX_WORKERS >= 2, "Too few threads");
 /* Max retries to generate random data */
 #define MAX_RAND_RETRIES  1000
 
-/* Used don't free */
+/* Use don't free */
 #define TX_MODE_DF        0
 /* Use static references */
 #define TX_MODE_REF       1
+/* Use packet copy */
+#define TX_MODE_COPY      2
 
 /* Minimum number of packets to receive in CI test */
 #define MIN_RX_PACKETS_CI 800
 
 /* Identifier for payload-timestamped packets */
 #define TS_MAGIC 0xff88ee99ddaaccbb
+
+enum {
+	L4_PROTO_UDP = 0,
+	L4_PROTO_TCP
+};
 
 ODP_STATIC_ASSERT(MAX_PKTIOS <= UINT8_MAX, "Interface index must fit into uint8_t\n");
 
@@ -91,11 +96,12 @@ typedef struct test_options_t {
 	uint32_t num_vlan;
 	uint32_t ipv4_src;
 	uint32_t ipv4_dst;
-	uint16_t udp_src;
-	uint16_t udp_dst;
+	uint16_t src_port;
+	uint16_t dst_port;
 	uint32_t wait_sec;
 	uint32_t wait_start_sec;
 	uint32_t mtu;
+	uint8_t l4_proto;
 	int tx_mode;
 	odp_bool_t promisc_mode;
 	odp_bool_t calc_latency;
@@ -108,8 +114,8 @@ typedef struct test_options_t {
 	} vlan[MAX_VLANS];
 
 	struct {
-		uint32_t udp_src;
-		uint32_t udp_dst;
+		uint32_t src_port;
+		uint32_t dst_port;
 	} c_mode;
 
 	char     pktio_name[MAX_PKTIOS][MAX_PKTIO_NAME + 1];
@@ -252,15 +258,18 @@ static void print_usage(void)
 	       "                              num_tx * burst_size * bursts * (10^9 / gap)\n"
 	       "  -s, --ipv4_src            IPv4 source address. Default: 192.168.0.1\n"
 	       "  -d, --ipv4_dst            IPv4 destination address. Default: 192.168.0.2\n"
-	       "  -o, --udp_src             UDP source port. Default: 10000\n"
-	       "  -p, --udp_dst             UDP destination port. Default: 20000\n"
+	       "  -o, --src_port            UDP/TCP source port. Default: 10000\n"
+	       "  -p, --dst_port            UDP/TCP destination port. Default: 20000\n"
+	       "  -N, --proto               L4 protocol. Default: 0\n"
+	       "                              0: UDP\n"
+	       "                              1: TCP\n"
 	       "  -P, --promisc_mode        Enable promiscuous mode.\n"
 	       "  -a, --latency             Calculate latency. Cannot be used with packet\n"
 	       "                            references (see \"--tx_mode\").\n"
-	       "  -c, --c_mode <counts>     Counter mode for incrementing UDP port numbers.\n"
+	       "  -c, --c_mode <counts>     Counter mode for incrementing UDP/TCP port numbers.\n"
 	       "                            Specify the number of port numbers used starting from\n"
-	       "                            udp_src/udp_dst. Comma-separated (no spaces) list of\n"
-	       "                            count values: <udp_src count>,<udp_dst count>\n"
+	       "                            src_port/dst_port. Comma-separated (no spaces) list of\n"
+	       "                            count values: <src_port count>,<dst_port count>\n"
 	       "                            Default value: 0,0\n"
 	       "  -C, --no_udp_checksum     Do not calculate UDP checksum. Instead, set it to\n"
 	       "                            zero in every packet.\n"
@@ -354,7 +363,7 @@ static int init_bins(test_global_t *global)
 
 static int parse_options(int argc, char *argv[], test_global_t *global)
 {
-	int opt, i, len, str_len, long_index, udp_port;
+	int opt, i, len, str_len, long_index, port;
 	unsigned long int count;
 	uint32_t min_packets, num_tx_pkt, num_tx_alloc, pkt_len, val, bins;
 	char *name, *str, *end;
@@ -368,6 +377,7 @@ static int parse_options(int argc, char *argv[], test_global_t *global)
 		{"num_rx",      required_argument, NULL, 'r'},
 		{"num_tx",      required_argument, NULL, 't'},
 		{"num_pkt",     required_argument, NULL, 'n'},
+		{"proto",       required_argument, NULL, 'N'},
 		{"len",         required_argument, NULL, 'l'},
 		{"len_range",   required_argument, NULL, 'L'},
 		{"direct_rx",   required_argument, NULL, 'D'},
@@ -378,8 +388,8 @@ static int parse_options(int argc, char *argv[], test_global_t *global)
 		{"vlan",        required_argument, NULL, 'v'},
 		{"ipv4_src",    required_argument, NULL, 's'},
 		{"ipv4_dst",    required_argument, NULL, 'd'},
-		{"udp_src",     required_argument, NULL, 'o'},
-		{"udp_dst",     required_argument, NULL, 'p'},
+		{"src_port",    required_argument, NULL, 'o'},
+		{"dst_port",    required_argument, NULL, 'p'},
 		{"promisc_mode", no_argument,      NULL, 'P'},
 		{"latency",     no_argument,       NULL, 'a'},
 		{"c_mode",      required_argument, NULL, 'c'},
@@ -394,7 +404,7 @@ static int parse_options(int argc, char *argv[], test_global_t *global)
 		{NULL, 0, NULL, 0}
 	};
 
-	static const char *shortopts = "+i:e:r:t:n:l:L:D:m:M:b:x:g:v:s:d:o:p:c:CAq:u:w:W:Pah";
+	static const char *shortopts = "+i:e:r:t:n:N:l:L:D:m:M:b:x:g:v:s:d:o:p:c:CAq:u:w:W:Pah";
 
 	test_options->num_pktio  = 0;
 	test_options->num_rx     = 1;
@@ -412,10 +422,10 @@ static int parse_options(int argc, char *argv[], test_global_t *global)
 	test_options->calc_latency = 0;
 	test_options->calc_cs    = 1;
 	test_options->fill_pl    = 1;
-	strncpy(test_options->ipv4_src_s, "192.168.0.1",
-		sizeof(test_options->ipv4_src_s) - 1);
-	strncpy(test_options->ipv4_dst_s, "192.168.0.2",
-		sizeof(test_options->ipv4_dst_s) - 1);
+	odph_strcpy(test_options->ipv4_src_s, "192.168.0.1",
+		    sizeof(test_options->ipv4_src_s));
+	odph_strcpy(test_options->ipv4_dst_s, "192.168.0.2",
+		    sizeof(test_options->ipv4_dst_s));
 	if (odph_ipv4_addr_parse(&test_options->ipv4_src, test_options->ipv4_src_s)) {
 		ODPH_ERR("Address parse failed\n");
 		return -1;
@@ -424,15 +434,16 @@ static int parse_options(int argc, char *argv[], test_global_t *global)
 		ODPH_ERR("Address parse failed\n");
 		return -1;
 	}
-	test_options->udp_src = 10000;
-	test_options->udp_dst = 20000;
-	test_options->c_mode.udp_src = 0;
-	test_options->c_mode.udp_dst = 0;
+	test_options->src_port = 10000;
+	test_options->dst_port = 20000;
+	test_options->c_mode.src_port = 0;
+	test_options->c_mode.dst_port = 0;
 	test_options->quit = 0;
 	test_options->update_msec = 0;
 	test_options->wait_sec = 0;
 	test_options->wait_start_sec = 0;
 	test_options->mtu = 0;
+	test_options->l4_proto = L4_PROTO_UDP;
 
 	for (i = 0; i < MAX_PKTIOS; i++) {
 		memcpy(global->pktio[i].eth_dst.addr, default_eth_dst, 6);
@@ -504,22 +515,22 @@ static int parse_options(int argc, char *argv[], test_global_t *global)
 			}
 			break;
 		case 'o':
-			udp_port = atoi(optarg);
-			if (udp_port < 0 || udp_port > UINT16_MAX) {
-				ODPH_ERR("Error: Bad UDP source port: %d\n", udp_port);
+			port = atoi(optarg);
+			if (port < 0 || port > UINT16_MAX) {
+				ODPH_ERR("Error: Bad source port: %d\n", port);
 				ret = -1;
 				break;
 			}
-			test_options->udp_src = udp_port;
+			test_options->src_port = port;
 			break;
 		case 'p':
-			udp_port = atoi(optarg);
-			if (udp_port < 0 || udp_port > UINT16_MAX) {
-				ODPH_ERR("Error: Bad UDP destination port: %d\n", udp_port);
+			port = atoi(optarg);
+			if (port < 0 || port > UINT16_MAX) {
+				ODPH_ERR("Error: Bad destination port: %d\n", port);
 				ret = -1;
 				break;
 			}
-			test_options->udp_dst = udp_port;
+			test_options->dst_port = port;
 			break;
 		case 'P':
 			test_options->promisc_mode = 1;
@@ -535,6 +546,9 @@ static int parse_options(int argc, char *argv[], test_global_t *global)
 			break;
 		case 'n':
 			test_options->num_pkt = atoi(optarg);
+			break;
+		case 'N':
+			test_options->l4_proto = atoi(optarg);
 			break;
 		case 'l':
 			test_options->pkt_len = atoi(optarg);
@@ -581,8 +595,8 @@ static int parse_options(int argc, char *argv[], test_global_t *global)
 				ODPH_ERR("Error: Bad IPv4 source address: %s\n", optarg);
 				ret = -1;
 			}
-			strncpy(test_options->ipv4_src_s, optarg,
-				sizeof(test_options->ipv4_src_s) - 1);
+			odph_strcpy(test_options->ipv4_src_s, optarg,
+				    sizeof(test_options->ipv4_src_s));
 			break;
 		case 'd':
 			if (odph_ipv4_addr_parse(&test_options->ipv4_dst,
@@ -590,16 +604,16 @@ static int parse_options(int argc, char *argv[], test_global_t *global)
 				ODPH_ERR("Error: Bad IPv4 destination address: %s\n", optarg);
 				ret = -1;
 			}
-			strncpy(test_options->ipv4_dst_s, optarg,
-				sizeof(test_options->ipv4_dst_s) - 1);
+			odph_strcpy(test_options->ipv4_dst_s, optarg,
+				    sizeof(test_options->ipv4_dst_s));
 			break;
 		case 'c':
 			count = strtoul(optarg, &end, 0);
-			test_options->c_mode.udp_src = count;
+			test_options->c_mode.src_port = count;
 
 			end++;
 			count = strtoul(end, NULL, 0);
-			test_options->c_mode.udp_dst = count;
+			test_options->c_mode.dst_port = count;
 			break;
 		case 'C':
 			test_options->calc_cs = 0;
@@ -637,8 +651,8 @@ static int parse_options(int argc, char *argv[], test_global_t *global)
 		return -1;
 	}
 
-	if (test_options->num_rx < 1 || test_options->num_tx < 1) {
-		ODPH_ERR("Error: At least one rx and tx thread needed.\n");
+	if (test_options->num_rx < 1 && test_options->num_tx < 1) {
+		ODPH_ERR("Error: At least one rx or tx thread needed.\n");
 		return -1;
 	}
 
@@ -684,6 +698,10 @@ static int parse_options(int argc, char *argv[], test_global_t *global)
 		ODPH_ERR("Error: Latency test is not supported with packet references (--tx_mode 1)\n");
 		return -1;
 	}
+	if (test_options->calc_latency && (test_options->num_rx < 1 || test_options->num_tx < 1)) {
+		ODPH_ERR("Error: Latency test requires both rx and tx threads\n");
+		return -1;
+	}
 
 	if (test_options->gap_nsec) {
 		double gap_hz = 1000000000.0 / test_options->gap_nsec;
@@ -702,17 +720,25 @@ static int parse_options(int argc, char *argv[], test_global_t *global)
 			ODPH_ERR("\nWARNING: Not enough packets for every packet length bin.\n\n");
 	}
 
-	if (test_options->c_mode.udp_dst &&
-	    num_tx_pkt % test_options->c_mode.udp_dst)
-		ODPH_ERR("\nWARNING: Transmit packet count is not evenly divisible by UDP destination port count.\n\n");
+	if (test_options->c_mode.dst_port && num_tx_pkt % test_options->c_mode.dst_port)
+		ODPH_ERR("\nWARNING: Transmit packet count is not evenly divisible by destination port count.\n\n");
 
-	if (test_options->c_mode.udp_src &&
-	    num_tx_pkt % test_options->c_mode.udp_src)
-		ODPH_ERR("\nWARNING: Transmit packet count is not evenly divisible by UDP source port count.\n\n");
+	if (test_options->c_mode.src_port && num_tx_pkt % test_options->c_mode.src_port)
+		ODPH_ERR("\nWARNING: Transmit packet count is not evenly divisible by source port count.\n\n");
 
-	test_options->hdr_len = ODPH_ETHHDR_LEN +
-				(test_options->num_vlan * ODPH_VLANHDR_LEN) +
-				ODPH_IPV4HDR_LEN + ODPH_UDPHDR_LEN;
+	if (test_options->l4_proto != L4_PROTO_TCP && test_options->l4_proto != L4_PROTO_UDP) {
+		ODPH_ERR("Error: Invalid L4 protocol: %" PRIu8 "\n", test_options->l4_proto);
+		return -1;
+	}
+	if (test_options->l4_proto == L4_PROTO_TCP && test_options->tx_mode != TX_MODE_COPY) {
+		ODPH_ERR("Error: TCP protocol supported only with copy transmit mode\n");
+		return -1;
+	}
+
+	test_options->hdr_len = ODPH_ETHHDR_LEN + (test_options->num_vlan * ODPH_VLANHDR_LEN) +
+				ODPH_IPV4HDR_LEN;
+	test_options->hdr_len += test_options->l4_proto == L4_PROTO_UDP ?
+					ODPH_UDPHDR_LEN : ODPH_TCPHDR_LEN;
 
 	pkt_len = test_options->use_rand_pkt_len ?
 			test_options->rand_pkt_len_min : test_options->pkt_len;
@@ -784,8 +810,6 @@ static int open_pktios(test_global_t *global)
 	uint32_t num_pkt = test_options->num_pkt;
 	uint32_t pkt_len = test_options->use_rand_pkt_len ?
 				test_options->rand_pkt_len_max : test_options->pkt_len;
-	odp_pktout_queue_t pktout[num_tx];
-	odp_pktin_queue_t pktin[num_rx];
 
 	printf("\nODP packet generator\n");
 	printf("  quit test after     %" PRIu64 " rounds\n",
@@ -822,10 +846,12 @@ static int open_pktios(test_global_t *global)
 	}
 	printf("  IPv4 source         %s\n", test_options->ipv4_src_s);
 	printf("  IPv4 destination    %s\n", test_options->ipv4_dst_s);
-	printf("  UDP source          %u\n", test_options->udp_src);
-	printf("  UDP destination     %u\n", test_options->udp_dst);
-	printf("  UDP src count       %u\n", test_options->c_mode.udp_src);
-	printf("  UDP dst count       %u\n", test_options->c_mode.udp_dst);
+	printf("  L4 protocol:        %s\n",
+	       test_options->l4_proto == L4_PROTO_UDP ? "UDP" : "TCP");
+	printf("  source port         %u\n", test_options->src_port);
+	printf("  destination port    %u\n", test_options->dst_port);
+	printf("  src port count      %u\n", test_options->c_mode.src_port);
+	printf("  dst port count      %u\n", test_options->c_mode.dst_port);
 	printf("  num pktio           %u\n", num_pktio);
 
 	printf("  interfaces names:   ");
@@ -891,12 +917,11 @@ static int open_pktios(test_global_t *global)
 
 	odp_pktio_param_init(&pktio_param);
 
-	if (test_options->direct_rx)
-		pktio_param.in_mode = ODP_PKTIN_MODE_DIRECT;
-	else
-		pktio_param.in_mode = ODP_PKTIN_MODE_SCHED;
+	pktio_param.in_mode = num_rx ? (test_options->direct_rx ?
+					ODP_PKTIN_MODE_DIRECT : ODP_PKTIN_MODE_SCHED) :
+					ODP_PKTIN_MODE_DISABLED;
 
-	pktio_param.out_mode = ODP_PKTOUT_MODE_DIRECT;
+	pktio_param.out_mode = num_tx ? ODP_PKTOUT_MODE_DIRECT : ODP_PKTOUT_MODE_DISABLED;
 
 	for (i = 0; i < num_pktio; i++)
 		global->pktio[i].pktio = ODP_PKTIO_INVALID;
@@ -1034,15 +1059,21 @@ static int open_pktios(test_global_t *global)
 			return -1;
 		}
 
-		if (odp_pktout_queue(pktio, pktout, num_tx) != num_tx) {
-			ODPH_ERR("Error (%s): Pktout queue request failed.\n", name);
-			return -1;
+		if (num_tx > 0) {
+			odp_pktout_queue_t pktout[MAX_THREADS];
+
+			if (odp_pktout_queue(pktio, pktout, num_tx) != num_tx) {
+				ODPH_ERR("Error (%s): Pktout queue request failed.\n", name);
+				return -1;
+			}
+
+			for (j = 0; j < num_tx; j++)
+				global->pktio[i].pktout[j] = pktout[j];
 		}
 
-		for (j = 0; j < num_tx; j++)
-			global->pktio[i].pktout[j] = pktout[j];
+		if (num_rx > 0 && test_options->direct_rx) {
+			odp_pktin_queue_t pktin[MAX_THREADS];
 
-		if (test_options->direct_rx) {
 			if (odp_pktin_queue(pktio, pktin, num_rx) != num_rx) {
 				ODPH_ERR("Error (%s): Pktin queue request failed.\n", name);
 				return -1;
@@ -1082,6 +1113,7 @@ static int print_link_info(odp_pktio_t pktio)
 
 	return 0;
 }
+
 static int start_pktios(test_global_t *global)
 {
 	uint32_t i;
@@ -1386,15 +1418,16 @@ static int init_packets(test_global_t *global, int pktio,
 	uint8_t *u8;
 	odph_ethhdr_t *eth;
 	odph_ipv4hdr_t *ip;
-	odph_udphdr_t *udp;
 	uint16_t tpid;
 	test_options_t *test_options = &global->test_options;
+	const odp_bool_t use_tcp = test_options->l4_proto == L4_PROTO_TCP;
 	uint32_t num_vlan = test_options->num_vlan;
 	uint32_t hdr_len = test_options->hdr_len;
-	uint16_t udp_src = test_options->udp_src;
-	uint16_t udp_dst = test_options->udp_dst;
-	uint32_t udp_src_cnt = 0;
-	uint32_t udp_dst_cnt = 0;
+	uint16_t src_port = test_options->src_port;
+	uint16_t dst_port = test_options->dst_port;
+	uint32_t src_cnt = 0;
+	uint32_t dst_cnt = 0;
+	uint32_t tcp_seqnum = 0x1234;
 	odph_vlanhdr_t *vlan = NULL; /* Fixes bogus compiler warning */
 
 	if (num_vlan > MAX_VLANS)
@@ -1446,61 +1479,94 @@ static int init_packets(test_global_t *global, int pktio,
 		ip->tot_len = odp_cpu_to_be_16(pkt_len - l2_len);
 		ip->id = odp_cpu_to_be_16(seq + i);
 		ip->ttl = 64;
-		ip->proto = ODPH_IPPROTO_UDP;
+		ip->proto = use_tcp ? ODPH_IPPROTO_TCP : ODPH_IPPROTO_UDP;
 		ip->src_addr = odp_cpu_to_be_32(test_options->ipv4_src);
 		ip->dst_addr = odp_cpu_to_be_32(test_options->ipv4_dst);
 		ip->chksum = ~odp_chksum_ones_comp16(ip, ODPH_IPV4HDR_LEN);
 
-		/* UDP */
-		udp = (odph_udphdr_t *)((uint8_t *)data + l2_len +
-		      ODPH_IPV4HDR_LEN);
-		memset(udp, 0, ODPH_UDPHDR_LEN);
-		udp->src_port = odp_cpu_to_be_16(udp_src);
-		udp->dst_port = odp_cpu_to_be_16(udp_dst);
-		udp->length   = odp_cpu_to_be_16(payload_len + ODPH_UDPHDR_LEN);
-		udp->chksum   = 0;
+		u8 = ((uint8_t *)data + l2_len + ODPH_IPV4HDR_LEN);
+
+		if (use_tcp) {
+			odph_tcphdr_t *tcp = (odph_tcphdr_t *)u8;
+
+			memset(tcp, 0, ODPH_TCPHDR_LEN);
+			tcp->src_port = odp_cpu_to_be_16(src_port);
+			tcp->dst_port = odp_cpu_to_be_16(dst_port);
+			tcp->seq_no   = odp_cpu_to_be_32(tcp_seqnum);
+			tcp->ack_no   = odp_cpu_to_be_32(0x12345678);
+			tcp->window   = odp_cpu_to_be_16(0x4000);
+			tcp->hl       = 5;
+			tcp->ack      = 1;
+			tcp_seqnum   += payload_len;
+		} else {
+			odph_udphdr_t *udp = (odph_udphdr_t *)u8;
+
+			memset(udp, 0, ODPH_UDPHDR_LEN);
+			udp->src_port = odp_cpu_to_be_16(src_port);
+			udp->dst_port = odp_cpu_to_be_16(dst_port);
+			udp->length   = odp_cpu_to_be_16(payload_len + ODPH_UDPHDR_LEN);
+			udp->chksum   = 0;
+		}
 
 		u8  = data;
 		u8 += hdr_len;
 
 		if (test_options->fill_pl) {
-			/* Init UDP payload until the end of the first segment */
+			/* Init payload until the end of the first segment */
 			for (j = 0; j < seg_len - hdr_len; j++)
 				u8[j] = j;
 		}
 
-		/* Insert UDP checksum */
+		/* Insert checksum */
 		odp_packet_l3_offset_set(pkt, l2_len);
 		odp_packet_l4_offset_set(pkt, l2_len + ODPH_IPV4HDR_LEN);
 		odp_packet_has_eth_set(pkt, 1);
 		odp_packet_has_ipv4_set(pkt, 1);
-		odp_packet_has_udp_set(pkt, 1);
-
-		udp->chksum = !test_options->calc_latency && test_options->calc_cs ?
-			odph_ipv4_udp_chksum(pkt) : 0;
+		if (use_tcp) {
+			odp_packet_has_tcp_set(pkt, 1);
+			/* TCP checksum is always updated before TX */
+		} else {
+			odp_packet_has_udp_set(pkt, 1);
+			if (!test_options->calc_latency && test_options->calc_cs)
+				odph_udp_chksum_set(pkt);
+		}
 
 		/* Increment port numbers */
-		if (test_options->c_mode.udp_src) {
-			udp_src_cnt++;
-			if (udp_src_cnt < test_options->c_mode.udp_src) {
-				udp_src++;
+		if (test_options->c_mode.src_port) {
+			src_cnt++;
+			if (src_cnt < test_options->c_mode.src_port) {
+				src_port++;
 			} else {
-				udp_src = test_options->udp_src;
-				udp_src_cnt = 0;
+				src_port = test_options->src_port;
+				src_cnt = 0;
 			}
 		}
-		if (test_options->c_mode.udp_dst) {
-			udp_dst_cnt++;
-			if (udp_dst_cnt < test_options->c_mode.udp_dst) {
-				udp_dst++;
+		if (test_options->c_mode.dst_port) {
+			dst_cnt++;
+			if (dst_cnt < test_options->c_mode.dst_port) {
+				dst_port++;
 			} else {
-				udp_dst = test_options->udp_dst;
-				udp_dst_cnt = 0;
+				dst_port = test_options->dst_port;
+				dst_cnt = 0;
 			}
 		}
 	}
 
 	return 0;
+}
+
+static inline void update_tcp_hdr(odp_packet_t pkt, odp_packet_t base_pkt, uint32_t hdr_len)
+{
+	odph_tcphdr_t *tcp = odp_packet_l4_ptr(pkt, NULL);
+	odph_tcphdr_t *tcp_base = odp_packet_l4_ptr(base_pkt, NULL);
+	uint32_t prev_seqnum = odp_be_to_cpu_32(tcp_base->seq_no);
+
+	tcp->seq_no = odp_cpu_to_be_32(prev_seqnum + (odp_packet_len(pkt) - hdr_len));
+
+	/* Last used sequence number is stored in the base packet */
+	tcp_base->seq_no = tcp->seq_no;
+
+	odph_tcp_chksum_set(pkt);
 }
 
 static inline int update_rand_data(uint8_t *data, uint32_t data_len)
@@ -1528,13 +1594,11 @@ static inline int update_rand_data(uint8_t *data, uint32_t data_len)
 	return 0;
 }
 
-static inline void set_timestamp(odp_packet_t pkt, uint32_t ts_off, odp_bool_t calc_cs)
+static inline void set_timestamp(odp_packet_t pkt, uint32_t ts_off)
 {
 	const ts_data_t ts_data = { .magic = TS_MAGIC, .tx_ts = odp_time_global_ns() };
-	odph_udphdr_t *udp = odp_packet_l4_ptr(pkt, NULL);
 
 	(void)odp_packet_copy_from_mem(pkt, ts_off, sizeof(ts_data), &ts_data);
-	udp->chksum = calc_cs ? odph_ipv4_udp_chksum(pkt) : 0;
 }
 
 static int alloc_packets(odp_pool_t pool, odp_packet_t *pkt_tbl, uint32_t num,
@@ -1570,8 +1634,8 @@ static int alloc_packets(odp_pool_t pool, odp_packet_t *pkt_tbl, uint32_t num,
 
 static inline uint32_t form_burst(odp_packet_t out_pkt[], uint32_t burst_size, uint32_t num_bins,
 				  uint32_t burst, odp_packet_t *pkt_tbl, odp_pool_t pool,
-				  int tx_mode, uint32_t ts_off, odp_bool_t calc_cs,
-				  uint64_t *total_bytes)
+				  int tx_mode, odp_bool_t calc_latency, uint32_t hdr_len,
+				  odp_bool_t calc_udp_cs, uint64_t *total_bytes, uint8_t l4_proto)
 {
 	uint32_t i, idx;
 	odp_packet_t pkt;
@@ -1615,8 +1679,13 @@ static inline uint32_t form_burst(odp_packet_t out_pkt[], uint32_t burst_size, u
 			if (odp_unlikely(out_pkt[i] == ODP_PACKET_INVALID))
 				break;
 
-			if (ts_off)
-				set_timestamp(out_pkt[i], ts_off, calc_cs);
+			if (calc_latency)
+				set_timestamp(out_pkt[i], hdr_len);
+
+			if (l4_proto == L4_PROTO_TCP)
+				update_tcp_hdr(out_pkt[i], pkt, hdr_len);
+			else if (calc_latency && calc_udp_cs)
+				odph_udp_chksum_set(out_pkt[i]);
 		}
 
 		bytes += odp_packet_len(out_pkt[i]);
@@ -1675,16 +1744,19 @@ static int tx_thread(void *arg)
 	uint64_t tx_packets = 0;
 	uint64_t tx_drops = 0;
 	int ret = 0;
+	const uint32_t hdr_len = test_options->hdr_len;
 	const uint32_t burst_size = test_options->burst_size;
 	const uint32_t bursts = test_options->bursts;
 	const uint32_t num_tx = test_options->num_tx;
+	const uint8_t l4_proto = test_options->l4_proto;
 	const int tx_mode = test_options->tx_mode;
-	odp_bool_t calc_cs = test_options->calc_cs;
+	const odp_bool_t calc_cs = test_options->calc_cs;
+	const odp_bool_t calc_latency = test_options->calc_latency;
 	int num_pktio = test_options->num_pktio;
 	odp_pktout_queue_t pktout[num_pktio];
-	uint32_t ts_off = test_options->calc_latency ? test_options->hdr_len : 0;
 	uint32_t tot_packets = 0;
 	uint32_t num_bins = global->num_bins;
+
 	thr = odp_thread_id();
 	tx_thr = thread_arg->tx_thr;
 	global->stat[thr].thread_type = TX_THREAD;
@@ -1754,7 +1826,8 @@ static int tx_thread(void *arg)
 
 			for (j = 0; j < bursts; j++) {
 				num = form_burst(pkt, burst_size, num_bins, j, pkt_tbl, pool,
-						 tx_mode, ts_off, calc_cs, &total_bytes);
+						 tx_mode, calc_latency, hdr_len, calc_cs,
+						 &total_bytes, l4_proto);
 
 				if (odp_unlikely(num == 0)) {
 					ret = -1;
@@ -1777,7 +1850,6 @@ static int tx_thread(void *arg)
 
 				if (odp_unlikely(periodic_stat))
 					global->stat[thr].pktio[i].tx_packets += sent;
-
 			}
 		}
 	}
@@ -1884,16 +1956,19 @@ static void print_periodic_stat(test_global_t *global, uint64_t nsec)
 				num_tx[i] += global->stat[j].pktio[i].tx_packets;
 		}
 	}
+	if (global->test_options.num_tx) {
+		printf("  TX: %12.6fs", sec);
+		for (i = 0; i < num_pktio; i++)
+			printf(" %10" PRIu64 "", num_tx[i]);
+		printf("\n");
+	}
 
-	printf("  TX: %12.6fs", sec);
-	for (i = 0; i < num_pktio; i++)
-		printf(" %10" PRIu64 "", num_tx[i]);
-
-	printf("\n  RX: %12.6fs", sec);
-	for (i = 0; i < num_pktio; i++)
-		printf(" %10" PRIu64 "", num_rx[i]);
-
-	printf("\n");
+	if (global->test_options.num_rx) {
+		printf("  RX: %12.6fs", sec);
+		for (i = 0; i < num_pktio; i++)
+			printf(" %10" PRIu64 "", num_rx[i]);
+		printf("\n");
+	}
 }
 
 static void periodic_print_loop(test_global_t *global)
@@ -1948,7 +2023,7 @@ static void print_humanised_latency(double lat_nsec, double lat_min_nsec, double
 static int print_final_stat(test_global_t *global)
 {
 	int i, num_thr;
-	double rx_pkt_ave, rx_mbit_per_sec, tx_mbit_per_sec;
+	double rx_mbit_per_sec, tx_mbit_per_sec;
 	test_options_t *test_options = &global->test_options;
 	int num_rx = test_options->num_rx;
 	int num_tx = test_options->num_tx;
@@ -1965,6 +2040,7 @@ static int print_final_stat(test_global_t *global)
 	uint64_t tx_byte_sum = 0;
 	uint64_t tx_drop_sum = 0;
 	uint64_t tx_tmo_sum = 0;
+	double rx_pkt_ave = 0.0;
 	double rx_pkt_per_sec = 0.0;
 	double rx_byte_per_sec = 0.0;
 	double rx_pkt_len = 0.0;
@@ -2036,7 +2112,8 @@ static int print_final_stat(test_global_t *global)
 		}
 	}
 
-	rx_pkt_ave = (double)rx_pkt_sum / num_rx;
+	if (num_rx)
+		rx_pkt_ave = (double)rx_pkt_sum / num_rx;
 	rx_sec = rx_nsec_sum / 1000000000.0;
 	tx_sec = tx_nsec_sum / 1000000000.0;
 

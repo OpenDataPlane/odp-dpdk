@@ -1,9 +1,7 @@
-/* Copyright (c) 2014-2018, Linaro Limited
- * Copyright (c) 2020-2024, Nokia
- * Copyright (c) 2020, Marvell
- * All rights reserved.
- *
- * SPDX-License-Identifier:     BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2014-2018 Linaro Limited
+ * Copyright (c) 2020-2024 Nokia
+ * Copyright (c) 2020 Marvell
  */
 
 #include <odp_api.h>
@@ -1598,48 +1596,48 @@ static void test_defaults(uint8_t fill)
 
 	memset(&pktio_p, fill, sizeof(pktio_p));
 	odp_pktio_param_init(&pktio_p);
-	CU_ASSERT_EQUAL(pktio_p.in_mode, ODP_PKTIN_MODE_DIRECT);
-	CU_ASSERT_EQUAL(pktio_p.out_mode, ODP_PKTOUT_MODE_DIRECT);
+	CU_ASSERT(pktio_p.in_mode == ODP_PKTIN_MODE_DIRECT);
+	CU_ASSERT(pktio_p.out_mode == ODP_PKTOUT_MODE_DIRECT);
 
 	memset(&qp_in, fill, sizeof(qp_in));
 	odp_pktin_queue_param_init(&qp_in);
-	CU_ASSERT_EQUAL(qp_in.op_mode, ODP_PKTIO_OP_MT);
-	CU_ASSERT_EQUAL(qp_in.classifier_enable, 0);
-	CU_ASSERT_EQUAL(qp_in.hash_enable, 0);
-	CU_ASSERT_EQUAL(qp_in.hash_proto.all_bits, 0);
-	CU_ASSERT_EQUAL(qp_in.num_queues, 1);
-	CU_ASSERT_EQUAL(qp_in.queue_size[0], 0);
-	CU_ASSERT_EQUAL(qp_in.queue_param.enq_mode, ODP_QUEUE_OP_MT);
-	CU_ASSERT_EQUAL(qp_in.queue_param.sched.prio, odp_schedule_default_prio());
-	CU_ASSERT_EQUAL(qp_in.queue_param.sched.sync, ODP_SCHED_SYNC_PARALLEL);
-	CU_ASSERT_EQUAL(qp_in.queue_param.sched.group, ODP_SCHED_GROUP_ALL);
-	CU_ASSERT_EQUAL(qp_in.queue_param.sched.lock_count, 0);
-	CU_ASSERT_EQUAL(qp_in.queue_param.order, ODP_QUEUE_ORDER_KEEP);
-	CU_ASSERT_EQUAL(qp_in.queue_param.nonblocking, ODP_BLOCKING);
-	CU_ASSERT_EQUAL(qp_in.queue_param.context, NULL);
-	CU_ASSERT_EQUAL(qp_in.queue_param.context_len, 0);
-	CU_ASSERT_EQUAL(qp_in.queue_param_ovr, NULL);
-	CU_ASSERT_EQUAL(qp_in.vector.enable, false);
+	CU_ASSERT(qp_in.op_mode == ODP_PKTIO_OP_MT);
+	CU_ASSERT(qp_in.classifier_enable == 0);
+	CU_ASSERT(qp_in.hash_enable == 0);
+	CU_ASSERT(qp_in.hash_proto.all_bits == 0);
+	CU_ASSERT(qp_in.num_queues == 1);
+	CU_ASSERT(qp_in.queue_size[0] == 0);
+	CU_ASSERT(qp_in.queue_param.enq_mode == ODP_QUEUE_OP_MT);
+	CU_ASSERT(qp_in.queue_param.sched.prio == odp_schedule_default_prio());
+	CU_ASSERT(qp_in.queue_param.sched.sync == ODP_SCHED_SYNC_PARALLEL);
+	CU_ASSERT(qp_in.queue_param.sched.group == ODP_SCHED_GROUP_ALL);
+	CU_ASSERT(qp_in.queue_param.sched.lock_count == 0);
+	CU_ASSERT(qp_in.queue_param.order == ODP_QUEUE_ORDER_KEEP);
+	CU_ASSERT(qp_in.queue_param.nonblocking == ODP_BLOCKING);
+	CU_ASSERT(qp_in.queue_param.context == NULL);
+	CU_ASSERT(qp_in.queue_param.context_len == 0);
+	CU_ASSERT(qp_in.queue_param_ovr == NULL);
+	CU_ASSERT(qp_in.vector.enable == false);
 
 	memset(&qp_out, fill, sizeof(qp_out));
 	odp_pktout_queue_param_init(&qp_out);
-	CU_ASSERT_EQUAL(qp_out.op_mode, ODP_PKTIO_OP_MT);
-	CU_ASSERT_EQUAL(qp_out.num_queues, 1);
-	CU_ASSERT_EQUAL(qp_out.queue_size[0], 0);
+	CU_ASSERT(qp_out.op_mode == ODP_PKTIO_OP_MT);
+	CU_ASSERT(qp_out.num_queues == 1);
+	CU_ASSERT(qp_out.queue_size[0] == 0);
 
 	memset(&pktio_conf, fill, sizeof(pktio_conf));
 	odp_pktio_config_init(&pktio_conf);
-	CU_ASSERT_EQUAL(pktio_conf.pktin.all_bits, 0);
-	CU_ASSERT_EQUAL(pktio_conf.pktout.all_bits, 0);
-	CU_ASSERT_EQUAL(pktio_conf.parser.layer, ODP_PROTO_LAYER_ALL);
-	CU_ASSERT_EQUAL(pktio_conf.enable_loop, false);
-	CU_ASSERT_EQUAL(pktio_conf.inbound_ipsec, false);
-	CU_ASSERT_EQUAL(pktio_conf.outbound_ipsec, false);
-	CU_ASSERT_EQUAL(pktio_conf.enable_lso, false);
-	CU_ASSERT_EQUAL(pktio_conf.reassembly.en_ipv4, false);
-	CU_ASSERT_EQUAL(pktio_conf.reassembly.en_ipv6, false);
-	CU_ASSERT_EQUAL(pktio_conf.reassembly.max_wait_time, 0);
-	CU_ASSERT_EQUAL(pktio_conf.reassembly.max_num_frags, 2);
+	CU_ASSERT(pktio_conf.pktin.all_bits == 0);
+	CU_ASSERT(pktio_conf.pktout.all_bits == 0);
+	CU_ASSERT(pktio_conf.parser.layer == ODP_PROTO_LAYER_ALL);
+	CU_ASSERT(pktio_conf.enable_loop == false);
+	CU_ASSERT(pktio_conf.inbound_ipsec == false);
+	CU_ASSERT(pktio_conf.outbound_ipsec == false);
+	CU_ASSERT(pktio_conf.enable_lso == false);
+	CU_ASSERT(pktio_conf.reassembly.en_ipv4 == false);
+	CU_ASSERT(pktio_conf.reassembly.en_ipv6 == false);
+	CU_ASSERT(pktio_conf.reassembly.max_wait_time == 0);
+	CU_ASSERT(pktio_conf.reassembly.max_num_frags == 2);
 }
 
 static void pktio_test_default_values(void)
@@ -3661,7 +3659,8 @@ static void pktio_test_pktout_compl_event(bool use_plain_queue)
 			CU_ASSERT(odp_packet_tx_compl_user_ptr(tx_compl) ==
 				  (const void *)&pkt_seq[i]);
 
-			/* No user area or source pool for TX completion events */
+			/* No user area/flag or source pool for TX completion events */
+			odp_event_user_flag_set(ev, 1);
 			CU_ASSERT(odp_event_user_area(ev) == NULL);
 			CU_ASSERT(odp_event_user_area_and_flag(ev, &flag) == NULL);
 			CU_ASSERT(flag < 0);
@@ -3703,7 +3702,8 @@ static void pktio_test_pktout_compl_event(bool use_plain_queue)
 				}
 			}
 
-			/* No user area or source pool for TX completion events */
+			/* No user area/flag or source pool for TX completion events */
+			odp_event_user_flag_set(ev, 1);
 			CU_ASSERT(odp_event_user_area(ev) == NULL);
 			CU_ASSERT(odp_event_user_area_and_flag(ev, &flag) == NULL);
 			CU_ASSERT(flag < 0);
@@ -5095,7 +5095,7 @@ static void pktio_test_pktin_event_queue(odp_pktin_mode_t pktin_mode)
 	odp_pktin_queue_param_t in_queue_param;
 	odp_pktout_queue_param_t out_queue_param;
 	odp_pktout_queue_t pktout_queue;
-	odp_queue_t queue, from;
+	odp_queue_t queue, from = ODP_QUEUE_INVALID;
 	odp_pool_t buf_pool;
 	odp_pool_param_t pool_param;
 	odp_packet_t pkt_tbl[TX_BATCH_LEN];
@@ -5189,8 +5189,6 @@ static void pktio_test_pktin_event_queue(odp_pktin_mode_t pktin_mode)
 
 			if (ev == ODP_EVENT_INVALID)
 				break;
-
-			CU_ASSERT(from == queue);
 		} else {
 			ev = odp_queue_deq(queue);
 
@@ -5214,9 +5212,12 @@ static void pktio_test_pktin_event_queue(odp_pktin_mode_t pktin_mode)
 		if (odp_event_type(ev) == ODP_EVENT_PACKET) {
 			pkt = odp_packet_from_event(ev);
 
-			if (pktio_pkt_seq(pkt) != TEST_SEQ_INVALID)
+			if (pktio_pkt_seq(pkt) != TEST_SEQ_INVALID) {
 				num_pkt++;
 
+				if (pktin_mode == ODP_PKTIN_MODE_SCHED)
+					CU_ASSERT(from == queue);
+			}
 		} else if (odp_event_type(ev) == ODP_EVENT_BUFFER) {
 			num_buf++;
 		} else {

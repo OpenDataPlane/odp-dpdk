@@ -1,7 +1,5 @@
-/* Copyright (c) 2020-2022, Nokia
- * All rights reserved.
- *
- * SPDX-License-Identifier:     BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2020-2022 Nokia
  */
 
 #include <odp/api/align.h>
@@ -14,7 +12,7 @@
 #include <odp_debug_internal.h>
 #include <odp_event_vector_internal.h>
 #include <odp_pool_internal.h>
-#include <odp_print_internal.h>
+#include <odp_string_internal.h>
 
 #include <inttypes.h>
 #include <stdint.h>

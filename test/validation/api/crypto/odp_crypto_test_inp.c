@@ -1,8 +1,6 @@
-/* Copyright (c) 2014-2018, Linaro Limited
- * Copyright (c) 2021-2023, Nokia
- * All rights reserved.
- *
- * SPDX-License-Identifier:	BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2014-2018 Linaro Limited
+ * Copyright (c) 2021-2024 Nokia
  */
 
 #include <string.h>
@@ -34,18 +32,18 @@ static void test_defaults(uint8_t fill)
 	memset(&param, fill, sizeof(param));
 	odp_crypto_session_param_init(&param);
 
-	CU_ASSERT_EQUAL(param.op, ODP_CRYPTO_OP_ENCODE);
-	CU_ASSERT_EQUAL(param.op_type, ODP_CRYPTO_OP_TYPE_LEGACY);
-	CU_ASSERT_EQUAL(param.cipher_range_in_bits, false);
-	CU_ASSERT_EQUAL(param.auth_range_in_bits, false);
-	CU_ASSERT_EQUAL(param.auth_cipher_text, false);
-	CU_ASSERT_EQUAL(param.null_crypto_enable, false);
-	CU_ASSERT_EQUAL(param.op_mode, ODP_CRYPTO_SYNC);
-	CU_ASSERT_EQUAL(param.cipher_alg, ODP_CIPHER_ALG_NULL);
-	CU_ASSERT_EQUAL(param.cipher_iv_len, 0);
-	CU_ASSERT_EQUAL(param.auth_alg, ODP_AUTH_ALG_NULL);
-	CU_ASSERT_EQUAL(param.auth_iv_len, 0);
-	CU_ASSERT_EQUAL(param.auth_aad_len, 0);
+	CU_ASSERT(param.op == ODP_CRYPTO_OP_ENCODE);
+	CU_ASSERT(param.op_type == ODP_CRYPTO_OP_TYPE_LEGACY);
+	CU_ASSERT(param.cipher_range_in_bits == false);
+	CU_ASSERT(param.auth_range_in_bits == false);
+	CU_ASSERT(param.auth_cipher_text == false);
+	CU_ASSERT(param.null_crypto_enable == false);
+	CU_ASSERT(param.op_mode == ODP_CRYPTO_SYNC);
+	CU_ASSERT(param.cipher_alg == ODP_CIPHER_ALG_NULL);
+	CU_ASSERT(param.cipher_iv_len == 0);
+	CU_ASSERT(param.auth_alg == ODP_AUTH_ALG_NULL);
+	CU_ASSERT(param.auth_iv_len == 0);
+	CU_ASSERT(param.auth_aad_len == 0);
 }
 
 static void test_default_values(void)
@@ -190,8 +188,8 @@ static int session_create(crypto_session_t *session,
 	int rc;
 	odp_crypto_ses_create_err_t status;
 	odp_crypto_session_param_t ses_params;
-	uint8_t cipher_key_data[ref->cipher_key_length];
-	uint8_t auth_key_data[ref->auth_key_length];
+	uint8_t cipher_key_data[MAX_KEY_LEN];
+	uint8_t auth_key_data[MAX_KEY_LEN];
 	odp_crypto_key_t cipher_key = {
 		.data = cipher_key_data,
 		.length = ref->cipher_key_length
@@ -776,6 +774,10 @@ static odp_cipher_alg_t cipher_algs[] = {
 	ODP_CIPHER_ALG_SNOW3G_UEA2,
 	ODP_CIPHER_ALG_AES_EEA2,
 	ODP_CIPHER_ALG_ZUC_EEA3,
+	ODP_CIPHER_ALG_SNOW_V,
+	ODP_CIPHER_ALG_SM4_ECB,
+	ODP_CIPHER_ALG_SM4_CBC,
+	ODP_CIPHER_ALG_SM4_CTR,
 };
 
 /*
@@ -790,6 +792,10 @@ static odp_auth_alg_t auth_algs[] = {
 	ODP_AUTH_ALG_SHA256_HMAC,
 	ODP_AUTH_ALG_SHA384_HMAC,
 	ODP_AUTH_ALG_SHA512_HMAC,
+	ODP_AUTH_ALG_SHA3_224_HMAC,
+	ODP_AUTH_ALG_SHA3_256_HMAC,
+	ODP_AUTH_ALG_SHA3_384_HMAC,
+	ODP_AUTH_ALG_SHA3_512_HMAC,
 	ODP_AUTH_ALG_AES_GMAC,
 	ODP_AUTH_ALG_AES_CMAC,
 	ODP_AUTH_ALG_AES_XCBC_MAC,
@@ -797,12 +803,20 @@ static odp_auth_alg_t auth_algs[] = {
 	ODP_AUTH_ALG_SNOW3G_UIA2,
 	ODP_AUTH_ALG_AES_EIA2,
 	ODP_AUTH_ALG_ZUC_EIA3,
+	ODP_AUTH_ALG_SNOW_V_GMAC,
+	ODP_AUTH_ALG_SM3_HMAC,
+	ODP_AUTH_ALG_SM4_GMAC,
 	ODP_AUTH_ALG_MD5,
 	ODP_AUTH_ALG_SHA1,
 	ODP_AUTH_ALG_SHA224,
 	ODP_AUTH_ALG_SHA256,
 	ODP_AUTH_ALG_SHA384,
 	ODP_AUTH_ALG_SHA512,
+	ODP_AUTH_ALG_SHA3_224,
+	ODP_AUTH_ALG_SHA3_256,
+	ODP_AUTH_ALG_SHA3_384,
+	ODP_AUTH_ALG_SHA3_512,
+	ODP_AUTH_ALG_SM3,
 };
 
 static void test_auth_hashes_in_auth_range(void)

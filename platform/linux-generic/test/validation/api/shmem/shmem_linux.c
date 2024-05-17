@@ -1,7 +1,5 @@
-/* Copyright (c) 2016-2018, Linaro Limited
- * All rights reserved.
- *
- * SPDX-License-Identifier:     BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2016-2018 Linaro Limited
  */
 
 /* this test makes sure that odp shared memory created with the ODP_SHM_PROC
@@ -222,13 +220,17 @@ int main(int argc __attribute__((unused)), char *argv[])
 	uid_t uid = getuid();
 	char *shm_dir = getenv("ODP_SHM_DIR");
 	const char *exeext = getenv("EXEEXT");
+	char *dir_name;
 
 	if (exeext == NULL)
 		exeext = "";
 
-	/* odp_app1 is in the same directory as this file: */
 	strncpy(prg_name, argv[0], PATH_MAX - 1);
-	sprintf(odp_name1, "%s/%s%s", dirname(prg_name), ODP_APP1_NAME, exeext);
+	prg_name[PATH_MAX - 1] = 0;
+	dir_name = dirname(prg_name);
+
+	/* odp_app1 is in the same directory as this file: */
+	snprintf(odp_name1, sizeof(odp_name1), "%s/%s%s", dir_name, ODP_APP1_NAME, exeext);
 
 	/* start the ODP application: */
 	odp_app1 = fork();
@@ -300,8 +302,7 @@ int main(int argc __attribute__((unused)), char *argv[])
 	}
 
 	/* odp_app2 is in the same directory as this file: */
-	strncpy(prg_name, argv[0], PATH_MAX - 1);
-	sprintf(odp_name2, "%s/%s%s", dirname(prg_name), ODP_APP2_NAME, exeext);
+	snprintf(odp_name2, sizeof(odp_name2), "%s/%s%s", dir_name, ODP_APP2_NAME, exeext);
 
 	/* start the second ODP application with pid of ODP_APP1 as parameter:*/
 	sprintf(pid1, "%d", odp_app1);

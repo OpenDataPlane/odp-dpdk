@@ -1,9 +1,7 @@
-/* Copyright (c) 2017-2018, Linaro Limited
- * Copyright (c) 2020-2021, Marvell
- * Copyright (c) 2021, Nokia
- * All rights reserved.
- *
- * SPDX-License-Identifier:     BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2017-2018 Linaro Limited
+ * Copyright (c) 2020-2021 Marvell
+ * Copyright (c) 2021 Nokia
  */
 
 #include <odp/helper/odph_api.h>
@@ -62,7 +60,7 @@ static void test_in_ipv4_ah_sha256(void)
 
 	sa = odp_ipsec_sa_create(&param);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa);
 
 	ipsec_test_part test = {
 		.pkt_in = &pkt_ipv4_icmp_0_ah_sha256_1,
@@ -97,7 +95,7 @@ static void test_in_ipv4_ah_sha256_tun_ipv4(void)
 
 	sa = odp_ipsec_sa_create(&param);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa);
 
 	ipsec_test_part test = {
 		.pkt_in = &pkt_ipv4_icmp_0_ah_tun_ipv4_sha256_1,
@@ -132,7 +130,7 @@ static void test_in_ipv4_ah_sha256_tun_ipv6(void)
 
 	sa = odp_ipsec_sa_create(&param);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa);
 
 	ipsec_test_part test = {
 		.pkt_in = &pkt_ipv4_icmp_0_ah_tun_ipv6_sha256_1,
@@ -164,7 +162,7 @@ static void test_in_ipv4_ah_sha256_tun_ipv4_notun(void)
 
 	sa = odp_ipsec_sa_create(&param);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa);
 
 	ipsec_test_part test = {
 		.pkt_in = &pkt_ipv4_icmp_0_ah_tun_ipv4_sha256_1,
@@ -197,7 +195,7 @@ static void test_in_ipv4_esp_null_sha256(void)
 
 	sa = odp_ipsec_sa_create(&param);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa);
 
 	ipsec_test_part test = {
 		.pkt_in = &pkt_ipv4_icmp_0_esp_null_sha256_1,
@@ -229,7 +227,7 @@ static void test_in_ipv4_esp_aes_cbc_null(void)
 
 	sa = odp_ipsec_sa_create(&param);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa);
 
 	ipsec_test_part test = {
 		.pkt_in = &pkt_ipv4_icmp_0_esp_aes_cbc_null_1,
@@ -261,7 +259,7 @@ static void test_in_ipv4_esp_aes_cbc_sha1(void)
 
 	sa = odp_ipsec_sa_create(&param);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa);
 
 	ipsec_test_part test = {
 		.pkt_in = &pkt_ipv4_icmp_0_esp_aes_cbc_sha1_1,
@@ -293,7 +291,7 @@ static void test_in_ipv4_esp_aes_cbc_sha256(void)
 
 	sa = odp_ipsec_sa_create(&param);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa);
 
 	ipsec_test_part test = {
 		.pkt_in = &pkt_ipv4_icmp_0_esp_aes_cbc_sha256_1,
@@ -325,7 +323,7 @@ static void test_in_ipv4_esp_aes_cbc_sha384(void)
 
 	sa = odp_ipsec_sa_create(&param);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa);
 
 	ipsec_test_part test = {
 		.pkt_in = &pkt_ipv4_icmp_0_esp_aes_cbc_sha384_1,
@@ -357,7 +355,7 @@ static void test_in_ipv4_esp_aes_cbc_sha512(void)
 
 	sa = odp_ipsec_sa_create(&param);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa);
 
 	ipsec_test_part test = {
 		.pkt_in = &pkt_ipv4_icmp_0_esp_aes_cbc_sha512_1,
@@ -389,7 +387,7 @@ static void test_in_ipv4_esp_aes_ctr_null(void)
 
 	sa = odp_ipsec_sa_create(&param);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa);
 
 	ipsec_test_part test = {
 		.pkt_in = &pkt_ipv4_icmp_0_esp_aes_ctr_null_1,
@@ -421,7 +419,7 @@ static void test_in_ipv4_ah_sha256_lookup(void)
 
 	sa = odp_ipsec_sa_create(&param);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa);
 
 	ipsec_test_part test = {
 		.pkt_in = &pkt_ipv4_icmp_0_ah_sha256_1,
@@ -456,7 +454,7 @@ static void test_in_ipv4_esp_null_sha256_lookup(void)
 
 	sa = odp_ipsec_sa_create(&param);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa);
 
 	ipsec_test_part test = {
 		.pkt_in = &pkt_ipv4_icmp_0_esp_null_sha256_1,
@@ -494,7 +492,7 @@ static void test_in_ipv4_esp_null_sha256_tun_ipv4(void)
 
 	sa = odp_ipsec_sa_create(&param);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa);
 
 	ipsec_test_part test = {
 		.pkt_in = &pkt_ipv4_icmp_0_esp_tun_ipv4_null_sha256_1,
@@ -529,7 +527,7 @@ static void test_in_ipv4_esp_null_sha256_tun_ipv6(void)
 
 	sa = odp_ipsec_sa_create(&param);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa);
 
 	ipsec_test_part test = {
 		.pkt_in = &pkt_ipv4_icmp_0_esp_tun_ipv6_null_sha256_1,
@@ -562,7 +560,7 @@ static void test_in_ipv4_esp_udp_null_sha256(void)
 
 	sa = odp_ipsec_sa_create(&param);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa);
 
 	ipsec_test_part test = {
 		.pkt_in = &pkt_ipv4_icmp_0_esp_udp_null_sha256_1,
@@ -595,7 +593,7 @@ static void test_in_ipv4_esp_udp_null_sha256_lookup(void)
 
 	sa = odp_ipsec_sa_create(&param);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa);
 
 	ipsec_test_part test = {
 		.pkt_in = &pkt_ipv4_icmp_0_esp_udp_null_sha256_1,
@@ -631,7 +629,7 @@ static void test_in_ipv4_ah_sha256_noreplay(void)
 
 	sa = odp_ipsec_sa_create(&param);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa);
 
 	ipsec_test_part test = {
 		.pkt_in = &pkt_ipv4_icmp_0_ah_sha256_1,
@@ -682,7 +680,7 @@ static void test_in_ipv4_ah_sha256_replay(void)
 
 	sa = odp_ipsec_sa_create(&param);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa);
 
 	ipsec_test_part test = {
 		.pkt_in = &pkt_ipv4_icmp_0_ah_sha256_1,
@@ -734,7 +732,7 @@ static void test_in_ipv4_esp_null_sha256_noreplay(void)
 
 	sa = odp_ipsec_sa_create(&param);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa);
 
 	ipsec_test_part test = {
 		.pkt_in = &pkt_ipv4_icmp_0_esp_null_sha256_1,
@@ -785,7 +783,7 @@ static void test_in_ipv4_esp_null_sha256_replay(void)
 
 	sa = odp_ipsec_sa_create(&param);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa);
 
 	ipsec_test_part test = {
 		.pkt_in = &pkt_ipv4_icmp_0_esp_null_sha256_1,
@@ -844,7 +842,7 @@ static void test_in_ipv4_ah_esp_pkt(void)
 
 	sa = odp_ipsec_sa_create(&param);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa);
 
 	test.pkt_in = &pkt_ipv4_icmp_0_esp_null_sha256_1;
 	test.num_pkt = 1;
@@ -876,7 +874,7 @@ static void test_in_ipv4_esp_ah_pkt(void)
 
 	sa = odp_ipsec_sa_create(&param);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa);
 
 	test.pkt_in = &pkt_ipv4_icmp_0_ah_sha256_1;
 	test.num_pkt = 1;
@@ -903,7 +901,7 @@ static void test_in_ipv4_ah_esp_pkt_lookup(void)
 
 	sa = odp_ipsec_sa_create(&param);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa);
 
 	test.pkt_in = &pkt_ipv4_icmp_0_esp_null_sha256_1;
 	test.flags.lookup = 1;
@@ -931,7 +929,7 @@ static void test_in_ipv4_esp_ah_pkt_lookup(void)
 
 	sa = odp_ipsec_sa_create(&param);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa);
 
 	test.pkt_in = &pkt_ipv4_icmp_0_ah_sha256_1;
 	test.flags.lookup = 1;
@@ -959,7 +957,7 @@ static void test_in_ipv4_ah_sha256_bad1(void)
 
 	sa = odp_ipsec_sa_create(&param);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa);
 
 	test.pkt_in = &pkt_ipv4_icmp_0_ah_sha256_1_bad1;
 	test.num_pkt = 1;
@@ -986,7 +984,7 @@ static void test_in_ipv4_ah_sha256_bad2(void)
 
 	sa = odp_ipsec_sa_create(&param);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa);
 
 	test.pkt_in = &pkt_ipv4_icmp_0_ah_sha256_1_bad2;
 	test.num_pkt = 1;
@@ -1013,7 +1011,7 @@ static void test_in_ipv4_esp_null_sha256_bad1(void)
 
 	sa = odp_ipsec_sa_create(&param);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa);
 
 	test.pkt_in = &pkt_ipv4_icmp_0_esp_null_sha256_1_bad1;
 	test.num_pkt = 1;
@@ -1037,7 +1035,7 @@ static void test_in_ipv4_rfc3602_5_esp(void)
 
 	sa = odp_ipsec_sa_create(&param);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa);
 
 	ipsec_test_part test = {
 		.pkt_in = &pkt_rfc3602_5_esp,
@@ -1069,7 +1067,7 @@ static void test_in_ipv4_rfc3602_6_esp(void)
 
 	sa = odp_ipsec_sa_create(&param);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa);
 
 	ipsec_test_part test = {
 		.pkt_in = &pkt_rfc3602_6_esp,
@@ -1105,7 +1103,7 @@ static void test_in_ipv4_rfc3602_7_esp(void)
 
 	sa = odp_ipsec_sa_create(&param);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa);
 
 	ipsec_test_part test = {
 		.pkt_in = &pkt_rfc3602_7_esp,
@@ -1141,7 +1139,7 @@ static void test_in_ipv4_rfc3602_8_esp(void)
 
 	sa = odp_ipsec_sa_create(&param);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa);
 
 	ipsec_test_part test = {
 		.pkt_in = &pkt_rfc3602_8_esp,
@@ -1177,7 +1175,7 @@ static void test_in_ipv4_mcgrew_gcm_2_esp(void)
 
 	sa = odp_ipsec_sa_create(&param);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa);
 
 	ipsec_test_part test = {
 		.pkt_in = &pkt_mcgrew_gcm_test_2_esp,
@@ -1213,7 +1211,7 @@ static void test_in_ipv4_mcgrew_gcm_3_esp(void)
 
 	sa = odp_ipsec_sa_create(&param);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa);
 
 	ipsec_test_part test = {
 		.pkt_in = &pkt_mcgrew_gcm_test_3_esp,
@@ -1249,7 +1247,7 @@ static void test_in_ipv4_mcgrew_gcm_4_esp(void)
 
 	sa = odp_ipsec_sa_create(&param);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa);
 
 	ipsec_test_part test = {
 		.pkt_in = &pkt_mcgrew_gcm_test_4_esp,
@@ -1290,7 +1288,7 @@ static void test_in_ipv4_mcgrew_gcm_12_esp(void)
 
 	sa = odp_ipsec_sa_create(&param);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa);
 
 	ipsec_test_part test = {
 		.pkt_in = &pkt_mcgrew_gcm_test_12_esp,
@@ -1323,7 +1321,7 @@ static void test_in_ipv4_mcgrew_gcm_12_esp_notun(void)
 
 	sa = odp_ipsec_sa_create(&param);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa);
 
 	ipsec_test_part test = {
 		.pkt_in = &pkt_mcgrew_gcm_test_12_esp,
@@ -1359,7 +1357,7 @@ static void test_in_ipv4_mcgrew_gcm_15_esp(void)
 
 	sa = odp_ipsec_sa_create(&param);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa);
 
 	ipsec_test_part test = {
 		.pkt_in = &pkt_mcgrew_gcm_test_15_esp,
@@ -1395,7 +1393,7 @@ static void test_in_ipv4_rfc7634_chacha(void)
 
 	sa = odp_ipsec_sa_create(&param);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa);
 
 	ipsec_test_part test = {
 		.pkt_in = &pkt_ipv4_rfc7634_esp,
@@ -1427,7 +1425,7 @@ static void test_in_ipv4_ah_aes_gmac_128(void)
 
 	sa = odp_ipsec_sa_create(&param);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa);
 
 	ipsec_test_part test = {
 		.pkt_in = &pkt_ipv4_icmp_0_ah_aes_gmac_128_1,
@@ -1459,7 +1457,7 @@ static void test_in_ipv4_esp_null_aes_gmac_128(void)
 
 	sa = odp_ipsec_sa_create(&param);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa);
 
 	ipsec_test_part test = {
 		.pkt_in = &pkt_ipv4_icmp_0_esp_null_aes_gmac_128_1,
@@ -1491,7 +1489,7 @@ static void test_in_ipv6_ah_sha256(void)
 
 	sa = odp_ipsec_sa_create(&param);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa);
 
 	ipsec_test_part test = {
 		.pkt_in = &pkt_ipv6_icmp_0_ah_sha256_1,
@@ -1526,7 +1524,7 @@ static void test_in_ipv6_ah_sha256_tun_ipv4(void)
 
 	sa = odp_ipsec_sa_create(&param);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa);
 
 	ipsec_test_part test = {
 		.pkt_in = &pkt_ipv6_icmp_0_ah_tun_ipv4_sha256_1,
@@ -1561,7 +1559,7 @@ static void test_in_ipv6_ah_sha256_tun_ipv6(void)
 
 	sa = odp_ipsec_sa_create(&param);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa);
 
 	ipsec_test_part test = {
 		.pkt_in = &pkt_ipv6_icmp_0_ah_tun_ipv6_sha256_1,
@@ -1593,7 +1591,7 @@ static void test_in_ipv6_esp_null_sha256(void)
 
 	sa = odp_ipsec_sa_create(&param);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa);
 
 	ipsec_test_part test = {
 		.pkt_in = &pkt_ipv6_icmp_0_esp_null_sha256_1,
@@ -1628,7 +1626,7 @@ static void test_in_ipv6_esp_null_sha256_tun_ipv4(void)
 
 	sa = odp_ipsec_sa_create(&param);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa);
 
 	ipsec_test_part test = {
 		.pkt_in = &pkt_ipv6_icmp_0_esp_tun_ipv4_null_sha256_1,
@@ -1663,7 +1661,7 @@ static void test_in_ipv6_esp_null_sha256_tun_ipv6(void)
 
 	sa = odp_ipsec_sa_create(&param);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa);
 
 	ipsec_test_part test = {
 		.pkt_in = &pkt_ipv6_icmp_0_esp_tun_ipv6_null_sha256_1,
@@ -1696,7 +1694,7 @@ static void test_in_ipv6_esp_udp_null_sha256(void)
 
 	sa = odp_ipsec_sa_create(&param);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa);
 
 	ipsec_test_part test = {
 		.pkt_in = &pkt_ipv6_icmp_0_esp_udp_null_sha256_1,
@@ -1729,7 +1727,7 @@ static void test_in_ipv6_esp_udp_null_sha256_lookup(void)
 
 	sa = odp_ipsec_sa_create(&param);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa);
 
 	ipsec_test_part test = {
 		.pkt_in = &pkt_ipv6_icmp_0_esp_udp_null_sha256_1,
@@ -1769,7 +1767,7 @@ static void test_ipsec_sa_print(void)
 
 	in_sa = odp_ipsec_sa_create(&param_in);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, in_sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != in_sa);
 
 	odp_ipsec_sa_print(in_sa);
 
@@ -1802,7 +1800,7 @@ static void test_multi_out_in(odp_ipsec_sa_t out_sa,
 		 */
 		part_prep_esp(&test_out, 1, tunnel_ip_ver == ODPH_IPV6);
 		test_out.pkt_in = input_packets[i];
-		CU_ASSERT_EQUAL(ipsec_check_out(&test_out, out_sa, &pkt), 1);
+		CU_ASSERT(ipsec_check_out(&test_out, out_sa, &pkt) == 1);
 
 		/*
 		 * Perform inbound IPsec processing for the IPsec packet.
@@ -1952,10 +1950,10 @@ static void test_in_ipv4_esp_reass_success(void)
 	param_in.inbound.reassembly_en = 1;
 
 	out_sa = odp_ipsec_sa_create(&param_out);
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, out_sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != out_sa);
 
 	in_sa = odp_ipsec_sa_create(&param_in);
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, in_sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != in_sa);
 
 	printf("\n	IPv4 two frags");
 	test_in_ipv4_esp_reass_success_two_frags(out_sa, in_sa);
@@ -2007,10 +2005,10 @@ static void test_in_ipv4_esp_reass_incomp(void)
 	param_in.inbound.reassembly_en = 1;
 
 	out_sa = odp_ipsec_sa_create(&param_out);
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, out_sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != out_sa);
 
 	in_sa = odp_ipsec_sa_create(&param_in);
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, in_sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != in_sa);
 
 	printf("\n	IPv4 missing frag");
 	test_in_ipv4_esp_reass_incomp_missing(out_sa, in_sa);
@@ -2141,10 +2139,10 @@ static void test_in_ipv6_esp_reass_success(void)
 	param_in.inbound.reassembly_en = 1;
 
 	out_sa = odp_ipsec_sa_create(&param_out);
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, out_sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != out_sa);
 
 	in_sa = odp_ipsec_sa_create(&param_in);
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, in_sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != in_sa);
 
 	printf("\n	IPv6 two frags");
 	test_in_ipv6_esp_reass_success_two_frags(out_sa, in_sa);
@@ -2200,10 +2198,10 @@ static void test_in_ipv6_esp_reass_incomp(void)
 	param_in.inbound.reassembly_en = 1;
 
 	out_sa = odp_ipsec_sa_create(&param_out);
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, out_sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != out_sa);
 
 	in_sa = odp_ipsec_sa_create(&param_in);
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, in_sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != in_sa);
 
 	printf("\n	IPv6 missing frag");
 	test_in_ipv6_esp_reass_incomp_missing(out_sa, in_sa);
@@ -2231,7 +2229,7 @@ static void test_in_ipv4_null_aes_xcbc_esp(void)
 
 	sa = odp_ipsec_sa_create(&param);
 
-	CU_ASSERT_NOT_EQUAL_FATAL(ODP_IPSEC_SA_INVALID, sa);
+	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa);
 
 	ipsec_test_part test = {
 		.pkt_in = &pkt_ipv4_null_aes_xcbc_esp,

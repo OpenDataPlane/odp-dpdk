@@ -26,6 +26,7 @@
 #include <odp_libconfig_internal.h>
 #include <odp_macros_internal.h>
 #include <odp_pool_internal.h>
+#include <odp_string_internal.h>
 
 #include <onnxruntime_c_api.h>
 
@@ -505,8 +506,7 @@ static int get_model_io_info(OrtSession *session, ml_model_t *mdl,
 			return -1;
 		}
 
-		strncpy(input_info[i].name, name, ODP_ML_MODEL_IO_NAME_LEN - 1);
-		input_info[i].name[ODP_ML_MODEL_IO_NAME_LEN - 1] = 0;
+		_odp_strcpy(input_info[i].name, name, ODP_ML_MODEL_IO_NAME_LEN);
 
 		/* Free memory allocated by SessionGetInputName */
 		status = ort_api->AllocatorFree(allocator, name);
@@ -556,8 +556,7 @@ static int get_model_io_info(OrtSession *session, ml_model_t *mdl,
 			return -1;
 		}
 
-		strncpy(output_info[i].name, name, ODP_ML_MODEL_IO_NAME_LEN - 1);
-		output_info[i].name[ODP_ML_MODEL_IO_NAME_LEN - 1] = 0;
+		_odp_strcpy(output_info[i].name, name, ODP_ML_MODEL_IO_NAME_LEN);
 
 		/* Free memory allocated by SessionGetOutputName */
 		status = ort_api->AllocatorFree(allocator, name);
@@ -784,23 +783,31 @@ static int check_io_shape(ml_model_t *mdl)
 	odp_ml_shape_info_t *shape;
 
 	for (uint32_t i = 0; i < mdl->info.num_inputs; i++) {
+		int num_dyn = 0;
+
 		shape = &mdl->input_info[i].shape;
 
-		if (shape->type == ODP_ML_SHAPE_NONE) {
-			_ODP_ERR("Undefined shape type for model input[%u]\n", i);
-			return -1;
-		}
+		switch (shape->type) {
+		case ODP_ML_SHAPE_STATIC:
+			break;
 
-		if (shape->type == ODP_ML_SHAPE_STATIC)
-			continue;
+		case ODP_ML_SHAPE_BATCH:
+			for (uint32_t j = 0; j < shape->num_dim; j++)
+				if (shape->dim[j] == ODP_ML_DIM_DYNAMIC)
+					num_dyn++;
 
-		/* shape->type == ODP_ML_SHAPE_BATCH */
-		for (uint32_t j = 0; j < shape->num_dim; j++) {
-			if (shape->dim[j] == ODP_ML_DIM_DYNAMIC && !shape->dim_max[j]) {
-				_ODP_ERR("Missing dim_max[%u] for dynamic sized input[%u], please"
-					 " provide via the extra_info of model param\n", j, i);
+			if (num_dyn != 1) {
+				_ODP_ERR("Incorrect number (%d) of dynamic dimensions "
+					 "for model input[%u]\n",
+					 num_dyn, i);
 				return -1;
 			}
+
+			break;
+
+		default:
+			_ODP_ERR("Undefined shape type for model input[%u]\n", i);
+			return -1;
 		}
 	}
 
@@ -917,10 +924,8 @@ odp_ml_model_t odp_ml_model_create(const char *name, const odp_ml_model_param_t 
 	mdl->session_opts = session_opts;
 	info->index = i;
 
-	if (name) {
-		strncpy(info->name, name, ODP_ML_MODEL_NAME_LEN - 1);
-		info->name[ODP_ML_MODEL_NAME_LEN - 1] = 0;
-	}
+	if (name)
+		_odp_strcpy(info->name, name, ODP_ML_MODEL_NAME_LEN);
 
 	mdl->max_compl_id = param->max_compl_id;
 	for (uint32_t j = 0; j < ML_MAX_COMPL_ID; j++)
@@ -2523,7 +2528,7 @@ static int read_config_file(ort_run_opts_t *opts)
 	_ODP_PRINT("  %s: %i\n", conf_str, opts->enable_profiling);
 
 	conf_str =  "ml.execution_mode";
-	if (_odp_libconfig_lookup_str(conf_str, mode_str, ML_MAX_CONFIG_STR_LEN) < 0) {
+	if (_odp_libconfig_lookup_str(conf_str, mode_str, ML_MAX_CONFIG_STR_LEN - 1) < 0) {
 		_ODP_ERR("Config option '%s' not found.\n", conf_str);
 		return -1;
 	}
@@ -2550,7 +2555,7 @@ static int read_config_file(ort_run_opts_t *opts)
 
 	conf_str =  "ml.graph_optimization_level";
 	if (_odp_libconfig_lookup_str(conf_str, opt_level_str,
-				      ML_MAX_CONFIG_STR_LEN) < 0) {
+				      ML_MAX_CONFIG_STR_LEN - 1) < 0) {
 		_ODP_ERR("Config option '%s' not found.\n", conf_str);
 		return -1;
 	}
@@ -2563,7 +2568,7 @@ static int read_config_file(ort_run_opts_t *opts)
 
 	conf_str =  "ml.optimized_model_filepath";
 	if (_odp_libconfig_lookup_str(conf_str, opts->opt_model_filepath,
-				      ML_MAX_CONFIG_STR_LEN) < 0) {
+				      ML_MAX_CONFIG_STR_LEN - 1) < 0) {
 		_ODP_ERR("Config option '%s' not found.\n", conf_str);
 		return -1;
 	}

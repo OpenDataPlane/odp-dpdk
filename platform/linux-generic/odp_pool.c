@@ -1,8 +1,6 @@
-/* Copyright (c) 2013-2018, Linaro Limited
- * Copyright (c) 2019-2023, Nokia
- * All rights reserved.
- *
- * SPDX-License-Identifier:     BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2013-2018 Linaro Limited
+ * Copyright (c) 2019-2023 Nokia
  */
 
 #include <odp/api/align.h>
@@ -32,6 +30,7 @@
 #include <odp_timer_internal.h>
 #include <odp_event_vector_internal.h>
 #include <odp_buffer_internal.h>
+#include <odp_string_internal.h>
 
 #include <string.h>
 #include <stdio.h>
@@ -135,6 +134,9 @@ static void cache_flush(pool_cache_t *cache, pool_t *pool)
 	_odp_event_hdr_t *event_hdr;
 	ring_ptr_t *ring;
 	uint32_t mask;
+
+	if (!pool->ring)
+		return;
 
 	ring = &pool->ring->hdr;
 	mask = pool->ring_mask;
@@ -429,7 +431,7 @@ static pool_t *reserve_pool(uint32_t shmflags, uint8_t pool_ext, uint32_t num)
 	odp_shm_t shm;
 	uint32_t mem_size;
 	pool_t *pool;
-	char ring_name[ODP_POOL_NAME_LEN];
+	char ring_name[ODP_SHM_NAME_LEN];
 
 	for (i = 0; i < CONFIG_POOLS; i++) {
 		pool = _odp_pool_entry_from_idx(i);
@@ -647,12 +649,10 @@ static bool shm_is_from_huge_pages(odp_shm_t shm)
 
 static void set_pool_name(pool_t *pool, const char *name)
 {
-	if (name == NULL) {
+	if (name == NULL)
 		pool->name[0] = 0;
-	} else {
-		strncpy(pool->name, name, ODP_POOL_NAME_LEN - 1);
-		pool->name[ODP_POOL_NAME_LEN - 1] = 0;
-	}
+	else
+		_odp_strcpy(pool->name, name, ODP_POOL_NAME_LEN);
 }
 
 static void set_pool_cache_size(pool_t *pool, uint32_t cache_size)
@@ -890,7 +890,7 @@ odp_pool_t _odp_pool_create(const char *name, const odp_pool_param_t *params,
 
 			if (!adj_size) {
 				_ODP_ERR("Calculating adjusted block size failed\n");
-				return ODP_POOL_INVALID;
+				goto error;
 			}
 		}
 
@@ -994,6 +994,11 @@ error:
 
 	if (pool->uarea_shm != ODP_SHM_INVALID)
 		odp_shm_free(pool->uarea_shm);
+
+	if (pool->ring_shm != ODP_SHM_INVALID)
+		odp_shm_free(pool->ring_shm);
+
+	pool->ring = NULL;
 
 	LOCK(&pool->lock);
 	pool->reserved = 0;
@@ -2046,6 +2051,8 @@ odp_pool_t odp_pool_ext_create(const char *name, const odp_pool_ext_param_t *par
 error:
 	if (pool->ring_shm != ODP_SHM_INVALID)
 		odp_shm_free(pool->ring_shm);
+
+	pool->ring = NULL;
 
 	LOCK(&pool->lock);
 	pool->reserved = 0;

@@ -1,8 +1,6 @@
-/* Copyright (c) 2014-2018, Linaro Limited
- * Copyright (c) 2019-2024, Nokia
- * All rights reserved.
- *
- * SPDX-License-Identifier:     BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2014-2018 Linaro Limited
+ * Copyright (c) 2019-2024 Nokia
  */
 
 #include <odp_api.h>
@@ -987,6 +985,26 @@ static void scheduler_test_create_group(void)
 	CU_ASSERT_FATAL(odp_schedule(NULL, wait_time) == ODP_EVENT_INVALID);
 }
 
+static void scheduler_test_group_long_name(void)
+{
+	odp_thrmask_t mask;
+	odp_schedule_group_t group;
+	int thr_id;
+	char name[ODP_SCHED_GROUP_NAME_LEN];
+
+	memset(name, 'a', sizeof(name));
+	name[sizeof(name) - 1] = 0;
+
+	thr_id = odp_thread_id();
+	odp_thrmask_zero(&mask);
+	odp_thrmask_set(&mask, thr_id);
+
+	group = odp_schedule_group_create(name, &mask);
+	CU_ASSERT_FATAL(group != ODP_SCHED_GROUP_INVALID);
+	CU_ASSERT(group == odp_schedule_group_lookup(name));
+	CU_ASSERT_FATAL(odp_schedule_group_destroy(group) == 0);
+}
+
 static void scheduler_test_create_max_groups(void)
 {
 	odp_thrmask_t mask;
@@ -1367,12 +1385,12 @@ static void chaos_run(unsigned int qtype)
 	shm = odp_shm_lookup(GLOBALS_SHM_NAME);
 	CU_ASSERT_FATAL(shm != ODP_SHM_INVALID);
 	globals = odp_shm_addr(shm);
-	CU_ASSERT_PTR_NOT_NULL_FATAL(globals);
+	CU_ASSERT_FATAL(globals != NULL);
 
 	shm = odp_shm_lookup(SHM_THR_ARGS_NAME);
 	CU_ASSERT_FATAL(shm != ODP_SHM_INVALID);
 	args = odp_shm_addr(shm);
-	CU_ASSERT_PTR_NOT_NULL_FATAL(args);
+	CU_ASSERT_FATAL(args != NULL);
 
 	args->globals = globals;
 
@@ -1798,7 +1816,7 @@ static void schedule_common(odp_schedule_sync_t sync, int num_queues,
 	shm = odp_shm_lookup(GLOBALS_SHM_NAME);
 	CU_ASSERT_FATAL(shm != ODP_SHM_INVALID);
 	globals = odp_shm_addr(shm);
-	CU_ASSERT_PTR_NOT_NULL_FATAL(globals);
+	CU_ASSERT_FATAL(globals != NULL);
 
 	memset(&args, 0, sizeof(thread_args_t));
 	args.globals = globals;
@@ -1829,12 +1847,12 @@ static void parallel_execute(odp_schedule_sync_t sync, int num_queues,
 	shm = odp_shm_lookup(GLOBALS_SHM_NAME);
 	CU_ASSERT_FATAL(shm != ODP_SHM_INVALID);
 	globals = odp_shm_addr(shm);
-	CU_ASSERT_PTR_NOT_NULL_FATAL(globals);
+	CU_ASSERT_FATAL(globals != NULL);
 
 	shm = odp_shm_lookup(SHM_THR_ARGS_NAME);
 	CU_ASSERT_FATAL(shm != ODP_SHM_INVALID);
 	args = odp_shm_addr(shm);
-	CU_ASSERT_PTR_NOT_NULL_FATAL(args);
+	CU_ASSERT_FATAL(args != NULL);
 
 	args->globals = globals;
 	args->sync = sync;
@@ -2583,12 +2601,12 @@ static void scheduler_test_sched_and_plain(odp_schedule_sync_t sync)
 	shm = odp_shm_lookup(GLOBALS_SHM_NAME);
 	CU_ASSERT_FATAL(shm != ODP_SHM_INVALID);
 	globals = odp_shm_addr(shm);
-	CU_ASSERT_PTR_NOT_NULL_FATAL(globals);
+	CU_ASSERT_FATAL(globals != NULL);
 
 	shm = odp_shm_lookup(SHM_THR_ARGS_NAME);
 	CU_ASSERT_FATAL(shm != ODP_SHM_INVALID);
 	args = odp_shm_addr(shm);
-	CU_ASSERT_PTR_NOT_NULL_FATAL(args);
+	CU_ASSERT_FATAL(args != NULL);
 	args->globals = globals;
 
 	/* Make sure all events fit to queues */
@@ -3183,7 +3201,7 @@ static int create_queues(test_globals_t *globals)
 
 		for (j = 0; j < queues_per_prio; j++) {
 			/* Per sched sync type */
-			char name[32];
+			char name[ODP_QUEUE_NAME_LEN];
 			odp_queue_t q, pq;
 
 			snprintf(name, sizeof(name), "sched_%d_%d_n", i, j);
@@ -3674,6 +3692,7 @@ odp_testinfo_t scheduler_basic_suite[] = {
 	ODP_TEST_INFO(scheduler_test_order_ignore),
 	ODP_TEST_INFO(scheduler_test_group_info_predef),
 	ODP_TEST_INFO(scheduler_test_create_group),
+	ODP_TEST_INFO(scheduler_test_group_long_name),
 	ODP_TEST_INFO(scheduler_test_create_max_groups),
 	ODP_TEST_INFO(scheduler_test_groups),
 	ODP_TEST_INFO(scheduler_test_pause_resume),

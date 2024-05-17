@@ -1,8 +1,6 @@
-/* Copyright (c) 2014-2018, Linaro Limited
- * Copyright (c) 2021-2023, Nokia
- * All rights reserved.
- *
- * SPDX-License-Identifier:     BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2014-2018 Linaro Limited
+ * Copyright (c) 2021-2023 Nokia
  */
 
 #include <odp_posix_extensions.h>
@@ -1910,7 +1908,8 @@ int odp_crypto_cipher_capability(odp_cipher_alg_t cipher,
 	if (num < num_copy)
 		num_copy = num;
 
-	memcpy(dst, src, num_copy * size);
+	if (dst)
+		memcpy(dst, src, num_copy * size);
 
 	return num;
 }
@@ -2012,7 +2011,8 @@ int odp_crypto_auth_capability(odp_auth_alg_t auth,
 	if (num < num_copy)
 		num_copy = num;
 
-	memcpy(dst, src, num_copy * size);
+	if (dst)
+		memcpy(dst, src, num_copy * size);
 
 	return num;
 }

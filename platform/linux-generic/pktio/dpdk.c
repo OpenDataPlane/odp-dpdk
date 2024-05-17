@@ -1,8 +1,6 @@
-/* Copyright (c) 2016-2018, Linaro Limited
- * Copyright (c) 2019-2023, Nokia
- * All rights reserved.
- *
- * SPDX-License-Identifier:     BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2016-2018 Linaro Limited
+ * Copyright (c) 2019-2023 Nokia
  */
 
 #include <odp/autoheader_internal.h>
@@ -34,6 +32,7 @@
 #include <protocols/udp.h>
 #include <odp_pool_internal.h>
 #include <odp_socket_common.h>
+#include <odp_string_internal.h>
 
 #include <rte_config.h>
 #include <rte_common.h>
@@ -118,6 +117,8 @@ ODP_STATIC_ASSERT(CONFIG_PACKET_HEADROOM == RTE_PKTMBUF_HEADROOM,
 /* DPDK poll mode drivers requiring minimum RX burst size DPDK_MIN_RX_BURST */
 #define IXGBE_DRV_NAME "net_ixgbe"
 #define I40E_DRV_NAME "net_i40e"
+
+#define PCAP_DRV_NAME "net_pcap"
 
 #define DPDK_MEMORY_MB 512
 #define DPDK_NB_MBUF 16384
@@ -1434,7 +1435,7 @@ static int dpdk_pktio_init(void)
 	if (numa_nodes <= 0)
 		numa_nodes = 1;
 
-	char mem_str[mem_str_len * numa_nodes];
+	char mem_str[mem_str_len * numa_nodes + 1];
 
 	for (i = 0; i < numa_nodes; i++)
 		sprintf(&mem_str[i * mem_str_len], "%d,", DPDK_MEMORY_MB);
@@ -2084,13 +2085,19 @@ static int dpdk_start(pktio_entry_t *pktio_entry)
 	uint16_t port_id = pkt_dpdk->port_id;
 	int ret;
 
-	/* DPDK doesn't support nb_rx_q/nb_tx_q being 0 */
-	if (!pktio_entry->num_in_queue)
-		pktio_entry->num_in_queue = 1;
-	if (!pktio_entry->num_out_queue)
-		pktio_entry->num_out_queue = 1;
-
 	rte_eth_dev_info_get(port_id, &dev_info);
+
+	/* Pcap driver reconfiguration may fail if number of rx/tx queues is set to zero */
+	if (!strncmp(dev_info.driver_name, PCAP_DRV_NAME, strlen(PCAP_DRV_NAME))) {
+		if (!pktio_entry->num_in_queue) {
+			pktio_entry->num_in_queue = 1;
+			pkt_dpdk->num_rx_desc[0] = dev_info.rx_desc_lim.nb_min;
+		}
+		if (!pktio_entry->num_out_queue) {
+			pktio_entry->num_out_queue = 1;
+			pkt_dpdk->num_tx_desc[0] = dev_info.tx_desc_lim.nb_min;
+		}
+	}
 
 	/* Setup device */
 	if (dpdk_setup_eth_dev(pktio_entry)) {
@@ -2468,8 +2475,8 @@ static int dpdk_extra_stat_info(pktio_entry_t *pktio_entry,
 	num_stats = ret;
 
 	for (i = 0; i < num && i < num_stats; i++)
-		strncpy(info[i].name, xstats_names[i].name,
-			ODP_PKTIO_STATS_EXTRA_NAME_LEN - 1);
+		_odp_strcpy(info[i].name, xstats_names[i].name,
+			    ODP_PKTIO_STATS_EXTRA_NAME_LEN);
 
 	return num_stats;
 }
