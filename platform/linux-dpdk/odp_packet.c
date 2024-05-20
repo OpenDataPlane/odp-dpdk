@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2013-2018 Linaro Limited
- * Copyright (c) 2019-2023 Nokia
+ * Copyright (c) 2019-2024 Nokia
  */
 
 #include <odp/api/align.h>
@@ -319,11 +319,6 @@ int odp_packet_alloc_multi(odp_pool_t pool_hdl, uint32_t len,
 		return -1;
 
 	return packet_alloc_multi(pool, len, pkt, num);
-}
-
-uint32_t odp_packet_reset_max_len(odp_packet_t pkt)
-{
-	return odp_packet_buf_len(pkt) - RTE_PKTMBUF_HEADROOM;
 }
 
 int odp_packet_reset(odp_packet_t pkt, uint32_t len)
