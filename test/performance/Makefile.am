@@ -30,7 +30,7 @@ COMPILE_ONLY = odp_cpu_bench \
 	       odp_sched_latency \
 	       odp_sched_perf \
 	       odp_sched_pktio \
-	       odp_scheduling \
+	       odp_timer_accuracy \
 	       odp_timer_perf
 
 if LIBCONFIG
@@ -46,7 +46,7 @@ TESTSCRIPTS = odp_cpu_bench_run.sh \
 	      odp_sched_latency_run.sh \
 	      odp_sched_perf_run.sh \
 	      odp_sched_pktio_run.sh \
-	      odp_scheduling_run.sh \
+	      odp_timer_accuracy_run.sh \
 	      odp_timer_perf_run.sh
 
 if ODP_PKTIO_PCAP
@@ -80,7 +80,6 @@ odp_packet_gen_SOURCES = odp_packet_gen.c
 odp_pktio_ordered_SOURCES = odp_pktio_ordered.c dummy_crc.h
 odp_sched_latency_SOURCES = odp_sched_latency.c
 odp_sched_pktio_SOURCES = odp_sched_pktio.c
-odp_scheduling_SOURCES = odp_scheduling.c
 odp_pktio_perf_SOURCES = odp_pktio_perf.c
 odp_pool_latency_SOURCES = odp_pool_latency.c
 odp_pool_perf_SOURCES = odp_pool_perf.c
@@ -88,17 +87,13 @@ odp_queue_perf_SOURCES = odp_queue_perf.c
 odp_random_SOURCES = odp_random.c
 odp_sched_perf_SOURCES = odp_sched_perf.c
 odp_stress_SOURCES = odp_stress.c
+odp_timer_accuracy_SOURCES = odp_timer_accuracy.c
 odp_timer_perf_SOURCES = odp_timer_perf.c
 
 if LIBCONFIG
 odp_ipsecfwd_SOURCES = odp_ipsecfwd.c
 AM_CFLAGS += $(LIBCONFIG_CFLAGS)
 endif
-
-# l2fwd test depends on generator example
-EXTRA_odp_l2fwd_DEPENDENCIES = $(top_builddir)/example/generator/odp_generator$(EXEEXT)
-$(top_builddir)/example/generator/odp_generator$(EXEEXT):
-	$(MAKE) -C $(top_builddir)/example/generator odp_generator$(EXEEXT)
 
 dist_check_SCRIPTS = $(TESTSCRIPTS)
 

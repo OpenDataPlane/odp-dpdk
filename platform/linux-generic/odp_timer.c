@@ -1,8 +1,6 @@
-/* Copyright (c) 2013-2018, Linaro Limited
- * Copyright (c) 2019-2023, Nokia
- * All rights reserved.
- *
- * SPDX-License-Identifier:     BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2013-2018 Linaro Limited
+ * Copyright (c) 2019-2023 Nokia
  */
 
 /**
@@ -46,7 +44,7 @@
 #include <odp_libconfig_internal.h>
 #include <odp_macros_internal.h>
 #include <odp_pool_internal.h>
-#include <odp_print_internal.h>
+#include <odp_string_internal.h>
 #include <odp_queue_if.h>
 #include <odp_timer_internal.h>
 #include <odp_types_internal.h>
@@ -190,10 +188,10 @@ typedef struct timer_pool_s {
 	odp_atomic_u32_t notify_overrun;
 	int owner;
 	pthread_t thr_pthread; /* pthread_t of timer thread */
-	pid_t thr_pid; /* gettid() for timer thread */
+	odp_atomic_u64_t thr_pid; /* gettid() for timer thread */
 	int thr_warm_up; /* number of warm up rounds */
 	odp_atomic_u32_t thr_ready; /* thread ready from warm up */
-	int thr_exit; /* request to exit for timer thread */
+	odp_atomic_u32_t thr_exit; /* request to exit for timer thread */
 	double base_freq;
 	uint64_t max_multiplier;
 	uint8_t periodic;
@@ -342,7 +340,7 @@ static void posix_timer_stop(timer_pool_t *tp)
 
 	/* Stop the thread */
 	_ODP_DBG("stop\n");
-	tp->thr_exit = 1;
+	odp_atomic_store_u32(&tp->thr_exit, 1);
 	ret = pthread_join(tp->thr_pthread, NULL);
 	if (ret != 0)
 		_ODP_ABORT("Unable to join thread, err %d\n", ret);
@@ -934,6 +932,7 @@ static void *timer_thread(void *arg)
 	siginfo_t si;
 	int warm_up = tp->thr_warm_up;
 	int num = 0;
+	pid_t thr_pid;
 
 	tmo.tv_sec  = 0;
 	tmo.tv_nsec = ODP_TIME_MSEC_IN_NS * 100;
@@ -944,15 +943,18 @@ static void *timer_thread(void *arg)
 	sigaddset(&sigset, SIGALRM);
 
 	/* Signal that this thread has started */
-	odp_mb_full();
-	tp->thr_pid = (pid_t)syscall(SYS_gettid);
-	odp_mb_full();
+	thr_pid = (pid_t)syscall(SYS_gettid);
+	if (thr_pid <= 0) {
+		_ODP_ERR("Invalid tid: %d\n", thr_pid);
+		return NULL;
+	}
+	odp_atomic_store_u64(&tp->thr_pid, thr_pid);
 
 	while (1) {
 		ret = sigtimedwait(&sigset, &si, &tmo);
 
-		if (tp->thr_exit) {
-			tp->thr_pid = 0;
+		if (odp_atomic_load_u32(&tp->thr_exit)) {
+			odp_atomic_store_u64(&tp->thr_pid, 0);
 			return NULL;
 		}
 
@@ -1061,7 +1063,7 @@ static void posix_timer_start(timer_pool_t *tp)
 	sec  = res / ODP_TIME_SEC_IN_NS;
 	nsec = res - sec * ODP_TIME_SEC_IN_NS;
 
-	tp->thr_pid = 0;
+	odp_atomic_init_u64(&tp->thr_pid, 0);
 	tp->thr_warm_up = 1;
 
 	/* 20ms warm up */
@@ -1074,13 +1076,13 @@ static void posix_timer_start(timer_pool_t *tp)
 		_ODP_ABORT("Unable to create timer thread: %d\n", ret);
 
 	/* wait thread set tp->thr_pid */
-	while (tp->thr_pid == 0)
-		sched_yield();
+	while (!odp_atomic_load_u64(&tp->thr_pid))
+		odp_cpu_pause();
 
 	memset(&sigev, 0, sizeof(sigev));
 	sigev.sigev_notify          = SIGEV_THREAD_ID;
 	sigev.sigev_value.sival_ptr = tp;
-	sigev._sigev_un._tid = tp->thr_pid;
+	sigev._sigev_un._tid = odp_atomic_load_u64(&tp->thr_pid);
 	sigev.sigev_signo = SIGALRM;
 
 	if (timer_create(CLOCK_MONOTONIC, &sigev, &tp->timerid))
@@ -1098,7 +1100,7 @@ static void posix_timer_start(timer_pool_t *tp)
 	/* Wait response from timer thread that warm up signals have been
 	 * processed. Warm up helps avoiding overrun on the first timeout. */
 	while (odp_atomic_load_acq_u32(&tp->thr_ready) == 0)
-		sched_yield();
+		odp_cpu_pause();
 
 	if (ODP_DEBUG_PRINT) {
 		uint32_t old_val = 0;
@@ -1232,12 +1234,10 @@ static odp_timer_pool_t timer_pool_new(const char *name, const odp_timer_pool_pa
 
 	odp_atomic_init_u64(&tp->cur_tick, 0);
 
-	if (name == NULL) {
+	if (name == NULL)
 		tp->name[0] = 0;
-	} else {
-		strncpy(tp->name, name, ODP_TIMER_POOL_NAME_LEN - 1);
-		tp->name[ODP_TIMER_POOL_NAME_LEN - 1] = 0;
-	}
+	else
+		_odp_strcpy(tp->name, name, ODP_TIMER_POOL_NAME_LEN);
 
 	tp->param = *param;
 	tp->param.res_ns = res_ns;
@@ -1251,6 +1251,7 @@ static odp_timer_pool_t timer_pool_new(const char *name, const odp_timer_pool_pa
 	tp->num_alloc = 0;
 	odp_atomic_init_u32(&tp->high_wm, 0);
 	odp_atomic_init_u32(&tp->notify_overrun, 0);
+	odp_atomic_init_u32(&tp->thr_exit, 0);
 	tp->first_free = 0;
 	tp->owner = -1;
 

@@ -1,8 +1,6 @@
-/* Copyright (c) 2013-2018, Linaro Limited
- * Copyright (c) 2019-2023, Nokia
- * All rights reserved.
- *
- * SPDX-License-Identifier:     BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2013-2018 Linaro Limited
+ * Copyright (c) 2019-2023 Nokia
  */
 
 #include <odp/api/align.h>
@@ -24,6 +22,7 @@
 #include <odp_macros_internal.h>
 #include <odp_packet_internal.h>
 #include <odp_pool_internal.h>
+#include <odp_string_internal.h>
 #include <odp_timer_internal.h>
 
 #include <rte_config.h>
@@ -57,8 +56,9 @@
 /* Pool name format */
 #define POOL_NAME_FORMAT "%" PRIu64 "-%d-%s"
 
-/* Define a practical limit for contiguous memory allocations */
-#define MAX_SIZE   (CONFIG_PACKET_SEG_SIZE - CONFIG_BUFFER_ALIGN_MIN)
+/* Default alignment for buffers */
+#define BUFFER_ALIGN_DEFAULT ODP_CACHE_LINE_SIZE
+ODP_STATIC_ASSERT(_ODP_CHECK_IS_POWER2(BUFFER_ALIGN_DEFAULT), "Buffer align must be power of two");
 
 /* Maximum packet user area size */
 #define MAX_UAREA_SIZE 2048
@@ -263,7 +263,8 @@ int odp_pool_capability(odp_pool_capability_t *capa)
 	/* Buffer pools */
 	capa->buf.max_pools = max_pools;
 	capa->buf.max_align = CONFIG_BUFFER_ALIGN_MAX;
-	capa->buf.max_size  = MAX_SIZE;
+	capa->buf.max_size  = _ODP_ROUNDDOWN_POWER2(CONFIG_PACKET_SEG_SIZE, BUFFER_ALIGN_DEFAULT) -
+				_ODP_EV_ENDMARK_SIZE;
 	capa->buf.max_num   = CONFIG_POOL_MAX_NUM;
 	capa->buf.max_uarea_size   = MAX_UAREA_SIZE;
 	capa->buf.uarea_persistence = true;
@@ -274,8 +275,8 @@ int odp_pool_capability(odp_pool_capability_t *capa)
 	/* Packet pools */
 	capa->pkt.max_align        = CONFIG_BUFFER_ALIGN_MIN;
 	capa->pkt.max_pools        = max_pools;
-	capa->pkt.max_len          = CONFIG_PACKET_MAX_SEG_LEN;
-	capa->pkt.max_num	   = _odp_pool_glb->config.pkt_max_num;
+	capa->pkt.max_len          = CONFIG_PACKET_MAX_SEG_LEN - _ODP_EV_ENDMARK_SIZE;
+	capa->pkt.max_num          = _odp_pool_glb->config.pkt_max_num;
 	capa->pkt.min_headroom     = RTE_PKTMBUF_HEADROOM;
 	capa->pkt.max_headroom     = RTE_PKTMBUF_HEADROOM;
 	capa->pkt.min_tailroom     = CONFIG_PACKET_TAILROOM;
@@ -657,7 +658,6 @@ static void init_obj_priv_data(struct rte_mempool *mp ODP_UNUSED, void *arg, voi
 	}
 }
 
-
 odp_pool_t _odp_pool_create(const char *name, const odp_pool_param_t *params,
 			    odp_pool_type_t type_2)
 {
@@ -677,14 +677,14 @@ odp_pool_t _odp_pool_create(const char *name, const odp_pool_param_t *params,
 	priv_data.type = params->type;
 
 	if (name)
-		strncpy(pool->name, name, ODP_POOL_NAME_LEN - 1);
+		_odp_strcpy(pool->name, name, ODP_POOL_NAME_LEN);
 
 	switch (params->type) {
 	case ODP_POOL_BUFFER:
 		num = params->buf.num;
 		cache_size = params->buf.cache_size;
 		priv_size = get_mbuf_priv_size(sizeof(odp_buffer_hdr_t));
-		align = params->buf.align > 0 ? params->buf.align : ODP_CACHE_LINE_SIZE;
+		align = params->buf.align > 0 ? params->buf.align : BUFFER_ALIGN_DEFAULT;
 		align = _ODP_MAX(align, (uint32_t)CONFIG_BUFFER_ALIGN_MIN);
 		data_size = _ODP_ROUNDUP_ALIGN(params->buf.size + trailer, align);
 		uarea_size = params->buf.uarea_size;
@@ -1118,7 +1118,7 @@ int odp_pool_ext_capability(odp_pool_type_t type,
 	capa->stats.all = supported_stats.all;
 
 	capa->pkt.max_num_buf = _odp_pool_glb->config.pkt_max_num;
-	capa->pkt.max_buf_size = MAX_SIZE;
+	capa->pkt.max_buf_size = CONFIG_PACKET_SEG_SIZE - CONFIG_BUFFER_ALIGN_MIN;
 	capa->pkt.odp_header_size = SIZEOF_OBJHDR + sizeof(odp_packet_hdr_t);
 	capa->pkt.odp_trailer_size = _ODP_EV_ENDMARK_SIZE;
 	capa->pkt.min_mem_align = ODP_CACHE_LINE_SIZE;
@@ -1216,12 +1216,10 @@ odp_pool_t odp_pool_ext_create(const char *name,
 	if (check_pool_ext_param(params))
 		return ODP_POOL_INVALID;
 
-	if (name == NULL) {
+	if (name == NULL)
 		pool_name[0] = 0;
-	} else {
-		strncpy(pool_name, name, ODP_POOL_NAME_LEN - 1);
-		pool_name[ODP_POOL_NAME_LEN - 1] = 0;
-	}
+	else
+		_odp_strcpy(pool_name, name, ODP_POOL_NAME_LEN);
 
 	/* Find an unused buffer pool slot and initialize it as requested */
 	for (i = 0; i < CONFIG_POOLS; i++) {

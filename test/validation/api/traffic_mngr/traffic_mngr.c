@@ -1,9 +1,7 @@
-/* Copyright (c) 2015-2018, Linaro Limited
- * Copyright (c) 2022, Marvell
- * Copyright (c) 2022, Nokia
- * All rights reserved.
- *
- * SPDX-License-Identifier:	BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2015-2018 Linaro Limited
+ * Copyright (c) 2022 Marvell
+ * Copyright (c) 2022 Nokia
  */
 
 #ifndef _GNU_SOURCE
@@ -67,7 +65,8 @@
 
 #define MAX_PKTS                 1000u
 #define PKT_BUF_SIZE             1460
-#define MAX_PAYLOAD              1400
+#define MIN_HDR_LEN              (ODPH_ETHHDR_LEN + ODPH_UDPHDR_LEN + ODPH_IPV4HDR_LEN)
+#define MAX_PAYLOAD              (PKT_BUF_SIZE - MIN_HDR_LEN)
 #define USE_IPV4                 false
 #define USE_IPV6                 true
 #define USE_UDP                  false
@@ -103,7 +102,6 @@
 #define ETHERNET_OVHD_LEN        (ETHERNET_IFG + ETHERNET_PREAMBLE)
 #define CRC_LEN                  4
 #define SHAPER_LEN_ADJ           ETHERNET_OVHD_LEN
-#define TM_NAME_LEN              32
 #define BILLION                  1000000000ULL
 #define MS                       1000000  /* Millisecond in units of NS */
 #define MBPS                     1000000
@@ -800,6 +798,12 @@ static odp_packet_t make_pkt(odp_pool_t  pkt_pool,
 	uint16_t        final_ether_type;
 	uint8_t        *buf, *pkt_class_ptr, next_hdr;
 	int             rc;
+
+	if (payload_len > MAX_PAYLOAD) {
+		ODPH_ERR("packet payload length of %u exceeds MAX_PAYLOAD of %u\n",
+			 payload_len, MAX_PAYLOAD);
+		return ODP_PACKET_INVALID;
+	}
 
 	l4_hdr_len   = pkt_info->use_tcp  ? ODPH_TCPHDR_LEN  : ODPH_UDPHDR_LEN;
 	l3_hdr_len   = pkt_info->use_ipv6 ? ODPH_IPV6HDR_LEN : ODPH_IPV4HDR_LEN;
@@ -1570,7 +1574,7 @@ static tm_node_desc_t *create_tm_node(odp_tm_t        odp_tm,
 	odp_tm_wred_t         green_profile, yellow_profile, red_profile;
 	odp_tm_node_t         tm_node, parent_node;
 	uint32_t              node_desc_size, queue_desc_size, priority;
-	char                  node_name[TM_NAME_LEN];
+	char                  node_name[ODP_TM_NAME_LEN];
 	int                   rc;
 
 	odp_tm_node_params_init(&node_params);
@@ -1731,7 +1735,7 @@ static tm_node_desc_t *find_node_desc(uint8_t     tm_system_idx,
 		name_ptr++;
 
 	while (node_desc != NULL) {
-		if (strncmp(node_desc->node_name, node_name, TM_NAME_LEN) == 0)
+		if (strncmp(node_desc->node_name, node_name, ODP_TM_NAME_LEN) == 0)
 			return node_desc;
 
 		if (name_ptr == NULL)
@@ -1866,7 +1870,7 @@ static int create_tm_system(void)
 	tm_node_desc_t              *root_node_desc;
 	uint32_t                     level, max_nodes[ODP_TM_MAX_LEVELS];
 	odp_tm_t                     odp_tm, found_odp_tm;
-	char                         tm_name[TM_NAME_LEN];
+	char                         tm_name[ODP_TM_NAME_LEN];
 	int                          rc;
 
 	odp_tm_requirements_init(&requirements);
@@ -2546,7 +2550,7 @@ static void traffic_mngr_test_shaper_profile(void)
 	odp_tm_shaper_params_t shaper_params;
 	odp_tm_shaper_t        profile;
 	uint32_t               idx, shaper_idx, i;
-	char                   shaper_name[TM_NAME_LEN];
+	char                   shaper_name[ODP_TM_NAME_LEN];
 
 	odp_tm_shaper_params_init(&shaper_params);
 	shaper_params.shaper_len_adjust = SHAPER_LEN_ADJ;
@@ -2610,7 +2614,7 @@ static void traffic_mngr_test_sched_profile(void)
 	odp_tm_sched_params_t sched_params;
 	odp_tm_sched_t        profile;
 	uint32_t              idx, priority, sched_idx, i;
-	char                  sched_name[TM_NAME_LEN];
+	char                  sched_name[ODP_TM_NAME_LEN];
 
 	odp_tm_sched_params_init(&sched_params);
 
@@ -2683,7 +2687,7 @@ static void traffic_mngr_test_threshold_profile(threshold_type_t threshold)
 	odp_tm_threshold_params_t threshold_params;
 	odp_tm_threshold_t        profile;
 	uint32_t                  idx, threshold_idx, i;
-	char                      threshold_name[TM_NAME_LEN];
+	char                      threshold_name[ODP_TM_NAME_LEN];
 
 	odp_tm_threshold_params_init(&threshold_params);
 
@@ -2778,7 +2782,7 @@ static void traffic_mngr_test_wred_profile(void)
 	odp_tm_wred_params_t wred_params;
 	odp_tm_wred_t        profile;
 	uint32_t             idx, color, wred_idx, i, c;
-	char                 wred_name[TM_NAME_LEN];
+	char                 wred_name[ODP_TM_NAME_LEN];
 
 	odp_tm_wred_params_init(&wred_params);
 	wred_params.enable_wred       = 1;
@@ -3068,7 +3072,7 @@ static int set_sched_fanin(const char         *node_name,
 	odp_tm_node_t         tm_node, fanin_node;
 	uint32_t              fanin_cnt, fanin, priority;
 	uint8_t               sched_weight;
-	char                  sched_name[TM_NAME_LEN];
+	char                  sched_name[ODP_TM_NAME_LEN];
 	int                   rc;
 
 	node_desc = find_node_desc(0, node_name);
@@ -4456,7 +4460,7 @@ static void test_defaults(uint8_t fill)
 
 	memset(&req, fill, sizeof(req));
 	odp_tm_requirements_init(&req);
-	CU_ASSERT_EQUAL(req.num_levels, 0);
+	CU_ASSERT(req.num_levels == 0);
 	CU_ASSERT(!req.tm_queue_shaper_needed);
 	CU_ASSERT(!req.tm_queue_wred_needed);
 	CU_ASSERT(!req.tm_queue_dual_slope_needed);
@@ -4466,7 +4470,7 @@ static void test_defaults(uint8_t fill)
 	CU_ASSERT(!req.drop_prec_marking_needed);
 	for (n = 0; n < ODP_NUM_PACKET_COLORS; n++)
 		CU_ASSERT(!req.marking_colors_needed[n]);
-	CU_ASSERT_EQUAL(req.pkt_prio_mode, ODP_TM_PKT_PRIO_MODE_PRESERVE);
+	CU_ASSERT(req.pkt_prio_mode == ODP_TM_PKT_PRIO_MODE_PRESERVE);
 	for (n = 0; n < ODP_TM_MAX_LEVELS; n++) {
 		odp_tm_level_requirements_t *l_req = &req.per_level[n];
 
@@ -4481,14 +4485,14 @@ static void test_defaults(uint8_t fill)
 	memset(&shaper, fill, sizeof(shaper));
 	odp_tm_shaper_params_init(&shaper);
 	CU_ASSERT(shaper.packet_mode == ODP_TM_SHAPER_RATE_SHAPE);
-	CU_ASSERT_EQUAL(shaper.shaper_len_adjust, 0);
+	CU_ASSERT(shaper.shaper_len_adjust == 0);
 	CU_ASSERT(!shaper.dual_rate);
 	CU_ASSERT(!shaper.packet_mode);
 
 	memset(&sched, 0xff, sizeof(sched));
 	odp_tm_sched_params_init(&sched);
 	for (n = 0; n < ODP_TM_MAX_PRIORITIES; n++)
-		CU_ASSERT_EQUAL(sched.sched_modes[n], ODP_TM_BYTE_BASED_WEIGHTS);
+		CU_ASSERT(sched.sched_modes[n] == ODP_TM_BYTE_BASED_WEIGHTS);
 
 	memset(&threshold, fill, sizeof(threshold));
 	odp_tm_threshold_params_init(&threshold);
@@ -4502,18 +4506,18 @@ static void test_defaults(uint8_t fill)
 
 	memset(&node, fill, sizeof(node));
 	odp_tm_node_params_init(&node);
-	CU_ASSERT_EQUAL(node.shaper_profile, ODP_TM_INVALID);
-	CU_ASSERT_EQUAL(node.threshold_profile, ODP_TM_INVALID);
+	CU_ASSERT(node.shaper_profile == ODP_TM_INVALID);
+	CU_ASSERT(node.threshold_profile == ODP_TM_INVALID);
 	for (n = 0; n < ODP_NUM_PACKET_COLORS; n++)
-		CU_ASSERT_EQUAL(node.wred_profile[n], ODP_TM_INVALID);
+		CU_ASSERT(node.wred_profile[n] == ODP_TM_INVALID);
 
 	memset(&queue, fill, sizeof(queue));
 	odp_tm_queue_params_init(&queue);
-	CU_ASSERT_EQUAL(queue.shaper_profile, ODP_TM_INVALID);
-	CU_ASSERT_EQUAL(queue.threshold_profile, ODP_TM_INVALID);
+	CU_ASSERT(queue.shaper_profile == ODP_TM_INVALID);
+	CU_ASSERT(queue.threshold_profile == ODP_TM_INVALID);
 	for (n = 0; n < ODP_NUM_PACKET_COLORS; n++)
-		CU_ASSERT_EQUAL(queue.wred_profile[n], ODP_TM_INVALID);
-	CU_ASSERT_EQUAL(queue.priority, 0);
+		CU_ASSERT(queue.wred_profile[n] == ODP_TM_INVALID);
+	CU_ASSERT(queue.priority == 0);
 	CU_ASSERT(queue.ordered_enqueue);
 }
 
@@ -4961,6 +4965,92 @@ static void traffic_mngr_test_lso_ipv4(void)
 	CU_ASSERT(odp_tm_is_idle(odp_tm_systems[0]));
 }
 
+static void traffic_mngr_test_node_long_name(void)
+{
+	odp_tm_node_params_t node_params;
+	odp_tm_node_t tm_node;
+	char name[ODP_TM_NAME_LEN];
+
+	memset(name, 'a', sizeof(name));
+	name[sizeof(name) - 1] = 0;
+
+	odp_tm_node_params_init(&node_params);
+
+	tm_node = odp_tm_node_create(odp_tm_systems[0], name, &node_params);
+	CU_ASSERT(tm_node != ODP_TM_INVALID);
+	CU_ASSERT(tm_node == odp_tm_node_lookup(odp_tm_systems[0], name));
+	CU_ASSERT(!odp_tm_node_destroy(tm_node));
+}
+
+static void traffic_mngr_test_shaper_long_name(void)
+{
+	odp_tm_shaper_params_t shaper_params;
+	odp_tm_shaper_t profile;
+	char name[ODP_TM_NAME_LEN];
+
+	memset(name, 'a', sizeof(name));
+	name[sizeof(name) - 1] = 0;
+
+	odp_tm_shaper_params_init(&shaper_params);
+	profile = odp_tm_shaper_create(name, &shaper_params);
+
+	CU_ASSERT(profile != ODP_TM_INVALID);
+	CU_ASSERT(profile == odp_tm_shaper_lookup(name));
+	CU_ASSERT(!odp_tm_shaper_destroy(profile));
+}
+
+static void traffic_mngr_test_sched_long_name(void)
+{
+	odp_tm_sched_params_t sched_params;
+	odp_tm_sched_t profile;
+	char name[ODP_TM_NAME_LEN];
+
+	memset(name, 'a', sizeof(name));
+	name[sizeof(name) - 1] = 0;
+
+	odp_tm_sched_params_init(&sched_params);
+	profile = odp_tm_sched_create(name, &sched_params);
+
+	CU_ASSERT(profile != ODP_TM_INVALID);
+	CU_ASSERT(profile == odp_tm_sched_lookup(name));
+	CU_ASSERT(!odp_tm_sched_destroy(profile));
+}
+
+static void traffic_mngr_test_threshold_long_name(void)
+{
+	odp_tm_threshold_params_t threshold_params;
+	odp_tm_threshold_t profile;
+	char name[ODP_TM_NAME_LEN];
+
+	memset(name, 'a', sizeof(name));
+	name[sizeof(name) - 1] = 0;
+
+	odp_tm_threshold_params_init(&threshold_params);
+	threshold_params.enable_max_bytes = true;
+	profile = odp_tm_threshold_create(name, &threshold_params);
+
+	CU_ASSERT(profile != ODP_TM_INVALID);
+	CU_ASSERT(profile == odp_tm_thresholds_lookup(name));
+	CU_ASSERT(!odp_tm_threshold_destroy(profile));
+}
+
+static void traffic_mngr_test_wred_long_name(void)
+{
+	odp_tm_wred_params_t wred_params;
+	odp_tm_wred_t profile;
+	char name[ODP_TM_NAME_LEN];
+
+	memset(name, 'a', sizeof(name));
+	name[sizeof(name) - 1] = 0;
+
+	odp_tm_wred_params_init(&wred_params);
+	profile = odp_tm_wred_create(name, &wred_params);
+
+	CU_ASSERT(profile != ODP_TM_INVALID);
+	CU_ASSERT(profile == odp_tm_wred_lookup(name));
+	CU_ASSERT(!odp_tm_wred_destroy(profile));
+}
+
 static void traffic_mngr_test_destroy(void)
 {
 	CU_ASSERT(destroy_tm_systems() == 0);
@@ -5012,6 +5102,15 @@ odp_testinfo_t traffic_mngr_suite[] = {
 				  traffic_mngr_check_tx_aging),
 	ODP_TEST_INFO(traffic_mngr_test_fanin_info),
 	ODP_TEST_INFO_CONDITIONAL(traffic_mngr_test_lso_ipv4, traffic_mngr_check_lso_ipv4),
+	ODP_TEST_INFO(traffic_mngr_test_node_long_name),
+	ODP_TEST_INFO_CONDITIONAL(traffic_mngr_test_shaper_long_name,
+				  traffic_mngr_check_shaper),
+	ODP_TEST_INFO_CONDITIONAL(traffic_mngr_test_sched_long_name,
+				  traffic_mngr_check_scheduler),
+	ODP_TEST_INFO_CONDITIONAL(traffic_mngr_test_threshold_long_name,
+				  traffic_mngr_check_thresholds_byte),
+	ODP_TEST_INFO_CONDITIONAL(traffic_mngr_test_wred_long_name,
+				  traffic_mngr_check_wred),
 	ODP_TEST_INFO(traffic_mngr_test_destroy),
 	ODP_TEST_INFO_NULL,
 };

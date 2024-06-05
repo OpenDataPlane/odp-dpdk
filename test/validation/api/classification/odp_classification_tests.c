@@ -1,8 +1,6 @@
-/* Copyright (c) 2015-2018, Linaro Limited
- * Copyright (c) 2020-2023, Nokia
- * All rights reserved.
- *
- * SPDX-License-Identifier:	BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2015-2018 Linaro Limited
+ * Copyright (c) 2020-2023 Nokia
  */
 
 #include "odp_classification_testsuites.h"
@@ -226,7 +224,7 @@ void configure_cls_pmr_chain(odp_bool_t enable_pktv)
 
 	uint16_t val;
 	uint16_t maskport;
-	char cosname[ODP_QUEUE_NAME_LEN];
+	char cosname[ODP_COS_NAME_LEN];
 	odp_queue_param_t qparam;
 	odp_cls_cos_param_t cls_param;
 	char queuename[ODP_QUEUE_NAME_LEN];

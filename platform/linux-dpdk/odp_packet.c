@@ -1,13 +1,12 @@
-/* Copyright (c) 2013-2018, Linaro Limited
- * Copyright (c) 2019-2023, Nokia
- * All rights reserved.
- *
- * SPDX-License-Identifier:     BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2013-2018 Linaro Limited
+ * Copyright (c) 2019-2024 Nokia
  */
 
 #include <odp/api/align.h>
 #include <odp/api/buffer.h>
 #include <odp/api/byteorder.h>
+#include <odp/api/cpu.h>
 #include <odp/api/hash.h>
 #include <odp/api/hints.h>
 #include <odp/api/packet.h>
@@ -30,7 +29,7 @@
 #include <odp_packet_io_internal.h>
 #include <odp_parse_internal.h>
 #include <odp_pool_internal.h>
-#include <odp_print_internal.h>
+#include <odp_string_internal.h>
 
 #include <rte_version.h>
 
@@ -128,6 +127,14 @@ static inline int num_segments(uint32_t len, uint32_t seg_len)
 	return num;
 }
 
+static inline void packet_reset_md(odp_packet_hdr_t *pkt_hdr, struct rte_mbuf *mb)
+{
+	mb->port = 0xff;
+	mb->vlan_tci = 0;
+
+	packet_init(pkt_hdr, ODP_PKTIO_INVALID);
+}
+
 static inline int packet_reset(odp_packet_t pkt, uint32_t len)
 {
 	odp_packet_hdr_t *const pkt_hdr = packet_hdr(pkt);
@@ -135,12 +142,10 @@ static inline int packet_reset(odp_packet_t pkt, uint32_t len)
 	uint8_t nb_segs = 0;
 	int32_t lenleft = len;
 
-	packet_init(pkt_hdr, ODP_PKTIO_INVALID);
+	packet_reset_md(pkt_hdr, mb);
 
-	mb->port = 0xff;
 	mb->pkt_len = len;
 	mb->data_off = RTE_PKTMBUF_HEADROOM;
-	mb->vlan_tci = 0;
 	nb_segs = 1;
 
 	if (RTE_PKTMBUF_HEADROOM + lenleft <= mb->buf_len) {
@@ -318,16 +323,17 @@ int odp_packet_alloc_multi(odp_pool_t pool_hdl, uint32_t len,
 
 int odp_packet_reset(odp_packet_t pkt, uint32_t len)
 {
-	if (odp_unlikely(len == 0))
+	if (odp_unlikely(len == 0 || len > odp_packet_reset_max_len(pkt)))
 		return -1;
-
-	if (RTE_PKTMBUF_HEADROOM + len > odp_packet_buf_len(pkt)) {
-		_ODP_DBG("Not enough head room for that packet %d/%d\n",
-			 RTE_PKTMBUF_HEADROOM + len, odp_packet_buf_len(pkt));
-		return -1;
-	}
 
 	return packet_reset(pkt, len);
+}
+
+void odp_packet_reset_meta(odp_packet_t pkt)
+{
+	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
+
+	packet_reset_md(pkt_hdr, &pkt_hdr->mb);
 }
 
 int odp_event_filter_packet(const odp_event_t event[],

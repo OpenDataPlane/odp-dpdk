@@ -1,8 +1,6 @@
-/* Copyright (c) 2018, Linaro Limited
- * Copyright (c) 2019-2024, Nokia
- * All rights reserved.
- *
- * SPDX-License-Identifier:     BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2018 Linaro Limited
+ * Copyright (c) 2019-2024 Nokia
  */
 
 #include <odp_posix_extensions.h>
@@ -26,9 +24,9 @@
 #include <odp_libconfig_internal.h>
 #include <odp_macros_internal.h>
 #include <odp_pool_internal.h>
-#include <odp_print_internal.h>
 #include <odp_queue_if.h>
 #include <odp_ring_u32_internal.h>
+#include <odp_string_internal.h>
 #include <odp_thread_internal.h>
 #include <odp_timer_internal.h>
 
@@ -129,7 +127,7 @@ typedef struct timer_pool_s {
 	} free_timer;
 
 	odp_timer_pool_param_t param;
-	char name[ODP_TIMER_POOL_NAME_LEN + 1];
+	char name[ODP_TIMER_POOL_NAME_LEN];
 	int used;
 	odp_ticketlock_t lock;
 	uint32_t cur_timers;
@@ -715,11 +713,8 @@ odp_timer_pool_t odp_timer_pool_create(const char *name,
 	}
 
 	odp_ticketlock_unlock(&timer_global->lock);
-	if (name) {
-		strncpy(timer_pool->name, name,
-			ODP_TIMER_POOL_NAME_LEN);
-		timer_pool->name[ODP_TIMER_POOL_NAME_LEN] = 0;
-	}
+	if (name)
+		_odp_strcpy(timer_pool->name, name, ODP_TIMER_POOL_NAME_LEN);
 
 	timer_pool->param = *param;
 	timer_pool->param.res_ns = res_ns;

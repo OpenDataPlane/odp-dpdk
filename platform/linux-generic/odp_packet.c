@@ -1,8 +1,6 @@
-/* Copyright (c) 2013-2018, Linaro Limited
- * Copyright (c) 2019-2023, Nokia
- * All rights reserved.
- *
- * SPDX-License-Identifier:     BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2013-2018 Linaro Limited
+ * Copyright (c) 2019-2023 Nokia
  */
 
 #include <odp/autoheader_external.h>
@@ -25,7 +23,7 @@
 #include <odp_packet_internal.h>
 #include <odp_packet_io_internal.h>
 #include <odp_pool_internal.h>
-#include <odp_print_internal.h>
+#include <odp_string_internal.h>
 
 /* Inlined API functions */
 #include <odp/api/plat/byteorder_inlines.h>
@@ -701,6 +699,9 @@ void odp_packet_free(odp_packet_t pkt)
 
 static inline void packet_free_multi_ev(const odp_packet_t pkt[], int num, _odp_ev_id_t id)
 {
+	if (odp_unlikely(!num))
+		return;
+
 	odp_packet_hdr_t *pkt_hdrs[num];
 	int i;
 	int num_freed = 0;
@@ -736,6 +737,14 @@ void odp_packet_free_sp(const odp_packet_t pkt[], int num)
 	packet_free_multi_ev(pkt, num, _ODP_EV_PACKET_FREE_SP);
 }
 
+uint32_t odp_packet_reset_max_len(odp_packet_t pkt)
+{
+	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
+	pool_t *pool = _odp_pool_entry(pkt_hdr->event_hdr.pool);
+
+	return pool->seg_len * pkt_hdr->seg_count;
+}
+
 int odp_packet_reset(odp_packet_t pkt, uint32_t len)
 {
 	odp_packet_hdr_t *const pkt_hdr = packet_hdr(pkt);
@@ -755,6 +764,13 @@ int odp_packet_reset(odp_packet_t pkt, uint32_t len)
 	packet_init(pkt_hdr, len);
 
 	return 0;
+}
+
+void odp_packet_reset_meta(odp_packet_t pkt)
+{
+	_ODP_ASSERT(pkt != ODP_PACKET_INVALID);
+
+	_odp_packet_reset_md(packet_hdr(pkt));
 }
 
 int odp_event_filter_packet(const odp_event_t event[],

@@ -1,8 +1,6 @@
-/* Copyright (c) 2019, Nokia
- * Copyright (c) 2016-2018, Linaro Limited
- * All rights reserved.
- *
- * SPDX-License-Identifier:     BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2016-2018 Linaro Limited
+ * Copyright (c) 2019 Nokia
  */
 
 /* This file handles the internal shared memory: internal shared memory
@@ -49,6 +47,7 @@
 #include <odp_ishmphy_internal.h>
 #include <odp_ishmpool_internal.h>
 #include <odp_libconfig_internal.h>
+#include <odp_string_internal.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -652,6 +651,7 @@ static int create_file(int block_index, huge_flag_t huge, uint64_t len,
 	int  oflag = O_RDWR | O_CREAT | O_TRUNC; /* flags for open	      */
 	char dir[ISHM_FILENAME_MAXLEN];
 	int ret;
+	const odp_bool_t use_huge = huge == HUGE;
 
 	/* No ishm_block_t for the master single VA memory file */
 	if (single_va) {
@@ -665,11 +665,10 @@ static int create_file(int block_index, huge_flag_t huge, uint64_t len,
 	}
 
 	/* huge dir must be known to create files there!: */
-	if ((huge == HUGE) &&
-	    (!odp_global_ro.hugepage_info.default_huge_page_dir))
+	if (use_huge && !odp_global_ro.hugepage_info.default_huge_page_dir)
 		return -1;
 
-	if (huge == HUGE)
+	if (use_huge)
 		snprintf(dir, ISHM_FILENAME_MAXLEN, "%s/%s",
 			 odp_global_ro.hugepage_info.default_huge_page_dir,
 			 odp_global_ro.uid);
@@ -685,7 +684,7 @@ static int create_file(int block_index, huge_flag_t huge, uint64_t len,
 
 	fd = open(filename, oflag, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
 	if (fd < 0) {
-		if (huge != HUGE)
+		if (!use_huge)
 			_ODP_ERR("Normal page open failed: file=%s, "
 				"err=\"%s\"\n", filename, strerror(errno));
 		return -1;
@@ -699,9 +698,10 @@ static int create_file(int block_index, huge_flag_t huge, uint64_t len,
 		}
 
 		if (ret == -1) {
-			_ODP_ERR("%s memory allocation failed: fd=%d, file=%s, "
-				"err=\"%s\"\n", (huge == HUGE) ? "Huge page" :
-				"Normal page", fd, filename, strerror(errno));
+			_ODP_LOG(use_huge ? ODP_LOG_WARN : ODP_LOG_ERR,
+				 use_huge ? "WARN" : "ERR",
+				 "%s page memory allocation failed: fd=%d, file=%s, err=\"%s\"\n",
+				 use_huge ? "Huge" : "Normal", fd, filename, strerror(errno));
 			close(fd);
 			unlink(filename);
 			return -1;
@@ -1090,7 +1090,7 @@ int _odp_ishm_reserve(const char *name, uint64_t size, int fd,
 
 	/* save block name (if any given): */
 	if (name)
-		strncpy(new_block->name, name, ISHM_NAME_MAXLEN - 1);
+		_odp_strcpy(new_block->name, name, ISHM_NAME_MAXLEN);
 	else
 		new_block->name[0] = 0;
 

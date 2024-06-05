@@ -1,8 +1,6 @@
-/* Copyright (c) 2013-2018, Linaro Limited
- * Copyright (c) 2019-2023, Nokia
- * All rights reserved.
- *
- * SPDX-License-Identifier:     BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2013-2018 Linaro Limited
+ * Copyright (c) 2019-2023 Nokia
  */
 
 #include <odp_posix_extensions.h>
@@ -28,6 +26,7 @@
 #include <rte_config.h>
 #include <rte_debug.h>
 #include <rte_eal.h>
+#include <rte_errno.h>
 #include <rte_string_fns.h>
 
 enum init_stage {
@@ -221,6 +220,8 @@ static int _odp_init_dpdk(const char *cmdline)
 		_ODP_ERR("Error reading PCI config\n");
 		return -1;
 	}
+	if (pci_cmd != NULL)
+		pci_str = pci_cmd;
 
 	/* Read any additional EAL command string from config */
 	ealcmdlen = read_eal_cmdstr(&eal_cmd);
@@ -230,14 +231,11 @@ static int _odp_init_dpdk(const char *cmdline)
 			free(pci_cmd);
 		return -1;
 	}
-	cmdlen = snprintf(NULL, 0, "odpdpdk --legacy-mem -m %" PRIu32 " %s ", mem_prealloc,
-			  cmdline) + pcicmdlen + ealcmdlen;
-
-	if (pci_cmd != NULL)
-		pci_str = pci_cmd;
-
 	if (eal_cmd != NULL)
 		eal_str = eal_cmd;
+
+	cmdlen = snprintf(NULL, 0, "odpdpdk --legacy-mem -m %" PRIu32 " %s %s %s",
+			  mem_prealloc, cmdline, pci_str, eal_str);
 
 	char full_cmdline[cmdlen];
 
@@ -271,7 +269,7 @@ static int _odp_init_dpdk(const char *cmdline)
 
 	i = rte_eal_init(dpdk_argc, dpdk_argv);
 	if (i < 0) {
-		_ODP_ERR("Cannot init the Intel DPDK EAL!\n");
+		_ODP_ERR("DPDK EAL init failed: %s\n", rte_strerror(rte_errno));
 		return -1;
 	} else if (i + 1 != dpdk_argc) {
 		_ODP_DBG("Some DPDK args were not processed!\n");

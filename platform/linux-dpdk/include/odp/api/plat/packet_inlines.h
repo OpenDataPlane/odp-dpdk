@@ -1,8 +1,6 @@
-/* Copyright (c) 2016-2018, Linaro Limited
- * Copyright (c) 2019-2023, Nokia
- * All rights reserved.
- *
- * SPDX-License-Identifier: BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2016-2018 Linaro Limited
+ * Copyright (c) 2019-2024 Nokia
  */
 
 /**
@@ -61,6 +59,7 @@ extern "C" {
 	#define odp_packet_data_seg_len __odp_packet_data_seg_len
 	#define odp_packet_len __odp_packet_len
 	#define odp_packet_buf_len __odp_packet_buf_len
+	#define odp_packet_reset_max_len __odp_packet_reset_max_len
 	#define odp_packet_headroom __odp_packet_headroom
 	#define odp_packet_tailroom __odp_packet_tailroom
 	#define odp_packet_pool __odp_packet_pool
@@ -185,6 +184,11 @@ _ODP_INLINE uint32_t odp_packet_buf_len(odp_packet_t pkt)
 	struct rte_mbuf *mb = (struct rte_mbuf *)pkt;
 
 	return (uint32_t)(mb->nb_segs * mb->buf_len);
+}
+
+_ODP_INLINE uint32_t odp_packet_reset_max_len(odp_packet_t pkt)
+{
+	return odp_packet_buf_len(pkt) - RTE_PKTMBUF_HEADROOM;
 }
 
 _ODP_INLINE void *odp_packet_data_seg_len(odp_packet_t pkt,

@@ -149,7 +149,6 @@ noinst_HEADERS = \
 		  ${top_srcdir}/platform/linux-generic/include/odp_name_table_internal.h \
 		  include/odp_packet_io_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_parse_internal.h \
-		  ${top_srcdir}/platform/linux-generic/include/odp_print_internal.h \
 		  include/odp_errno_define.h \
 		  include/odp_event_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_event_validation_internal.h \
@@ -157,7 +156,7 @@ noinst_HEADERS = \
 		  ${top_srcdir}/platform/linux-generic/include/odp_pcapng.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_pkt_queue_internal.h \
 		  include/odp_pool_internal.h \
-		  include/odp_posix_extensions.h \
+		  ${top_srcdir}/platform/linux-generic/include/odp_posix_extensions.h \
 		  include/odp_queue_basic_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_queue_if.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_queue_lf.h \
@@ -176,6 +175,7 @@ noinst_HEADERS = \
 		  ${top_srcdir}/platform/linux-generic/include/odp_ring_u64_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_schedule_if.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_sorted_list_internal.h \
+		  ${top_srcdir}/platform/linux-generic/include/odp_string_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_sysinfo_internal.h \
 		  include/odp_shm_internal.h \
 		  include/odp_thread_internal.h \
@@ -184,13 +184,13 @@ noinst_HEADERS = \
 		  ${top_srcdir}/platform/linux-generic/include/odp_traffic_mngr_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_types_internal.h \
 		  include/odp_event_vector_internal.h \
-		  include/protocols/eth.h \
-		  include/protocols/ip.h \
-		  include/protocols/ipsec.h \
-		  include/protocols/sctp.h \
-		  include/protocols/tcp.h \
-		  include/protocols/thash.h \
-		  include/protocols/udp.h \
+		  ${top_srcdir}/platform/linux-generic/include/protocols/eth.h \
+		  ${top_srcdir}/platform/linux-generic/include/protocols/ip.h \
+		  ${top_srcdir}/platform/linux-generic/include/protocols/ipsec.h \
+		  ${top_srcdir}/platform/linux-generic/include/protocols/sctp.h \
+		  ${top_srcdir}/platform/linux-generic/include/protocols/tcp.h \
+		  ${top_srcdir}/platform/linux-generic/include/protocols/thash.h \
+		  ${top_srcdir}/platform/linux-generic/include/protocols/udp.h \
 		  Makefile.inc
 
 BUILT_SOURCES = \
@@ -231,7 +231,6 @@ __LIB__libodp_dpdk_la_SOURCES = \
 			   ../linux-generic/pktio/loop.c \
 			   ../linux-generic/pktio/null.c \
 			   ../linux-generic/odp_pkt_queue.c \
-			   ../linux-generic/odp_print.c \
 			   odp_pool.c \
 			   odp_queue_basic.c \
 			   odp_queue_eventdev.c \
@@ -249,6 +248,7 @@ __LIB__libodp_dpdk_la_SOURCES = \
 			   ../linux-generic/odp_sorted_list.c \
 			   ../linux-generic/odp_stash.c \
 			   ../linux-generic/odp_std.c \
+			   ../linux-generic/odp_string.c \
 			   odp_system_info.c \
 			   ../linux-generic/odp_pcapng.c \
 			   odp_thread.c \
@@ -425,7 +425,7 @@ __LIB__libodp_dpdk_la_LIBADD += $(PTHREAD_LIBS)
 __LIB__libodp_dpdk_la_LIBADD += $(TIMER_LIBS)
 __LIB__libodp_dpdk_la_LIBADD += $(ORT_LIBS)
 
-CHECK_GLOBALS_REGEX = " (odp_|_odp_|_deprecated_odp_|miniz_|mz_|tdefl_|tinfl_|mp_hdlr_init_odp_pool_ops)"
+CHECK_GLOBALS_REGEX = " (odp_|_odp_|_deprecated_odp_|miniz_|mz_|tdefl_|tinfl_|mp_hdlr_init_odp_pool_ops|__odr_asan)"
 
 TESTS_ENVIRONMENT = \
 	LIBTOOL="$(LIBTOOL)" \

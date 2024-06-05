@@ -1,9 +1,7 @@
 #!/bin/bash
 #
-# Copyright (c) 2015-2018, Linaro Limited
-# All rights reserved.
-#
-# SPDX-License-Identifier:	BSD-3-Clause
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2015-2018 Linaro Limited
 #
 
 # TEST_DIR is set by Makefile, when we add a rule to Makefile for odp_l2fwd_run
@@ -25,15 +23,13 @@ TEST_DIR="${TEST_DIR:-$PWD}"
 # directory where test sources are, including scripts
 TEST_SRC_DIR=$(dirname $0)
 
-PATH=$TEST_DIR:$TEST_DIR/../../example/generator:$PATH
+PATH=$TEST_DIR:$PATH
 
 # exit codes expected by automake for skipped tests
 TEST_SKIPPED=77
 
 VALIDATION_TESTDIR=platform/$ODP_PLATFORM/test/validation
 PLATFORM_VALIDATION=${TEST_SRC_DIR}/../../$VALIDATION_TESTDIR
-
-FLOOD_MODE=0
 
 # Use installed pktio env or for make check take it from platform directory
 if [ -f "./pktio_env" ]; then
@@ -60,40 +56,33 @@ run_l2fwd()
 		exit $TEST_SKIPPED
 	fi
 
-	type odp_generator > /dev/null
+	type odp_packet_gen > /dev/null
 	if [ $? -ne 0 ]; then
-		echo "odp_generator not installed. Aborting."
+		echo "odp_packet_gen not installed. Aborting."
 		cleanup_pktio_env
 		exit 1
 	fi
 
-	export ODP_PLATFORM_PARAMS="-m 256 --file-prefix="gen" \
+	export ODP_PLATFORM_PARAMS="-m 512 --file-prefix="gen" \
 --proc-type auto --no-pci \
 --vdev net_pcap0,iface=$IF0"
 
-	# Run generator with one worker
-	(odp_generator${EXEEXT} --interval $FLOOD_MODE -I 0 \
-			--srcip 192.168.0.1 --dstip 192.168.0.2 \
-			-m u -w 1 2>&1 > /dev/null) \
+	# Run odp_packet_gen with one tx thread
+	(odp_packet_gen${EXEEXT} --gap 0 -i 0 \
+			--ipv4_src 192.168.0.1 --ipv4_dst 192.168.0.2 \
+			-r 0 -t 1 2>&1 > /dev/null) \
 			2>&1 > /dev/null &
 
 	GEN_PID=$!
 
-	# this just turns off output buffering so that you still get periodic
-	# output while piping to tee, as long as stdbuf is available.
-	if [ "$(which stdbuf)" != "" ]; then
-		STDBUF="stdbuf -o 0"
-	else
-		STDBUF=
-	fi
 	LOG=odp_l2fwd_tmp.log
 
-	export ODP_PLATFORM_PARAMS="-m 256 --file-prefix="l2fwd" \
+	export ODP_PLATFORM_PARAMS="-m 512 --file-prefix="l2fwd" \
 --proc-type auto --no-pci --vdev net_pcap1,iface=$IF1 \
 --vdev net_pcap2,iface=$IF2"
 
 	# Max 2 workers
-	$STDBUF odp_l2fwd${EXEEXT} -i 0,1 -m 0 -t 5 -c 2 | tee $LOG
+	odp_l2fwd${EXEEXT} -i 0,1 -m 0 -t 5 -c 2 | tee $LOG
 	ret=${PIPESTATUS[0]}
 
 	kill -2 ${GEN_PID}

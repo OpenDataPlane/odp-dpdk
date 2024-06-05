@@ -156,8 +156,8 @@ noinst_HEADERS = \
 		  include/odp_packet_internal.h \
 		  include/odp_packet_io_internal.h \
 		  include/odp_parse_internal.h \
-		  include/odp_print_internal.h \
 		  include/odp_socket_common.h \
+		  include/odp_string_internal.h \
 		  include/odp_packet_io_stats_common.h \
 		  include/odp_packet_io_stats.h \
 		  include/odp_sysfs_stats.h \
@@ -240,7 +240,6 @@ __LIB__libodp_linux_la_SOURCES = \
 			   odp_packet_io.c \
 			   odp_parse.c \
 			   odp_pkt_queue.c \
-			   odp_print.c \
 			   odp_pool.c \
 			   odp_pool_mem_src_ops.c \
 			   odp_queue_basic.c \
@@ -260,6 +259,7 @@ __LIB__libodp_linux_la_SOURCES = \
 			   odp_sorted_list.c \
 			   odp_stash.c \
 			   odp_std.c \
+			   odp_string.c \
 			   odp_system_info.c \
 			   odp_pcapng.c \
 			   odp_thread.c \
@@ -492,7 +492,7 @@ if ODP_PKTIO_PCAP
 __LIB__libodp_linux_la_LIBADD += $(PCAP_LIBS)
 endif
 
-CHECK_GLOBALS_REGEX = " (odp_|_odp_|_deprecated_odp_|miniz_|mz_|tdefl_|tinfl_|mp_hdlr_init_odp_pool_ops)"
+CHECK_GLOBALS_REGEX = " (odp_|_odp_|_deprecated_odp_|miniz_|mz_|tdefl_|tinfl_|mp_hdlr_init_odp_pool_ops|__odr_asan)"
 
 TESTS_ENVIRONMENT = \
 	LIBTOOL="$(LIBTOOL)" \

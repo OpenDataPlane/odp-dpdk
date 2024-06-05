@@ -1,6 +1,5 @@
 SUBDIRS = classifier \
 	  debug \
-	  generator \
 	  hello \
 	  ipsec_api \
 	  ipsec_crypto \
@@ -11,7 +10,6 @@ SUBDIRS = classifier \
 	  simple_pipeline \
 	  switch \
 	  sysinfo \
-	  time \
 	  timer \
 	  traffic_mgmt
 

@@ -1,9 +1,7 @@
-/* Copyright (c) 2014-2018, Linaro Limited
- * Copyright (c) 2019-2022, Nokia
- * Copyright (c) 2021, Marvell
- * All rights reserved.
- *
- * SPDX-License-Identifier:     BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2014-2018 Linaro Limited
+ * Copyright (c) 2019-2024 Nokia
+ * Copyright (c) 2021 Marvell
  */
 
 #ifndef _GNU_SOURCE
@@ -107,10 +105,8 @@ void odp_cu_assert(CU_BOOL value, unsigned int line,
 	if (idx < MAX_FAILURES) {
 		assertion_failure_t *a = &thr_global->failure[idx];
 
-		strncpy(a->cond, condition, sizeof(a->cond));
-		strncpy(a->file, file, sizeof(a->file));
-		a->cond[sizeof(a->cond) - 1] = 0;
-		a->file[sizeof(a->file) - 1] = 0;
+		odph_strcpy(a->cond, condition, sizeof(a->cond));
+		odph_strcpy(a->file, file, sizeof(a->file));
 		a->line = line;
 		a->fatal = fatal;
 	}
@@ -244,13 +240,24 @@ int odp_cunit_thread_create(int num, int func_ptr(void *), void *const arg[], in
 
 int odp_cunit_thread_join(int num)
 {
+	odph_thread_join_result_t res[num];
+
 	/* Wait for threads to exit */
-	if (odph_thread_join(thread_tbl, num) != num) {
-		fprintf(stderr, "error: odph_thread_join() failed.\n");
+	if (odph_thread_join_result(thread_tbl, res, num) != num) {
+		fprintf(stderr, "error: odph_thread_join_result() failed.\n");
 		return -1;
 	}
+
 	threads_running = 0;
 	thread_func = 0;
+
+	for (int i = 0; i < num; i++) {
+		if (res[i].is_sig || res[i].ret != 0) {
+			fprintf(stderr, "error: worker thread failure%s: %d.\n", res[i].is_sig ?
+					" (signaled)" : "", res[i].ret);
+			return -1;
+		}
+	}
 
 	handle_postponed_asserts();
 

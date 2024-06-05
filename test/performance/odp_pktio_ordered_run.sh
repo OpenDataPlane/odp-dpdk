@@ -1,10 +1,9 @@
 #!/bin/bash
 #
-# Copyright (c) 2016-2018, Linaro Limited
-# All rights reserved.
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2016-2018 Linaro Limited
 #
-# SPDX-License-Identifier:     BSD-3-Clause
-#
+
 TEST_SRC_DIR=$(dirname $0)
 TEST_DIR="${TEST_DIR:-$(dirname $0)}"
 
@@ -20,19 +19,11 @@ if [ ! -f ${PCAP_IN} ]; then
 	exit 1
 fi
 
-# This just turns off output buffering so that you still get periodic
-# output while piping to tee, as long as stdbuf is available.
-if [ "$(which stdbuf)" != "" ]; then
-	STDBUF="stdbuf -o 0"
-else
-	STDBUF=
-fi
-
 export ODP_PLATFORM_PARAMS="--no-pci \
 --vdev net_pcap0,rx_pcap=${PCAP_IN},tx_pcap=${PCAP_OUT} \
 --vdev net_pcap1,rx_pcap=${PCAP_IN},tx_pcap=${PCAP_OUT}"
 
-$STDBUF ${TEST_DIR}/odp_pktio_ordered${EXEEXT} \
+${TEST_DIR}/odp_pktio_ordered${EXEEXT} \
 	-i 0,1 \
 	-t $DURATION | tee $LOG
 ret=${PIPESTATUS[0]}

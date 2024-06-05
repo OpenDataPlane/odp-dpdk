@@ -1,11 +1,10 @@
-/* Copyright (c) 2016-2018, Linaro Limited
- * Copyright (c) 2023, Nokia
- * All rights reserved.
- *
- * SPDX-License-Identifier:     BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2016-2018 Linaro Limited
+ * Copyright (c) 2023 Nokia
  */
 
 #include <odp_sysinfo_internal.h>
+#include <odp_string_internal.h>
 #include "cpu_flags.h"
 #include <string.h>
 
@@ -49,8 +48,8 @@ int _odp_cpuinfo_parser(FILE *file, system_info_t *sysinfo)
 			if (pos_end != NULL)
 				*(pos_end - 1) = '\0';
 
-			strncpy(sysinfo->model_str[id], pos + 2,
-				MODEL_STR_SIZE - 1);
+			_odp_strcpy(sysinfo->model_str[id], pos + 2,
+				    MODEL_STR_SIZE);
 
 			if (sysinfo->cpu_hz_max[id]) {
 				freq_set = true;

@@ -1,15 +1,13 @@
-/* Copyright 2015 EZchip Semiconductor Ltd. All Rights Reserved.
- *
- * Copyright (c) 2015-2018, Linaro Limited
- * Copyright (c) 2022, Marvell
- * Copyright (c) 2022, Nokia
- * All rights reserved.
- *
- * SPDX-License-Identifier: BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2015 EZchip Semiconductor Ltd.
+ * Copyright (c) 2015-2018 Linaro Limited
+ * Copyright (c) 2022 Marvell
+ * Copyright (c) 2022 Nokia
  */
 
 #include <odp_posix_extensions.h>
 
+#include <odp/api/cpu.h>
 #include <odp/api/packet.h>
 #include <odp/api/packet_flags.h>
 #include <odp/api/std_types.h>
@@ -160,7 +158,6 @@ typedef struct {
 	int cpu_num;
 
 	/* Service threads */
-	uint64_t         busy_wait_counter;
 	odp_bool_t       main_loop_running;
 	odp_atomic_u64_t atomic_request_cnt;
 	odp_atomic_u64_t currently_serving_cnt;
@@ -492,6 +489,7 @@ static tm_system_t *tm_system_alloc(void)
 			memset(tm_system, 0, sizeof(tm_system_t));
 			tm_system->tm_idx = tm_idx;
 			tm_system->status = TM_STATUS_RESERVED;
+			odp_atomic_init_u32(&tm_system->is_idle, 0);
 			return tm_system;
 		}
 	}
@@ -2415,14 +2413,6 @@ static int tm_process_expired_timers(tm_system_t *tm_system,
 	return work_done;
 }
 
-static void busy_wait(uint32_t iterations)
-{
-	uint32_t cnt;
-
-	for (cnt = 1; cnt <= iterations; cnt++)
-		tm_glb->busy_wait_counter++;
-}
-
 static void signal_request(void)
 {
 	uint64_t request_num, serving;
@@ -2431,7 +2421,7 @@ static void signal_request(void)
 
 	serving = odp_atomic_load_u64(&tm_glb->currently_serving_cnt);
 	while (serving != request_num) {
-		busy_wait(100);
+		odp_cpu_pause();
 		serving = odp_atomic_load_u64(&tm_glb->currently_serving_cnt);
 	}
 }
@@ -2448,11 +2438,11 @@ static void check_for_request(void)
 	/* Signal the other requesting thread to proceed and then
 	 * wait for their done indication */
 	odp_atomic_inc_u64(&tm_glb->currently_serving_cnt);
-	busy_wait(100);
+	odp_cpu_pause();
 
 	done_cnt = odp_atomic_load_u64(&tm_glb->atomic_done_cnt);
 	while (done_cnt != request_num) {
-		busy_wait(100);
+		odp_cpu_pause();
 		done_cnt = odp_atomic_load_u64(&tm_glb->atomic_done_cnt);
 	}
 }
@@ -2506,7 +2496,7 @@ static void *tm_system_thread(void *arg)
 	odp_barrier_wait(&tm_group->tm_group_barrier);
 	tm_glb->main_loop_running = true;
 
-	destroying = odp_atomic_load_u64(&tm_system->destroying);
+	destroying = odp_atomic_load_acq_u64(&tm_system->destroying);
 
 	current_ns = odp_time_to_ns(odp_time_local());
 	_odp_timer_wheel_start(_odp_int_timer_wheel, current_ns);
@@ -2547,9 +2537,9 @@ static void *tm_system_thread(void *arg)
 
 		current_ns = odp_time_to_ns(odp_time_local());
 		tm_system->current_time = current_ns;
-		tm_system->is_idle = (timer_cnt == 0) &&
-			(work_queue_cnt == 0);
-		destroying = odp_atomic_load_u64(&tm_system->destroying);
+		odp_atomic_store_rel_u32(&tm_system->is_idle,
+					 (timer_cnt == 0) && (work_queue_cnt == 0));
+		destroying = odp_atomic_load_acq_u64(&tm_system->destroying);
 
 		/* Advance to the next tm_system in the tm_system_group. */
 		tm_system = tm_system->next;
@@ -2569,7 +2559,7 @@ odp_bool_t odp_tm_is_idle(odp_tm_t odp_tm)
 	tm_system_t *tm_system;
 
 	tm_system = GET_TM_SYSTEM(odp_tm);
-	return tm_system->is_idle;
+	return odp_atomic_load_acq_u32(&tm_system->is_idle);
 }
 
 void odp_tm_requirements_init(odp_tm_requirements_t *requirements)
@@ -3214,7 +3204,7 @@ int odp_tm_destroy(odp_tm_t odp_tm)
 	 * all new pkts are prevented from coming in.
 	 */
 	odp_barrier_init(&tm_system->tm_system_destroy_barrier, 2);
-	odp_atomic_inc_u64(&tm_system->destroying);
+	odp_atomic_store_rel_u64(&tm_system->destroying, 1);
 	odp_barrier_wait(&tm_system->tm_system_destroy_barrier);
 
 	/* Remove ourselves from the group.  If we are the last tm_system in
@@ -4525,7 +4515,7 @@ int odp_tm_enq(odp_tm_queue_t tm_queue, odp_packet_t pkt)
 	if (!tm_system)
 		return -1;
 
-	if (odp_atomic_load_u64(&tm_system->destroying))
+	if (odp_atomic_load_acq_u64(&tm_system->destroying))
 		return -1;
 
 	rc = tm_enqueue(tm_system, tm_queue_obj, pkt);
@@ -4549,7 +4539,7 @@ int odp_tm_enq_with_cnt(odp_tm_queue_t tm_queue, odp_packet_t pkt)
 	if (!tm_system)
 		return -1;
 
-	if (odp_atomic_load_u64(&tm_system->destroying))
+	if (odp_atomic_load_acq_u64(&tm_system->destroying))
 		return -1;
 
 	rc = tm_enqueue(tm_system, tm_queue_obj, pkt);
@@ -4575,7 +4565,7 @@ int odp_tm_enq_multi(odp_tm_queue_t tm_queue, const odp_packet_t packets[],
 	if (!tm_system)
 		return -1;
 
-	if (odp_atomic_load_u64(&tm_system->destroying))
+	if (odp_atomic_load_acq_u64(&tm_system->destroying))
 		return -1;
 
 	for (i = 0; i < num; i++) {

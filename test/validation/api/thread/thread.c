@@ -1,8 +1,6 @@
-/* Copyright (c) 2015-2018, Linaro Limited
- * Copyright (c) 2022, Nokia
- * All rights reserved.
- *
- * SPDX-License-Identifier:     BSD-3-Clause
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2015-2018 Linaro Limited
+ * Copyright (c) 2022 Nokia
  */
 
 #include <odp_api.h>
@@ -81,11 +79,6 @@ static int thread_global_term(odp_instance_t inst)
 	}
 
 	return 0;
-}
-
-static void thread_test_odp_cpu_id(void)
-{
-	CU_ASSERT(odp_cpu_id() >= 0);
 }
 
 static void thread_test_odp_thread_id(void)
@@ -222,7 +215,6 @@ static void thread_test_odp_thrmask_control(void)
 }
 
 odp_testinfo_t thread_suite[] = {
-	ODP_TEST_INFO(thread_test_odp_cpu_id),
 	ODP_TEST_INFO(thread_test_odp_thread_id),
 	ODP_TEST_INFO(thread_test_odp_thread_count),
 	ODP_TEST_INFO(thread_test_odp_thread_count_max),
