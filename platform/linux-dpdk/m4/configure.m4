@@ -119,5 +119,6 @@ AC_CONFIG_FILES([platform/linux-dpdk/Makefile
 		 platform/linux-dpdk/test/example/switch/Makefile
 		 platform/linux-dpdk/test/performance/Makefile
 		 platform/linux-dpdk/test/performance/dmafwd/Makefile
+		 platform/linux-dpdk/test/validation/api/ml/Makefile
 		 platform/linux-dpdk/test/validation/api/pktio/Makefile])
 ])
