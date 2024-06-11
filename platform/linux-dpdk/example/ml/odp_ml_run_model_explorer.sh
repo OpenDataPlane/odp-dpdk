@@ -1,1 +1,0 @@
-../../../linux-generic/example/ml/odp_ml_run_model_explorer.sh

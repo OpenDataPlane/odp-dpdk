@@ -12,7 +12,6 @@ if PLATFORM_IS_LINUX_DPDK
 PLATFORM_DIR = platform/linux-dpdk
 PLATFORM_DUMPCONF_DIR = platform/linux-dpdk/dumpconfig
 PLATFORM_TEST_DIR = platform/linux-dpdk/test
-PLATFORM_EXAMPLE_DIR = platform/linux-dpdk/example
 endif
 
 SUBDIRS = \
