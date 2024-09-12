@@ -198,7 +198,7 @@ BUILT_SOURCES = \
 
 __LIB__libodp_dpdk_la_SOURCES = \
 			   ../linux-generic/odp_barrier.c \
-			   odp_buffer.c \
+			   ../linux-generic/odp_buffer.c \
 			   ../linux-generic/odp_chksum.c \
 			   ../linux-generic/odp_classification.c \
 			   ../linux-generic/odp_comp.c \
