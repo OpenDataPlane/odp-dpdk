@@ -20,6 +20,7 @@ extern "C" {
 #include <odp/api/hints.h>
 #include <odp/api/packet_io.h>
 #include <odp/api/spinlock.h>
+#include <odp/api/std.h>
 #include <odp/api/ticketlock.h>
 #include <odp/api/time.h>
 
@@ -210,7 +211,7 @@ typedef struct pktio_if_ops {
 	uint32_t (*maxlen_get)(pktio_entry_t *pktio_entry);
 	int (*maxlen_set)(pktio_entry_t *pktio_entry, uint32_t maxlen_input,
 			  uint32_t maxlen_output);
-	int (*promisc_mode_set)(pktio_entry_t *pktio_entry,  int enable);
+	int (*promisc_mode_set)(pktio_entry_t *pktio_entry, odp_bool_t enable);
 	int (*promisc_mode_get)(pktio_entry_t *pktio_entry);
 	int (*mac_get)(pktio_entry_t *pktio_entry, void *mac_addr);
 	int (*mac_set)(pktio_entry_t *pktio_entry, const void *mac_addr);
