@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2014-2018 Linaro Limited
- * Copyright (c) 2021-2023 Nokia
+ * Copyright (c) 2021-2024 Nokia
  */
 
 /**
@@ -209,6 +209,11 @@ static inline _odp_event_hdr_t *packet_to_event_hdr(odp_packet_t pkt)
 static inline odp_packet_t packet_from_event_hdr(_odp_event_hdr_t *event_hdr)
 {
 	return (odp_packet_t)(uintptr_t)event_hdr;
+}
+
+static inline uint32_t packet_first_seg_len(odp_packet_hdr_t *pkt_hdr)
+{
+	return pkt_hdr->mb.data_len;
 }
 
 static inline struct rte_mbuf *pkt_to_mbuf(odp_packet_t  pkt)
