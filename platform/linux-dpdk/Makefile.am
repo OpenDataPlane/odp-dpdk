@@ -210,7 +210,8 @@ __LIB__libodp_dpdk_la_SOURCES = \
 			   odp_dma.c \
 			   odp_crypto.c \
 			   odp_errno.c \
-			   odp_event.c \
+			   ../linux-generic/odp_event.c \
+			   odp_event_offsets.c \
 			   ../linux-generic/odp_event_validation.c \
 			   ../linux-generic/odp_hash_crc_gen.c \
 			   odp_init.c \
