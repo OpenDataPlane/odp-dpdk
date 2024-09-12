@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2017-2018 Linaro Limited
- * Copyright (c) 2022-2023 Nokia
+ * Copyright (c) 2022-2024 Nokia
  */
 
 /**
@@ -24,7 +24,8 @@
 #include <odp_api.h>
 #include <odp/helper/odph_api.h>
 
-#include "bench_common.h"
+#include <bench_common.h>
+#include <export_results.h>
 
 /** Packet user area size in bytes */
 #define PKT_POOL_UAREA_SIZE 8
@@ -61,6 +62,11 @@
 /** Default burst size for *_multi operations */
 #define TEST_DEF_BURST 8
 
+/** Maximum number of results to be held */
+#define TEST_MAX_BENCH 100
+
+#define TEST_MAX_SIZES 7
+
 /** Get rid of path in filename - only for unix-type paths using '/' */
 #define NO_PATH(file_name) (strrchr((file_name), '/') ? \
 			    strrchr((file_name), '/') + 1 : (file_name))
@@ -74,6 +80,9 @@ ODP_STATIC_ASSERT((TEST_ALIGN_OFFSET + TEST_ALIGN_LEN) <= TEST_MIN_PKT_SIZE,
 /** Test packet sizes */
 const uint32_t test_packet_len[] = {TEST_MIN_PKT_SIZE, 128, 256, 512,
 				    1024, 1518, TEST_MAX_PKT_SIZE};
+
+ODP_STATIC_ASSERT(ODPH_ARRAY_SIZE(test_packet_len) <= TEST_MAX_SIZES,
+		  "Result array is too small to hold all the results");
 
 /**
  * Parsed command line arguments
@@ -126,6 +135,10 @@ typedef struct {
 	odp_time_t ts_tbl[TEST_REPEAT_COUNT];
 	/** Array for storing test data */
 	uint8_t data_tbl[TEST_REPEAT_COUNT][TEST_MAX_PKT_SIZE];
+	/** Options for exporting results */
+	test_common_options_t common_options;
+	/** Array for storing results */
+	double result[TEST_MAX_SIZES][TEST_MAX_BENCH];
 } args_t;
 
 /** Global pointer to args */
@@ -138,6 +151,35 @@ static void sig_handler(int signo ODP_UNUSED)
 	odp_atomic_store_u32(&gbl_args->suite.exit_worker, 1);
 }
 
+static int bench_packet_export(void *data)
+{
+	args_t *gbl_args = data;
+	int ret = 0;
+
+	if (test_common_write("%s", "Function name,64B,128B,256B,512B,1024B,1518B,2048B\n")) {
+		ret = -1;
+		goto exit;
+	}
+
+	for (int i = 0; i < gbl_args->suite.num_bench; i++) {
+		if (test_common_write("odp_%s,%f,%f,%f,%f,%f,%f,%f\n",
+				      gbl_args->suite.bench[i].desc != NULL ?
+				      gbl_args->suite.bench[i].desc : gbl_args->suite.bench[i].name,
+				      gbl_args->result[0][i], gbl_args->result[1][i],
+				      gbl_args->result[2][i], gbl_args->result[3][i],
+				      gbl_args->result[4][i], gbl_args->result[5][i],
+				      gbl_args->result[6][i])) {
+			ret = -1;
+			goto exit;
+		}
+	}
+
+exit:
+	test_common_write_term();
+
+	return ret;
+}
+
 /**
  * Master function for running the microbenchmarks
  */
@@ -147,16 +189,13 @@ static int run_benchmarks(void *arg)
 	args_t *args = arg;
 	bench_suite_t *suite = &args->suite;
 	int num_sizes = ODPH_ARRAY_SIZE(test_packet_len);
-	double results[num_sizes][suite->num_bench];
-
-	memset(results, 0, sizeof(results));
 
 	for (i = 0; i < num_sizes; i++) {
 		printf("Packet length: %6d bytes", test_packet_len[i]);
 
 		gbl_args->pkt.len = test_packet_len[i];
 
-		suite->result = results[i];
+		suite->result = args->result[i];
 
 		bench_run(suite);
 	}
@@ -174,9 +213,17 @@ static int run_benchmarks(void *arg)
 		       suite->bench[i].desc : suite->bench[i].name);
 
 		for (int j = 0; j < num_sizes; j++)
-			printf("%8.1f  ", results[j][i]);
+			printf("%8.1f  ", args->result[j][i]);
 	}
 	printf("\n\n");
+
+	if (args->common_options.is_export) {
+		if (bench_packet_export(args)) {
+			ODPH_ERR("Error: Export failed\n");
+			return -1;
+		}
+	}
+
 	return 0;
 }
 
@@ -434,6 +481,16 @@ static int packet_free(void)
 	return i;
 }
 
+static int event_free(void)
+{
+	int i;
+
+	for (i = 0; i < TEST_REPEAT_COUNT; i++)
+		odp_event_free(gbl_args->event_tbl[i]);
+
+	return i;
+}
+
 static int packet_free_multi(void)
 {
 	int i;
@@ -447,6 +504,19 @@ static int packet_free_multi(void)
 	return i;
 }
 
+static int event_free_multi(void)
+{
+	int i;
+
+	for (i = 0; i < TEST_REPEAT_COUNT; i++) {
+		int pkt_idx = i * gbl_args->appl.burst_size;
+
+		odp_event_free_multi(&gbl_args->event_tbl[pkt_idx],
+				     gbl_args->appl.burst_size);
+	}
+	return i;
+}
+
 static int packet_free_sp(void)
 {
 	int i;
@@ -456,6 +526,19 @@ static int packet_free_sp(void)
 
 		odp_packet_free_sp(&gbl_args->pkt_tbl[pkt_idx],
 				   gbl_args->appl.burst_size);
+	}
+	return i;
+}
+
+static int event_free_sp(void)
+{
+	int i;
+
+	for (i = 0; i < TEST_REPEAT_COUNT; i++) {
+		int pkt_idx = i * gbl_args->appl.burst_size;
+
+		odp_event_free_sp(&gbl_args->event_tbl[pkt_idx],
+				  gbl_args->appl.burst_size);
 	}
 	return i;
 }
@@ -501,6 +584,27 @@ static int packet_reset(void)
 		ret += odp_packet_reset(gbl_args->pkt_tbl[i],
 					gbl_args->pkt.len);
 	return !ret;
+}
+
+static int packet_reset_meta(void)
+{
+	int i;
+
+	for (i = 0; i < TEST_REPEAT_COUNT; i++)
+		odp_packet_reset_meta(gbl_args->pkt_tbl[i]);
+
+	return i;
+}
+
+static int packet_reset_max_len(void)
+{
+	int i;
+	uint32_t ret = 0;
+
+	for (i = 0; i < TEST_REPEAT_COUNT; i++)
+		ret += odp_packet_reset_max_len(gbl_args->pkt_tbl[i]);
+
+	return ret;
 }
 
 static int packet_from_event(void)
@@ -1029,6 +1133,16 @@ static int packet_pool(void)
 	return i;
 }
 
+static int event_pool(void)
+{
+	int i;
+
+	for (i = 0; i < TEST_REPEAT_COUNT; i++)
+		gbl_args->pool_tbl[i] = odp_event_pool(gbl_args->event_tbl[i]);
+
+	return i;
+}
+
 static int packet_input(void)
 {
 	int i;
@@ -1083,6 +1197,17 @@ static int packet_user_area(void)
 	return i;
 }
 
+static int event_user_area(void)
+{
+	int i;
+	odp_event_t *event_tbl = gbl_args->event_tbl;
+
+	for (i = 0; i < TEST_REPEAT_COUNT; i++)
+		gbl_args->ptr_tbl[i] = odp_event_user_area(event_tbl[i]);
+
+	return i;
+}
+
 static int packet_user_area_size(void)
 {
 	int i;
@@ -1105,12 +1230,37 @@ static int packet_user_flag(void)
 	return ret;
 }
 
+static int event_user_area_and_flag(void)
+{
+	odp_event_t *event_tbl = gbl_args->event_tbl;
+	void **ptr_tbl = gbl_args->ptr_tbl;
+	int ret = 0;
+	int flag;
+
+	for (int i = 0; i < TEST_REPEAT_COUNT; i++) {
+		ptr_tbl[i] = odp_event_user_area_and_flag(event_tbl[i], &flag);
+		ret += !flag;
+	}
+
+	return ret;
+}
+
 static int packet_user_flag_set(void)
 {
 	int i;
 
 	for (i = 0; i < TEST_REPEAT_COUNT; i++)
 		odp_packet_user_flag_set(gbl_args->pkt_tbl[i], 1);
+
+	return i;
+}
+
+static int event_user_flag_set(void)
+{
+	int i;
+
+	for (i = 0; i < TEST_REPEAT_COUNT; i++)
+		odp_event_user_flag_set(gbl_args->event_tbl[i], 1);
 
 	return i;
 }
@@ -1317,6 +1467,17 @@ static int packet_subtype(void)
 	return i;
 }
 
+static int event_subtype(void)
+{
+	int i;
+	odp_event_t *event_tbl = gbl_args->event_tbl;
+
+	for (i = 0; i < TEST_REPEAT_COUNT; i++)
+		gbl_args->output_tbl[i] = odp_event_subtype(event_tbl[i]);
+
+	return i;
+}
+
 static int packet_parse(void)
 {
 	odp_packet_parse_param_t param;
@@ -1479,11 +1640,16 @@ bench_info_t test_suite[] = {
 	BENCH_INFO(packet_alloc, NULL, free_packets, NULL),
 	BENCH_INFO(packet_alloc_multi, NULL, free_packets_multi, NULL),
 	BENCH_INFO(packet_free, create_packets, NULL, NULL),
+	BENCH_INFO(event_free, create_events, NULL, NULL),
 	BENCH_INFO(packet_free_multi, alloc_packets_multi, NULL, NULL),
+	BENCH_INFO(event_free_multi, create_events_multi, NULL, NULL),
 	BENCH_INFO(packet_free_sp, alloc_packets_multi, NULL, NULL),
+	BENCH_INFO(event_free_sp, create_events_multi, NULL, NULL),
 	BENCH_INFO(packet_alloc_free, NULL, NULL, NULL),
 	BENCH_INFO(packet_alloc_free_multi, NULL, NULL, NULL),
 	BENCH_INFO(packet_reset, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_reset_meta, create_packets, free_packets, NULL),
+	BENCH_INFO(packet_reset_max_len, create_packets, free_packets, NULL),
 	BENCH_INFO(packet_from_event, create_events, free_packets, NULL),
 	BENCH_INFO(packet_from_event_multi, create_events_multi, free_packets_multi, NULL),
 	BENCH_INFO(packet_to_event, create_packets, free_packets, NULL),
@@ -1527,14 +1693,18 @@ bench_info_t test_suite[] = {
 	BENCH_INFO(packet_copy_data, create_packets, free_packets, NULL),
 	BENCH_INFO(packet_move_data, create_packets, free_packets, NULL),
 	BENCH_INFO(packet_pool, create_packets, free_packets, NULL),
+	BENCH_INFO(event_pool, create_events, free_packets, NULL),
 	BENCH_INFO(packet_input, create_packets, free_packets, NULL),
 	BENCH_INFO(packet_input_index, create_packets, free_packets, NULL),
 	BENCH_INFO(packet_user_ptr, create_packets, free_packets, NULL),
 	BENCH_INFO(packet_user_ptr_set, create_packets, free_packets, NULL),
 	BENCH_INFO(packet_user_area, create_packets, free_packets, NULL),
+	BENCH_INFO(event_user_area, create_events, free_packets, NULL),
 	BENCH_INFO(packet_user_area_size, create_packets, free_packets, NULL),
 	BENCH_INFO(packet_user_flag, create_packets, free_packets, NULL),
+	BENCH_INFO(event_user_area_and_flag, create_events, free_packets, NULL),
 	BENCH_INFO(packet_user_flag_set, create_packets, free_packets, NULL),
+	BENCH_INFO(event_user_flag_set, create_events, free_packets, NULL),
 	BENCH_INFO(packet_l2_ptr, create_packets, free_packets, NULL),
 	BENCH_INFO(packet_l2_offset, create_packets, free_packets, NULL),
 	BENCH_INFO(packet_l2_offset_set, create_packets, free_packets, NULL),
@@ -1553,6 +1723,7 @@ bench_info_t test_suite[] = {
 	BENCH_INFO(packet_ref_pkt, alloc_packets_twice, free_packets_twice, NULL),
 	BENCH_INFO(packet_has_ref, alloc_ref_packets, free_packets_twice, NULL),
 	BENCH_INFO(packet_subtype, create_packets, free_packets, NULL),
+	BENCH_INFO(event_subtype, create_events, free_packets, NULL),
 	BENCH_INFO(packet_parse, alloc_parse_packets_ipv4_tcp, free_packets,
 		   "packet_parse ipv4/tcp"),
 	BENCH_INFO(packet_parse, alloc_parse_packets_ipv4_udp, free_packets,
@@ -1571,12 +1742,16 @@ bench_info_t test_suite[] = {
 		   "packet_parse_multi ipv6/udp"),
 };
 
+ODP_STATIC_ASSERT(ODPH_ARRAY_SIZE(test_suite) < TEST_MAX_BENCH,
+		  "Result array is too small to hold all the results");
+
 /**
  * ODP packet microbenchmark application
  */
 int main(int argc, char *argv[])
 {
 	odph_helper_options_t helper_options;
+	test_common_options_t common_options;
 	odph_thread_t worker_thread;
 	odph_thread_common_param_t thr_common;
 	odph_thread_param_t thr_param;
@@ -1595,6 +1770,12 @@ int main(int argc, char *argv[])
 	argc = odph_parse_options(argc, argv);
 	if (odph_options(&helper_options)) {
 		ODPH_ERR("Error: reading ODP helper options failed.\n");
+		exit(EXIT_FAILURE);
+	}
+
+	argc = test_common_parse_options(argc, argv);
+	if (test_common_options(&common_options)) {
+		ODPH_ERR("Error: reading test options failed\n");
 		exit(EXIT_FAILURE);
 	}
 
@@ -1630,6 +1811,8 @@ int main(int argc, char *argv[])
 	}
 
 	memset(gbl_args, 0, sizeof(args_t));
+
+	gbl_args->common_options = common_options;
 
 	/* Parse and store the application arguments */
 	parse_args(argc, argv, &gbl_args->appl);

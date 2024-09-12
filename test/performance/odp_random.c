@@ -54,6 +54,7 @@ typedef struct {
 	int num_threads;
 	uint32_t size;
 	uint32_t rounds;
+	uint32_t msec;
 	uint64_t delay;
 
 } options_t;
@@ -64,6 +65,7 @@ static const options_t options_def = {
 	.num_threads = 1,
 	.size = 256,
 	.rounds = 100000,
+	.msec = 500,
 	.delay = 0,
 };
 
@@ -77,15 +79,18 @@ static void print_usage(void)
 	       "  -m, --mode    Test mode select (default: 0):\n"
 	       "                  0: Data throughput\n"
 	       "                  1: Data generation latency (size: 8B by default)\n"
-	       "  -t, --threads Number of worker threads (default %u)\n"
-	       "  -s, --size    Size of buffer in bytes (default %u)\n"
-	       "  -r, --rounds  Number of test rounds (default %u)\n"
-	       "                Divided by 100 for ODP_RANDOM_TRUE\n"
-	       "  -d, --delay   Delay (nsec) between buffer fills (default %" PRIu64 ").\n"
+	       "  -c, --num_cpu Number of CPUs (worker threads). 0: all available CPUs. Default 1.\n"
+	       "  -s, --size    Size of buffer in bytes. Default %u.\n"
+	       "  -r, --rounds  Number of test rounds. Default %u.\n"
+	       "                Divided by 100 for ODP_RANDOM_TRUE.\n"
+	       "  -t, --time    Target test duration (msec). 0: use rounds from -r option. Default %u.\n"
+	       "                Based on a measurement on one thread. Test duration may be\n"
+	       "                significantly longer with multiple threads.\n"
+	       "  -d, --delay   Delay (nsec) between buffer fills. Default %" PRIu64 ".\n"
 	       "                Affects only latency mode.\n"
-	       "  -h, --help    This help\n"
+	       "  -h, --help    This help.\n"
 	       "\n",
-	       options_def.num_threads, options_def.size, options_def.rounds, options_def.delay);
+	       options_def.size, options_def.rounds, options_def.msec, options_def.delay);
 }
 
 static int parse_options(int argc, char *argv[])
@@ -96,15 +101,16 @@ static int parse_options(int argc, char *argv[])
 
 	static const struct option longopts[] = {
 		{ "mode", required_argument, NULL, 'm' },
-		{ "threads", required_argument, NULL, 't' },
+		{ "num_cpu", required_argument, NULL, 'c' },
 		{ "size", required_argument, NULL, 's' },
 		{ "rounds", required_argument, NULL, 'r' },
+		{ "time", required_argument, NULL, 't' },
 		{ "delay", required_argument, NULL, 'd' },
 		{ "help", no_argument, NULL, 'h' },
 		{ NULL, 0, NULL, 0 }
 	};
 
-	static const char *shortopts = "+m:t:s:r:d:h";
+	static const char *shortopts = "+m:c:s:r:t:d:h";
 
 	options = options_def;
 	options.size = 0;
@@ -119,7 +125,7 @@ static int parse_options(int argc, char *argv[])
 		case 'm':
 			options.mode = atoi(optarg);
 			break;
-		case 't':
+		case 'c':
 			options.num_threads = atol(optarg);
 			break;
 		case 's':
@@ -127,6 +133,9 @@ static int parse_options(int argc, char *argv[])
 			break;
 		case 'r':
 			options.rounds = atol(optarg);
+			break;
+		case 't':
+			options.msec = atol(optarg);
 			break;
 		case 'd':
 			options.delay = atol(optarg);
@@ -155,9 +164,10 @@ static int parse_options(int argc, char *argv[])
 	printf("\nOptions:\n");
 	printf("------------------------\n");
 	printf("  mode:      %i\n", options.mode);
-	printf("  threads:   %i\n", options.num_threads);
+	printf("  num_cpu:   %i\n", options.num_threads);
 	printf("  size:      %u\n", options.size);
 	printf("  rounds:    %u\n", options.rounds);
+	printf("  time:      %u\n", options.msec);
 	printf("  delay:     %" PRIu64 "\n", options.delay);
 	printf("\n");
 
@@ -322,25 +332,69 @@ static int test_random_latency(void *ptr)
 	return 0;
 }
 
-static uint32_t type_rounds(odp_random_kind_t type)
+static uint32_t type_rounds(test_global_t *global, odp_random_kind_t type)
 {
-	switch (type) {
-	case ODP_RANDOM_TRUE:
-		return options.rounds / 100;
-	default:
-		return options.rounds;
+	uint32_t rounds = options.rounds;
+
+	if (type == ODP_RANDOM_TRUE)
+		rounds /= 100;
+
+	if (options.msec) {
+		/*
+		 * Determine number of rounds to run based on the target test
+		 * duration. Random data may be very fast or very slow, so
+		 * start with just one round and increase exponentially until
+		 * we hit a time limit. Then use the total number of rounds we
+		 * reached to calculate a suitable number of rounds for the
+		 * actual test.
+		 */
+
+		uint8_t *buf = (uint8_t *)malloc(options.size);
+
+		if (!buf) {
+			ODPH_ERR("malloc() failed\n");
+			exit(EXIT_FAILURE);
+		}
+
+		/* One warm up round */
+		random_data_loop(type, 1, buf, options.size);
+
+		uint32_t r = 1, tr = 0;
+		odp_time_t time;
+		odp_time_t start_time = odp_time_local();
+		odp_time_t end_time = odp_time_add_ns(start_time, 100 * ODP_TIME_MSEC_IN_NS);
+
+		while (1) {
+			if (options.mode)
+				random_data_latency(global, 0, r, buf, options.size);
+			else
+				random_data_loop(type, r, buf, options.size);
+			tr += r;
+			time = odp_time_local();
+			if (odp_time_cmp(time, end_time) >= 0)
+				break;
+			r *= 2;
+		}
+
+		rounds = (uint64_t)tr * options.msec * ODP_TIME_MSEC_IN_NS /
+			 odp_time_diff_ns(time, start_time);
+		free(buf);
 	}
+
+	return ODPH_MAX(1u, rounds);
 }
 
 static void test_type(odp_instance_t instance, test_global_t *global, odp_random_kind_t type)
 {
 	int i;
+	uint32_t rounds;
 	int num_threads = options.num_threads;
-	uint32_t rounds = type_rounds(type);
 	uint32_t size = options.size;
 
-	memset(&global->stat, 0, sizeof(global->stat));
 	global->type = type;
+	rounds = type_rounds(global, type);
+
+	memset(&global->stat, 0, sizeof(global->stat));
 	global->rounds = rounds;
 	odp_barrier_init(&global->barrier, num_threads);
 
@@ -384,8 +438,9 @@ static void test_type(odp_instance_t instance, test_global_t *global, odp_random
 	}
 
 	for (i = 0; i < num_threads; i++) {
-		if (res[i].ret != 0) {
-			ODPH_ERR("Worker thread failure: %d.\n", res[i].ret);
+		if (res[i].is_sig || res[i].ret != 0) {
+			ODPH_ERR("Worker thread failure%s: %d\n", res[i].is_sig ?
+					" (signaled)" : "", res[i].ret);
 			exit(EXIT_FAILURE);
 		}
 	}
@@ -451,6 +506,7 @@ static void test_type(odp_instance_t instance, test_global_t *global, odp_random
 
 int main(int argc, char **argv)
 {
+	odph_helper_options_t helper_options;
 	odp_instance_t instance;
 	odp_init_t init;
 	odp_shm_t shm_glb, shm_data;
@@ -458,6 +514,14 @@ int main(int argc, char **argv)
 	int num_threads, i;
 	uint64_t tot_size, size;
 	uint8_t *addr;
+
+	/* Let helper collect its own arguments (e.g. --odph_proc) */
+	argc = odph_parse_options(argc, argv);
+
+	if (odph_options(&helper_options)) {
+		ODPH_ERR("Failed to read ODP helper options.\n");
+		exit(EXIT_FAILURE);
+	}
 
 	if (parse_options(argc, argv))
 		exit(EXIT_FAILURE);
@@ -472,6 +536,7 @@ int main(int argc, char **argv)
 	init.not_used.feat.stash = 1;
 	init.not_used.feat.timer = 1;
 	init.not_used.feat.tm = 1;
+	init.mem_model = helper_options.mem_model;
 
 	/* Init ODP before calling anything else */
 	if (odp_init_global(&instance, &init, NULL)) {
@@ -519,8 +584,6 @@ int main(int argc, char **argv)
 		global->thread_arg[i].thread_idx = i;
 		global->thread_arg[i].data = addr + i * size;
 	}
-
-	odp_shm_print_all();
 
 	switch (odp_random_max_kind()) {
 	case ODP_RANDOM_TRUE:

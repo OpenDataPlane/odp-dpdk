@@ -33,6 +33,10 @@ COMPILE_ONLY = odp_cpu_bench \
 	       odp_timer_accuracy \
 	       odp_timer_perf
 
+if icache_perf_test
+EXECUTABLES += odp_icache_perf
+endif
+
 if LIBCONFIG
 COMPILE_ONLY += odp_ipsecfwd
 endif
@@ -63,16 +67,17 @@ endif
 bin_PROGRAMS = $(EXECUTABLES) $(COMPILE_ONLY)
 
 odp_atomic_perf_SOURCES = odp_atomic_perf.c
-odp_bench_buffer_SOURCES = odp_bench_buffer.c bench_common.c bench_common.h
-odp_bench_misc_SOURCES = odp_bench_misc.c bench_common.c bench_common.h
-odp_bench_packet_SOURCES = odp_bench_packet.c bench_common.c bench_common.h
-odp_bench_pktio_sp_SOURCES = odp_bench_pktio_sp.c bench_common.c bench_common.h
-odp_bench_timer_SOURCES = odp_bench_timer.c bench_common.c bench_common.h
+odp_bench_buffer_SOURCES = odp_bench_buffer.c
+odp_bench_misc_SOURCES = odp_bench_misc.c
+odp_bench_packet_SOURCES = odp_bench_packet.c
+odp_bench_pktio_sp_SOURCES = odp_bench_pktio_sp.c
+odp_bench_timer_SOURCES = odp_bench_timer.c
 odp_cpu_bench_SOURCES = odp_cpu_bench.c
 odp_crc_SOURCES = odp_crc.c
 odp_crypto_SOURCES = odp_crypto.c
 odp_dmafwd_SOURCES = odp_dmafwd.c
 odp_dma_perf_SOURCES = odp_dma_perf.c
+odp_icache_perf_SOURCES = odp_icache_perf.c
 odp_ipsec_SOURCES = odp_ipsec.c
 odp_lock_perf_SOURCES = odp_lock_perf.c
 odp_mem_perf_SOURCES = odp_mem_perf.c
@@ -94,6 +99,8 @@ if LIBCONFIG
 odp_ipsecfwd_SOURCES = odp_ipsecfwd.c
 AM_CFLAGS += $(LIBCONFIG_CFLAGS)
 endif
+
+PRELDADD += $(LIBBENCH_COMMON) $(LIBTEST_COMMON)
 
 dist_check_SCRIPTS = $(TESTSCRIPTS)
 

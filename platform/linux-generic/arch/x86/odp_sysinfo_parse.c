@@ -24,7 +24,7 @@ int _odp_cpuinfo_parser(FILE *file, system_info_t *sysinfo)
 
 	#if defined __x86_64 || defined __x86_64__
 	sysinfo->cpu_isa_sw.x86 = ODP_CPU_ARCH_X86_64;
-	#elif defined __i686 || defined __i686__
+	#elif defined __i386 || defined __i386__
 	sysinfo->cpu_isa_sw.x86 = ODP_CPU_ARCH_X86_I686;
 	#endif
 
@@ -119,7 +119,7 @@ uint64_t odp_cpu_arch_hz_current(int id)
 	}
 
 	fclose(file);
-	if (mhz)
+	if (mhz > 0.0)
 		return (uint64_t)(mhz * 1000000.0);
 
 	return 0;

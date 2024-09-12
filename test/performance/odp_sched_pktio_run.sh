@@ -2,6 +2,7 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright (c) 2018 Linaro Limited
+# Copyright (c) 2024 Nokia
 #
 
 # directory where test binaries have been built
@@ -66,10 +67,11 @@ run_sched_pktio()
 --proc-type auto --no-pci \
 --vdev net_pcap0,iface=$IF0"
 
+	GEN_LOG=odp_packet_gen_tmp.log
 	(odp_packet_gen${EXEEXT} --gap 0 -i 0 \
 			--ipv4_src 192.168.0.1 --ipv4_dst 192.168.0.2 \
-			-r 0 -t 1 2>&1 > /dev/null) \
-			2>&1 > /dev/null &
+			-r 0 -t 1 2>&1 > $GEN_LOG) \
+			2>&1 > $GEN_LOG &
 
 	GEN_PID=$!
 
@@ -86,12 +88,17 @@ run_sched_pktio()
 	ret=$?
 
 	if [ $ret -eq 3 ]; then
-		echo "PASS: received and transmitted over 5000 packets"
+		echo "PASS: received and transmitted over threshold number of packets"
 		ret=0
 	else
-		echo "FAIL: less than thousand rx or tx packets $ret"
+		echo -e "\nodp_packet_gen"
+		echo "=============="
+		cat $GEN_LOG
+		echo "FAIL: less than threshold number of rx or tx packets: ret=$ret"
 		ret=1
 	fi
+
+	rm -f $GEN_LOG
 
 	cleanup_pktio_env
 

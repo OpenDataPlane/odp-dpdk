@@ -429,7 +429,7 @@ static void timer_test_timeout_pool_alloc(void)
 
 	/* Try to allocate num items from the pool */
 	for (index = 0; index < num; index++) {
-		odp_event_subtype_t subtype;
+		odp_event_subtype_t subtype = ODP_EVENT_PACKET_BASIC;
 
 		tmo[index] = odp_timeout_alloc(pool);
 
@@ -2003,6 +2003,7 @@ static void timer_test_tmo_limit(odp_queue_type_t queue_type,
 	int num = 5;
 	odp_timer_t timer[num];
 	odp_timer_clk_src_t clk_src = test_global->clk_src;
+	bool wait_tmo;
 
 	memset(&timer_capa, 0, sizeof(timer_capa));
 	ret = odp_timer_capability(clk_src, &timer_capa);
@@ -2058,6 +2059,8 @@ static void timer_test_tmo_limit(odp_queue_type_t queue_type,
 	tmo_tick    = odp_timer_ns_to_tick(timer_pool, tmo_ns);
 	/* Min_tmo maybe zero. Wait min timeouts at least 20ms + resolution */
 	max_wait    = (20 * ODP_TIME_MSEC_IN_NS + res_ns + 10 * tmo_ns);
+	/* Wait for the timeout if it is less than 5 second, otherwise cancel.*/
+	wait_tmo    = tmo_ns < 5 * ODP_TIME_SEC_IN_NS;
 
 	ODPH_DBG("\nTimer pool parameters:\n");
 	ODPH_DBG("  res_ns      %" PRIu64 "\n",   timer_param.res_ns);
@@ -2065,14 +2068,6 @@ static void timer_test_tmo_limit(odp_queue_type_t queue_type,
 	ODPH_DBG("  max_tmo     %" PRIu64 "\n",   timer_param.max_tmo);
 	ODPH_DBG("  tmo_ns      %" PRIu64 "\n",   tmo_ns);
 	ODPH_DBG("  tmo_tick    %" PRIu64 "\n\n", tmo_tick);
-
-	if (min) {
-		/*
-		 * Prevent the test from taking too long by asserting that the
-		 * timeout is reasonably short.
-		 */
-		CU_ASSERT_FATAL(tmo_ns < 5 * ODP_TIME_SEC_IN_NS);
-	}
 
 	for (i = 0; i < num; i++) {
 		timer[i] = odp_timer_alloc(timer_pool, queue, NULL);
@@ -2104,8 +2099,8 @@ static void timer_test_tmo_limit(odp_queue_type_t queue_type,
 
 		CU_ASSERT(ret == ODP_TIMER_SUCCESS);
 
-		if (min) {
-			/* Min timeout - wait for events */
+		if (wait_tmo) {
+			/* Wait for events */
 			int break_loop = 0;
 
 			while (1) {
@@ -2136,7 +2131,7 @@ static void timer_test_tmo_limit(odp_queue_type_t queue_type,
 					break;
 			}
 		} else {
-			/* Max timeout - cancel events */
+			/* Cancel events */
 			ev = ODP_EVENT_INVALID;
 
 			ret = odp_timer_cancel(timer[i], &ev);
@@ -2154,7 +2149,7 @@ static void timer_test_tmo_limit(odp_queue_type_t queue_type,
 		}
 	}
 
-	if (min)
+	if (wait_tmo)
 		CU_ASSERT(num_tmo == num);
 
 	for (i = 0; i < num; i++)
@@ -2208,7 +2203,7 @@ static void timer_test_max_tmo_max_tmo_sched(void)
 /* Handle a received (timeout) event */
 static void handle_tmo(odp_event_t ev, bool stale, uint64_t prev_tick)
 {
-	odp_event_subtype_t subtype;
+	odp_event_subtype_t subtype = ODP_EVENT_PACKET_BASIC;
 	odp_timeout_t tmo;
 	odp_timer_t tim;
 	uint64_t tick;
@@ -2553,7 +2548,7 @@ sleep:
 
 	free(tt);
 	ODPH_DBG("Thread %u: exiting\n", thr);
-	return CU_get_number_of_failures();
+	return 0;
 }
 
 static void timer_test_all(odp_queue_type_t queue_type)

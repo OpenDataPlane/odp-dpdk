@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2015-2018 Linaro Limited
- * Copyright (c) 2021-2023 Nokia
+ * Copyright (c) 2021-2024 Nokia
  */
 
 #include <odp_cunit_common.h>
@@ -136,7 +136,7 @@ static void cos_destroy_multi(odp_cos_t cos[], uint32_t num)
 static void cls_create_cos_multi(void)
 {
 	odp_cls_cos_param_t param_single;
-	odp_cls_cos_param_t param[MAX_HANDLES];
+	odp_cls_cos_param_t *param;
 	odp_cls_capability_t capa;
 	odp_cos_t cos[MAX_HANDLES];
 	const char *name[MAX_HANDLES] = {NULL, "aaa", NULL, "bbb", "ccc", NULL, "ddd"};
@@ -146,6 +146,9 @@ static void cls_create_cos_multi(void)
 	CU_ASSERT_FATAL(capa.max_cos);
 
 	num = capa.max_cos < MAX_HANDLES ? capa.max_cos : MAX_HANDLES;
+
+	param = calloc(num, sizeof(odp_cls_cos_param_t));
+	CU_ASSERT_FATAL(param != NULL);
 
 	for (uint32_t i = 0; i < num; i++) {
 		odp_cls_cos_param_init(&param[i]);
@@ -165,6 +168,7 @@ static void cls_create_cos_multi(void)
 	num_created = cos_create_multi(NULL, param, cos, num);
 	CU_ASSERT(num_created == num)
 	cos_destroy_multi(cos, num_created);
+	free(param);
 }
 
 static void cls_create_cos_max(void)
@@ -732,6 +736,90 @@ static int check_capa_cos_hashing(void)
 	return capa.max_hash_queues > 1 ? ODP_TEST_ACTIVE : ODP_TEST_INACTIVE;
 }
 
+static void cls_hash_result_single_queue(void)
+{
+	odp_pool_t pool;
+	odp_queue_t queue, hash_queue;
+	odp_cls_cos_param_t cls_param;
+	odp_cos_t cos;
+	cls_packet_info_t pkt_info;
+	odp_atomic_u32_t seq;
+	odp_packet_t pkt;
+
+	pool = pool_create("cls_basic_pool");
+	CU_ASSERT_FATAL(pool != ODP_POOL_INVALID);
+
+	queue = queue_create("cls_basic_queue", true);
+	CU_ASSERT_FATAL(queue != ODP_QUEUE_INVALID);
+
+	odp_cls_cos_param_init(&cls_param);
+	cls_param.queue = queue;
+	cls_param.pool = pool;
+	cos = odp_cls_cos_create(NULL, &cls_param);
+	CU_ASSERT_FATAL(cos != ODP_COS_INVALID);
+
+	memset(&pkt_info, 0, sizeof(pkt_info));
+	pkt_info.pool = pool;
+	odp_atomic_init_u32(&seq, 0);
+	pkt_info.seq = &seq;
+	pkt = create_packet(pkt_info);
+	CU_ASSERT_FATAL(pkt != ODP_PACKET_INVALID);
+
+	hash_queue = odp_cls_hash_result(cos, pkt);
+	CU_ASSERT(hash_queue == queue);
+
+	odp_packet_free(pkt);
+	odp_cos_destroy(cos);
+	odp_queue_destroy(queue);
+	odp_pool_destroy(pool);
+}
+
+static void cls_hash_result_many_queues(void)
+{
+	odp_pool_t pool;
+	odp_cls_capability_t capa;
+	int ret;
+	odp_queue_param_t q_param;
+	odp_cls_cos_param_t cls_param;
+	odp_cos_t cos;
+	cls_packet_info_t pkt_info;
+	odp_atomic_u32_t seq;
+	odp_packet_t pkt;
+	odp_queue_t hash_queue;
+
+	pool = pool_create("cls_basic_pool");
+	CU_ASSERT_FATAL(pool != ODP_POOL_INVALID);
+
+	ret = odp_cls_capability(&capa);
+	CU_ASSERT_FATAL(ret == 0);
+	CU_ASSERT_FATAL(capa.hash_protocols.all_bits != 0);
+
+	odp_queue_param_init(&q_param);
+	q_param.type = ODP_QUEUE_TYPE_SCHED;
+	odp_cls_cos_param_init(&cls_param);
+	cls_param.num_queue = capa.max_hash_queues;
+	cls_param.queue_param = q_param;
+	cls_param.hash_proto.all_bits = capa.hash_protocols.all_bits;
+	cls_param.pool = pool;
+
+	cos = odp_cls_cos_create(NULL, &cls_param);
+	CU_ASSERT_FATAL(cos != ODP_COS_INVALID);
+
+	memset(&pkt_info, 0, sizeof(pkt_info));
+	pkt_info.pool = pool;
+	odp_atomic_init_u32(&seq, 0);
+	pkt_info.seq = &seq;
+	pkt = create_packet(pkt_info);
+	CU_ASSERT_FATAL(pkt != ODP_PACKET_INVALID);
+
+	hash_queue = odp_cls_hash_result(cos, pkt);
+	CU_ASSERT(hash_queue != ODP_QUEUE_INVALID);
+
+	odp_packet_free(pkt);
+	odp_cos_destroy(cos);
+	odp_pool_destroy(pool);
+}
+
 odp_testinfo_t classification_suite_basic[] = {
 	ODP_TEST_INFO(cls_default_values),
 	ODP_TEST_INFO(cls_create_cos),
@@ -747,5 +835,7 @@ odp_testinfo_t classification_suite_basic[] = {
 	ODP_TEST_INFO(cls_cos_set_pool),
 	ODP_TEST_INFO(cls_pmr_composite_create),
 	ODP_TEST_INFO_CONDITIONAL(cls_create_cos_with_hash_queues, check_capa_cos_hashing),
+	ODP_TEST_INFO(cls_hash_result_single_queue),
+	ODP_TEST_INFO_CONDITIONAL(cls_hash_result_many_queues, check_capa_cos_hashing),
 	ODP_TEST_INFO_NULL,
 };

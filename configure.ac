@@ -4,7 +4,7 @@ AC_PREREQ([2.5])
 ##########################################################################
 m4_define([odp_version_generation], [1])
 m4_define([odp_version_major],     [45])
-m4_define([odp_version_minor],      [0])
+m4_define([odp_version_minor],      [1])
 m4_define([odp_version_patch],      [0])
 
 m4_define([odp_version_api],
@@ -125,8 +125,8 @@ AS_IF([test "$GCC" == yes],
       )
 )
 
-ODP_CFLAGS="$ODP_CFLAGS -std=c11 -D_GNU_SOURCE"
-ODP_CXXFLAGS="$ODP_CXXFLAGS -std=c++11"
+ODP_CFLAGS="$ODP_CFLAGS -std=c11 -fno-strict-aliasing -D_GNU_SOURCE"
+ODP_CXXFLAGS="$ODP_CXXFLAGS -std=c++11 -fno-strict-aliasing"
 
 # Extra flags for example to suppress certain warning types
 ODP_CFLAGS="$ODP_CFLAGS $ODP_CFLAGS_EXTRA"
@@ -232,6 +232,7 @@ if test "x$abi_compat" = "xno" ; then
 
 	if test $? -ne 0; then
 		ODP_CHECK_CFLAG([-march=native])
+		ODP_CHECK_CXXFLAG([-march=native])
 	fi
 fi
 AM_CONDITIONAL(ODP_ABI_COMPAT, [test "x$ODP_ABI_COMPAT" = "x1"])

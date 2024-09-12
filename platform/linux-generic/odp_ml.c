@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: BSD-3-Clause
- * Copyright (c) 2023 Nokia
+ * Copyright (c) 2023-2024 Nokia
  */
 
 #include <odp/autoheader_external.h>
@@ -105,7 +105,6 @@ typedef struct ml_model_t {
 	OrtSession		*session;
 	OrtSessionOptions	*session_opts;
 	uint32_t		max_compl_id;
-	odp_atomic_u32_t	compl_status[ML_MAX_COMPL_ID];
 
 	odp_ml_model_info_t	info;
 	odp_ml_input_info_t	input_info[CONFIG_ML_MAX_INPUTS];
@@ -928,8 +927,6 @@ odp_ml_model_t odp_ml_model_create(const char *name, const odp_ml_model_param_t 
 		_odp_strcpy(info->name, name, ODP_ML_MODEL_NAME_LEN);
 
 	mdl->max_compl_id = param->max_compl_id;
-	for (uint32_t j = 0; j < ML_MAX_COMPL_ID; j++)
-		odp_atomic_init_u32(&mdl->compl_status[j], 1);
 
 	odp_ticketlock_unlock(&mdl->lock);
 	return (odp_ml_model_t)mdl;
@@ -1521,9 +1518,6 @@ int odp_ml_model_load_start(odp_ml_model_t model, const odp_ml_compl_param_t *co
 	if (odp_unlikely(check_compl_param(compl_param, mdl->max_compl_id, true)))
 		return -1;
 
-	if (compl_param->mode == ODP_ML_COMPL_MODE_POLL)
-		odp_atomic_store_rel_u32(&mdl->compl_status[compl_param->compl_id], 0);
-
 	ret = odp_ml_model_load(model, NULL);
 
 	if (odp_unlikely(ret))
@@ -1552,13 +1546,11 @@ int odp_ml_model_load_start(odp_ml_model_t model, const odp_ml_compl_param_t *co
 	}
 
 	mdl->result[compl_param->compl_id].user_ptr = compl_param->user_ptr;
-	odp_atomic_store_rel_u32(&mdl->compl_status[compl_param->compl_id], 1);
 	return 0;
 }
 
 int odp_ml_model_load_status(odp_ml_model_t model, uint32_t compl_id, odp_ml_load_result_t *result)
 {
-	int ret;
 	ml_model_t *mdl = ml_model_from_handle(model);
 
 	if (odp_unlikely(model == ODP_ML_MODEL_INVALID || compl_id > mdl->max_compl_id)) {
@@ -1566,14 +1558,12 @@ int odp_ml_model_load_status(odp_ml_model_t model, uint32_t compl_id, odp_ml_loa
 		return -2;
 	}
 
-	ret = odp_atomic_load_acq_u32(&mdl->compl_status[compl_id]);
-
-	if (ret && result) {
+	if (result) {
 		result->error_code = 0;
 		result->user_ptr = mdl->result[compl_id].user_ptr;
 	}
 
-	return ret;
+	return 1;
 }
 
 int odp_ml_model_unload(odp_ml_model_t model, odp_ml_load_result_t *result)
@@ -1624,9 +1614,6 @@ int odp_ml_model_unload_start(odp_ml_model_t model, const odp_ml_compl_param_t *
 	if (odp_unlikely(check_compl_param(compl_param, mdl->max_compl_id, true)))
 		return -1;
 
-	if (compl_param->mode == ODP_ML_COMPL_MODE_POLL)
-		odp_atomic_store_rel_u32(&mdl->compl_status[compl_param->compl_id], 0);
-
 	ret = odp_ml_model_unload(model, NULL);
 
 	if (odp_unlikely(ret))
@@ -1653,7 +1640,6 @@ int odp_ml_model_unload_start(odp_ml_model_t model, const odp_ml_compl_param_t *
 	}
 
 	mdl->result[compl_param->compl_id].user_ptr = compl_param->user_ptr;
-	odp_atomic_store_rel_u32(&mdl->compl_status[compl_param->compl_id], 1);
 	return 0;
 }
 
@@ -1925,6 +1911,7 @@ static int verify_tensor(const OrtValue *tensor, odp_ml_data_type_t expected_typ
 	OrtTensorTypeAndShapeInfo *tensor_info;
 	ONNXTensorElementDataType tensor_type;
 	size_t dim_count;
+	int ret = -1;
 	OrtStatus *status = NULL;
 	int64_t dims[ODP_ML_MAX_DIMS] = {0};
 	int64_t shape_arr[ODP_ML_MAX_DIMS] = {0};
@@ -1938,50 +1925,47 @@ static int verify_tensor(const OrtValue *tensor, odp_ml_data_type_t expected_typ
 
 	status = ort_api->GetTensorElementType(tensor_info, &tensor_type);
 	if (check_ortstatus(status)) {
-		ort_api->ReleaseTensorTypeAndShapeInfo(tensor_info);
 		_ODP_ERR("GetTensorElementType() failed\n");
-		return -1;
+		goto error;
 	}
 
 	if (onnx_dtype_to_odp_dtype(tensor_type) != expected_type) {
-		ort_api->ReleaseTensorTypeAndShapeInfo(tensor_info);
 		_ODP_ERR("Tensor type does not match model type\n");
-		return -1;
+		goto error;
 	}
 
 	status = ort_api->GetDimensionsCount(tensor_info, &dim_count);
 	if (check_ortstatus(status)) {
-		ort_api->ReleaseTensorTypeAndShapeInfo(tensor_info);
 		_ODP_ERR("GetDimensionsCount() failed\n");
-		return -1;
+		goto error;
 	}
 
 	if (dim_count != expected_shape->num_dim) {
-		ort_api->ReleaseTensorTypeAndShapeInfo(tensor_info);
 		_ODP_ERR("Tensor dimension does not match shape_dim\n");
-		return -1;
+		goto error;
 	}
 
 	status = ort_api->GetDimensions(tensor_info, dims, dim_count);
 	if (check_ortstatus(status)) {
-		ort_api->ReleaseTensorTypeAndShapeInfo(tensor_info);
 		_ODP_ERR("GetDimensions() failed\n");
-		return -1;
+		goto error;
 	}
 
 	ml_shape_to_int64(expected_shape, batch_size, shape_arr);
 
 	for (uint32_t i = 0; i < dim_count; i++) {
 		if (dims[i] != shape_arr[i]) {
-			ort_api->ReleaseTensorTypeAndShapeInfo(tensor_info);
 			_ODP_ERR("Shape[%u]: %" PRIu64 " does not match expected: %" PRIu64 "\n",
 				 i, dims[i], shape_arr[i]);
-			return -1;
+			goto error;
 		}
 	}
 
+	ret = 0;
+
+error:
 	ort_api->ReleaseTensorTypeAndShapeInfo(tensor_info);
-	return 0;
+	return ret;
 }
 
 static int input_data_to_tensor(const odp_ml_input_info_t *input_info, uint32_t num_seg,
@@ -2013,14 +1997,14 @@ static int input_data_to_tensor(const odp_ml_input_info_t *input_info, uint32_t 
 						 input_info->shape.num_dim,
 						 onnx_dtype,
 						 input_tensor);
-	if (check_ortstatus(status) || !input_tensor[0]) {
+	if (check_ortstatus(status) || !*input_tensor) {
 		_ODP_ERR("CreateTensorWithDataAsOrtValue() failed\n");
 		return -1;
 	}
 
 	input_size = input_info->data_type_size * get_num_elem(batch_size, &input_info->shape);
 
-	status = ort_api->GetTensorMutableData(input_tensor[0], &data);
+	status = ort_api->GetTensorMutableData(*input_tensor, &data);
 	if (check_ortstatus(status) || !data) {
 		_ODP_ERR("GetTensorMutableData() failed\n");
 		return -1;
@@ -2046,14 +2030,14 @@ static int input_data_to_tensor(const odp_ml_input_info_t *input_info, uint32_t 
 	if (!ODP_DEBUG)
 		return 0;
 
-	status = ort_api->IsTensor(input_tensor[0], &is_tensor);
+	status = ort_api->IsTensor(*input_tensor, &is_tensor);
 	if (check_ortstatus(status) || !is_tensor) {
 		_ODP_ERR("input_tensor IsTensor failed\n");
 		return -1;
 	}
 
 	/* Make sure tensor shape matches input_shape */
-	if (verify_tensor(input_tensor[0], input_info->data_type,
+	if (verify_tensor(*input_tensor, input_info->data_type,
 			  &input_info->shape, batch_size)) {
 		_ODP_ERR("Verify input_tensor failed\n");
 		return -1;
@@ -2270,7 +2254,7 @@ int odp_ml_run(odp_ml_model_t model, const odp_ml_data_t *data, const odp_ml_run
 
 	if (ODP_DEBUG && verify_run_params(model, data, param)) {
 		result_local.error_code = ML_BAD_INPUT;
-		goto init_fail;
+		goto error;
 	}
 
 	if (param && param->batch_size)
@@ -2289,7 +2273,7 @@ int odp_ml_run(odp_ml_model_t model, const odp_ml_data_t *data, const odp_ml_run
 		if (ret) {
 			_ODP_ERR("%uth input data to tensor failed\n", i);
 			result_local.error_code = ML_LIB_FAILED;
-			goto release_input_tensors;
+			goto error;
 		}
 
 		_ODP_DBG("input_tensor[%u]: %p\n", i, input_tensor[i]);
@@ -2319,27 +2303,27 @@ int odp_ml_run(odp_ml_model_t model, const odp_ml_data_t *data, const odp_ml_run
 	if (check_ortstatus(status)) {
 		_ODP_ERR("Run inference failed\n");
 		result_local.error_code = ML_LIB_FAILED;
-		goto release_all_tensors;
+		goto error;
 	}
 
 	/* Verify output tensors and store them to output */
 	if (output_tensors_to_data(output_tensors, ml_info->num_outputs, param,
 				   output_info, data, &result_local)) {
 		_ODP_ERR("Output tensors to data failed\n");
-		goto release_all_tensors;
+		goto error;
 	}
 
 	retval = 1;
 
-release_all_tensors:
+error:
 	for (uint32_t i = 0; i < ml_info->num_outputs; i++)
-		ort_api->ReleaseValue(output_tensors[i]);
+		if (output_tensors[i])
+			ort_api->ReleaseValue(output_tensors[i]);
 
-release_input_tensors:
 	for (uint32_t i = 0; i < ml_info->num_inputs; i++)
-		ort_api->ReleaseValue(input_tensor[i]);
+		if (input_tensor[i])
+			ort_api->ReleaseValue(input_tensor[i]);
 
-init_fail:
 	if (param && param->result)
 		*param->result = result_local;
 
@@ -2400,9 +2384,6 @@ int odp_ml_run_start(odp_ml_model_t model, const odp_ml_data_t *data,
 		return -1;
 	}
 
-	if (compl_param->mode == ODP_ML_COMPL_MODE_POLL)
-		odp_atomic_store_rel_u32(&mdl->compl_status[compl_param->compl_id], 0);
-
 	ret = odp_ml_run(model, data, run_param);
 
 	if (odp_unlikely(ret < 1))
@@ -2430,7 +2411,6 @@ int odp_ml_run_start(odp_ml_model_t model, const odp_ml_data_t *data,
 
 	/* compl_param->mode == ODP_ML_COMPL_MODE_POLL */
 	mdl->result[compl_param->compl_id].user_ptr = compl_param->user_ptr;
-	odp_atomic_store_rel_u32(&mdl->compl_status[compl_param->compl_id], 1);
 
 	return 1;
 }
@@ -2465,7 +2445,6 @@ int odp_ml_run_start_multi(odp_ml_model_t model, const odp_ml_data_t data[],
 
 int odp_ml_run_status(odp_ml_model_t model, uint32_t compl_id, odp_ml_run_result_t *result)
 {
-	int ret;
 	ml_model_t *mdl = ml_model_from_handle(model);
 
 	if (odp_unlikely(model == ODP_ML_MODEL_INVALID ||
@@ -2474,14 +2453,12 @@ int odp_ml_run_status(odp_ml_model_t model, uint32_t compl_id, odp_ml_run_result
 		return -2;
 	}
 
-	ret = odp_atomic_load_acq_u32(&mdl->compl_status[compl_id]);
-
 	if (result) {
 		result->error_code = 0;
 		result->user_ptr = mdl->result[compl_id].user_ptr;
 	}
 
-	return ret;
+	return 1;
 }
 
 static int opt_level_from_str(const char *level_str, GraphOptimizationLevel *level)
@@ -2603,25 +2580,25 @@ int _odp_ml_init_global(void)
 
 	if (odp_ml_capability(&_odp_ml_glb->capa)) {
 		_ODP_ERR("ML capability failed\n");
-		return -1;
+		goto error;
 	}
 
 	odp_pool_param_init(&_odp_ml_glb->pool_param);
 
 	if (read_config_file(&_odp_ml_glb->ort_run_opts))
-		return -1;
+		goto error;
 
 	ort_api = OrtGetApiBase()->GetApi(ORT_API_VERSION);
 	if (!ort_api) {
 		_ODP_ERR("Failed to init ONNX Runtime engine.\n");
-		return -1;
+		goto error;
 	}
 	_odp_ml_glb->ort_api = ort_api;
 
 	status = ort_api->CreateEnv(ORT_LOGGING_LEVEL_WARNING, "Default", &env);
 	if (check_ortstatus(status) || !env) {
 		_ODP_ERR("ort_api->CreateEnv() failed.\n");
-		return -1;
+		goto error;
 	}
 	_odp_ml_glb->env = env;
 
@@ -2629,6 +2606,12 @@ int _odp_ml_init_global(void)
 		odp_ticketlock_init(&_odp_ml_glb->models[i].lock);
 
 	return 0;
+
+error:
+	if (odp_shm_free(_odp_ml_glb->shm))
+		_ODP_ERR("Shm free failed for odp_ml\n");
+
+	return -1;
 }
 
 int _odp_ml_term_global(void)
