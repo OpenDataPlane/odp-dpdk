@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: BSD-3-Clause
- * Copyright (c) 2021 Nokia
+ * Copyright (c) 2021-2024 Nokia
  */
 
 /**
@@ -20,6 +20,8 @@
 #include <odp_api.h>
 #include <odp/helper/odph_api.h>
 
+#include <export_results.h>
+
 /* Default number of test rounds */
 #define NUM_ROUNDS 100000u
 
@@ -29,6 +31,9 @@
 
 /* Max number of workers if num_cpu=0 */
 #define DEFAULT_MAX_WORKERS 10
+
+/* Maximum number of results to be held */
+#define TEST_MAX_BENCH 70
 
 #define TEST_INFO(name, test, validate, op_type) \
 	{name, test, validate, op_type}
@@ -69,10 +74,19 @@ typedef struct test_thread_ctx_t {
 	test_global_t *global;
 	test_fn_t func;
 	uint64_t nsec;
+	uint64_t cycles;
 	uint32_t idx;
 	op_bit_t type;
 
 } test_thread_ctx_t;
+
+typedef struct results_t {
+	const char *test_name;
+	double cycles_per_op;
+	double nsec_per_op;
+	double operations_per_cpu;
+	double total_operations;
+} results_t;
 
 /* Global data */
 struct test_global_t {
@@ -92,6 +106,8 @@ struct test_global_t {
 		uint64_t u64;
 		odp_u128_t u128;
 	} output[ODP_THREAD_COUNT_MAX];
+	test_common_options_t common_options;
+	results_t results[TEST_MAX_BENCH];
 };
 
 typedef struct {
@@ -481,6 +497,52 @@ static inline int validate_atomic_max_u64(void *val, void *out ODP_UNUSED, uint3
 	return (result != ((uint64_t)INIT_VAL + num_round)) && (result != UINT64_MAX);
 }
 
+static inline void test_atomic_fetch_max_u32(void *val, void *out, uint32_t num_round)
+{
+	odp_atomic_u32_t *atomic_val = val;
+	uint32_t *result = out;
+	uint32_t new_max = INIT_VAL + 1, old_max = INIT_VAL;
+
+	for (uint32_t i = 0; i < num_round; i++)
+		old_max = odp_atomic_fetch_max_u32(atomic_val, new_max++);
+
+	*result = old_max;
+}
+
+static inline void test_atomic_fetch_max_u64(void *val, void *out, uint32_t num_round)
+{
+	odp_atomic_u64_t *atomic_val = val;
+	uint64_t *result = out;
+	uint64_t new_max = INIT_VAL + 1, old_max = INIT_VAL;
+
+	for (uint32_t i = 0; i < num_round; i++)
+		old_max = odp_atomic_fetch_max_u64(atomic_val, new_max++);
+
+	*result = old_max;
+}
+
+static inline int validate_atomic_fetch_max_u32(void *val, void *out, uint32_t num_round,
+						uint32_t num_worker ODP_UNUSED,
+						int private ODP_UNUSED)
+{
+	uint32_t result = odp_atomic_load_u32((odp_atomic_u32_t *)val);
+	uint32_t *output = out;
+
+	return (result != ((uint32_t)INIT_VAL + num_round) && result != UINT32_MAX) ||
+	       (*output != result - 1 && *output != result);
+}
+
+static inline int validate_atomic_fetch_max_u64(void *val, void *out, uint32_t num_round,
+						uint32_t num_worker ODP_UNUSED,
+						int private ODP_UNUSED)
+{
+	uint64_t result = odp_atomic_load_u64((odp_atomic_u64_t *)val);
+	uint64_t *output = out;
+
+	return (result != ((uint64_t)INIT_VAL + num_round) && result != UINT64_MAX) ||
+	       (*output != result - 1 && *output != result);
+}
+
 static inline void test_atomic_min_u32(void *val, void *out ODP_UNUSED, uint32_t num_round)
 {
 	odp_atomic_u32_t *atomic_val = val;
@@ -513,6 +575,52 @@ static inline int validate_atomic_min_u64(void *val, void *out ODP_UNUSED, uint3
 	uint64_t result = odp_atomic_load_u64((odp_atomic_u64_t *)val);
 
 	return result != ((uint64_t)INIT_VAL - num_round) && result != 0;
+}
+
+static inline void test_atomic_fetch_min_u32(void *val, void *out, uint32_t num_round)
+{
+	odp_atomic_u32_t *atomic_val = val;
+	uint32_t *result = out;
+	uint32_t new_min = INIT_VAL - 1, old_min = INIT_VAL;
+
+	for (uint32_t i = 0; i < num_round; i++)
+		old_min = odp_atomic_fetch_min_u32(atomic_val, new_min--);
+
+	*result = old_min;
+}
+
+static inline void test_atomic_fetch_min_u64(void *val, void *out, uint32_t num_round)
+{
+	odp_atomic_u64_t *atomic_val = val;
+	uint64_t *result = out;
+	uint64_t new_min = INIT_VAL - 1, old_min = INIT_VAL;
+
+	for (uint32_t i = 0; i < num_round; i++)
+		old_min = odp_atomic_fetch_min_u64(atomic_val, new_min--);
+
+	*result = old_min;
+}
+
+static inline int validate_atomic_fetch_min_u32(void *val, void *out, uint32_t num_round,
+						uint32_t num_worker ODP_UNUSED,
+						int private ODP_UNUSED)
+{
+	uint32_t result = odp_atomic_load_u32((odp_atomic_u32_t *)val);
+	uint32_t *output = out;
+
+	return (result != ((uint32_t)INIT_VAL - num_round) && result != 0) ||
+	       (*output != result + 1 && *output != result);
+}
+
+static inline int validate_atomic_fetch_min_u64(void *val, void *out, uint32_t num_round,
+						uint32_t num_worker ODP_UNUSED,
+						int private ODP_UNUSED)
+{
+	uint64_t result = odp_atomic_load_u64((odp_atomic_u64_t *)val);
+	uint64_t *output = out;
+
+	return (result != ((uint64_t)INIT_VAL - num_round) && result != 0) ||
+	       (*output != result + 1 && *output != result);
 }
 
 static inline void test_atomic_cas_u32(void *val, void *out ODP_UNUSED, uint32_t num_round)
@@ -620,7 +728,87 @@ static inline void test_atomic_xchg_u64(void *val, void *out, uint32_t num_round
 	*result = ret;
 }
 
-static inline void test_atomic_load_acq_u32(void *val, void *out, uint32_t num_round)
+static inline void test_atomic_bit_set_u32(void *val, void *out ODP_UNUSED, uint32_t num_round)
+{
+	odp_atomic_u32_t *atomic_val = val;
+
+	for (uint32_t i = 0; i < num_round; i++)
+		odp_atomic_bit_set_u32(atomic_val, 0x1);
+}
+
+static inline void test_atomic_bit_fetch_set_u32(void *val, void *out, uint32_t num_round)
+{
+	odp_atomic_u32_t *atomic_val = val;
+	uint32_t *result = out;
+	uint32_t ret = 0;
+
+	for (uint32_t i = 0; i < num_round; i++)
+		ret += odp_atomic_bit_fetch_set_u32(atomic_val, 0x1);
+
+	*result = ret;
+}
+
+static inline void test_atomic_bit_clr_u32(void *val, void *out ODP_UNUSED, uint32_t num_round)
+{
+	odp_atomic_u32_t *atomic_val = val;
+
+	for (uint32_t i = 0; i < num_round; i++)
+		odp_atomic_bit_clr_u32(atomic_val, 0x1);
+}
+
+static inline void test_atomic_bit_fetch_clr_u32(void *val, void *out, uint32_t num_round)
+{
+	odp_atomic_u32_t *atomic_val = val;
+	uint32_t *result = out;
+	uint32_t ret = 0;
+
+	for (uint32_t i = 0; i < num_round; i++)
+		ret += odp_atomic_bit_fetch_clr_u32(atomic_val, 0x1);
+
+	*result = ret;
+}
+
+static inline void test_atomic_bit_set_u64(void *val, void *out ODP_UNUSED, uint32_t num_round)
+{
+	odp_atomic_u64_t *atomic_val = val;
+
+	for (uint32_t i = 0; i < num_round; i++)
+		odp_atomic_bit_set_u64(atomic_val, 0x1);
+}
+
+static inline void test_atomic_bit_fetch_set_u64(void *val, void *out, uint32_t num_round)
+{
+	odp_atomic_u64_t *atomic_val = val;
+	uint64_t *result = out;
+	uint64_t ret = 0;
+
+	for (uint32_t i = 0; i < num_round; i++)
+		ret += odp_atomic_bit_fetch_set_u64(atomic_val, 0x1);
+
+	*result = ret;
+}
+
+static inline void test_atomic_bit_clr_u64(void *val, void *out ODP_UNUSED, uint32_t num_round)
+{
+	odp_atomic_u64_t *atomic_val = val;
+
+	for (uint32_t i = 0; i < num_round; i++)
+		odp_atomic_bit_clr_u64(atomic_val, 0x1);
+}
+
+static inline void test_atomic_bit_fetch_clr_u64(void *val, void *out, uint32_t num_round)
+{
+	odp_atomic_u64_t *atomic_val = val;
+	uint64_t *result = out;
+	uint64_t ret = 0;
+
+	for (uint32_t i = 0; i < num_round; i++)
+		ret += odp_atomic_bit_fetch_clr_u64(atomic_val, 0x1);
+
+	*result = ret;
+}
+
+static inline void test_atomic_load_acq_u32(void *val, void *out ODP_UNUSED, uint32_t num_round)
 {
 	odp_atomic_u32_t *atomic_val = val;
 	uint32_t *result = out;
@@ -826,6 +1014,38 @@ static inline void test_atomic_cas_acq_rel_u128(void *val, void *out ODP_UNUSED,
 	}
 }
 
+static inline void test_atomic_bit_set_rel_u32(void *val, void *out ODP_UNUSED, uint32_t num_round)
+{
+	odp_atomic_u32_t *atomic_val = val;
+
+	for (uint32_t i = 0; i < num_round; i++)
+		odp_atomic_bit_set_rel_u32(atomic_val, 0x1);
+}
+
+static inline void test_atomic_bit_clr_rel_u32(void *val, void *out ODP_UNUSED, uint32_t num_round)
+{
+	odp_atomic_u32_t *atomic_val = val;
+
+	for (uint32_t i = 0; i < num_round; i++)
+		odp_atomic_bit_clr_rel_u32(atomic_val, 0x1);
+}
+
+static inline void test_atomic_bit_set_rel_u64(void *val, void *out ODP_UNUSED, uint32_t num_round)
+{
+	odp_atomic_u64_t *atomic_val = val;
+
+	for (uint32_t i = 0; i < num_round; i++)
+		odp_atomic_bit_set_rel_u64(atomic_val, 0x1);
+}
+
+static inline void test_atomic_bit_clr_rel_u64(void *val, void *out ODP_UNUSED, uint32_t num_round)
+{
+	odp_atomic_u64_t *atomic_val = val;
+
+	for (uint32_t i = 0; i < num_round; i++)
+		odp_atomic_bit_clr_rel_u64(atomic_val, 0x1);
+}
+
 static void print_usage(void)
 {
 	printf("\n"
@@ -855,20 +1075,26 @@ static void print_info(test_options_t *test_options)
 	odp_atomic_lock_free_u64(&atomic_ops);
 
 	printf("\nAtomic operations lock-free:\n");
-	printf("  odp_atomic_load_u64:      %" PRIu32 "\n", atomic_ops.op.load);
-	printf("  odp_atomic_store_u64:     %" PRIu32 "\n", atomic_ops.op.store);
-	printf("  odp_atomic_fetch_add_u64: %" PRIu32 "\n", atomic_ops.op.fetch_add);
-	printf("  odp_atomic_add_u64:       %" PRIu32 "\n", atomic_ops.op.add);
-	printf("  odp_atomic_fetch_sub_u64: %" PRIu32 "\n", atomic_ops.op.fetch_sub);
-	printf("  odp_atomic_sub_u64:       %" PRIu32 "\n", atomic_ops.op.sub);
-	printf("  odp_atomic_fetch_inc_u64: %" PRIu32 "\n", atomic_ops.op.fetch_inc);
-	printf("  odp_atomic_inc_u64:       %" PRIu32 "\n", atomic_ops.op.inc);
-	printf("  odp_atomic_fetch_dec_u64: %" PRIu32 "\n", atomic_ops.op.fetch_dec);
-	printf("  odp_atomic_dec_u64:       %" PRIu32 "\n", atomic_ops.op.dec);
-	printf("  odp_atomic_min_u64:       %" PRIu32 "\n", atomic_ops.op.min);
-	printf("  odp_atomic_max_u64:       %" PRIu32 "\n", atomic_ops.op.max);
-	printf("  odp_atomic_cas_u64:       %" PRIu32 "\n", atomic_ops.op.cas);
-	printf("  odp_atomic_xchg_u64:      %" PRIu32 "\n", atomic_ops.op.xchg);
+	printf("  odp_atomic_load_u64:          %" PRIu32 "\n", atomic_ops.op.load);
+	printf("  odp_atomic_store_u64:         %" PRIu32 "\n", atomic_ops.op.store);
+	printf("  odp_atomic_fetch_add_u64:     %" PRIu32 "\n", atomic_ops.op.fetch_add);
+	printf("  odp_atomic_add_u64:           %" PRIu32 "\n", atomic_ops.op.add);
+	printf("  odp_atomic_fetch_sub_u64:     %" PRIu32 "\n", atomic_ops.op.fetch_sub);
+	printf("  odp_atomic_sub_u64:           %" PRIu32 "\n", atomic_ops.op.sub);
+	printf("  odp_atomic_fetch_inc_u64:     %" PRIu32 "\n", atomic_ops.op.fetch_inc);
+	printf("  odp_atomic_inc_u64:           %" PRIu32 "\n", atomic_ops.op.inc);
+	printf("  odp_atomic_fetch_dec_u64:     %" PRIu32 "\n", atomic_ops.op.fetch_dec);
+	printf("  odp_atomic_dec_u64:           %" PRIu32 "\n", atomic_ops.op.dec);
+	printf("  odp_atomic_min_u64:           %" PRIu32 "\n", atomic_ops.op.min);
+	printf("  odp_atomic_fetch_min_u64:     %" PRIu32 "\n", atomic_ops.op.fetch_min);
+	printf("  odp_atomic_max_u64:           %" PRIu32 "\n", atomic_ops.op.max);
+	printf("  odp_atomic_fetch_max_u64:     %" PRIu32 "\n", atomic_ops.op.fetch_max);
+	printf("  odp_atomic_cas_u64:           %" PRIu32 "\n", atomic_ops.op.cas);
+	printf("  odp_atomic_xchg_u64:          %" PRIu32 "\n", atomic_ops.op.xchg);
+	printf("  odp_atomic_bit_fetch_set_u64: %" PRIu32 "\n", atomic_ops.op.bit_fetch_set);
+	printf("  odp_atomic_bit_set_u64:       %" PRIu32 "\n", atomic_ops.op.bit_set);
+	printf("  odp_atomic_bit_fetch_clr_u64: %" PRIu32 "\n", atomic_ops.op.bit_fetch_clr);
+	printf("  odp_atomic_bit_clr_u64:       %" PRIu32 "\n", atomic_ops.op.bit_clr);
 
 	atomic_ops.all_bits = 0;
 	odp_atomic_lock_free_u128(&atomic_ops);
@@ -878,6 +1104,42 @@ static void print_info(test_options_t *test_options)
 	printf("  odp_atomic_cas_u128:      %" PRIu32 "\n", atomic_ops.op.cas);
 
 	printf("\n\n");
+}
+
+static int output_summary(test_global_t *global)
+{
+	int results_size = ODPH_ARRAY_SIZE(global->results);
+	results_t res;
+
+	if (global->common_options.is_export) {
+		if (test_common_write("function name,ops/cpu (M/s),total ops (M/s),"
+				      "cycles/op,nsec/op\n")) {
+			test_common_write_term();
+			return -1;
+		}
+	}
+
+	printf("Average results over %i threads:\n", global->test_options.num_cpu);
+	printf("%-33s %-15s %-17s %-11s %-11s\n", "function name", "ops/cpu (M/s)",
+	       "total ops (M/s)", "cycles/op", "nsec/op");
+	printf("-----------------------------------------------------------------------------"
+	       "-----------------------\n");
+	for (int i = 0; i < results_size && global->results[i].test_name; i++) {
+		res = global->results[i];
+		printf("[%02d] %-28s %-15.2f %-17.2f %-11.2f %-11.2f\n", i + 1,
+		       res.test_name, res.operations_per_cpu, res.total_operations,
+		       res.cycles_per_op, res.nsec_per_op);
+		if (global->common_options.is_export) {
+			if (test_common_write("%s,%f,%f,%f,%f\n", res.test_name,
+					      res.operations_per_cpu, res.total_operations,
+					      res.cycles_per_op, res.nsec_per_op)) {
+				test_common_write_term();
+				return -1;
+			}
+		}
+	}
+
+	return 0;
 }
 
 static int parse_options(int argc, char *argv[], test_options_t *test_options)
@@ -1014,6 +1276,8 @@ static int run_test(void *arg)
 {
 	uint64_t nsec;
 	odp_time_t t1, t2;
+	uint64_t cycles;
+	uint64_t c1, c2;
 	test_thread_ctx_t *thread_ctx = arg;
 	test_global_t *global = thread_ctx->global;
 	test_options_t *test_options = &global->test_options;
@@ -1053,16 +1317,20 @@ static int run_test(void *arg)
 	/* Start all workers at the same time */
 	odp_barrier_wait(&global->barrier);
 
-	t1 = odp_time_local();
+	t1 = odp_time_local_strict();
+	c1 = odp_cpu_cycles();
 
 	test_func(val, out, num_round);
 
-	t2 = odp_time_local();
+	c2 = odp_cpu_cycles();
+	t2 = odp_time_local_strict();
 
 	nsec = odp_time_diff_ns(t2, t1);
+	cycles = odp_cpu_cycles_diff(c2, c1);
 
 	/* Update stats */
 	thread_ctx->nsec = nsec;
+	thread_ctx->cycles = cycles;
 	if (type == OP_32BIT)
 		global->output[idx].u32 = out_u32;
 	else if (type == OP_64BIT)
@@ -1137,55 +1405,10 @@ static int validate_results(test_global_t *global, validate_fn_t validate, op_bi
 				val = &global->atomic_private[i].u128;
 		}
 
-		if (validate(val, out, num_round, num_cpu, private))
+		if (validate != NULL && validate(val, out, num_round, num_cpu, private))
 			return -1;
 	}
 	return 0;
-}
-
-static void print_stat(test_global_t *global)
-{
-	int i, num;
-	double nsec_ave;
-	test_options_t *test_options = &global->test_options;
-	int num_cpu = test_options->num_cpu;
-	uint32_t num_round = test_options->num_round;
-	uint64_t nsec_sum = 0;
-
-	for (i = 0; i < ODP_THREAD_COUNT_MAX; i++)
-		nsec_sum += global->thread_ctx[i].nsec;
-
-	if (nsec_sum == 0) {
-		printf("No results.\n");
-		return;
-	}
-
-	nsec_ave = nsec_sum / num_cpu;
-	num = 0;
-
-	printf("---------------------------------------------\n");
-	printf("Per thread results (Millions of ops per sec):\n");
-	printf("---------------------------------------------\n");
-	printf("          1        2        3        4        5        6        7        8        9       10");
-
-	for (i = 0; i < ODP_THREAD_COUNT_MAX; i++) {
-		if (global->thread_ctx[i].nsec) {
-			if ((num % 10) == 0)
-				printf("\n   ");
-
-			printf("%8.2f ", num_round / (global->thread_ctx[i].nsec / 1000.0));
-			num++;
-		}
-	}
-	printf("\n\n");
-
-	printf("Average results over %i threads:\n", num_cpu);
-	printf("---------------------------------------\n");
-	printf("  duration:           %8.2f  sec\n",  nsec_ave / ODP_TIME_SEC_IN_NS);
-	printf("  operations per cpu: %8.2fM ops/sec\n", num_round / (nsec_ave / 1000.0));
-	printf("  total operations:   %8.2fM ops/sec\n",
-	       (num_cpu * num_round) / (nsec_ave / 1000.0));
-	printf("\n\n");
 }
 
 /**
@@ -1214,12 +1437,24 @@ static test_case_t test_suite[] = {
 		  validate_atomic_sub_round_u32, OP_32BIT),
 	TEST_INFO("odp_atomic_max_u32", test_atomic_max_u32,
 		  validate_atomic_max_u32, OP_32BIT),
+	TEST_INFO("odp_atomic_fetch_max_u32", test_atomic_fetch_max_u32,
+		  validate_atomic_fetch_max_u32, OP_32BIT),
 	TEST_INFO("odp_atomic_min_u32", test_atomic_min_u32,
 		  validate_atomic_min_u32, OP_32BIT),
+	TEST_INFO("odp_atomic_fetch_min_u32", test_atomic_fetch_min_u32,
+		  validate_atomic_fetch_min_u32, OP_32BIT),
 	TEST_INFO("odp_atomic_cas_u32", test_atomic_cas_u32,
 		  validate_atomic_cas_u32, OP_32BIT),
 	TEST_INFO("odp_atomic_xchg_u32", test_atomic_xchg_u32,
 		  validate_atomic_num_round_u32, OP_32BIT),
+	TEST_INFO("odp_atomic_bit_set_u32", test_atomic_bit_set_u32,
+		  NULL, OP_32BIT),
+	TEST_INFO("odp_atomic_bit_fetch_set_u32", test_atomic_bit_fetch_set_u32,
+		  NULL, OP_32BIT),
+	TEST_INFO("odp_atomic_bit_clr_u32", test_atomic_bit_clr_u32,
+		  NULL, OP_32BIT),
+	TEST_INFO("odp_atomic_bit_fetch_clr_u32", test_atomic_bit_fetch_clr_u32,
+		  NULL, OP_32BIT),
 	TEST_INFO("odp_atomic_load_acq_u32", test_atomic_load_acq_u32,
 		  validate_atomic_init_val_u32, OP_32BIT),
 	TEST_INFO("odp_atomic_store_rel_u32", test_atomic_store_rel_u32,
@@ -1234,6 +1469,10 @@ static test_case_t test_suite[] = {
 		  validate_atomic_cas_u32, OP_32BIT),
 	TEST_INFO("odp_atomic_cas_acq_rel_u32", test_atomic_cas_acq_rel_u32,
 		  validate_atomic_cas_u32, OP_32BIT),
+	TEST_INFO("odp_atomic_bit_set_rel_u32", test_atomic_bit_set_rel_u32,
+		  NULL, OP_32BIT),
+	TEST_INFO("odp_atomic_bit_clr_rel_u32", test_atomic_bit_clr_rel_u32,
+		  NULL, OP_32BIT),
 	TEST_INFO("odp_atomic_load_u64", test_atomic_load_u64,
 		  validate_atomic_init_val_u64, OP_64BIT),
 	TEST_INFO("odp_atomic_store_u64", test_atomic_store_u64,
@@ -1256,12 +1495,24 @@ static test_case_t test_suite[] = {
 		  validate_atomic_sub_round_u64, OP_64BIT),
 	TEST_INFO("odp_atomic_max_u64", test_atomic_max_u64,
 		  validate_atomic_max_u64, OP_64BIT),
+	TEST_INFO("odp_atomic_fetch_max_u64", test_atomic_fetch_max_u64,
+		  validate_atomic_fetch_max_u64, OP_64BIT),
 	TEST_INFO("odp_atomic_min_u64", test_atomic_min_u64,
 		  validate_atomic_min_u64, OP_64BIT),
+	TEST_INFO("odp_atomic_fetch_min_u64", test_atomic_fetch_min_u64,
+		  validate_atomic_fetch_min_u64, OP_64BIT),
 	TEST_INFO("odp_atomic_cas_u64", test_atomic_cas_u64,
 		  validate_atomic_cas_u64, OP_64BIT),
 	TEST_INFO("odp_atomic_xchg_u64", test_atomic_xchg_u64,
 		  validate_atomic_num_round_u64, OP_64BIT),
+	TEST_INFO("odp_atomic_bit_set_u64", test_atomic_bit_set_u64,
+		  NULL, OP_64BIT),
+	TEST_INFO("odp_atomic_bit_fetch_set_u64", test_atomic_bit_fetch_set_u64,
+		  NULL, OP_64BIT),
+	TEST_INFO("odp_atomic_bit_clr_u64", test_atomic_bit_clr_u64,
+		  NULL, OP_64BIT),
+	TEST_INFO("odp_atomic_bit_fetch_clr_u64", test_atomic_bit_fetch_clr_u64,
+		  NULL, OP_64BIT),
 	TEST_INFO("odp_atomic_load_acq_u64", test_atomic_load_acq_u64,
 		  validate_atomic_init_val_u64, OP_64BIT),
 	TEST_INFO("odp_atomic_store_rel_u64", test_atomic_store_rel_u64,
@@ -1276,6 +1527,10 @@ static test_case_t test_suite[] = {
 		  validate_atomic_cas_u64, OP_64BIT),
 	TEST_INFO("odp_atomic_cas_acq_rel_u64", test_atomic_cas_acq_rel_u64,
 		  validate_atomic_cas_u64, OP_64BIT),
+	TEST_INFO("odp_atomic_bit_set_rel_u64", test_atomic_bit_set_rel_u64,
+		  NULL, OP_64BIT),
+	TEST_INFO("odp_atomic_bit_clr_rel_u64", test_atomic_bit_clr_rel_u64,
+		  NULL, OP_64BIT),
 	TEST_INFO("odp_atomic_load_u128", test_atomic_load_u128,
 		  validate_atomic_init_val_u128, OP_128BIT),
 	TEST_INFO("odp_atomic_store_u128", test_atomic_store_u128,
@@ -1290,6 +1545,70 @@ static test_case_t test_suite[] = {
 		  validate_atomic_cas_u128, OP_128BIT),
 };
 
+ODP_STATIC_ASSERT(ODPH_ARRAY_SIZE(test_suite) < TEST_MAX_BENCH,
+		  "Result array is too small to hold all the results");
+
+static void output_results(test_global_t *global, int idx)
+{
+	int i, num;
+	double nsec_ave, nsec_per_op, cycles_per_op, operations_per_cpu, total_operations;
+	test_options_t *test_options = &global->test_options;
+	int num_cpu = test_options->num_cpu;
+	uint32_t num_round = test_options->num_round;
+	uint64_t nsec_sum = 0;
+	uint64_t cycles_sum = 0;
+
+	global->results[idx].test_name = test_suite[idx].name;
+
+	for (i = 0; i < ODP_THREAD_COUNT_MAX; i++) {
+		nsec_sum += global->thread_ctx[i].nsec;
+		cycles_sum += global->thread_ctx[i].cycles;
+	}
+
+	if (nsec_sum == 0 || cycles_sum == 0) {
+		printf("No results.\n");
+		return;
+	}
+
+	nsec_ave = (double)nsec_sum / num_cpu;
+	nsec_per_op = (double)nsec_sum / (num_cpu * num_round);
+	cycles_per_op = (double)cycles_sum / (num_cpu * num_round);
+	num = 0;
+
+	operations_per_cpu = num_round / (nsec_ave / 1000.0);
+	total_operations = (num_cpu * num_round) / (nsec_ave / 1000.0);
+
+	global->results[idx].cycles_per_op = cycles_per_op;
+	global->results[idx].operations_per_cpu = operations_per_cpu;
+	global->results[idx].nsec_per_op = nsec_per_op;
+	global->results[idx].total_operations = total_operations;
+
+	printf("---------------------------------------------\n");
+	printf("Per thread results (Millions of ops per sec):\n");
+	printf("---------------------------------------------\n");
+	printf("          1        2        3        4        5        6        7        8        9       10");
+
+	for (i = 0; i < ODP_THREAD_COUNT_MAX; i++) {
+		if (global->thread_ctx[i].nsec) {
+			if ((num % 10) == 0)
+				printf("\n   ");
+
+			printf("%8.2f ", num_round / (global->thread_ctx[i].nsec / 1000.0));
+			num++;
+		}
+	}
+	printf("\n\n");
+
+	printf("Average results over %i threads:\n", num_cpu);
+	printf("---------------------------------------\n");
+	printf("  duration:	      %8.4f  sec\n", nsec_ave / ODP_TIME_SEC_IN_NS);
+	printf("  cycles per op:      %8.2f\n", cycles_per_op);
+	printf("  nsec per op:        %8.2f\n", nsec_per_op);
+	printf("  ops per cpu:	      %8.2fM ops/sec\n", operations_per_cpu);
+	printf("  total ops:	      %8.2fM ops/sec\n", total_operations);
+	printf("\n\n");
+}
+
 int main(int argc, char **argv)
 {
 	odph_helper_options_t helper_options;
@@ -1298,11 +1617,18 @@ int main(int argc, char **argv)
 	odp_shm_t shm;
 	test_options_t test_options;
 	int num_tests, i;
+	test_common_options_t common_options;
 
 	/* Let helper collect its own arguments (e.g. --odph_proc) */
 	argc = odph_parse_options(argc, argv);
 	if (odph_options(&helper_options)) {
 		ODPH_ERR("Error: reading ODP helper options failed.\n");
+		exit(EXIT_FAILURE);
+	}
+
+	argc = test_common_parse_options(argc, argv);
+	if (test_common_options(&common_options)) {
+		ODPH_ERR("Error while reading test options, exiting\n");
 		exit(EXIT_FAILURE);
 	}
 
@@ -1350,6 +1676,7 @@ int main(int argc, char **argv)
 	}
 	memset(test_global, 0, sizeof(test_global_t));
 	test_global->test_options = test_options;
+	test_global->common_options = common_options;
 
 	odp_sys_info_print();
 
@@ -1375,13 +1702,18 @@ int main(int argc, char **argv)
 		/* Wait workers to exit */
 		odph_thread_join(test_global->thread_tbl, test_global->test_options.num_cpu);
 
-		print_stat(test_global);
+		output_results(test_global, i);
 
 		/* Validate test results */
 		if (validate_results(test_global, test_suite[i].validate_fn, test_suite[i].type)) {
 			ODPH_ERR("Test %s result validation failed.\n", test_suite[i].name);
 			exit(EXIT_FAILURE);
 		}
+	}
+
+	if (output_summary(test_global)) {
+		ODPH_ERR("Outputting summary failed.\n");
+		exit(EXIT_FAILURE);
 	}
 
 	if (odp_shm_free(shm)) {

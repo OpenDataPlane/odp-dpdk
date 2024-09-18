@@ -219,6 +219,7 @@ __LIB__libodp_linux_la_SOURCES = \
 			   odp_dma.c \
 			   odp_errno.c \
 			   odp_event.c \
+			   odp_event_offsets.c \
 			   odp_event_validation.c \
 			   odp_fdserver.c \
 			   odp_hash_crc_gen.c \
@@ -492,7 +493,7 @@ if ODP_PKTIO_PCAP
 __LIB__libodp_linux_la_LIBADD += $(PCAP_LIBS)
 endif
 
-CHECK_GLOBALS_REGEX = " (odp_|_odp_|_deprecated_odp_|miniz_|mz_|tdefl_|tinfl_|mp_hdlr_init_odp_pool_ops|__odr_asan)"
+CHECK_GLOBALS_REGEX = " (odp_|_odp_|_deprecated_odp_|miniz_|mz_|tdefl_|tinfl_|mp_hdlr_init_odp_pool_ops|__odr_asan|__.*get_pc_thunk.*)"
 
 TESTS_ENVIRONMENT = \
 	LIBTOOL="$(LIBTOOL)" \

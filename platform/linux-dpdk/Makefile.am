@@ -198,7 +198,7 @@ BUILT_SOURCES = \
 
 __LIB__libodp_dpdk_la_SOURCES = \
 			   ../linux-generic/odp_barrier.c \
-			   odp_buffer.c \
+			   ../linux-generic/odp_buffer.c \
 			   ../linux-generic/odp_chksum.c \
 			   ../linux-generic/odp_classification.c \
 			   ../linux-generic/odp_comp.c \
@@ -210,7 +210,8 @@ __LIB__libodp_dpdk_la_SOURCES = \
 			   odp_dma.c \
 			   odp_crypto.c \
 			   odp_errno.c \
-			   odp_event.c \
+			   ../linux-generic/odp_event.c \
+			   odp_event_offsets.c \
 			   ../linux-generic/odp_event_validation.c \
 			   ../linux-generic/odp_hash_crc_gen.c \
 			   odp_init.c \
@@ -225,7 +226,7 @@ __LIB__libodp_dpdk_la_SOURCES = \
 			   odp_packet.c \
 			   odp_packet_dpdk.c \
 			   ../linux-generic/odp_packet_vector.c \
-			   odp_packet_flags.c \
+			   ../linux-generic/odp_packet_flags.c \
 			   ../linux-generic/odp_packet_io.c \
 			   ../linux-generic/odp_parse.c \
 			   ../linux-generic/pktio/loop.c \
@@ -425,7 +426,7 @@ __LIB__libodp_dpdk_la_LIBADD += $(PTHREAD_LIBS)
 __LIB__libodp_dpdk_la_LIBADD += $(TIMER_LIBS)
 __LIB__libodp_dpdk_la_LIBADD += $(ORT_LIBS)
 
-CHECK_GLOBALS_REGEX = " (odp_|_odp_|_deprecated_odp_|miniz_|mz_|tdefl_|tinfl_|mp_hdlr_init_odp_pool_ops|__odr_asan)"
+CHECK_GLOBALS_REGEX = " (odp_|_odp_|_deprecated_odp_|miniz_|mz_|tdefl_|tinfl_|mp_hdlr_init_odp_pool_ops|__odr_asan|__.*get_pc_thunk.*)"
 
 TESTS_ENVIRONMENT = \
 	LIBTOOL="$(LIBTOOL)" \

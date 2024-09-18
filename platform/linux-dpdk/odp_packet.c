@@ -1657,6 +1657,11 @@ uint64_t odp_packet_seg_to_u64(odp_packet_seg_t hdl)
 	return _odp_pri(hdl);
 }
 
+uint64_t odp_packet_tx_compl_to_u64(odp_packet_tx_compl_t tx_compl)
+{
+	return _odp_pri(tx_compl);
+}
+
 odp_packet_t odp_packet_ref(odp_packet_t pkt, uint32_t offset)
 {
 	odp_packet_t new;

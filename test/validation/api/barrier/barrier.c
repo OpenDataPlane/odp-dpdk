@@ -24,8 +24,6 @@
 
 #define GLOBAL_SHM_NAME		"GlobalLockTest"
 
-#define UNUSED			__attribute__((__unused__))
-
 static volatile int temp_result;
 
 typedef __volatile uint32_t volatile_u32_t;
@@ -220,7 +218,7 @@ static uint32_t barrier_test(per_thread_mem_t *per_thread_mem,
 	return barrier_errs;
 }
 
-static int no_barrier_functional_test(void *arg UNUSED)
+static int no_barrier_functional_test(void *arg ODP_UNUSED)
 {
 	per_thread_mem_t *per_thread_mem;
 	uint32_t barrier_errs;
@@ -238,10 +236,10 @@ static int no_barrier_functional_test(void *arg UNUSED)
 	CU_ASSERT(barrier_errs != 0 || global_mem->g_num_threads == 1);
 	thread_finalize(per_thread_mem);
 
-	return CU_get_number_of_failures();
+	return 0;
 }
 
-static int barrier_functional_test(void *arg UNUSED)
+static int barrier_functional_test(void *arg ODP_UNUSED)
 {
 	per_thread_mem_t *per_thread_mem;
 	uint32_t barrier_errs;
@@ -252,7 +250,7 @@ static int barrier_functional_test(void *arg UNUSED)
 	CU_ASSERT(barrier_errs == 0);
 	thread_finalize(per_thread_mem);
 
-	return CU_get_number_of_failures();
+	return 0;
 }
 
 static void barrier_test_init(void)

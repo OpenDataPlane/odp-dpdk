@@ -1345,7 +1345,7 @@ static uint32_t dpdk_maxlen_get(pktio_entry_t *pktio_entry)
 	return pkt_dpdk->mtu;
 }
 
-static int promisc_mode_set_pkt_dpdk(pktio_entry_t *pktio_entry,  int enable)
+static int promisc_mode_set_pkt_dpdk(pktio_entry_t *pktio_entry, odp_bool_t enable)
 {
 	uint16_t port_id = pkt_priv(pktio_entry)->port_id;
 	int ret;

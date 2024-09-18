@@ -994,6 +994,11 @@ uint64_t odp_dma_compl_to_u64(odp_dma_compl_t dma_compl)
 	return _odp_pri(dma_compl);
 }
 
+uint64_t odp_dma_transfer_id_to_u64(odp_dma_transfer_id_t transfer_id)
+{
+	return _odp_pri(transfer_id);
+}
+
 void odp_dma_compl_print(odp_dma_compl_t dma_compl)
 {
 	odp_dma_result_t result;
@@ -1154,6 +1159,11 @@ void odp_dma_print(odp_dma_t dma ODP_UNUSED)
 uint64_t odp_dma_compl_to_u64(odp_dma_compl_t dma_compl ODP_UNUSED)
 {
 	return _odp_pri(ODP_DMA_COMPL_INVALID);
+}
+
+uint64_t odp_dma_transfer_id_to_u64(odp_dma_transfer_id_t transfer_id ODP_UNUSED)
+{
+	return _odp_pri(ODP_DMA_TRANSFER_ID_INVALID);
 }
 
 void odp_dma_compl_print(odp_dma_compl_t dma_compl ODP_UNUSED)
