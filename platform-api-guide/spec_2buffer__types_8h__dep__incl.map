@@ -1,0 +1,12 @@
+<map id="buffer_types.h" name="buffer_types.h">
+<area shape="rect" id="node1" title="ODP buffer types." alt="" coords="127,5,242,32"/>
+<area shape="rect" id="node2" href="$buffer__types_8h.html" title="ODP buffer types." alt="" coords="127,80,242,107"/>
+<area shape="rect" id="node3" href="$spec_2buffer_8h.html" title="ODP buffer." alt="" coords="27,155,97,181"/>
+<area shape="rect" id="node6" href="$buffer__inlines_8h_source.html" title=" " alt="" coords="166,229,289,256"/>
+<area shape="rect" id="node7" href="$event__inlines_8h_source.html" title=" " alt="" coords="173,155,295,181"/>
+<area shape="rect" id="node8" href="$event__validation__external_8h.html" title="ODP event validation." alt="" coords="319,155,523,181"/>
+<area shape="rect" id="node4" href="$buffer_8h.html" title="ODP buffer descriptor." alt="" coords="27,229,97,256"/>
+<area shape="rect" id="node5" href="$dma__inlines_8h_source.html" title=" " alt="" coords="5,304,119,331"/>
+<area shape="rect" id="node9" href="$packet__inlines_8h.html" title="ODP packet inline functions." alt="" coords="335,229,461,256"/>
+<area shape="rect" id="node10" href="$queue__inlines_8h_source.html" title=" " alt="" coords="485,229,609,256"/>
+</map>
