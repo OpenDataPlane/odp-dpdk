@@ -413,7 +413,7 @@ endif
 __LIB__libodp_dpdk_la_LIBADD = $(ATOMIC_LIBS)
 __LIB__libodp_dpdk_la_LIBADD += $(OPENSSL_LIBS)
 __LIB__libodp_dpdk_la_LIBADD += $(LIBCONFIG_LIBS)
-__LIB__libodp_dpdk_la_LIBADD += $(DPDK_LIBS_LIBODP)
+__LIB__libodp_dpdk_la_LIBADD += $(DPDK_LIBS)
 __LIB__libodp_dpdk_la_LIBADD += $(PTHREAD_LIBS)
 __LIB__libodp_dpdk_la_LIBADD += $(TIMER_LIBS)
 __LIB__libodp_dpdk_la_LIBADD += $(ML_LIBS)
