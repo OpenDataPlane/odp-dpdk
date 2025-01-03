@@ -37,7 +37,6 @@
 #include <rte_ip_frag.h>
 #include <rte_udp.h>
 #include <rte_tcp.h>
-#include <rte_version.h>
 
 #include <linux/ethtool.h>
 #include <linux/sockios.h>
@@ -55,50 +54,6 @@
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <unistd.h>
-
-#if RTE_VERSION < RTE_VERSION_NUM(21, 11, 0, 0)
-	#define RTE_MBUF_F_TX_IPV4 PKT_TX_IPV4
-	#define RTE_MBUF_F_TX_IPV6 PKT_TX_IPV6
-	#define RTE_MBUF_F_TX_IP_CKSUM PKT_TX_IP_CKSUM
-	#define RTE_MBUF_F_TX_UDP_CKSUM PKT_TX_UDP_CKSUM
-	#define RTE_MBUF_F_TX_TCP_CKSUM PKT_TX_TCP_CKSUM
-
-	#define RTE_ETH_RSS_IPV4 ETH_RSS_IPV4
-	#define RTE_ETH_RSS_FRAG_IPV4 ETH_RSS_FRAG_IPV4
-	#define RTE_ETH_RSS_NONFRAG_IPV4_TCP ETH_RSS_NONFRAG_IPV4_TCP
-	#define RTE_ETH_RSS_NONFRAG_IPV4_UDP ETH_RSS_NONFRAG_IPV4_UDP
-	#define RTE_ETH_RSS_NONFRAG_IPV4_OTHER ETH_RSS_NONFRAG_IPV4_OTHER
-
-	#define RTE_ETH_RSS_IPV6 ETH_RSS_IPV6
-	#define RTE_ETH_RSS_IPV6_EX ETH_RSS_IPV6_EX
-	#define RTE_ETH_RSS_IPV6_UDP_EX ETH_RSS_IPV6_UDP_EX
-	#define RTE_ETH_RSS_IPV6_TCP_EX ETH_RSS_IPV6_TCP_EX
-	#define RTE_ETH_RSS_FRAG_IPV6 ETH_RSS_FRAG_IPV6
-	#define RTE_ETH_RSS_NONFRAG_IPV6_TCP ETH_RSS_NONFRAG_IPV6_TCP
-	#define RTE_ETH_RSS_NONFRAG_IPV6_UDP ETH_RSS_NONFRAG_IPV6_UDP
-	#define RTE_ETH_RSS_NONFRAG_IPV6_OTHER ETH_RSS_NONFRAG_IPV6_OTHER
-
-	#define RTE_ETH_MQ_RX_RSS ETH_MQ_RX_RSS
-	#define RTE_ETH_MQ_TX_NONE ETH_MQ_TX_NONE
-
-	#define RTE_ETH_RX_OFFLOAD_IPV4_CKSUM DEV_RX_OFFLOAD_IPV4_CKSUM
-	#define RTE_ETH_RX_OFFLOAD_TCP_CKSUM DEV_RX_OFFLOAD_TCP_CKSUM
-	#define RTE_ETH_RX_OFFLOAD_UDP_CKSUM DEV_RX_OFFLOAD_UDP_CKSUM
-
-	#define RTE_ETH_TX_OFFLOAD_IPV4_CKSUM DEV_TX_OFFLOAD_IPV4_CKSUM
-	#define RTE_ETH_TX_OFFLOAD_SCTP_CKSUM DEV_TX_OFFLOAD_SCTP_CKSUM
-	#define RTE_ETH_TX_OFFLOAD_TCP_CKSUM DEV_TX_OFFLOAD_TCP_CKSUM
-	#define RTE_ETH_TX_OFFLOAD_UDP_CKSUM DEV_TX_OFFLOAD_UDP_CKSUM
-	#define RTE_ETH_TX_OFFLOAD_MULTI_SEGS DEV_TX_OFFLOAD_MULTI_SEGS
-
-	#define RTE_ETH_FC_FULL RTE_FC_FULL
-	#define RTE_ETH_FC_RX_PAUSE RTE_FC_RX_PAUSE
-	#define RTE_ETH_FC_TX_PAUSE RTE_FC_TX_PAUSE
-	#define RTE_ETH_LINK_AUTONEG ETH_LINK_AUTONEG
-	#define RTE_ETH_LINK_FULL_DUPLEX ETH_LINK_FULL_DUPLEX
-	#define RTE_ETH_LINK_UP ETH_LINK_UP
-	#define RTE_ETH_SPEED_NUM_NONE ETH_SPEED_NUM_NONE
-#endif
 
 /* DPDK poll mode drivers requiring minimum RX burst size DPDK_MIN_RX_BURST */
 #define IXGBE_DRV_NAME "net_ixgbe"
@@ -380,13 +335,8 @@ static int dpdk_setup_eth_dev(pktio_entry_t *pktio_entry, const struct rte_eth_d
 	/* RX packet len same size as pool segment minus headroom and double
 	 * VLAN tag
 	 */
-#if RTE_VERSION < RTE_VERSION_NUM(21, 11, 0, 0)
-	eth_conf.rxmode.max_rx_pkt_len =
-#else
-	eth_conf.rxmode.mtu =
-#endif
-		rte_pktmbuf_data_room_size(pool->rte_mempool) -
-		get_eth_overhead(dev_info) - RTE_PKTMBUF_HEADROOM;
+	eth_conf.rxmode.mtu = rte_pktmbuf_data_room_size(pool->rte_mempool) -
+				get_eth_overhead(dev_info) - RTE_PKTMBUF_HEADROOM;
 
 	ret = rte_eth_dev_configure(pkt_dpdk->port_id,
 				    pktio_entry->num_in_queue,

@@ -31,8 +31,6 @@
 #include <odp_pool_internal.h>
 #include <odp_string_internal.h>
 
-#include <rte_version.h>
-
 #include <protocols/eth.h>
 #include <protocols/ip.h>
 #include <protocols/sctp.h>
@@ -43,10 +41,6 @@
 #include <stdio.h>
 #include <stddef.h>
 #include <inttypes.h>
-
-#if RTE_VERSION < RTE_VERSION_NUM(21, 11, 0, 0)
-	#define RTE_MBUF_F_RX_RSS_HASH PKT_RX_RSS_HASH
-#endif
 
 #include <odp/visibility_begin.h>
 
