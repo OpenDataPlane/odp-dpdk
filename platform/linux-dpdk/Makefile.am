@@ -127,7 +127,6 @@ endif
 
 noinst_HEADERS = \
 		  ${top_srcdir}/platform/linux-generic/include/odp_atomic_internal.h \
-		  ${top_srcdir}/platform/linux-generic/include/odp_bitset.h \
 		  include/odp_buffer_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_chksum_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_classification_internal.h \
@@ -142,7 +141,6 @@ noinst_HEADERS = \
 		  ${top_srcdir}/platform/linux-generic/include/odp_init_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_ipsec_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_libconfig_internal.h \
-		  ${top_srcdir}/platform/linux-generic/include/odp_llqueue.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_macros_internal.h \
 		  include/odp_packet_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_name_table_internal.h \
@@ -317,8 +315,7 @@ endif
 noinst_HEADERS += arch/arm/odp_cpu.h \
 		  arch/default/odp_atomic.h \
 		  arch/default/odp_cpu.h \
-		  arch/default/odp_random.h \
-		  arch/default/odp_wait_until.h
+		  arch/default/odp_random.h
 endif
 if ARCH_IS_AARCH64
 __LIB__libodp_dpdk_la_SOURCES += arch/aarch64/odp_atomic.c \
@@ -343,8 +340,7 @@ endif
 noinst_HEADERS += arch/aarch64/odp_atomic.h \
 		  arch/aarch64/odp_cpu.h \
 		  arch/aarch64/cpu_flags.h \
-		  arch/aarch64/odp_random.h \
-		  arch/aarch64/odp_wait_until.h
+		  arch/aarch64/odp_random.h
 endif
 if ARCH_IS_DEFAULT
 __LIB__libodp_dpdk_la_SOURCES += arch/default/odp_atomic.c \
@@ -365,8 +361,7 @@ odpapiabiarchinclude_HEADERS += arch/default/odp/api/abi/atomic_generic.h \
 endif
 noinst_HEADERS += arch/default/odp_atomic.h \
 		  arch/default/odp_cpu.h \
-		  arch/default/odp_random.h \
-		  arch/default/odp_wait_until.h
+		  arch/default/odp_random.h
 endif
 if ARCH_IS_POWERPC
 __LIB__libodp_dpdk_la_SOURCES += arch/default/odp_atomic.c \
@@ -387,8 +382,7 @@ odpapiabiarchinclude_HEADERS += arch/default/odp/api/abi/atomic_generic.h \
 endif
 noinst_HEADERS += arch/default/odp_atomic.h \
 		  arch/default/odp_cpu.h \
-		  arch/default/odp_random.h \
-		  arch/default/odp_wait_until.h
+		  arch/default/odp_random.h
 endif
 if ARCH_IS_X86
 __LIB__libodp_dpdk_la_SOURCES += arch/default/odp_atomic.c \
@@ -413,8 +407,7 @@ noinst_HEADERS += arch/x86/cpu_flags.h \
 		  arch/x86/odp_cpu.h \
 		  arch/x86/odp_random.h \
 		  arch/default/odp_atomic.h \
-		  arch/default/odp_cpu.h \
-		  arch/default/odp_wait_until.h
+		  arch/default/odp_cpu.h
 endif
 
 __LIB__libodp_dpdk_la_LIBADD = $(ATOMIC_LIBS)
