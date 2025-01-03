@@ -747,7 +747,7 @@ odp_timer_pool_t odp_timer_pool_create(const char *name,
 	return timer_pool_to_hdl(timer_pool);
 }
 
-void odp_timer_pool_start(void)
+void ODP_DEPRECATE(odp_timer_pool_start)(void)
 {
 	/* Nothing to do */
 }
