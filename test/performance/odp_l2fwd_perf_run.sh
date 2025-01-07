@@ -51,16 +51,25 @@ run_l2fwd_perf()
 		exit 1
 	fi
 
+	export ODP_PLATFORM_PARAMS="-m 512 --file-prefix="packet_gen" \
+--proc-type auto --no-pci \
+--vdev net_pcap0,iface=$IF0"
+
 	# Run odp_packet_gen with one tx thread
 	GEN_LOG=odp_packet_gen_tmp.log
-	(odp_packet_gen${EXEEXT} --gap 0 -i $IF0 \
+	(odp_packet_gen${EXEEXT} --gap 0 -i 0 \
 			--ipv4_src 192.168.0.1 --ipv4_dst 192.168.0.2 \
 			-r 0 -t 1 2>&1 > $GEN_LOG) \
 			2>&1 > $GEN_LOG &
 	GEN_PID=$!
 	LOG=odp_l2fwd_perf_tmp.log
+
+	export ODP_PLATFORM_PARAMS="-m 512 --file-prefix="l2fwd" \
+--proc-type auto --no-pci --vdev net_pcap1,iface=$IF1 \
+--vdev net_pcap2,iface=$IF2"
+
 	# Max 2 workers
-	odp_l2fwd_perf${EXEEXT} -i $IF1,$IF2 -m 0 -t 5 -c 2 | tee $LOG
+	odp_l2fwd_perf${EXEEXT} -i 0,1 -m 0 -t 5 -c 2 | tee $LOG
 	ret=${PIPESTATUS[0]}
 	kill -2 ${GEN_PID}
 	wait ${GEN_PID}
