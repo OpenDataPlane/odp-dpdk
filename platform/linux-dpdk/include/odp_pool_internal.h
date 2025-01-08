@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2013-2018 Linaro Limited
- * Copyright (c) 2021-2023 Nokia
+ * Copyright (c) 2021-2025 Nokia
  */
 
 /**
@@ -47,24 +47,8 @@ extern "C" {
 	#undef vector
 #endif
 
-/* Use ticketlock instead of spinlock */
-#define POOL_USE_TICKETLOCK
-
-/* Extra error checks */
-/* #define POOL_ERROR_CHECK */
-
-#ifdef POOL_USE_TICKETLOCK
-#include <odp/api/ticketlock.h>
-#else
-#include <odp/api/spinlock.h>
-#endif
-
 typedef struct ODP_ALIGNED_CACHE {
-#ifdef POOL_USE_TICKETLOCK
 	odp_ticketlock_t lock ODP_ALIGNED_CACHE;
-#else
-	odp_spinlock_t lock ODP_ALIGNED_CACHE;
-#endif
 	uint32_t		pool_idx;
 
 	/* Everything under this mark is memset() to zero on pool create */
