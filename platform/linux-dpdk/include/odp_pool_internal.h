@@ -69,22 +69,25 @@ typedef struct ODP_ALIGNED_CACHE {
 
 	/* Everything under this mark is memset() to zero on pool create */
 	uint8_t			memset_mark;
-	struct rte_mempool	*rte_mempool;
-	uint32_t		seg_len; /* Initial packet segment length (excludes endmark) */
-	uint32_t		ext_head_offset;
-	uint32_t		num;
-	uint32_t		num_populated;
-	odp_pool_type_t		type_2;
 	uint8_t			type;
 	uint8_t			pool_ext;
+	struct rte_mempool	*rte_mempool;
+	uint32_t		seg_len; /* Initial packet segment length (excludes endmark) */
+	uint32_t		param_uarea_size;
+	uint32_t		ext_head_offset;
+	uint32_t		num;
 	odp_pool_param_t	params;
 	odp_pool_ext_param_t	ext_param;
+
+	/* --- Control path data --- */
+
 	odp_shm_t		uarea_shm;
 	uint64_t		uarea_shm_size;
-	uint32_t		param_uarea_size;
+	uint8_t			*uarea_base_addr;
 	uint32_t		uarea_size;
 	uint32_t		trailer_size; /* Endmark size */
-	uint8_t			*uarea_base_addr;
+	uint32_t		num_populated;
+	odp_pool_type_t		type_2;
 	char			name[ODP_POOL_NAME_LEN];
 
 } pool_t;
