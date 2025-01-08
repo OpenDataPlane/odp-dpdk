@@ -78,7 +78,7 @@ pool_global_t *_odp_pool_glb;
 const _odp_pool_inline_offset_t _odp_pool_inline ODP_ALIGNED_CACHE = {
 	.index             = offsetof(pool_t, pool_idx),
 	.seg_len           = offsetof(pool_t, seg_len),
-	.uarea_size        = offsetof(pool_t, params.pkt.uarea_size),
+	.uarea_size        = offsetof(pool_t, param_uarea_size),
 	.ext_head_offset   = offsetof(pool_t, ext_head_offset)
 };
 
