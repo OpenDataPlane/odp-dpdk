@@ -1,6 +1,6 @@
 #!/bin/bash
 
-export ODP_PLATFORM_PARAMS=${ODP_PLATFORM_PARAMS:-"--vdev=crypto_openssl --vdev=crypto_null"}
+export ODP_PLATFORM_PARAMS=${ODP_PLATFORM_PARAMS:-"--vdev=crypto_null --vdev=crypto_openssl"}
 # where to mount huge pages
 export HUGEPAGEDIR=${HUGEPAGEDIR:-/mnt/huge}
 # exit codes expected by automake for skipped tests

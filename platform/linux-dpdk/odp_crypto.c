@@ -335,7 +335,7 @@ int _odp_crypto_init_global(void)
 {
 	size_t mem_size;
 	int idx;
-	int16_t cdev_id, cdev_count;
+	uint8_t cdev_id, cdev_count;
 	int rc = -1;
 	unsigned int pool_size;
 	unsigned int nb_queue_pairs = 0, queue_pair;
@@ -391,7 +391,7 @@ int _odp_crypto_init_global(void)
 			max_sess_sz = sess_sz;
 	}
 
-	for (cdev_id = cdev_count - 1; cdev_id >= 0; cdev_id--) {
+	for (cdev_id = 0; cdev_id < cdev_count; cdev_id++) {
 		struct rte_cryptodev_info dev_info;
 		struct rte_mempool *mp;
 		odp_bool_t queue_pairs_shared = false;
