@@ -2,6 +2,7 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright (C) 2021 Marvell
+# Copyright (C) 2025 Nokia
 #
 # Script to setup interfaces used for running application on linux-dpdk.
 #
@@ -30,6 +31,11 @@ fi
 # Skip IPsec example tests when there's no OpenSSL.
 if [ -n "$WITH_OPENSSL" ] && [ ${WITH_OPENSSL} -eq 0 ]; then
 	echo "Crypto not supported. Skipping."
+	exit 77
+fi
+
+if [ -n "$ODPH_PROC_MODE" ] && [ ${ODPH_PROC_MODE} -ne 0 ]; then
+	echo "Process mode not supported. Skipping."
 	exit 77
 fi
 
