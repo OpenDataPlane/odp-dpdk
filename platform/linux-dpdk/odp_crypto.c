@@ -75,6 +75,7 @@ ODP_STATIC_ASSERT(_ODP_CHECK_IS_POWER2(NB_DESC_PER_QUEUE_PAIR),
 
 typedef struct cryptodev_s {
 	uint8_t dev_id;
+	odp_bool_t disable_aes_cmac;
 	odp_bool_t qpairs_shared;
 	uint16_t num_qpairs;
 } cryptodev_t;
@@ -97,6 +98,7 @@ typedef struct crypto_session_entry_s {
 typedef struct crypto_config_s {
 	uint32_t max_sessions;
 	odp_bool_t allow_queue_pair_sharing;
+	odp_bool_t openssl_disable_aes_cmac;
 } crypto_config_t;
 
 typedef struct crypto_global_s {
@@ -364,6 +366,14 @@ static int read_config(crypto_config_t *config)
 	config->allow_queue_pair_sharing = !!val;
 	_ODP_PRINT("  %s: %d\n", str, val);
 
+	str = "crypto.openssl.disable_aes_cmac";
+	if (!_odp_libconfig_lookup_int(str, &val)) {
+		_ODP_ERR("Config option '%s' not found.\n", str);
+		return -1;
+	}
+	config->openssl_disable_aes_cmac = !!val;
+	_ODP_PRINT("  %s: %d\n", str, val);
+
 	_ODP_PRINT("\n");
 	return 0;
 }
@@ -460,6 +470,10 @@ int _odp_crypto_init_global(void)
 			.nb_queue_pairs = nb_queue_pairs,
 			.socket_id = socket_id,
 		};
+
+		if (dev_info.driver_name && !strcmp(dev_info.driver_name, "crypto_openssl"))
+			global->devs[global->num_devs].disable_aes_cmac =
+				config.openssl_disable_aes_cmac;
 
 		if (global->session_mempool[socket_id] == NULL) {
 			char mp_name[RTE_MEMPOOL_NAMESIZE];
@@ -697,6 +711,10 @@ int odp_crypto_capability(odp_crypto_capability_t *capability)
 		rte_cryptodev_info_get(global->devs[n].dev_id, &dev_info);
 		capability_process(&dev_info, &capability->ciphers,
 				   &capability->auths);
+
+		if (global->devs[n].disable_aes_cmac)
+			capability->auths.bit.aes_cmac = 0;
+
 		if ((dev_info.feature_flags &
 		     RTE_CRYPTODEV_FF_HW_ACCELERATED)) {
 			capability->hw_ciphers = capability->ciphers;
@@ -1102,6 +1120,9 @@ static int auth_capability(odp_auth_alg_t auth,
 	for (int n = 0; n < global->num_devs; n++) {
 		struct rte_cryptodev_info dev_info;
 
+		if (auth == ODP_AUTH_ALG_AES_CMAC && global->devs[n].disable_aes_cmac)
+			continue;
+
 		rte_cryptodev_info_get(global->devs[n].dev_id, &dev_info);
 		cap = find_capa_for_alg(&dev_info, &auth_xform);
 		if (cap == NULL)
@@ -1299,17 +1320,20 @@ get_crypto_dev(struct rte_crypto_sym_xform *cipher_xform,
 		cipher_ok = is_cipher_supported(&dev_info, cipher_xform);
 		auth_ok = is_auth_supported(&dev_info, auth_xform);
 
+		if (auth_xform->auth.algo == RTE_CRYPTO_AUTH_AES_CMAC &&
+		    dev->disable_aes_cmac)
+			auth_ok = 0;
+
 		if (cipher_ok)
 			cipher_supported = 1;
 		if (auth_ok)
 			auth_supported = 1;
 
-		if (is_combo_buggy(&dev_info,
-				   cipher_xform->cipher.algo,
-				   auth_xform->auth.algo))
-			continue;
-
 		if (cipher_ok && auth_ok) {
+			if (is_combo_buggy(&dev_info,
+					   cipher_xform->cipher.algo,
+					   auth_xform->auth.algo))
+				continue;
 			*device = dev;
 			return ODP_CRYPTO_SES_ERR_NONE;
 		}
