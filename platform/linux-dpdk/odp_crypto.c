@@ -442,7 +442,7 @@ int _odp_crypto_init_global(void)
 								   socket_id);
 			if (mp == NULL) {
 				_ODP_ERR("Cannot create session pool on socket %d\n", socket_id);
-				return -1;
+				goto fail;
 			}
 
 			_ODP_PRINT("Allocated session pool on socket %d\n", socket_id);
@@ -453,7 +453,7 @@ int _odp_crypto_init_global(void)
 		rc = rte_cryptodev_configure(cdev_id, &conf);
 		if (rc < 0) {
 			_ODP_ERR("Failed to configure cryptodev %u", cdev_id);
-			return -1;
+			goto fail;
 		}
 
 		qp_conf.nb_descriptors = NB_DESC_PER_QUEUE_PAIR;
@@ -470,14 +470,14 @@ int _odp_crypto_init_global(void)
 			if (rc < 0) {
 				_ODP_ERR("Fail to setup queue pair %u on dev %u",
 					 queue_pair, cdev_id);
-				return -1;
+				goto fail;
 			}
 		}
 
 		rc = rte_cryptodev_start(cdev_id);
 		if (rc < 0) {
 			_ODP_ERR("Failed to start device %u: error %d\n", cdev_id, rc);
-			return -1;
+			goto fail;
 		}
 
 		global->devs[global->num_devs].dev_id = cdev_id;
@@ -509,10 +509,14 @@ int _odp_crypto_init_global(void)
 
 	if (global->crypto_op_pool == NULL) {
 		_ODP_ERR("Cannot create crypto op pool\n");
-		return -1;
+		goto fail;
 	}
 
 	return 0;
+
+fail:
+	(void)_odp_crypto_term_global();
+	return -1;
 }
 
 int _odp_crypto_init_local(void)
@@ -1618,8 +1622,22 @@ int _odp_crypto_term_global(void)
 		rc = -1;
 	}
 
-	if (global->crypto_op_pool != NULL)
+	for (uint8_t dev = 0; dev < global->num_devs; dev++) {
+		rte_cryptodev_stop(global->devs[dev].dev_id);
+		rte_cryptodev_close(global->devs[dev].dev_id);
+	}
+	global->num_devs = 0;
+
+	if (global->crypto_op_pool != NULL) {
 		rte_mempool_free(global->crypto_op_pool);
+		global->crypto_op_pool = NULL;
+	}
+
+	for (int socket_id = 0; socket_id < RTE_MAX_NUMA_NODES; socket_id++)
+		if (global->session_mempool[socket_id] != NULL) {
+			rte_mempool_free(global->session_mempool[socket_id]);
+			global->session_mempool[socket_id] = NULL;
+		}
 
 	ret = odp_shm_free(global->shm);
 	if (ret < 0) {
