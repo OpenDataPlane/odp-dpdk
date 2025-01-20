@@ -96,6 +96,7 @@ typedef struct crypto_session_entry_s {
 
 typedef struct crypto_config_s {
 	uint32_t max_sessions;
+	odp_bool_t allow_queue_pair_sharing;
 } crypto_config_t;
 
 typedef struct crypto_global_s {
@@ -355,6 +356,14 @@ static int read_config(crypto_config_t *config)
 	}
 	config->max_sessions = val;
 
+	str = "crypto.allow_queue_pair_sharing";
+	if (!_odp_libconfig_lookup_int(str, &val)) {
+		_ODP_ERR("Config option '%s' not found.\n", str);
+		return -1;
+	}
+	config->allow_queue_pair_sharing = !!val;
+	_ODP_PRINT("  %s: %d\n", str, val);
+
 	_ODP_PRINT("\n");
 	return 0;
 }
@@ -430,6 +439,13 @@ int _odp_crypto_init_global(void)
 		rte_cryptodev_info_get(cdev_id, &dev_info);
 		nb_queue_pairs = odp_thread_count_max();
 		if (nb_queue_pairs > dev_info.max_nb_queue_pairs) {
+			if (!config.allow_queue_pair_sharing) {
+				_ODP_ERR("Crypto device %" PRIu16 " (driver: %s), "
+					 "does not have enough queue pairs. "
+					 "Check ODP config file.\n",
+					 cdev_id, dev_info.driver_name);
+				goto fail;
+			}
 			nb_queue_pairs = dev_info.max_nb_queue_pairs;
 			queue_pairs_shared = true;
 			_ODP_PRINT("Using shared queue pairs for crypto device %"
