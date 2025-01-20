@@ -471,9 +471,14 @@ int _odp_crypto_init_global(void)
 			.socket_id = socket_id,
 		};
 
-		if (dev_info.driver_name && !strcmp(dev_info.driver_name, "crypto_openssl"))
+		if (dev_info.driver_name && !strcmp(dev_info.driver_name, "crypto_openssl")) {
 			global->devs[global->num_devs].disable_aes_cmac =
 				config.openssl_disable_aes_cmac;
+			if (odp_global_ro.init_param.mem_model == ODP_MEM_MODEL_PROCESS) {
+				_ODP_ERR("Disabling crypto_openssl: process mode not supported\n");
+				continue;
+			}
+		}
 
 		if (global->session_mempool[socket_id] == NULL) {
 			char mp_name[RTE_MEMPOOL_NAMESIZE];
