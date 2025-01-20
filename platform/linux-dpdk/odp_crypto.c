@@ -397,6 +397,12 @@ int _odp_crypto_init_global(void)
 		return 0;
 	}
 
+	cdev_count = rte_cryptodev_count();
+	if (cdev_count == 0) {
+		_ODP_PRINT("No crypto devices available\n");
+		return 0;
+	}
+
 	/* Calculate the memory size we need */
 	mem_size  = sizeof(*global);
 	mem_size += (config.max_sessions * sizeof(crypto_session_entry_t));
@@ -427,12 +433,6 @@ int _odp_crypto_init_global(void)
 
 	global->num_devs = 0;
 	odp_spinlock_init(&global->lock);
-
-	cdev_count = rte_cryptodev_count();
-	if (cdev_count == 0) {
-		_ODP_PRINT("No crypto devices available\n");
-		return 0;
-	}
 
 	for (cdev_id = 0; cdev_id < cdev_count; cdev_id++) {
 		sess_sz = rte_cryptodev_sym_get_private_session_size(cdev_id);
@@ -694,10 +694,8 @@ int odp_crypto_capability(odp_crypto_capability_t *capability)
 	/* Initialize crypto capability structure */
 	memset(capability, 0, sizeof(odp_crypto_capability_t));
 
-	if (global->num_devs == 0) {
-		_ODP_ERR("No crypto devices available\n");
+	if (!global || global->num_devs == 0)
 		return 0;
-	}
 
 	capability->sync_mode = ODP_SUPPORT_YES;
 	capability->async_mode = ODP_SUPPORT_PREFERRED;
@@ -830,15 +828,8 @@ static int cipher_aead_capability(odp_cipher_alg_t cipher,
 
 	aead_xform.type = RTE_CRYPTO_SYM_XFORM_AEAD;
 	rc = cipher_aead_alg_odp_to_rte(cipher, &aead_xform);
-
-	/* Check result */
 	if (rc)
 		return -1;
-
-	if (global->num_devs == 0) {
-		_ODP_ERR("No crypto devices available\n");
-		return -1;
-	}
 
 	for (int n = 0; n < global->num_devs; n++) {
 		struct rte_cryptodev_info dev_info;
@@ -875,15 +866,8 @@ static int cipher_capability(odp_cipher_alg_t cipher,
 
 	cipher_xform.type = RTE_CRYPTO_SYM_XFORM_CIPHER;
 	rc = cipher_alg_odp_to_rte(cipher, &cipher_xform);
-
-	/* Check result */
 	if (rc)
 		return -1;
-
-	if (global->num_devs == 0) {
-		_ODP_ERR("No crypto devices available\n");
-		return -1;
-	}
 
 	for (int n = 0; n < global->num_devs; n++) {
 		struct rte_cryptodev_info dev_info;
@@ -912,6 +896,9 @@ int odp_crypto_cipher_capability(odp_cipher_alg_t cipher,
 				 odp_crypto_cipher_capability_t dst[],
 				 int num_copy)
 {
+	if (!global || global->num_devs == 0)
+		return 0;
+
 	/* We implement NULL in software, so always return capability */
 	if (cipher == ODP_CIPHER_ALG_NULL) {
 		if (num_copy >= 1)
@@ -1027,15 +1014,8 @@ static int auth_aead_capability(odp_auth_alg_t auth,
 
 	aead_xform.type = RTE_CRYPTO_SYM_XFORM_AEAD;
 	rc = auth_aead_alg_odp_to_rte(auth, &aead_xform);
-
-	/* Check result */
 	if (rc)
 		return -1;
-
-	if (global->num_devs == 0) {
-		_ODP_ERR("No crypto devices available\n");
-		return -1;
-	}
 
 	for (int n = 0; n < global->num_devs; n++) {
 		struct rte_cryptodev_info dev_info;
@@ -1076,8 +1056,6 @@ static int auth_capability(odp_auth_alg_t auth,
 
 	auth_xform.type = RTE_CRYPTO_SYM_XFORM_AUTH;
 	rc = auth_alg_odp_to_rte(auth, &auth_xform);
-
-	/* Check result */
 	if (rc)
 		return -1;
 
@@ -1111,11 +1089,6 @@ static int auth_capability(odp_auth_alg_t auth,
 	key_range_override.min = key_size_override;
 	key_range_override.max = key_size_override;
 	key_range_override.increment = 0;
-
-	if (global->num_devs == 0) {
-		_ODP_ERR("No crypto devices available\n");
-		return -1;
-	}
 
 	for (int n = 0; n < global->num_devs; n++) {
 		struct rte_cryptodev_info dev_info;
@@ -1156,6 +1129,9 @@ int odp_crypto_auth_capability(odp_auth_alg_t auth,
 			       odp_crypto_auth_capability_t dst[],
 			       int num_copy)
 {
+	if (!global || global->num_devs == 0)
+		return 0;
+
 	/* We implement NULL in software, so always return capability */
 	if (auth == ODP_AUTH_ALG_NULL) {
 		if (num_copy >= 1)
@@ -1486,10 +1462,7 @@ int odp_crypto_session_create(const odp_crypto_session_param_t *param,
 	struct rte_mempool *sess_mp;
 	crypto_session_entry_t *session = NULL;
 
-	if (odp_global_ro.disable.crypto) {
-		_ODP_ERR("Crypto is disabled\n");
-		/* Dummy output to avoid compiler warning about uninitialized
-		 * variables */
+	if (!global || global->num_devs == 0) {
 		*status = ODP_CRYPTO_SES_ERR_ENOMEM;
 		*session_out = ODP_CRYPTO_SESSION_INVALID;
 		return -1;
@@ -1517,12 +1490,6 @@ int odp_crypto_session_create(const odp_crypto_session_param_t *param,
 		*status = ODP_CRYPTO_SES_ERR_PARAMS;
 		*session_out = ODP_CRYPTO_SESSION_INVALID;
 		return -1;
-	}
-
-	if (global->num_devs == 0) {
-		_ODP_ERR("No crypto devices available\n");
-		*status = ODP_CRYPTO_SES_ERR_ENOMEM;
-		goto err;
 	}
 
 	/* Allocate memory for this session */
@@ -1683,7 +1650,7 @@ int _odp_crypto_term_global(void)
 	uint32_t count = 0;
 	crypto_session_entry_t *session;
 
-	if (odp_global_ro.disable.crypto || global == NULL)
+	if (global == NULL)
 		return 0;
 
 	for (session = global->free; session != NULL; session = session->next)
