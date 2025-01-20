@@ -710,18 +710,22 @@ int odp_crypto_capability(odp_crypto_capability_t *capability)
 
 	for (int n = 0; n < global->num_devs; n++) {
 		struct rte_cryptodev_info dev_info;
+		odp_crypto_cipher_algos_t ciphers = {.all_bits = 0};
+		odp_crypto_auth_algos_t auths = {.all_bits = 0};
 
 		rte_cryptodev_info_get(global->devs[n].dev_id, &dev_info);
-		capability_process(&dev_info, &capability->ciphers,
-				   &capability->auths);
+		capability_process(&dev_info, &ciphers, &auths);
 
 		if (global->devs[n].disable_aes_cmac)
-			capability->auths.bit.aes_cmac = 0;
+			auths.bit.aes_cmac = 0;
+
+		capability->ciphers.all_bits |= ciphers.all_bits;
+		capability->auths.all_bits |= auths.all_bits;
 
 		if ((dev_info.feature_flags &
 		     RTE_CRYPTODEV_FF_HW_ACCELERATED)) {
-			capability->hw_ciphers = capability->ciphers;
-			capability->hw_auths = capability->auths;
+			capability->hw_ciphers.all_bits |= ciphers.all_bits;
+			capability->hw_auths.all_bits |= auths.all_bits;
 		}
 
 		/* Report the lowest max_nb_sessions of all devices */
