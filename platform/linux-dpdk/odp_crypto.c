@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2017-2018 Linaro Limited
- * Copyright (c) 2018-2023 Nokia
+ * Copyright (c) 2018-2025 Nokia
  */
 
 #include <odp_posix_extensions.h>
@@ -71,6 +71,14 @@ ODP_STATIC_ASSERT(_ODP_CHECK_IS_POWER2(NB_DESC_PER_QUEUE_PAIR),
 /* Min delay between rte_cryptodev_dequeue_burst() retries in nanoseconds */
 #define DEQ_RETRY_DELAY_NS 10
 
+#define MAX_CRYPTODEVS 16
+
+typedef struct cryptodev_s {
+	uint8_t dev_id;
+	odp_bool_t qpairs_shared;
+	uint16_t num_qpairs;
+} cryptodev_t;
+
 typedef struct crypto_session_entry_s {
 	struct crypto_session_entry_s *next;
 
@@ -83,16 +91,13 @@ typedef struct crypto_session_entry_s {
 		unsigned int aead:1;
 	} flags;
 	uint8_t cdev_id;
-
+	cryptodev_t *dev;
 } crypto_session_entry_t;
 
 typedef struct crypto_global_s {
 	odp_spinlock_t                lock;
-	uint8_t enabled_crypto_devs;
-	uint8_t enabled_crypto_dev_ids[RTE_CRYPTO_MAX_DEVS];
-	uint16_t enabled_crypto_dev_qpairs[RTE_CRYPTO_MAX_DEVS];
-	odp_bool_t enabled_crypto_dev_qpairs_shared[RTE_CRYPTO_MAX_DEVS];
-	int is_crypto_dev_initialized;
+	uint8_t num_devs;
+	cryptodev_t devs[MAX_CRYPTODEVS];
 	struct rte_mempool *crypto_op_pool;
 	struct rte_mempool *session_mempool[RTE_MAX_NUMA_NODES];
 	odp_shm_t shm;
@@ -370,11 +375,8 @@ int _odp_crypto_init_global(void)
 		global->free = &global->sessions[idx];
 	}
 
-	global->enabled_crypto_devs = 0;
+	global->num_devs = 0;
 	odp_spinlock_init(&global->lock);
-
-	if (global->is_crypto_dev_initialized)
-		return 0;
 
 	cdev_count = rte_cryptodev_count();
 	if (cdev_count == 0) {
@@ -382,7 +384,7 @@ int _odp_crypto_init_global(void)
 		return 0;
 	}
 
-	for (cdev_id = 0; cdev_id < rte_cryptodev_count(); cdev_id++) {
+	for (cdev_id = 0; cdev_id < cdev_count; cdev_id++) {
 		sess_sz = rte_cryptodev_sym_get_private_session_size(cdev_id);
 
 		if (sess_sz > max_sess_sz)
@@ -478,12 +480,14 @@ int _odp_crypto_init_global(void)
 			return -1;
 		}
 
-		global->enabled_crypto_dev_ids[global->enabled_crypto_devs] =
-			cdev_id;
-		global->enabled_crypto_dev_qpairs[cdev_id] = nb_queue_pairs;
-		global->enabled_crypto_dev_qpairs_shared[cdev_id] =
-			queue_pairs_shared;
-		global->enabled_crypto_devs++;
+		global->devs[global->num_devs].dev_id = cdev_id;
+		global->devs[global->num_devs].qpairs_shared = queue_pairs_shared;
+		global->devs[global->num_devs].num_qpairs = nb_queue_pairs;
+		global->num_devs++;
+		if (global->num_devs >= MAX_CRYPTODEVS) {
+			_ODP_ERR("Too many crypto devices, skipping the rest\n");
+			break;
+		}
 	}
 
 	/*
@@ -507,8 +511,6 @@ int _odp_crypto_init_global(void)
 		_ODP_ERR("Cannot create crypto op pool\n");
 		return -1;
 	}
-
-	global->is_crypto_dev_initialized = 1;
 
 	return 0;
 }
@@ -616,8 +618,6 @@ static void capability_process(struct rte_cryptodev_info *dev_info,
 
 int odp_crypto_capability(odp_crypto_capability_t *capability)
 {
-	uint8_t cdev_id, cdev_count;
-
 	if (odp_global_ro.disable.crypto) {
 		_ODP_ERR("Crypto is disabled\n");
 		return -1;
@@ -629,8 +629,7 @@ int odp_crypto_capability(odp_crypto_capability_t *capability)
 	/* Initialize crypto capability structure */
 	memset(capability, 0, sizeof(odp_crypto_capability_t));
 
-	cdev_count = rte_cryptodev_count();
-	if (cdev_count == 0) {
+	if (global->num_devs == 0) {
 		_ODP_ERR("No crypto devices available\n");
 		return 0;
 	}
@@ -641,10 +640,10 @@ int odp_crypto_capability(odp_crypto_capability_t *capability)
 	capability->queue_type_plain = 1;
 	capability->queue_type_sched = 1;
 
-	for (cdev_id = 0; cdev_id < cdev_count; cdev_id++) {
+	for (int n = 0; n < global->num_devs; n++) {
 		struct rte_cryptodev_info dev_info;
 
-		rte_cryptodev_info_get(cdev_id, &dev_info);
+		rte_cryptodev_info_get(global->devs[n].dev_id, &dev_info);
 		capability_process(&dev_info, &capability->ciphers,
 				   &capability->auths);
 		if ((dev_info.feature_flags &
@@ -757,8 +756,6 @@ static int cipher_aead_capability(odp_cipher_alg_t cipher,
 	odp_crypto_cipher_capability_t src[_ODP_MAX(num_copy, 1)];
 	int idx = 0, rc = 0;
 	int size = sizeof(odp_crypto_cipher_capability_t);
-
-	uint8_t cdev_id, cdev_count;
 	const struct rte_cryptodev_capabilities *cap;
 	struct rte_crypto_sym_xform aead_xform;
 
@@ -769,16 +766,15 @@ static int cipher_aead_capability(odp_cipher_alg_t cipher,
 	if (rc)
 		return -1;
 
-	cdev_count = rte_cryptodev_count();
-	if (cdev_count == 0) {
+	if (global->num_devs == 0) {
 		_ODP_ERR("No crypto devices available\n");
 		return -1;
 	}
 
-	for (cdev_id = 0; cdev_id < cdev_count; cdev_id++) {
+	for (int n = 0; n < global->num_devs; n++) {
 		struct rte_cryptodev_info dev_info;
 
-		rte_cryptodev_info_get(cdev_id, &dev_info);
+		rte_cryptodev_info_get(global->devs[n].dev_id, &dev_info);
 		cap = find_capa_for_alg(&dev_info, &aead_xform);
 		if (cap == NULL)
 			continue;
@@ -805,7 +801,6 @@ static int cipher_capability(odp_cipher_alg_t cipher,
 	odp_crypto_cipher_capability_t src[_ODP_MAX(num_copy, 1)];
 	int idx = 0, rc = 0;
 	int size = sizeof(odp_crypto_cipher_capability_t);
-	uint8_t cdev_id, cdev_count;
 	const struct rte_cryptodev_capabilities *cap;
 	struct rte_crypto_sym_xform cipher_xform;
 
@@ -816,16 +811,15 @@ static int cipher_capability(odp_cipher_alg_t cipher,
 	if (rc)
 		return -1;
 
-	cdev_count = rte_cryptodev_count();
-	if (cdev_count == 0) {
+	if (global->num_devs == 0) {
 		_ODP_ERR("No crypto devices available\n");
 		return -1;
 	}
 
-	for (cdev_id = 0; cdev_id < cdev_count; cdev_id++) {
+	for (int n = 0; n < global->num_devs; n++) {
 		struct rte_cryptodev_info dev_info;
 
-		rte_cryptodev_info_get(cdev_id, &dev_info);
+		rte_cryptodev_info_get(global->devs[n].dev_id, &dev_info);
 		cap = find_capa_for_alg(&dev_info, &cipher_xform);
 		if (cap == NULL)
 			continue;
@@ -959,8 +953,6 @@ static int auth_aead_capability(odp_auth_alg_t auth,
 	odp_crypto_auth_capability_t src[_ODP_MAX(num_copy, 1)];
 	int idx = 0, rc = 0;
 	int size = sizeof(odp_crypto_auth_capability_t);
-
-	uint8_t cdev_id, cdev_count;
 	const struct rte_cryptodev_capabilities *cap;
 	struct rte_crypto_sym_xform aead_xform;
 
@@ -971,16 +963,15 @@ static int auth_aead_capability(odp_auth_alg_t auth,
 	if (rc)
 		return -1;
 
-	cdev_count = rte_cryptodev_count();
-	if (cdev_count == 0) {
+	if (global->num_devs == 0) {
 		_ODP_ERR("No crypto devices available\n");
 		return -1;
 	}
 
-	for (cdev_id = 0; cdev_id < cdev_count; cdev_id++) {
+	for (int n = 0; n < global->num_devs; n++) {
 		struct rte_cryptodev_info dev_info;
 
-		rte_cryptodev_info_get(cdev_id, &dev_info);
+		rte_cryptodev_info_get(global->devs[n].dev_id, &dev_info);
 		cap = find_capa_for_alg(&dev_info, &aead_xform);
 		if (cap == NULL)
 			continue;
@@ -1009,7 +1000,6 @@ static int auth_capability(odp_auth_alg_t auth,
 	odp_crypto_auth_capability_t src[_ODP_MAX(num_copy, 1)];
 	int idx = 0, rc = 0;
 	int size = sizeof(odp_crypto_auth_capability_t);
-	uint8_t cdev_id, cdev_count;
 	const struct rte_cryptodev_capabilities *cap;
 	struct rte_crypto_sym_xform auth_xform;
 	uint16_t key_size_override;
@@ -1053,16 +1043,15 @@ static int auth_capability(odp_auth_alg_t auth,
 	key_range_override.max = key_size_override;
 	key_range_override.increment = 0;
 
-	cdev_count = rte_cryptodev_count();
-	if (cdev_count == 0) {
+	if (global->num_devs == 0) {
 		_ODP_ERR("No crypto devices available\n");
 		return -1;
 	}
 
-	for (cdev_id = 0; cdev_id < cdev_count; cdev_id++) {
+	for (int n = 0; n < global->num_devs; n++) {
 		struct rte_cryptodev_info dev_info;
 
-		rte_cryptodev_info_get(cdev_id, &dev_info);
+		rte_cryptodev_info_get(global->devs[n].dev_id, &dev_info);
 		cap = find_capa_for_alg(&dev_info, &auth_xform);
 		if (cap == NULL)
 			continue;
@@ -1110,16 +1099,15 @@ int odp_crypto_auth_capability(odp_auth_alg_t auth,
 
 static odp_crypto_ses_create_err_t
 get_crypto_aead_dev(struct rte_crypto_sym_xform *aead_xform,
-		    uint8_t *dev_id)
+		    cryptodev_t **device)
 {
-	uint8_t cdev_id, id;
 	const struct rte_cryptodev_capabilities *cap;
 
-	for (id = 0; id < global->enabled_crypto_devs; id++) {
+	for (int n = 0; n < global->num_devs; n++) {
+		cryptodev_t *dev = &global->devs[n];
 		struct rte_cryptodev_info dev_info;
 
-		cdev_id = global->enabled_crypto_dev_ids[id];
-		rte_cryptodev_info_get(cdev_id, &dev_info);
+		rte_cryptodev_info_get(dev->dev_id, &dev_info);
 
 		cap = find_capa_for_alg(&dev_info, aead_xform);
 		if (cap == NULL)
@@ -1147,7 +1135,7 @@ get_crypto_aead_dev(struct rte_crypto_sym_xform *aead_xform,
 			continue;
 		}
 
-		*dev_id = cdev_id;
+		*device = dev;
 		return ODP_CRYPTO_SES_ERR_NONE;
 	}
 
@@ -1245,18 +1233,17 @@ static int is_combo_buggy(struct rte_cryptodev_info *dev_info,
 static odp_crypto_ses_create_err_t
 get_crypto_dev(struct rte_crypto_sym_xform *cipher_xform,
 	       struct rte_crypto_sym_xform *auth_xform,
-	       uint8_t *dev_id)
+	       cryptodev_t **device)
 {
-	uint8_t cdev_id, id;
 	int cipher_supported = 0;
 	int auth_supported = 0;
 
-	for (id = 0; id < global->enabled_crypto_devs; id++) {
+	for (int n = 0; n < global->num_devs; n++) {
+		cryptodev_t *dev = &global->devs[n];
 		struct rte_cryptodev_info dev_info;
 		int cipher_ok, auth_ok;
 
-		cdev_id = global->enabled_crypto_dev_ids[id];
-		rte_cryptodev_info_get(cdev_id, &dev_info);
+		rte_cryptodev_info_get(dev->dev_id, &dev_info);
 
 		cipher_ok = is_cipher_supported(&dev_info, cipher_xform);
 		auth_ok = is_auth_supported(&dev_info, auth_xform);
@@ -1272,7 +1259,7 @@ get_crypto_dev(struct rte_crypto_sym_xform *cipher_xform,
 			continue;
 
 		if (cipher_ok && auth_ok) {
-			*dev_id = cdev_id;
+			*device = dev;
 			return ODP_CRYPTO_SES_ERR_NONE;
 		}
 	}
@@ -1414,6 +1401,7 @@ int odp_crypto_session_create(const odp_crypto_session_param_t *param,
 			      odp_crypto_ses_create_err_t *status)
 {
 	odp_crypto_ses_create_err_t rc = ODP_CRYPTO_SES_ERR_NONE;
+	cryptodev_t *dev;
 	uint8_t cdev_id = 0;
 	uint8_t socket_id;
 	struct rte_crypto_sym_xform cipher_xform;
@@ -1456,7 +1444,7 @@ int odp_crypto_session_create(const odp_crypto_session_param_t *param,
 		return -1;
 	}
 
-	if (rte_cryptodev_count() == 0) {
+	if (global->num_devs == 0) {
 		_ODP_ERR("No crypto devices available\n");
 		*status = ODP_CRYPTO_SES_ERR_ENOMEM;
 		goto err;
@@ -1483,8 +1471,7 @@ int odp_crypto_session_create(const odp_crypto_session_param_t *param,
 
 		first_xform = &cipher_xform;
 
-		rc = get_crypto_aead_dev(&cipher_xform,
-					 &cdev_id);
+		rc = get_crypto_aead_dev(&cipher_xform, &dev);
 	} else {
 		odp_bool_t do_cipher_first;
 
@@ -1525,9 +1512,7 @@ int odp_crypto_session_create(const odp_crypto_session_param_t *param,
 			first_xform->next = &cipher_xform;
 		}
 
-		rc = get_crypto_dev(&cipher_xform,
-				    &auth_xform,
-				    &cdev_id);
+		rc = get_crypto_dev(&cipher_xform, &auth_xform, &dev);
 	}
 	if (rc != ODP_CRYPTO_SES_ERR_NONE) {
 		_ODP_DBG("Couldn't find a crypto device (error %d)", rc);
@@ -1535,7 +1520,8 @@ int odp_crypto_session_create(const odp_crypto_session_param_t *param,
 		goto err;
 	}
 
-	socket_id = rte_cryptodev_socket_id(cdev_id);
+	cdev_id = dev->dev_id;
+	socket_id = rte_cryptodev_socket_id(dev->dev_id);
 	sess_mp = global->session_mempool[socket_id];
 
 	/* Setup session */
@@ -1562,10 +1548,9 @@ int odp_crypto_session_create(const odp_crypto_session_param_t *param,
 #endif
 
 	session->flags.chained_bufs_ok = chained_bufs_ok(param, cdev_id);
-	if (global->enabled_crypto_dev_qpairs_shared[cdev_id])
-		session->flags.cdev_qpairs_shared = 1;
-	else
-		session->flags.cdev_qpairs_shared = 0;
+	session->flags.cdev_qpairs_shared = dev->qpairs_shared;
+	session->dev = dev;
+
 out_null:
 	session->rte_session  = rte_session;
 	session->cdev_id = cdev_id;
@@ -1974,7 +1959,7 @@ static void dev_enq_deq(uint8_t cdev_id, int thread_id, crypto_op_t *op[], int n
 
 	queue_pairs_shared = op[0]->state.session->flags.cdev_qpairs_shared;
 	if (odp_unlikely(queue_pairs_shared))
-		queue_pair = thread_id % global->enabled_crypto_dev_qpairs[cdev_id];
+		queue_pair = thread_id % op[0]->state.session->dev->num_qpairs;
 	else
 		queue_pair = thread_id;
 
