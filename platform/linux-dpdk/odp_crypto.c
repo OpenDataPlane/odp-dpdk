@@ -24,6 +24,7 @@
 #include <odp_init_internal.h>
 #include <odp_packet_internal.h>
 #include <odp_macros_internal.h>
+#include <odp_libconfig_internal.h>
 
 /* Inlined API functions */
 #include <odp/api/plat/event_inlines.h>
@@ -39,7 +40,6 @@
 #include <math.h>
 
 #define MAX_BURST 32
-#define MAX_SESSIONS 4000
 /*
  * Max size of per-thread session object cache. May be useful if sessions
  * are created and destroyed very frequently.
@@ -94,6 +94,10 @@ typedef struct crypto_session_entry_s {
 	cryptodev_t *dev;
 } crypto_session_entry_t;
 
+typedef struct crypto_config_s {
+	uint32_t max_sessions;
+} crypto_config_t;
+
 typedef struct crypto_global_s {
 	odp_spinlock_t                lock;
 	uint8_t num_devs;
@@ -101,6 +105,7 @@ typedef struct crypto_global_s {
 	struct rte_mempool *crypto_op_pool;
 	struct rte_mempool *session_mempool[RTE_MAX_NUMA_NODES];
 	odp_shm_t shm;
+	crypto_config_t config;
 	crypto_session_entry_t *free;
 	crypto_session_entry_t sessions[];
 } crypto_global_t;
@@ -331,16 +336,42 @@ static void free_session(crypto_session_entry_t *session)
 	odp_spinlock_unlock(&global->lock);
 }
 
+static int read_config(crypto_config_t *config)
+{
+	const char *str;
+	int val;
+
+	_ODP_PRINT("Crypto config:\n");
+
+	str = "crypto.max_num_sessions";
+	if (!_odp_libconfig_lookup_int(str, &val)) {
+		_ODP_ERR("Config option '%s' not found.\n", str);
+		return -1;
+	}
+	_ODP_PRINT("  %s: %d\n", str, val);
+	if (val <= 0) {
+		_ODP_ERR("Invalid value for config option '%s'\n", str);
+		return -1;
+	}
+	config->max_sessions = val;
+
+	_ODP_PRINT("\n");
+	return 0;
+}
+
 int _odp_crypto_init_global(void)
 {
+	crypto_config_t config;
 	size_t mem_size;
-	int idx;
 	uint8_t cdev_id, cdev_count;
 	int rc = -1;
 	unsigned int pool_size;
 	unsigned int nb_queue_pairs = 0, queue_pair;
 	uint32_t max_sess_sz = 0, sess_sz;
 	odp_shm_t shm;
+
+	if (read_config(&config))
+		return -1;
 
 	if (odp_global_ro.disable.crypto) {
 		_ODP_PRINT("\nODP crypto is DISABLED\n");
@@ -349,7 +380,7 @@ int _odp_crypto_init_global(void)
 
 	/* Calculate the memory size we need */
 	mem_size  = sizeof(*global);
-	mem_size += (MAX_SESSIONS * sizeof(crypto_session_entry_t));
+	mem_size += (config.max_sessions * sizeof(crypto_session_entry_t));
 
 	/* Allocate our globally shared memory */
 	shm = odp_shm_reserve("_odp_crypto_global", mem_size,
@@ -365,12 +396,12 @@ int _odp_crypto_init_global(void)
 		return -1;
 	}
 
-	/* Clear it out */
 	memset(global, 0, mem_size);
 	global->shm = shm;
+	global->config = config;
 
 	/* Initialize free list and lock */
-	for (idx = 0; idx < MAX_SESSIONS; idx++) {
+	for (uint32_t idx = 0; idx < config.max_sessions; idx++) {
 		global->sessions[idx].next = global->free;
 		global->free = &global->sessions[idx];
 	}
@@ -426,7 +457,7 @@ int _odp_crypto_init_global(void)
 			 * the pool has to have twice as many elements
 			 * as the maximum number of sessions.
 			 */
-			pool_size = 2 * MAX_SESSIONS;
+			pool_size = 2 * config.max_sessions;
 			/*
 			 * Add the number of elements that may get lost
 			 * in thread local caches. The mempool implementation
@@ -640,7 +671,7 @@ int odp_crypto_capability(odp_crypto_capability_t *capability)
 
 	capability->sync_mode = ODP_SUPPORT_YES;
 	capability->async_mode = ODP_SUPPORT_PREFERRED;
-	capability->max_sessions = MAX_SESSIONS;
+	capability->max_sessions = global->config.max_sessions;
 	capability->queue_type_plain = 1;
 	capability->queue_type_sched = 1;
 
@@ -1609,7 +1640,7 @@ int _odp_crypto_term_global(void)
 {
 	int rc = 0;
 	int ret;
-	int count = 0;
+	uint32_t count = 0;
 	crypto_session_entry_t *session;
 
 	if (odp_global_ro.disable.crypto || global == NULL)
@@ -1617,7 +1648,7 @@ int _odp_crypto_term_global(void)
 
 	for (session = global->free; session != NULL; session = session->next)
 		count++;
-	if (count != MAX_SESSIONS) {
+	if (count != global->config.max_sessions) {
 		_ODP_ERR("crypto sessions still active\n");
 		rc = -1;
 	}
