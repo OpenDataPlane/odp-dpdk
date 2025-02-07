@@ -59,7 +59,7 @@ enum {
 	/* Bad input */
 	ML_BAD_INPUT,
 
-	/* Fail from underlying library onnxruntime */
+	/* Fail from underlying library */
 	ML_LIB_FAILED,
 
 	/* Bad output */
@@ -90,7 +90,7 @@ typedef struct ml_input_t {
 	uint64_t size;
 } ml_input_t;
 
-/* Onnxruntime model info */
+/* Model info */
 typedef struct ml_model_t {
 	/* Guards state, which must be accessed atomically */
 	odp_ticketlock_t	lock;
@@ -114,7 +114,7 @@ typedef struct ml_model_t {
 
 	struct {
 		void *user_ptr;
-	} result[ML_MAX_COMPL_ID];
+	} result[ML_MAX_COMPL_ID + 1];
 } ml_model_t;
 
 typedef struct ml_global_t {
@@ -199,32 +199,32 @@ void odp_ml_config_init(odp_ml_config_t *config)
 int odp_ml_config(const odp_ml_config_t *config)
 {
 	if (!config) {
-		_ODP_ERR("Error: config must not be NULL\n");
+		_ODP_ERR("Config must not be NULL\n");
 		return -1;
 	}
 
 	if (config->max_model_size == 0 || config->max_models_created == 0 ||
 	    config->max_models_loaded == 0) {
-		_ODP_ERR("Error: max_model_size, max_models_created and max_models_loaded"
+		_ODP_ERR("max_model_size, max_models_created and max_models_loaded"
 			 " must be bigger than 0\n");
 		return -1;
 	}
 
 	if (config->max_models_loaded > config->max_models_created) {
-		_ODP_ERR("Error: max_models_loaded %d exceeds max_models_created %d\n",
+		_ODP_ERR("max_models_loaded %d exceeds max_models_created %d\n",
 			 config->max_models_loaded, config->max_models_created);
 		return -1;
 	}
 
 	if (config->max_models_created > ML_MAX_MODELS_CREATED) {
-		_ODP_ERR("Error: max_models_created %d exceeds maximum number"
+		_ODP_ERR("max_models_created %d exceeds maximum number"
 			 " of models that can be created in this driver %d\n",
 			 config->max_models_created, ML_MAX_MODELS_CREATED);
 		return -1;
 	}
 
 	if (config->max_models_loaded > ML_MAX_MODELS_LOADED) {
-		_ODP_ERR("Error: max_models_loaded %d exceeds maximum number"
+		_ODP_ERR("max_models_loaded %d exceeds maximum number"
 			 " of models that can be loaded in this driver %d\n",
 			 config->max_models_loaded, ML_MAX_MODELS_LOADED);
 		return -1;
@@ -836,7 +836,8 @@ odp_ml_model_t odp_ml_model_create(const char *name, const odp_ml_model_param_t 
 	}
 
 	if (odp_unlikely(param->size > _odp_ml_glb->ml_config.max_model_size)) {
-		_ODP_ERR("Model size %" PRIu64 " exceeds maximum model size configured %" PRIu64 "\n",
+		_ODP_ERR("Model size %" PRIu64 " exceeds maximum model size configured %" PRIu64
+			 "\n",
 			 param->size, _odp_ml_glb->ml_config.max_model_size);
 		return ODP_ML_MODEL_INVALID;
 	}
@@ -853,7 +854,7 @@ odp_ml_model_t odp_ml_model_create(const char *name, const odp_ml_model_param_t 
 		return ODP_ML_MODEL_INVALID;
 	}
 
-	/* Find an emtpy slot to store the new model */
+	/* Find an empty slot to store the new model */
 	for (i = 0; i < ML_MAX_MODELS_CREATED; i++) {
 		if (_odp_ml_glb->models[i].state)
 			continue;
@@ -879,7 +880,7 @@ odp_ml_model_t odp_ml_model_create(const char *name, const odp_ml_model_param_t 
 
 	status = ort_api->CreateSessionOptions(&session_opts);
 	if (check_ortstatus(status) || !session_opts) {
-		_ODP_ERR("Error: CreateSessionOptions failed.\n");
+		_ODP_ERR("CreateSessionOptions failed.\n");
 		mdl->state = ML_STATE_FREE;
 		odp_ticketlock_unlock(&mdl->lock);
 		return ODP_ML_MODEL_INVALID;
@@ -894,7 +895,7 @@ odp_ml_model_t odp_ml_model_create(const char *name, const odp_ml_model_param_t 
 
 	/* Store model info */
 	info = &mdl->info;
-	memset(info, 0, sizeof(odp_ml_model_info_t));
+	memset(info, 0, sizeof(*info));
 
 	if (create_ort_model(param, &session, mdl, session_opts)) {
 		mdl->state = ML_STATE_FREE;
@@ -1139,10 +1140,10 @@ static void print_shape(const odp_ml_shape_info_t *shape)
 
 void odp_ml_model_print(odp_ml_model_t model)
 {
-	ml_model_t *mdl	= ml_model_from_handle(model);
-	const odp_ml_model_info_t * const info	= &mdl->info;
-	const odp_ml_input_info_t * const input_info = mdl->input_info;
-	const odp_ml_output_info_t * const output_info = mdl->output_info;
+	ml_model_t *mdl = ml_model_from_handle(model);
+	const odp_ml_model_info_t *const info = &mdl->info;
+	const odp_ml_input_info_t *const input_info = mdl->input_info;
+	const odp_ml_output_info_t *const output_info = mdl->output_info;
 
 	if (odp_unlikely(model == ODP_ML_MODEL_INVALID)) {
 		_ODP_ERR("Bad ML model handle\n");
@@ -1249,7 +1250,7 @@ int odp_ml_model_extra_stats(odp_ml_model_t model, uint64_t stats[] ODP_UNUSED, 
 void odp_ml_compl_pool_param_init(odp_ml_compl_pool_param_t *pool_param)
 {
 	if (odp_unlikely(!pool_param)) {
-		_ODP_ERR("Param 'pool_param' must not NULL\n");
+		_ODP_ERR("Param 'pool_param' must not be NULL\n");
 		return;
 	}
 
@@ -1260,7 +1261,6 @@ void odp_ml_compl_pool_param_init(odp_ml_compl_pool_param_t *pool_param)
 
 odp_pool_t odp_ml_compl_pool_create(const char *name, const odp_ml_compl_pool_param_t *pool_param)
 {
-	odp_pool_t pool;
 	odp_pool_param_t ml_pool_param;
 	uint32_t num = pool_param->num;
 	uint32_t uarea_size = pool_param->uarea_size;
@@ -1293,9 +1293,7 @@ odp_pool_t odp_ml_compl_pool_create(const char *name, const odp_ml_compl_pool_pa
 	ml_pool_param.buf.size           = buf_size;
 	ml_pool_param.buf.uarea_size     = uarea_size;
 
-	pool = _odp_pool_create(name, &ml_pool_param, ODP_POOL_ML_COMPL);
-
-	return pool;
+	return _odp_pool_create(name, &ml_pool_param, ODP_POOL_ML_COMPL);
 }
 
 odp_ml_compl_t odp_ml_compl_alloc(odp_pool_t pool)
@@ -1412,8 +1410,8 @@ void odp_ml_compl_param_init(odp_ml_compl_param_t *compl_param)
 {
 	memset(compl_param, 0, sizeof(odp_ml_compl_param_t));
 
-	compl_param->queue	= ODP_QUEUE_INVALID;
-	compl_param->event	= ODP_EVENT_INVALID;
+	compl_param->queue = ODP_QUEUE_INVALID;
+	compl_param->event = ODP_EVENT_INVALID;
 }
 
 int odp_ml_model_load(odp_ml_model_t model, odp_ml_load_result_t *result)
@@ -1714,14 +1712,14 @@ static int verify_run_params(odp_ml_model_t model, const odp_ml_data_t *data,
 	/* Make sure that the number of input data segments equals or bigger than
 	 * the number of model inputs. */
 	if (mdl->info.num_inputs > data->num_input_seg) {
-		_ODP_ERR("The num of input data segments %u must not less than "
+		_ODP_ERR("The num of input data segments %u must not be less than "
 			 "the number of model inputs %u\n", data->num_input_seg,
 			 mdl->info.num_inputs);
 		return -1;
 	}
 
 	if (mdl->info.num_outputs > data->num_output_seg) {
-		_ODP_ERR("The num of output data segments %u must not less than "
+		_ODP_ERR("The num of output data segments %u must not be less than "
 			 "the number of model outputs %u\n", data->num_output_seg,
 			 mdl->info.num_outputs);
 		return -1;
@@ -1747,13 +1745,13 @@ static int verify_run_params(odp_ml_model_t model, const odp_ml_data_t *data,
 
 	for (uint32_t i = 0; i < data->num_input_seg; i++) {
 		if (data->input_seg[i].addr == NULL) {
-			_ODP_ERR("data->input_seg[%u].addr must not NULL\n", i);
+			_ODP_ERR("data->input_seg[%u].addr must not be NULL\n", i);
 			return -1;
 		};
 
 		if (index_new) {
 			if (input_index > mdl->info.num_inputs - 1) {
-				_ODP_ERR("Too much number of input segments given\n");
+				_ODP_ERR("Too many input segments given\n");
 				return -1;
 			}
 
@@ -1809,13 +1807,13 @@ static int verify_run_params(odp_ml_model_t model, const odp_ml_data_t *data,
 
 	for (uint32_t i = 0; i < data->num_output_seg; i++) {
 		if (data->output_seg[i].addr == NULL) {
-			_ODP_ERR("data->output_seg[%u].addr must not NULL\n", i);
+			_ODP_ERR("data->output_seg[%u].addr must not be NULL\n", i);
 			return -1;
 		}
 
 		if (index_new) {
 			if (output_index > mdl->info.num_outputs - 1) {
-				_ODP_ERR("Too much number of output segments given\n");
+				_ODP_ERR("Too many output segments given\n");
 				return -1;
 			}
 

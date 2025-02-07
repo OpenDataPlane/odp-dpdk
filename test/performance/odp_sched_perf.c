@@ -69,6 +69,8 @@ typedef struct test_options_t {
 	uint32_t ctx_size;
 	uint32_t ctx_rd_words;
 	uint32_t ctx_rw_words;
+	uint32_t tot_rd_size;
+	uint32_t tot_rw_size;
 	uint32_t uarea_rd;
 	uint32_t uarea_rw;
 	uint32_t uarea_size;
@@ -407,6 +409,10 @@ static int parse_options(int argc, char *argv[], test_options_t *test_options)
 
 	test_options->ctx_size = ctx_size;
 	test_options->uarea_size = 8 * (test_options->uarea_rd + test_options->uarea_rw);
+	test_options->tot_rd_size = 8 * (test_options->ctx_rd_words + test_options->uarea_rd +
+					 test_options->rd_words);
+	test_options->tot_rw_size = 8 * (test_options->ctx_rw_words + test_options->uarea_rw +
+					 test_options->rw_words);
 
 	return ret;
 }
@@ -455,6 +461,64 @@ static uint64_t init_data(uint64_t init, uint64_t *data, uint32_t words)
 	return val;
 }
 
+static void print_options(test_options_t *options)
+{
+	printf("\nScheduler performance test\n");
+	printf("  num sched                 %u\n", options->num_sched);
+	printf("  num cpu                   %u\n", options->num_cpu);
+	printf("  num queues                %u\n", options->num_queue);
+	printf("  num lowest prio queues    %u\n", options->num_low);
+	printf("  num highest prio queues   %u\n", options->num_high);
+	printf("  num empty queues          %u\n", options->num_dummy);
+	printf("  total queues              %u\n", options->tot_queue);
+	printf("  num groups                %i", options->num_group);
+
+	if (options->num_group == -1)
+		printf(" (ODP_SCHED_GROUP_WORKER)\n");
+	else if (options->num_group == 0)
+		printf(" (ODP_SCHED_GROUP_ALL)\n");
+	else
+		printf("\n");
+
+	printf("  num join                  %u\n", options->num_join);
+	printf("  forward events            %i\n", options->forward ? 1 : 0);
+	printf("  wait                      %" PRIu64 " nsec\n", options->wait_ns);
+	printf("  events per queue          %u\n", options->num_event);
+	printf("  queue size                %u\n", options->queue_size);
+	printf("  max burst size            %u\n", options->max_burst);
+	printf("  total events              %u\n", options->tot_event);
+	printf("  stress                    0x%x\n", options->stress);
+
+	printf("  event size                %u bytes", options->event_size);
+	if (options->touch_data)
+		printf(" (rd: %u, rw: %u)", 8 * options->rd_words, 8 * options->rw_words);
+	printf("\n");
+
+	printf("  queue context size        %u bytes", options->ctx_size);
+	if (options->ctx_rd_words || options->ctx_rw_words) {
+		printf(" (rd: %u, rw: %u)",
+		       8 * options->ctx_rd_words,
+		       8 * options->ctx_rw_words);
+	}
+	printf("\n");
+
+	printf("  user area size            %u bytes", options->uarea_size);
+	if (options->uarea_size)
+		printf(" (rd: %u, rw: %u)", 8 * options->uarea_rd, 8 * options->uarea_rw);
+	printf("\n");
+
+	printf("  pool type                 %s\n", options->pool_type == ODP_POOL_BUFFER ?
+						   "buffer" : "packet");
+
+	printf("  queue type                %s\n\n", options->queue_type == 0 ? "parallel" :
+						     options->queue_type == 1 ? "atomic" :
+						     "ordered");
+
+	printf("Extra rd/rw ops per event (queue context + user area + event data)\n");
+	printf("  read                      %u bytes\n", options->tot_rd_size);
+	printf("  write                     %u bytes\n\n", options->tot_rw_size);
+}
+
 static int create_pool(test_global_t *global)
 {
 	odp_pool_capability_t pool_capa;
@@ -462,71 +526,15 @@ static int create_pool(test_global_t *global)
 	odp_pool_t pool;
 	uint32_t max_num, max_size, max_uarea;
 	test_options_t *test_options = &global->test_options;
-	uint32_t num_cpu   = test_options->num_cpu;
-	uint32_t num_queue = test_options->num_queue;
-	uint32_t num_dummy = test_options->num_dummy;
-	uint32_t num_event = test_options->num_event;
-	uint32_t num_sched = test_options->num_sched;
-	uint32_t max_burst = test_options->max_burst;
-	uint32_t tot_queue = test_options->tot_queue;
 	uint32_t tot_event = test_options->tot_event;
-	uint32_t queue_size = test_options->queue_size;
-	int      num_group = test_options->num_group;
-	uint32_t num_join = test_options->num_join;
-	int      forward   = test_options->forward;
-	uint64_t wait_ns = test_options->wait_ns;
 	uint32_t event_size = 16;
-	int      touch_data = test_options->touch_data;
-	uint32_t ctx_size = test_options->ctx_size;
 	uint32_t uarea_size = test_options->uarea_size;
 
-	if (touch_data) {
+	if (test_options->touch_data) {
 		event_size = test_options->rd_words + test_options->rw_words;
 		event_size = 8 * event_size;
 	}
 	test_options->event_size = event_size;
-
-	printf("\nScheduler performance test\n");
-	printf("  num sched                 %u\n", num_sched);
-	printf("  num cpu                   %u\n", num_cpu);
-	printf("  num queues                %u\n", num_queue);
-	printf("  num lowest prio queues    %u\n", test_options->num_low);
-	printf("  num highest prio queues   %u\n", test_options->num_high);
-	printf("  num empty queues          %u\n", num_dummy);
-	printf("  total queues              %u\n", tot_queue);
-	printf("  num groups                %i", num_group);
-	if (num_group == -1)
-		printf(" (ODP_SCHED_GROUP_WORKER)\n");
-	else if (num_group == 0)
-		printf(" (ODP_SCHED_GROUP_ALL)\n");
-	else
-		printf("\n");
-
-	printf("  num join                  %u\n", num_join);
-	printf("  forward events            %i\n", forward ? 1 : 0);
-	printf("  wait nsec                 %" PRIu64 "\n", wait_ns);
-	printf("  events per queue          %u\n", num_event);
-	printf("  queue size                %u\n", queue_size);
-	printf("  max burst size            %u\n", max_burst);
-	printf("  total events              %u\n", tot_event);
-	printf("  stress                    0x%x\n", test_options->stress);
-	printf("  event size                %u bytes", event_size);
-	if (touch_data)
-		printf(" (rd: %u, rw: %u)", 8 * test_options->rd_words, 8 * test_options->rw_words);
-	printf("\n");
-
-	printf("  context size              %u bytes", ctx_size);
-	if (test_options->ctx_rd_words || test_options->ctx_rw_words) {
-		printf(" (rd: %u, rw: %u)",
-		       8 * test_options->ctx_rd_words,
-		       8 * test_options->ctx_rw_words);
-	}
-	printf("\n");
-
-	printf("  user area size            %u bytes", uarea_size);
-	if (uarea_size)
-		printf(" (rd: %u, rw: %u)", 8 * test_options->uarea_rd, 8 * test_options->uarea_rw);
-	printf("\n");
 
 	if (odp_pool_capability(&pool_capa)) {
 		ODPH_ERR("Error: pool capa failed\n");
@@ -534,12 +542,10 @@ static int create_pool(test_global_t *global)
 	}
 
 	if (test_options->pool_type == ODP_POOL_BUFFER) {
-		printf("  pool type                 buffer\n");
 		max_num = pool_capa.buf.max_num;
 		max_size = pool_capa.buf.max_size;
 		max_uarea = pool_capa.buf.max_uarea_size;
 	} else {
-		printf("  pool type                 packet\n");
 		max_num = pool_capa.pkt.max_num;
 		max_size = pool_capa.pkt.max_seg_len;
 		max_uarea = pool_capa.pkt.max_uarea_size;
@@ -633,7 +639,6 @@ static int create_queues(test_global_t *global)
 	odp_queue_t queue;
 	odp_schedule_sync_t sync;
 	odp_schedule_prio_t prio;
-	const char *type_str;
 	uint32_t i, j, first;
 	test_options_t *test_options = &global->test_options;
 	uint32_t event_size = test_options->event_size;
@@ -650,18 +655,12 @@ static int create_queues(test_global_t *global)
 	uint32_t ctx_size = test_options->ctx_size;
 	uint64_t init_val = 0;
 
-	if (type == 0) {
-		type_str = "parallel";
+	if (type == 0)
 		sync = ODP_SCHED_SYNC_PARALLEL;
-	} else if (type == 1) {
-		type_str = "atomic";
+	else if (type == 1)
 		sync = ODP_SCHED_SYNC_ATOMIC;
-	} else {
-		type_str = "ordered";
+	else
 		sync = ODP_SCHED_SYNC_ORDERED;
-	}
-
-	printf("  queue type                %s\n\n", type_str);
 
 	if (tot_queue > global->schedule_config.num_queues) {
 		printf("Max queues supported %u\n",
@@ -1376,7 +1375,7 @@ static double measure_wait_time_cycles(uint64_t wait_ns)
 static int output_results(test_global_t *global)
 {
 	int i, num;
-	double rounds_ave, enqueues_ave, events_ave, nsec_ave, cycles_ave;
+	double rounds_ave, enqueues_ave, events_ave, events_per_sec, nsec_ave, cycles_ave;
 	double waits_ave, wait_cycles, wait_cycles_ave;
 	test_options_t *test_options = &global->test_options;
 	int num_cpu = test_options->num_cpu;
@@ -1387,6 +1386,8 @@ static int output_results(test_global_t *global)
 	uint64_t nsec_sum = 0;
 	uint64_t cycles_sum = 0;
 	uint64_t waits_sum = 0;
+	uint32_t tot_rd = test_options->tot_rd_size;
+	uint32_t tot_rw = test_options->tot_rw_size;
 
 	wait_cycles = measure_wait_time_cycles(wait_ns);
 
@@ -1458,8 +1459,12 @@ static int output_results(test_global_t *global)
 	       events_ave / rounds_ave);
 	printf("  rounds per sec:           %.3f M\n",
 	       (1000.0 * rounds_ave) / nsec_ave);
-	printf("  events per sec:           %.3f M\n\n",
-	       (1000.0 * events_ave) / nsec_ave);
+
+	events_per_sec = (1000.0 * events_ave) / nsec_ave;
+	printf("  events per sec:           %.3f M\n", events_per_sec);
+
+	printf("  extra reads per sec:      %.3f MB\n", tot_rd * events_per_sec);
+	printf("  extra writes per sec:     %.3f MB\n", tot_rw * events_per_sec);
 
 	printf("TOTAL events per sec:       %.3f M\n\n",
 	       (1000.0 * events_sum) / nsec_ave);
@@ -1485,6 +1490,8 @@ static int output_results(test_global_t *global)
 			test_common_write_term();
 			return -1;
 		}
+
+		test_common_write_term();
 	}
 
 	return 0;
@@ -1595,6 +1602,8 @@ int main(int argc, char **argv)
 
 	if (global->test_options.verbose)
 		odp_shm_print_all();
+
+	print_options(&global->test_options);
 
 	/* Start workers */
 	start_workers(global, instance);
