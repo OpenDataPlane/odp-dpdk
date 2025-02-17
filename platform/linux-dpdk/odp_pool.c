@@ -30,6 +30,7 @@
 #include <rte_malloc.h>
 #include <rte_mempool.h>
 #include <rte_mbuf_pool_ops.h>
+#include <rte_version.h>
 /* ppc64 rte_memcpy.h (included through rte_mempool.h) may define vector */
 #if defined(__PPC64__) && defined(vector)
 	#undef vector
@@ -1344,7 +1345,11 @@ static void init_ext_obj(struct rte_mempool *mp, void *arg, void *mbuf, unsigned
 	/* Start of buffer is just after the ODP type specific header
 	 * which contains in the very beginning the rte_mbuf struct */
 	mb->buf_addr = (char *)mb + mb_ctor_arg->seg_buf_offset;
+#if RTE_VERSION < RTE_VERSION_NUM(22, 11, 0, 0) || \
+	(RTE_VERSION < RTE_VERSION_NUM(23, 03, 0, 0) && RTE_IOVA_AS_PA) || \
+	(RTE_VERSION >= RTE_VERSION_NUM(23, 03, 0, 0) && RTE_IOVA_IN_MBUF)
 	mb->buf_iova = rte_mempool_virt2iova(mb) + mb_ctor_arg->seg_buf_offset;
+#endif
 	mb->buf_len = mb_ctor_arg->seg_buf_size;
 	mb->priv_size = rte_pktmbuf_priv_size(mp);
 
