@@ -358,6 +358,9 @@ static int output_results(test_globals_t *globals)
 		}
 	}
 
+	if (globals->common_options.is_export)
+		test_common_write_term();
+
 	return 0;
 }
 
@@ -843,6 +846,109 @@ static int destroy_groups(odp_schedule_group_t group[], int num)
 	return 0;
 }
 
+static int calc_queue_sizes(test_globals_t *globals, uint32_t queue_size[])
+{
+	odp_schedule_capability_t capa;
+	test_args_t *args = &globals->args;
+	const uint32_t min_queue_size = 256;
+	uint32_t tot_queues = 0;
+
+	if (odp_schedule_capability(&capa)) {
+		ODPH_ERR("Schedule capability failed\n");
+		return -1;
+	}
+
+	for (int i = 0; i < NUM_PRIOS; i++) {
+		uint32_t events = args->prio[i].events;
+		int queues = args->prio[i].queues;
+
+		if (!args->prio[i].events_per_queue && queues)
+			events = (events + queues - 1) / queues;
+
+		/* Events may stack up if forwarding is enabled */
+		if (args->forward_mode != EVENT_FORWARD_NONE)
+			events *= queues;
+
+		/* Reserve room for sample event */
+		events++;
+
+		queue_size[i] = ODPH_MAX(events, min_queue_size);
+
+		if (capa.max_queue_size && queue_size[i] > capa.max_queue_size) {
+			ODPH_ERR("Warn: queues may not be able to store all events (required size "
+				"%" PRIu32 ", max supported %" PRIu32 ")\n", queue_size[i],
+				capa.max_queue_size);
+			queue_size[i] = capa.max_queue_size;
+		}
+		tot_queues += queues;
+	}
+
+	if (tot_queues > capa.max_queues) {
+		ODPH_ERR("Requested %" PRIu32 " queues, max %" PRIu32 " supported\n",
+			 tot_queues, capa.max_queues);
+		return -1;
+	}
+
+	return 0;
+}
+
+static int create_queues(test_globals_t *globals)
+{
+	odp_queue_param_t param;
+	test_args_t *args = &globals->args;
+	int num_group = args->num_group;
+	uint32_t queue_size[NUM_PRIOS];
+
+	if (calc_queue_sizes(globals, queue_size))
+		return -1;
+
+	odp_queue_param_init(&param);
+	param.type = ODP_QUEUE_TYPE_SCHED;
+	param.sched.sync = args->sync_type;
+
+	for (int i = 0; i < NUM_PRIOS; i++) {
+		char name[] = "sched_XX_YY";
+		odp_queue_t queue;
+		odp_schedule_group_t grp = num_group < 0 ? ODP_SCHED_GROUP_WORKER :
+							   ODP_SCHED_GROUP_ALL;
+		const int prio = i == HI_PRIO ? odp_schedule_max_prio() :
+						odp_schedule_min_prio();
+
+		param.sched.prio = prio;
+		param.size = queue_size[i];
+
+		/* Replace XX and YY in name to differentiate queues */
+		name[6] = '0' + (prio / 10);
+		name[7] = '0' + prio - (10 * (prio / 10));
+
+		for (int j = 0; j < args->prio[i].queues; j++) {
+			name[9]  = '0' + j / 10;
+			name[10] = '0' + j - 10 * (j / 10);
+
+			/* Round robin queues into groups */
+			if (num_group > 0)
+				grp = globals->group[i][j % num_group];
+
+			param.sched.group = grp;
+
+			queue = odp_queue_create(name, &param);
+
+			if (queue == ODP_QUEUE_INVALID) {
+				ODPH_ERR("Scheduled queue create failed\n");
+				return -1;
+			}
+
+			globals->queue[i][j] = queue;
+		}
+		if (args->forward_mode == EVENT_FORWARD_RAND) {
+			uint64_t seed = i;
+
+			randomize_queues(globals->queue[i], args->prio[i].queues, &seed);
+		}
+	}
+	return 0;
+}
+
 /**
  * Test main function
  */
@@ -986,58 +1092,10 @@ int main(int argc, char *argv[])
 		goto error;
 	}
 
-	/*
-	 * Create queues for schedule test
-	 */
-	for (i = 0; i < NUM_PRIOS; i++) {
-		char name[] = "sched_XX_YY";
-		odp_queue_t queue;
-		odp_queue_param_t param;
-		odp_schedule_group_t grp;
-		int prio;
-
-		grp = ODP_SCHED_GROUP_ALL;
-		if (num_group < 0)
-			grp = ODP_SCHED_GROUP_WORKER;
-
-		if (i == HI_PRIO)
-			prio = odp_schedule_max_prio();
-		else
-			prio = odp_schedule_min_prio();
-
-		name[6] = '0' + (prio / 10);
-		name[7] = '0' + prio - (10 * (prio / 10));
-
-		odp_queue_param_init(&param);
-		param.type        = ODP_QUEUE_TYPE_SCHED;
-		param.sched.prio  = prio;
-		param.sched.sync  = args.sync_type;
-
-		for (j = 0; j < args.prio[i].queues; j++) {
-			name[9]  = '0' + j / 10;
-			name[10] = '0' + j - 10 * (j / 10);
-
-			/* Round robin queues into groups */
-			if (num_group > 0)
-				grp = globals->group[i][j % num_group];
-
-			param.sched.group = grp;
-
-			queue = odp_queue_create(name, &param);
-
-			if (queue == ODP_QUEUE_INVALID) {
-				ODPH_ERR("Scheduled queue create failed.\n");
-				exit(EXIT_FAILURE);
-			}
-
-			globals->queue[i][j] = queue;
-		}
-		if (args.forward_mode == EVENT_FORWARD_RAND) {
-			uint64_t seed = i;
-
-			randomize_queues(globals->queue[i], args.prio[i].queues,
-					 &seed);
-		}
+	if (create_queues(globals)) {
+		ODPH_ERR("Creating test queues failed.\n");
+		err = -1;
+		goto error;
 	}
 
 	odp_barrier_init(&globals->barrier, num_workers);

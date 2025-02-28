@@ -25,6 +25,7 @@ COMPILE_ONLY = odp_cpu_bench \
 	       odp_dma_perf \
 	       odp_ipsec \
 	       odp_l2fwd \
+	       odp_l2fwd_perf \
 	       odp_packet_gen \
 	       odp_pktio_ordered \
 	       odp_sched_latency \
@@ -41,11 +42,17 @@ if LIBCONFIG
 COMPILE_ONLY += odp_ipsecfwd
 endif
 
+if WITH_ML
+COMPILE_ONLY += odp_ml_perf
+odp_ml_perf_SOURCES = odp_ml_perf.c
+endif
+
 TESTSCRIPTS = odp_cpu_bench_run.sh \
 	      odp_crypto_run.sh \
 	      odp_dma_perf_run.sh \
 	      odp_ipsec_run.sh \
 	      odp_l2fwd_run.sh \
+	      odp_l2fwd_perf_run.sh \
 	      odp_packet_gen_run.sh \
 	      odp_sched_latency_run.sh \
 	      odp_sched_perf_run.sh \
@@ -79,6 +86,8 @@ odp_dmafwd_SOURCES = odp_dmafwd.c
 odp_dma_perf_SOURCES = odp_dma_perf.c
 odp_icache_perf_SOURCES = odp_icache_perf.c
 odp_ipsec_SOURCES = odp_ipsec.c
+odp_l2fwd_SOURCES = odp_l2fwd.c
+odp_l2fwd_perf_SOURCES = odp_l2fwd_perf.c
 odp_lock_perf_SOURCES = odp_lock_perf.c
 odp_mem_perf_SOURCES = odp_mem_perf.c
 odp_packet_gen_SOURCES = odp_packet_gen.c

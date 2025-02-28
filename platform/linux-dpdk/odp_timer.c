@@ -747,7 +747,7 @@ odp_timer_pool_t odp_timer_pool_create(const char *name,
 	return timer_pool_to_hdl(timer_pool);
 }
 
-void odp_timer_pool_start(void)
+void ODP_DEPRECATE(odp_timer_pool_start)(void)
 {
 	/* Nothing to do */
 }
@@ -1238,24 +1238,6 @@ uint64_t odp_timer_to_u64(odp_timer_t timer_hdl)
 uint64_t odp_timeout_to_u64(odp_timeout_t tmo)
 {
 	return (uint64_t)(uintptr_t)tmo;
-}
-
-int ODP_DEPRECATE(odp_timeout_fresh)(odp_timeout_t tmo)
-{
-	timer_entry_t *timer;
-	odp_timeout_hdr_t *timeout_hdr = timeout_to_hdr(tmo);
-
-	/* Timeout not connected to a timer */
-	if (odp_unlikely(timeout_hdr->timer == ODP_TIMER_INVALID))
-		return 0;
-
-	timer = timer_from_hdl(timeout_hdr->timer);
-
-	if (timer->timer_pool->periodic)
-		return timer->periodic_ticks != PERIODIC_CANCELLED;
-
-	/* Check if timer has been reused after timeout sent. */
-	return timeout_hdr->expiration == timer->tick;
 }
 
 odp_timeout_t odp_timeout_alloc(odp_pool_t pool_hdl)

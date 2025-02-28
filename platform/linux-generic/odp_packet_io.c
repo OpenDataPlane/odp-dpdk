@@ -1,12 +1,13 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2013-2018 Linaro Limited
- * Copyright (c) 2019-2023 Nokia
+ * Copyright (c) 2019-2024 Nokia
  */
 
 #include <odp_posix_extensions.h>
 
 #include <odp/api/buffer.h>
 #include <odp/api/debug.h>
+#include <odp/api/deprecated.h>
 #include <odp/api/packet.h>
 #include <odp/api/packet_io.h>
 #include <odp/api/proto_stats.h>
@@ -650,13 +651,13 @@ int odp_pktio_config(odp_pktio_t hdl, const odp_pktio_config_t *config)
 	entry->config = *config;
 
 	entry->enabled.tx_ts = config->pktout.bit.ts_ena;
-	entry->enabled.tx_compl = (config->pktout.bit.tx_compl_ena ||
+	entry->enabled.tx_compl = (config->pktout.bit.ODP_DEPRECATE(tx_compl_ena) ||
 				   config->tx_compl.mode_event ||
 				   config->tx_compl.mode_poll);
 
 	if (entry->enabled.tx_compl) {
-		if ((config->pktout.bit.tx_compl_ena || config->tx_compl.mode_event) &&
-		    configure_tx_event_compl(entry)) {
+		if ((config->pktout.bit.ODP_DEPRECATE(tx_compl_ena) ||
+		     config->tx_compl.mode_event) && configure_tx_event_compl(entry)) {
 			unlock_entry(entry);
 			_ODP_ERR("Unable to configure Tx event completion\n");
 			return -1;
@@ -1593,6 +1594,7 @@ int odp_pktio_capability(odp_pktio_t pktio, odp_pktio_capability_t *capa)
 	capa->lso.proto.ipv4             = 1;
 	capa->lso.proto.custom           = 1;
 	capa->lso.mod_op.add_segment_num = 1;
+	capa->lso.mod_op.write_bits      = 1;
 
 	capa->tx_compl.queue_type_sched = 1;
 	capa->tx_compl.queue_type_plain = 1;
@@ -2861,8 +2863,16 @@ odp_lso_profile_t odp_lso_profile_create(odp_pktio_t pktio, const odp_lso_profil
 				return ODP_LSO_PROFILE_INVALID;
 			}
 
-			/* Currently only segment number supported */
-			if (mod_op != ODP_LSO_ADD_SEGMENT_NUM) {
+			switch (mod_op) {
+			case ODP_LSO_ADD_SEGMENT_NUM:
+				break;
+			case ODP_LSO_WRITE_BITS:
+				if (size != 1) {
+					_ODP_ERR("Bad custom field size %u\n", size);
+					return ODP_LSO_PROFILE_INVALID;
+				}
+				break;
+			default:
 				_ODP_ERR("Custom modify operation %u not supported\n", mod_op);
 				return ODP_LSO_PROFILE_INVALID;
 			}
@@ -2977,10 +2987,19 @@ static int lso_update_ipv4(odp_packet_t pkt, int index, int num_pkt,
 	ipv4 = odp_packet_l3_ptr(pkt, NULL);
 	ipv4->tot_len = odp_cpu_to_be_16(tot_len);
 
-	/* IP payload offset in 8 byte blocks */
-	frag_offset = ((uint32_t)index * payload_len) / 8;
+	/* Give up if the IP header contains options as we cannot yet handle them */
+	if (odp_unlikely(_ODP_IPV4HDR_IHL(ipv4->ver_ihl) > _ODP_IPV4HDR_IHL_MIN)) {
+		_ODP_ERR("Cannot handle packets with IP options in IPv4 LSO\n");
+		return -1;
+	}
 
-	/* More fragments flag */
+	/* Preserve DF and MF flags and the original fragment offset */
+	frag_offset = odp_be_to_cpu_16(ipv4->frag_offset);
+
+	/* Increment fragment offset in the fragments that we created */
+	frag_offset += ((uint32_t)index * payload_len) / 8;
+
+	/* Make sure MF flag is set in the non-last fragments that we created */
 	if (index < (num_pkt - 1))
 		frag_offset |= _ODP_IPV4HDR_FRAG_OFFSET_MORE_FRAGS;
 
@@ -2990,7 +3009,7 @@ static int lso_update_ipv4(odp_packet_t pkt, int index, int num_pkt,
 	return ret;
 }
 
-static int lso_update_custom(lso_profile_t *lso_prof, odp_packet_t pkt, int segnum)
+static int lso_update_custom(lso_profile_t *lso_prof, odp_packet_t pkt, int segnum, int num_segs)
 {
 	void *ptr;
 	int i, mod_op;
@@ -3037,6 +3056,17 @@ static int lso_update_custom(lso_profile_t *lso_prof, odp_packet_t pkt, int segn
 				u16 = odp_cpu_to_be_16(segnum + odp_be_to_cpu_16(u16));
 			else
 				u8 += segnum;
+		} else if (mod_op == ODP_LSO_WRITE_BITS) {
+			odp_lso_write_bits_t bits;
+
+			if (segnum == 0)
+				bits = lso_prof->param.custom.field[i].write_bits.first_seg;
+			else if (segnum == num_segs - 1)
+				bits = lso_prof->param.custom.field[i].write_bits.last_seg;
+			else
+				bits = lso_prof->param.custom.field[i].write_bits.middle_seg;
+
+			u8 = (u8 & ~bits.mask[0]) | (bits.value[0] & bits.mask[0]);
 		}
 
 		if (odp_packet_copy_from_mem(pkt, offset, size, ptr)) {
@@ -3134,10 +3164,9 @@ int _odp_lso_create_packets(odp_packet_t packet, const odp_packet_lso_opt_t *lso
 	num = odp_packet_alloc_multi(pool, pkt_len, pkt_out, num_full);
 	if (odp_unlikely(num < num_full)) {
 		_ODP_DBG("Alloc failed %i\n", num);
-		if (num > 0) {
+		if (num > 0)
 			num_free = num;
-			goto error;
-		}
+		goto error;
 	}
 
 	if (left_over_len) {
@@ -3199,7 +3228,7 @@ int _odp_lso_create_packets(odp_packet_t packet, const odp_packet_lso_opt_t *lso
 		int num_custom = lso_prof->param.custom.num_custom;
 
 		for (i = 0; num_custom && i < num_pkt; i++) {
-			if (lso_update_custom(lso_prof, pkt_out[i], i)) {
+			if (lso_update_custom(lso_prof, pkt_out[i], i, num_pkt)) {
 				_ODP_ERR("Custom field update failed. Segment %i\n", i);
 				goto error;
 			}
