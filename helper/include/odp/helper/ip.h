@@ -112,7 +112,8 @@ static inline int odph_ipv4_csum(odp_packet_t pkt,
 				 odp_u16sum_t *chksum)
 {
 	uint32_t nleft = (uint32_t)(ODPH_IPV4HDR_IHL(ip->ver_ihl) * 4);
-	uint16_t buf[nleft / 2];
+	const int max_ip_header_len = 15 * 4;
+	uint16_t buf[max_ip_header_len];
 	int res;
 
 	if (odp_unlikely(nleft < sizeof(*ip)))
@@ -273,6 +274,8 @@ typedef struct ODP_PACKED {
  * have to be present and may have leading zeros. String does not have to be
  * NULL terminated. The address is written only when successful. The address
  * byte order is CPU native.
+ *
+ * This function may be called before ODP initialization.
  *
  * @param[out] ip_addr    Pointer to IPv4 address for output (in native endian)
  * @param      str        IPv4 address string to be parsed

@@ -17,6 +17,7 @@
 extern "C" {
 #endif
 
+#include <odp/api/deprecated.h>
 #include <odp/api/proto_stats_types.h>
 #include <odp/api/queue_types.h>
 
@@ -407,9 +408,10 @@ typedef struct odp_packet_lso_opt_t {
 	/** Maximum payload length in an LSO segment
 	 *
 	 *  Max_payload_len parameter defines the maximum number of payload bytes in each
-	 *  created segment. Depending on the implementation, segments with less payload may be
-	 *  created. However, this value is used typically to divide packet payload evenly over
-	 *  all segments except the last one, which contains the remaining payload bytes.
+	 *  created segment. Depending on the implementation and the LSO profile, segments
+	 *  with less payload may be created. However, this value is used typically to divide
+	 *  packet payload evenly over all segments except the last one, which contains the
+	 *  remaining payload bytes.
 	 */
 	uint32_t max_payload_len;
 
@@ -443,7 +445,9 @@ typedef enum odp_packet_tx_compl_mode_t {
  *
  * @deprecated Use #ODP_PACKET_TX_COMPL_EVENT instead.
  */
+#if ODP_DEPRECATED_API
 #define ODP_PACKET_TX_COMPL_ALL ODP_PACKET_TX_COMPL_EVENT
+#endif
 
 /**
  * Packet transmit completion request options
