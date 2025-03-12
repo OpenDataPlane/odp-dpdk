@@ -9,6 +9,7 @@
 #include <odp/api/buffer.h>
 #include <odp/api/crypto.h>
 #include <odp/api/debug.h>
+#include <odp/api/deprecated.h>
 #include <odp/api/hints.h>
 #include <odp/api/shared_memory.h>
 #include <odp/api/spinlock.h>
@@ -201,11 +202,9 @@ static int cipher_aead_alg_odp_to_rte(odp_cipher_alg_t cipher_alg,
 	case ODP_CIPHER_ALG_AES_CCM:
 		aead_xform->aead.algo = RTE_CRYPTO_AEAD_AES_CCM;
 		break;
-#if RTE_VERSION >= RTE_VERSION_NUM(20, 11, 0, 0)
 	case ODP_CIPHER_ALG_CHACHA20_POLY1305:
 		aead_xform->aead.algo = RTE_CRYPTO_AEAD_CHACHA20_POLY1305;
 		break;
-#endif
 	default:
 		rc = -1;
 	}
@@ -225,11 +224,9 @@ static int auth_aead_alg_odp_to_rte(odp_auth_alg_t auth_alg,
 	case ODP_AUTH_ALG_AES_CCM:
 		aead_xform->aead.algo = RTE_CRYPTO_AEAD_AES_CCM;
 		break;
-#if RTE_VERSION >= RTE_VERSION_NUM(20, 11, 0, 0)
 	case ODP_AUTH_ALG_CHACHA20_POLY1305:
 		aead_xform->aead.algo = RTE_CRYPTO_AEAD_CHACHA20_POLY1305;
 		break;
-#endif
 	default:
 		rc = -1;
 	}
@@ -676,12 +673,10 @@ static void capability_process(struct rte_cryptodev_info *dev_info,
 				ciphers->bit.aes_ccm = 1;
 				auths->bit.aes_ccm = 1;
 			}
-#if RTE_VERSION >= RTE_VERSION_NUM(20, 11, 0, 0)
 			if (cap_aead_algo == RTE_CRYPTO_AEAD_CHACHA20_POLY1305) {
 				ciphers->bit.chacha20_poly1305 = 1;
 				auths->bit.chacha20_poly1305 = 1;
 			}
-#endif
 		}
 	}
 }
@@ -1494,8 +1489,12 @@ int odp_crypto_session_create(const odp_crypto_session_param_t *param,
 		return -1;
 	}
 
+#if ODP_DEPRECATED_API
 	if (param->op_type != ODP_CRYPTO_OP_TYPE_BASIC &&
 	    param->op_type != ODP_CRYPTO_OP_TYPE_LEGACY) {
+#else
+	if (param->op_type != ODP_CRYPTO_OP_TYPE_BASIC) {
+#endif
 		*status = ODP_CRYPTO_SES_ERR_PARAMS;
 		*session_out = ODP_CRYPTO_SESSION_INVALID;
 		return -1;
@@ -1698,6 +1697,7 @@ int _odp_crypto_term_global(void)
 void odp_crypto_session_param_init(odp_crypto_session_param_t *param)
 {
 	memset(param, 0, sizeof(odp_crypto_session_param_t));
+	param->op_type = ODP_CRYPTO_OP_TYPE_BASIC;
 }
 
 uint64_t odp_crypto_session_to_u64(odp_crypto_session_t hdl)
@@ -1849,6 +1849,7 @@ static int linearize_pkt(const crypto_session_entry_t *session, odp_packet_t pkt
 	return odp_packet_num_segs(pkt) != 1;
 }
 
+#if ODP_DEPRECATED_API
 static int copy_data_and_metadata(odp_packet_t dst, odp_packet_t src)
 {
 	int md_copy;
@@ -1900,13 +1901,14 @@ static odp_packet_t get_output_packet(const crypto_session_entry_t *session,
 	odp_packet_free(pkt_in);
 	return pkt_out;
 }
+#endif
 
 /*
  * Return number of ops allocated and packets consumed.
  */
 static int op_alloc(crypto_op_t *op[],
 		    const odp_packet_t pkt_in[],
-		    odp_packet_t pkt_out[],
+		    odp_packet_t pkt_out[] ODP_UNUSED,
 		    const odp_crypto_packet_op_param_t param[],
 		    int num_pkts)
 {
@@ -1929,14 +1931,13 @@ static int op_alloc(crypto_op_t *op[],
 	}
 
 	for (n = 0; n < num_pkts; n++) {
-		odp_packet_t pkt;
+		odp_packet_t pkt = pkt_in[n];
 
 		session = (crypto_session_entry_t *)(intptr_t)param[n].session;
 		_ODP_ASSERT(session != NULL);
 
-		if (odp_likely(session->p.op_type == ODP_CRYPTO_OP_TYPE_BASIC)) {
-			pkt = pkt_in[n];
-		} else {
+#if ODP_DEPRECATED_API
+		if (odp_unlikely(session->p.op_type == ODP_CRYPTO_OP_TYPE_LEGACY)) {
 			pkt = get_output_packet(session, pkt_in[n], pkt_out[n]);
 			if (odp_unlikely(pkt == ODP_PACKET_INVALID)) {
 				for (int i = n; i < num_pkts; i++)
@@ -1944,6 +1945,7 @@ static int op_alloc(crypto_op_t *op[],
 				break;
 			}
 		}
+#endif
 		op[n]->state.pkt = pkt;
 	}
 	return n;
@@ -2233,7 +2235,7 @@ int odp_crypto_op(const odp_packet_t pkt_in[],
 }
 
 int odp_crypto_op_enq(const odp_packet_t pkt_in[],
-		      const odp_packet_t pkt_out[],
+		      const odp_packet_t pkt_out[] ODP_UNUSED,
 		      const odp_crypto_packet_op_param_t param[],
 		      int num_pkt)
 {
@@ -2250,8 +2252,10 @@ int odp_crypto_op_enq(const odp_packet_t pkt_in[],
 		_ODP_ASSERT(ODP_CRYPTO_ASYNC == session->p.op_mode);
 		_ODP_ASSERT(ODP_QUEUE_INVALID != session->p.compl_queue);
 
+#if ODP_DEPRECATED_API
 		if (session->p.op_type != ODP_CRYPTO_OP_TYPE_BASIC)
 			out_pkts[i] = pkt_out[i];
+#endif
 	}
 
 	num_pkt = odp_crypto_int(pkt_in, out_pkts, param, num_pkt);

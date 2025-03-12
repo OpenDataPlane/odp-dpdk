@@ -23,7 +23,7 @@ export CI="true"
 
 ODP_SCHEDULER=basic    make check
 
-# Run only validation tests for the sp scheduler
+# Run only validation tests for SP scheduler
 pushd ./test/validation/api/
 ODP_SCHEDULER=sp       make check
 popd

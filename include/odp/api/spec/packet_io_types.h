@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2013-2018 Linaro Limited
- * Copyright (c) 2020-2023 Nokia
+ * Copyright (c) 2020-2024 Nokia
  */
 
 /**
@@ -17,6 +17,7 @@
 extern "C" {
 #endif
 
+#include <odp/api/deprecated.h>
 #include <odp/api/packet_types.h>
 #include <odp/api/packet_io_stats.h>
 #include <odp/api/pool_types.h>
@@ -533,7 +534,7 @@ typedef union odp_pktout_config_opt_t {
 		 *
 		 * @deprecated Use odp_pktio_config_t::mode_event instead.
 		 */
-		uint64_t tx_compl_ena : 1;
+		uint64_t ODP_DEPRECATE(tx_compl_ena) : 1;
 
 		/** Enable packet protocol stats update */
 		uint64_t proto_stats_ena : 1;
@@ -777,7 +778,10 @@ typedef enum odp_lso_modify_t {
 	ODP_LSO_ADD_PAYLOAD_LEN = 0x2,
 
 	/** Add number of payload bytes in all previous segments */
-	ODP_LSO_ADD_PAYLOAD_OFFSET = 0x4
+	ODP_LSO_ADD_PAYLOAD_OFFSET = 0x4,
+
+	/** Write bits in the first, middle and last segment */
+	ODP_LSO_WRITE_BITS,
 
 } odp_lso_modify_t;
 
@@ -789,27 +793,108 @@ typedef enum odp_lso_protocol_t {
 	/** Protocol not selected. */
 	ODP_LSO_PROTO_NONE = 0,
 
-	/** Custom protocol. LSO performs only custom field updates to the packet headers. */
+	/** Custom protocol. LSO performs only custom field updates to the packet headers.
+	 *
+	 *  All segments except the last one have exactly the maximum number of payload
+	 *  bytes as given by the max_payload_len parameter in odp_packet_lso_opt_t.
+	 */
 	ODP_LSO_PROTO_CUSTOM,
 
 	/** LSO performs IPv4 fragmentation.
 	 *
-	 *  IP header length and checksum fields are updated. IP fragmentation related fields are
-	 *  filled and IPv4 Identification field value is copied from the original packet. */
+	 *  The total length, MF flag, fragment offset and checksum fields
+	 *  of the IP header are updated according to the IPv4 standard and
+	 *  other fields are copied from the original packet. All IP options
+	 *  in the original packets are copied to the fragments.
+	 *
+	 *  IPv4 LSO must not be attempted for the following packets:
+	 *  - packets that are not IPv4 packets
+	 *  - packets that are already IPv4 fragments
+	 *  - packets that have IP options that may not be copied to all
+	 *    fragments
+	 *  - packets for which L4 checksum offload is requested
+	 *
+	 *  L3 offset must point to the start of the IP header.
+	 *  Payload offset must point to the start of the IP payload.
+	 */
 	ODP_LSO_PROTO_IPV4,
 
-	/** LSO performs IPv6 fragmentation. */
+	/** LSO performs IPv6 fragmentation.
+	 *
+	 *  Header updates and fragment header generation are done according
+	 *  to the IPv6 standard. The identification field of the fragment
+	 *  header is generated in an implementation specific manner.
+	 *
+	 *  Fragment header is inserted in the packets in the offset pointed
+	 *  to by the payload offset metadata. IPv6 base header and extension
+	 *  headers up to and including the inserted fragment header are
+	 *  copied to all created fragments.
+	 *
+	 *  IPv6 LSO must not be attempted for the following packets:
+	 *  - packets that are not IPv6 packets
+	 *  - packets that are already IPv6 fragments
+	 *  - packets for which L4 checksum offload is requested
+	 *
+	 *  L3 offset must point to the start of the IP header.
+	 *  Payload offset must point to the first byte of after the
+	 *  per-fragment headers as defined in RFC 8200, i.e. to the
+	 *  packet offset where the fragment header is to be inserted.
+	 */
 	ODP_LSO_PROTO_IPV6,
 
 	/** LSO performs TCP segmentation on top of IPv4.
 	 *
-	 *  IP header length and checksum fields are updated. IP fragmentation is not performed
-	 *  and IPv4 Don't Fragment bit is not set. Unique IPv4 Identification field values
-	 *  are generated. Those are usually increments of the IPv4 ID field value in the packet.
+	 *  TCP header is updated as if the payload data was originally sent
+	 *  in multiple TCP segments.
+	 *
+	 *  TCP headers of the created segments are copied from the original
+	 *  packet, with the sequence number and checksum updated. All TCP
+	 *  options are copied from the original packet. The FIN flag is copied
+	 *  to the last created segment and cleared in other segments. The CWR
+	 *  flag is copied to the first created segment and cleared in other
+	 *  segments.
+	 *
+	 *  IP headers (including IP options) of the created segments are
+	 *  copied from the original packet, with total length, checksum
+	 *  and identification fields updated. Unique IPv4 identification
+	 *  field values are generated if the DF flag is not set. The
+	 *  values are usually increments of the IPv4 ID field value in
+	 *  the original packet so an application should not send packets
+	 *  with consecutive identification values if the DF flag is not set.
+	 *
+	 *  TCP_IPV4 LSO must not be attempted for the following packets;
+	 *  - packets that are not TCP over IPv4
+	 *  - packets that are IP fragments
+	 *  - packets that have the SYN, RST or URG flag set
+	 *  - packets that have TCP options that may not be copied to all
+	 *    segments
+	 *
+	 * L3 offset must point to the start of the IP header.
+	 * L4 offset must point to the start of the TCP header.
+	 * Payload offset must point to the start of the TCP payload.
 	 */
 	ODP_LSO_PROTO_TCP_IPV4,
 
-	/** LSO performs TCP segmentation on top of IPv6. */
+	/** LSO performs TCP segmentation on top of IPv6.
+	 *
+	 *  TCP headers of the created segments are created in the same way
+	 *  as in ODP_LSO_PROTO_TCP_IPV4.
+	 *
+	 *  IP headers (including extension headers) of the created segments
+	 *  are copied from the original packet, with the payload length
+	 *  updated.
+	 *
+	 *  TCP_IPV6 LSO must not be attempted for the following packets;
+	 *  - packets that are not TCP over IPv6
+	 *  - packets that are IP fragments
+	 *  - packets that have the SYN, RST or URG flag set
+	 *  - packets that have TCP options that may not be copied to all
+	 *    segments
+	 *
+	 * L3 offset must point to the start of the IP header.
+	 * L4 offset must point to the start of the TCP header.
+	 * Payload offset must point to the start of the TCP payload.
+	 */
 	ODP_LSO_PROTO_TCP_IPV6,
 
 	/** LSO performs SCTP segmentation on top of IPv4. */
@@ -856,6 +941,9 @@ typedef struct odp_lso_capability_t {
 
 		/** ODP_LSO_ADD_PAYLOAD_OFFSET support */
 		uint16_t add_payload_offset:1;
+
+		/** ODP_LSO_WRITE_BITS support */
+		uint16_t write_bits:1;
 
 	} mod_op;
 
@@ -1033,7 +1121,7 @@ typedef struct odp_pktio_capability_t {
 		 *
 		 * @deprecated Use mode_event instead.
 		 */
-		uint32_t mode_all   : 1;
+		uint32_t ODP_DEPRECATE(mode_all)   : 1;
 
 		/** Packet transmit completion mode ODP_PACKET_TX_COMPL_EVENT support */
 		uint32_t mode_event : 1;
@@ -1080,6 +1168,18 @@ typedef struct odp_pktio_capability_t {
 
 } odp_pktio_capability_t;
 
+/** Parameters for ODP_LSO_WRITE_BITS custom operation */
+typedef struct odp_lso_write_bits_t {
+	/** Bitmask to select which bits to write */
+	uint8_t mask[1];
+
+	/** Value to be written using the mask:
+	 *  new_value[n] = (old_value[n] & ~mask[n]) | (value[n] & mask[n])
+	 */
+	uint8_t value[1];
+
+} odp_lso_write_bits_t;
+
 /**
  * LSO profile parameters
  */
@@ -1089,8 +1189,10 @@ typedef struct odp_lso_profile_param_t {
 	 *
 	 * Selects on which protocol LSO operation performs segmentation (e.g. IP fragmentation vs.
 	 * TCP segmentation). When ODP_LSO_PROTO_CUSTOM is selected, only custom field
-	 * modifications are performed. The default value is ODP_LSO_PROTO_NONE. Check LSO
-	 * capability for supported protocols.
+	 * modifications are performed. Packet content is not modified when a packet is not
+	 * segmented.
+	 *
+	 * The default value is ODP_LSO_PROTO_NONE. Check LSO capability for supported protocols.
 	 */
 	odp_lso_protocol_t lso_proto;
 
@@ -1099,6 +1201,12 @@ typedef struct odp_lso_profile_param_t {
 	 *
 	 * Set lso_proto to ODP_LSO_PROTO_CUSTOM when using custom fields. Fields are defined
 	 * in the same order they appear in the packet.
+	 *
+	 * Fields may not modify overlapping packet bytes except as follows:
+	 * - An ODP_LSO_WRITE_BITS operation may modify the same byte as an ODP_LSO_ADD_* operation.
+	 *   In that case the write-bits operation is done after the add operation, overwriting
+	 *   some of the bits written by the add operation. Such write-bits field must appear
+	 *   after the overlapping add field.
 	 */
 	struct {
 		/** Custom field to be modified by LSO */
@@ -1111,9 +1219,23 @@ typedef struct odp_lso_profile_param_t {
 			/** Field offset in bytes from packet start */
 			uint32_t offset;
 
-			/** Field size in bytes. Valid values are 1, 2, 4, and 8 bytes. */
+			/** Field size in bytes. Valid values are 1, 2, 4, and 8 bytes.
+			 *  Must be set to 1 in ODP_LSO_WRITE_BITS operation.
+			 */
 			uint8_t size;
 
+			/** Operation specific parameters */
+			union {
+				/** Parameters for ODP_LSO_WRITE_BITS operation */
+				struct {
+					/** bits to write in the first segment */
+					odp_lso_write_bits_t first_seg;
+					/** bits to write in middle segments */
+					odp_lso_write_bits_t middle_seg;
+					/** bits to write in the last segment */
+					odp_lso_write_bits_t last_seg;
+				} write_bits;
+			};
 		} field[ODP_LSO_MAX_CUSTOM];
 
 		/** Number of custom fields specified. The default value is 0. */

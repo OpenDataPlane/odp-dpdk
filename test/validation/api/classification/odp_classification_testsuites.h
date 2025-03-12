@@ -38,6 +38,7 @@ typedef union odp_cls_testcase {
 		uint32_t drop_cos:1;
 		uint32_t error_cos:1;
 		uint32_t pmr_chain:1;
+		uint32_t pmr_chain_rev:1;
 		uint32_t pmr_cos:1;
 		uint32_t pmr_composite_cos:1;
 	};
@@ -77,8 +78,9 @@ void configure_pktio_drop_cos(odp_bool_t enable_pktv, uint32_t max_cos_stats);
 void test_pktio_drop_cos(odp_bool_t enable_pktv);
 void configure_pktio_error_cos(odp_bool_t enable_pktv);
 void test_pktio_error_cos(odp_bool_t enable_pktv);
-void configure_cls_pmr_chain(odp_bool_t enable_pktv);
-void test_cls_pmr_chain(odp_bool_t enable_pktv);
+void configure_cls_pmr_chain(odp_bool_t enable_pktv, int src, int dst, const char *saddr,
+			     uint16_t port, odp_bool_t saddr_first);
+void test_cls_pmr_chain(odp_bool_t enable_pktv, int src, int dst, const char *saddr, uint16_t port);
 void configure_cos_with_l2_priority(odp_bool_t enable_pktv);
 void test_cos_with_l2_priority(odp_bool_t enable_pktv);
 void configure_pmr_cos(odp_bool_t enable_pktv);
@@ -87,6 +89,7 @@ void configure_pktio_pmr_composite(odp_bool_t enable_pktv);
 void test_pktio_pmr_composite_cos(odp_bool_t enable_pktv);
 int stop_pktio(odp_pktio_t pktio);
 odp_cls_pmr_term_t find_first_supported_l3_pmr(void);
+cls_packet_l4_info find_first_supported_proto(void);
 int set_first_supported_pmr_port(odp_packet_t pkt, uint16_t port);
 
 #endif /* ODP_BUFFER_TESTSUITES_H_ */

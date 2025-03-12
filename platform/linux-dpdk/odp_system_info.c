@@ -8,16 +8,18 @@
 
 #include <odp_posix_extensions.h>
 
+#include <odp/api/align.h>
+#include <odp/api/cpu.h>
+#include <odp/api/hints.h>
 #include <odp/api/system_info.h>
 #include <odp/api/version.h>
+
 #include <odp_global_data.h>
 #include <odp_sysinfo_internal.h>
 #include <odp_init_internal.h>
 #include <odp_libconfig_internal.h>
 #include <odp_debug_internal.h>
 #include <odp_config_internal.h>
-#include <odp/api/align.h>
-#include <odp/api/cpu.h>
 #include <odp_packet_internal.h>
 
 #include <errno.h>
@@ -262,22 +264,13 @@ static int read_config_file(void)
 	}
 	odp_global_ro.system_info.cpu_hz_static = !!val;
 
-	str = "system.cpu_id_static";
-	if (!_odp_libconfig_lookup_int(str, &val)) {
-		_ODP_ERR("Config option '%s' not found.\n", str);
-		return -1;
-	}
-	odp_global_ro.system_info.cpu_id_static = !!val;
-
 	_ODP_PRINT("System config:\n");
 	_ODP_PRINT("  system.cpu_mhz: %" PRIu64 "\n",
 		   odp_global_ro.system_info.default_cpu_hz);
 	_ODP_PRINT("  system.cpu_mhz_max: %" PRIu64 "\n",
 		   odp_global_ro.system_info.default_cpu_hz_max);
-	_ODP_PRINT("  system.cpu_hz_static: %" PRIu8 "\n",
+	_ODP_PRINT("  system.cpu_hz_static: %" PRIu8 "\n\n",
 		   odp_global_ro.system_info.cpu_hz_static);
-	_ODP_PRINT("  system.cpu_id_static: %" PRIu8 "\n\n",
-		   odp_global_ro.system_info.cpu_id_static);
 
 	return 0;
 }
@@ -373,6 +366,9 @@ int _odp_system_info_term(void)
 uint64_t odp_cpu_hz(void)
 {
 	int id = odp_cpu_id();
+
+	if (odp_unlikely(id < 0))
+		return -1;
 
 	if (odp_global_ro.system_info.cpu_hz_static)
 		return cpu_hz_static(id);
