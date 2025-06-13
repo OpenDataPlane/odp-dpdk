@@ -157,6 +157,24 @@ static inline void _odp_event_free_multi(_odp_event_hdr_t *event_hdr[], int num)
 	rte_mempool_put_bulk(mp_pending, (void **)&event_hdr[i - num_pending], num_pending);
 }
 
+static inline void _odp_event_free_sp(_odp_event_hdr_t *event_hdr[], int num)
+{
+	struct rte_mempool *mp;
+
+	if (odp_unlikely(num <= 0))
+		return;
+
+	mp = event_hdr[0]->mb.pool;
+
+	if (ODP_DEBUG) {
+		for (int i = 0; i < num; i++) {
+			_ODP_ASSERT(event_hdr[i] != NULL);
+			_ODP_ASSERT(event_hdr[i]->mb.pool == mp);
+		}
+	}
+	rte_mempool_put_bulk(mp, (void **)event_hdr, num);
+}
+
 static inline void _odp_event_free(odp_event_t event)
 {
 	struct rte_mbuf *mbuf = _odp_event_to_mbuf(event);
