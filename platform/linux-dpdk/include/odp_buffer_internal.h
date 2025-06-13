@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2013-2018 Linaro Limited
- * Copyright (c) 2021-2024 Nokia
+ * Copyright (c) 2021-2025 Nokia
  */
 
 /**
@@ -27,6 +27,7 @@ extern "C" {
 
 #include <odp_config_internal.h>
 #include <odp_event_internal.h>
+#include <odp_pool_internal.h>
 
 #include <sys/types.h>
 #include <stddef.h>
@@ -82,6 +83,11 @@ static inline void _odp_buffer_subtype_set(odp_buffer_t buf, int subtype)
 static inline uint32_t _odp_buffer_index(odp_buffer_t buf)
 {
 	return _odp_buf_hdr(buf)->event_hdr.index;
+}
+
+static inline void _odp_buffer_free_sp(const odp_buffer_t buf[], int num)
+{
+	_odp_event_free_sp((_odp_event_hdr_t **)(uintptr_t)buf, num);
 }
 
 #ifdef __cplusplus
