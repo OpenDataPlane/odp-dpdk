@@ -74,9 +74,9 @@ odp_event_type_t odp_event_vector_type(odp_event_vector_t evv)
 	if (odp_unlikely(num == 0))
 		return ODP_EVENT_ANY;
 
-	type = _odp_event_hdr(evv_hdr->event[0])->event_type;
+	type = odp_event_type((evv_hdr->event[0]));
 	for (uint32_t i = 1; i < num; i++) {
-		if (_odp_event_hdr(evv_hdr->event[i])->event_type != (int8_t)type) {
+		if (odp_event_type(evv_hdr->event[i]) != type) {
 			type = ODP_EVENT_ANY;
 			break;
 		}
