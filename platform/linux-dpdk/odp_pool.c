@@ -295,7 +295,7 @@ int odp_pool_capability(odp_pool_capability_t *capa)
 	capa->tmo.max_cache_size   = RTE_MEMPOOL_CACHE_MAX_SIZE;
 	capa->tmo.stats.all = supported_stats.all;
 
-	/* Vector pools */
+	/* Packet vector pools */
 	capa->vector.max_pools      = max_pools;
 	capa->vector.max_num        = CONFIG_POOL_MAX_NUM;
 	capa->vector.max_uarea_size   = MAX_UAREA_SIZE;
@@ -304,6 +304,16 @@ int odp_pool_capability(odp_pool_capability_t *capa)
 	capa->vector.min_cache_size = 0;
 	capa->vector.max_cache_size = RTE_MEMPOOL_CACHE_MAX_SIZE;
 	capa->vector.stats.all = supported_stats.all;
+
+	/* Event vector pools */
+	capa->event_vector.max_pools = max_pools;
+	capa->event_vector.max_num   = CONFIG_POOL_MAX_NUM;
+	capa->event_vector.max_size  = CONFIG_EVENT_VECTOR_MAX_SIZE;
+	capa->event_vector.max_uarea_size = MAX_UAREA_SIZE;
+	capa->event_vector.uarea_persistence = true;
+	capa->event_vector.min_cache_size = 0;
+	capa->event_vector.max_cache_size = RTE_MEMPOOL_CACHE_MAX_SIZE;
+	capa->event_vector.stats.all = supported_stats.all;
 
 	return 0;
 }
@@ -486,6 +496,47 @@ static int check_params(const odp_pool_param_t *params)
 
 		break;
 
+	case ODP_POOL_EVENT_VECTOR:
+		if (params->event_vector.num == 0) {
+			_ODP_ERR("event_vector.num zero\n");
+			return -1;
+		}
+
+		if (params->event_vector.num > capa.event_vector.max_num) {
+			_ODP_ERR("event_vector.num too large %u\n", params->event_vector.num);
+			return -1;
+		}
+
+		if (params->event_vector.max_size == 0) {
+			_ODP_ERR("event_vector.max_size zero\n");
+			return -1;
+		}
+
+		if (params->event_vector.max_size > capa.event_vector.max_size) {
+			_ODP_ERR("event_vector.max_size too large %u\n",
+				 params->event_vector.max_size);
+			return -1;
+		}
+
+		if (params->event_vector.cache_size > capa.event_vector.max_cache_size) {
+			_ODP_ERR("event_vector.cache_size too large %u\n",
+				 params->event_vector.cache_size);
+			return -1;
+		}
+
+		if (params->event_vector.uarea_size > capa.event_vector.max_uarea_size) {
+			_ODP_ERR("event_vector.uarea_size too large %u\n",
+				 params->event_vector.uarea_size);
+			return -1;
+		}
+
+		if (params->stats.all & ~capa.event_vector.stats.all) {
+			_ODP_ERR("Unsupported pool statistics counter\n");
+			return -1;
+		}
+
+		break;
+
 	default:
 		_ODP_ERR("bad pool type %i\n", params->type);
 		return -1;
@@ -637,6 +688,7 @@ static void init_obj_priv_data(struct rte_mempool *mp ODP_UNUSED, void *arg, voi
 		obj_uarea = &((odp_timeout_hdr_t *)mbuf)->uarea_addr;
 		break;
 	case ODP_POOL_VECTOR:
+	case ODP_POOL_EVENT_VECTOR:
 		obj_uarea = &((odp_event_vector_hdr_t *)mbuf)->uarea_addr;
 		break;
 	default:
@@ -728,6 +780,15 @@ odp_pool_t _odp_pool_create(const char *name, const odp_pool_param_t *params,
 		data_size = 0;
 		uarea_size = params->vector.uarea_size;
 		priv_data.event_type = ODP_EVENT_PACKET_VECTOR;
+		break;
+	case ODP_POOL_EVENT_VECTOR:
+		num = params->event_vector.num;
+		cache_size = params->event_vector.cache_size;
+		priv_size = get_mbuf_priv_size(sizeof(odp_event_vector_hdr_t) +
+					       params->event_vector.max_size * sizeof(odp_event_t));
+		data_size = 0;
+		uarea_size = params->event_vector.uarea_size;
+		priv_data.event_type = ODP_EVENT_VECTOR;
 		break;
 	default:
 		odp_ticketlock_unlock(&pool->lock);
@@ -848,6 +909,8 @@ static const char *get_short_type_str(odp_pool_type_t type)
 		return "T";
 	case ODP_POOL_VECTOR:
 		return "V";
+	case ODP_POOL_EVENT_VECTOR:
+		return "E";
 	case ODP_POOL_DMA_COMPL:
 		return "D";
 	case ODP_POOL_ML_COMPL:
@@ -998,6 +1061,7 @@ void odp_pool_param_init(odp_pool_param_t *params)
 	params->pkt.cache_size = RTE_MEMPOOL_CACHE_MAX_SIZE;
 	params->tmo.cache_size = RTE_MEMPOOL_CACHE_MAX_SIZE;
 	params->vector.cache_size = RTE_MEMPOOL_CACHE_MAX_SIZE;
+	params->event_vector.cache_size = RTE_MEMPOOL_CACHE_MAX_SIZE;
 }
 
 uint64_t odp_pool_to_u64(odp_pool_t hdl)
@@ -1095,6 +1159,7 @@ int odp_pool_ext_capability(odp_pool_type_t type,
 	case ODP_POOL_BUFFER:
 	case ODP_POOL_TIMEOUT:
 	case ODP_POOL_VECTOR:
+	case ODP_POOL_EVENT_VECTOR:
 	case ODP_POOL_DMA_COMPL:
 	case ODP_POOL_ML_COMPL:
 		memset(capa, 0, sizeof(odp_pool_ext_capability_t));
@@ -1382,6 +1447,7 @@ static void init_ext_obj(struct rte_mempool *mp, void *arg, void *mbuf, unsigned
 		obj_uarea = &((odp_timeout_hdr_t *)mbuf)->uarea_addr;
 		break;
 	case ODP_POOL_VECTOR:
+	case ODP_POOL_EVENT_VECTOR:
 		obj_uarea = &((odp_event_vector_hdr_t *)mbuf)->uarea_addr;
 		break;
 	default:

@@ -38,6 +38,7 @@ odpapiplatinclude_HEADERS = \
 		  include/odp/api/plat/event_inlines.h \
 		  include/odp/api/plat/event_inline_types.h \
 		  include/odp/api/plat/event_validation_external.h \
+		  include/odp/api/plat/event_vector_inlines.h \
 		  include/odp/api/plat/event_vector_inline_types.h \
 		  include/odp/api/plat/hash_inlines.h \
 		  include/odp/api/plat/ipsec_inlines.h \
@@ -212,6 +213,7 @@ __LIB__libodp_dpdk_la_SOURCES = \
 			   ../linux-generic/odp_event.c \
 			   odp_event_offsets.c \
 			   ../linux-generic/odp_event_validation.c \
+			   ../linux-generic/odp_event_vector.c \
 			   ../linux-generic/odp_hash_crc_gen.c \
 			   odp_init.c \
 			   ../linux-generic/odp_impl.c \
@@ -277,6 +279,7 @@ __LIB__libodp_dpdk_la_SOURCES += \
 			   ../linux-generic/odp_crypto_api.c \
 			   ../linux-generic/odp_dma_api.c \
 			   ../linux-generic/odp_event_api.c \
+			   ../linux-generic/odp_event_vector_api.c \
 			   ../linux-generic/odp_hash_api.c \
 			   ../linux-generic/odp_ipsec_api.c \
 			   ../linux-generic/odp_packet_api.c \
