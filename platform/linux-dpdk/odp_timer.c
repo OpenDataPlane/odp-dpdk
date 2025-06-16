@@ -636,6 +636,11 @@ odp_timer_pool_t odp_timer_pool_create(const char *name,
 		return ODP_TIMER_POOL_INVALID;
 	}
 
+	if (param->priority > 0) {
+		_ODP_ERR("Only default timer pool priority supported.\n");
+		return ODP_TIMER_POOL_INVALID;
+	}
+
 	if (param->num_timers > MAX_TIMERS) {
 		_ODP_ERR("Too many timers\n");
 		return ODP_TIMER_POOL_INVALID;
