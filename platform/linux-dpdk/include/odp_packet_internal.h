@@ -38,9 +38,6 @@ extern "C" {
 #include <string.h>
 
 #include <rte_config.h>
-#if defined(__clang__)
-#undef RTE_TOOLCHAIN_GCC
-#endif
 #include <rte_mbuf.h>
 #include <rte_memory.h>
 /* ppc64 rte_memcpy.h (included through rte_mbuf.h) may define vector */

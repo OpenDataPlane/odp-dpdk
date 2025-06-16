@@ -29,9 +29,6 @@
 #include <protocols/eth.h>
 
 #include <rte_config.h>
-#if defined(__clang__)
-#undef RTE_TOOLCHAIN_GCC
-#endif
 #include <rte_common.h>
 #include <rte_ethdev.h>
 #include <rte_ip_frag.h>
