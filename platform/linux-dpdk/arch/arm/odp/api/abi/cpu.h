@@ -6,19 +6,19 @@
 #ifndef ODP_API_ABI_CPU_H_
 #define ODP_API_ABI_CPU_H_
 
+#include <rte_common.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#include <rte_common.h>
-
 #define ODP_CACHE_LINE_SIZE RTE_CACHE_LINE_SIZE
-
-/* Inlined functions for non-ABI compat mode */
-#include <odp/api/plat/cpu_inlines.h>
 
 #ifdef __cplusplus
 }
 #endif
+
+/* Inlined functions for non-ABI compat mode */
+#include <odp/api/plat/cpu_inlines.h>
 
 #endif
