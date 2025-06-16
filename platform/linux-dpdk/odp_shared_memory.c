@@ -249,6 +249,11 @@ odp_shm_t odp_shm_reserve(const char *name, uint64_t size, uint64_t align,
 	int idx;
 	uint32_t supported_flgs = SUPPORTED_SHM_FLAGS;
 
+	if (name && strlen(name) + 1 > ODP_SHM_NAME_LEN) {
+		_ODP_ERR("SHM name too long (max %d)\n", ODP_SHM_NAME_LEN);
+		return ODP_SHM_INVALID;
+	}
+
 	if (flags & ~supported_flgs) {
 		_ODP_ERR("Unsupported SHM flag: %" PRIx32 "\n", flags);
 		return ODP_SHM_INVALID;
@@ -310,6 +315,11 @@ odp_shm_t odp_shm_import(const char *remote_name, odp_instance_t odp_inst,
 	const struct rte_memzone *mz;
 	char mz_name[RTE_MEMZONE_NAMESIZE];
 	int idx;
+
+	if (local_name && strlen(local_name) + 1 > ODP_SHM_NAME_LEN) {
+		_ODP_ERR("SHM local name too long (max %d)\n", ODP_SHM_NAME_LEN);
+		return ODP_SHM_INVALID;
+	}
 
 	snprintf(mz_name, RTE_MEMZONE_NAMESIZE, SHM_BLOCK_NAME, odp_inst, 0,
 		 remote_name);
