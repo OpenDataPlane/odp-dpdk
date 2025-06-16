@@ -16,6 +16,10 @@
 
 #include <stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /** @cond _ODP_HIDE_FROM_DOXYGEN_ */
 
 typedef struct _odp_time_global_t {
@@ -254,5 +258,9 @@ _ODP_INLINE void odp_time_startup(odp_time_startup_t *startup)
 }
 
 /** @endcond */
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

@@ -12,10 +12,6 @@
 #ifndef _ODP_PLAT_PACKET_INLINES_H_
 #define _ODP_PLAT_PACKET_INLINES_H_
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 #include <odp/api/event.h>
 #include <odp/api/hints.h>
 #include <odp/api/packet_types.h>
@@ -36,10 +32,13 @@ extern "C" {
 #include <sys/types.h>
 #include <rte_config.h>
 #include <rte_mbuf.h>
-
-/* ppc64 rte_memcpy.h may overwrite bool with an incompatible type and define
- * vector */
 #include <rte_memcpy.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* ppc64 rte_memcpy.h may overwrite bool with an incompatible type and define vector */
 #if defined(__PPC64__) && defined(bool)
 	#undef bool
 	#define bool _Bool
