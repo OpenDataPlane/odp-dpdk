@@ -6,6 +6,7 @@
 
 #include <odp/api/atomic.h>
 #include <odp/api/buffer.h>
+#include <odp/api/cpu.h>
 #include <odp/api/event.h>
 #include <odp/api/hints.h>
 #include <odp/api/ml.h>
