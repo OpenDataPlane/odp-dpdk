@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: BSD-3-Clause
- * Copyright (c) 2019-2023 Nokia
+ * Copyright (c) 2019-2025 Nokia
  */
 
 #ifndef ODP_PLAT_BUFFER_INLINES_H_
@@ -100,39 +100,31 @@ _ODP_INLINE void odp_buffer_free(odp_buffer_t buf)
 
 _ODP_INLINE void odp_buffer_free_multi(const odp_buffer_t buf[], int num)
 {
-	struct rte_mbuf *mbuf_tbl[num];
 	struct rte_mempool *mp_pending;
-	unsigned int num_pending;
+	struct rte_mbuf *mbuf;
+	uint32_t i, num_pending;
 
 	if (odp_unlikely(num <= 0))
 		return;
 
 	_odp_buffer_validate_multi(buf, num, _ODP_EV_BUFFER_FREE_MULTI);
 
-	mbuf_tbl[0] = (struct rte_mbuf *)buf[0];
-	mp_pending = mbuf_tbl[0]->pool;
+	mbuf = (struct rte_mbuf *)buf[0];
+	mp_pending = mbuf->pool;
 	num_pending = 1;
 
-/*
- * num_pending is less than or equal to num, but GCC 13 is not able figure that out, so we have to
- * ignore array-bounds warnings in the rte_mempool_put_bulk() calls.
- */
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Warray-bounds"
-	for (int i = 1; i < num; i++) {
-		struct rte_mbuf *mbuf = (struct rte_mbuf *)buf[i];
+	for (i = 1; i < (uint32_t)num; i++) {
+		mbuf = (struct rte_mbuf *)buf[i];
 
 		if (mbuf->pool != mp_pending) {
-			rte_mempool_put_bulk(mp_pending, (void **)mbuf_tbl, num_pending);
-			mbuf_tbl[0] = mbuf;
-			num_pending = 1;
+			rte_mempool_put_bulk(mp_pending, (void **)(uintptr_t)&buf[i - num_pending],
+					     num_pending);
 			mp_pending = mbuf->pool;
-		} else {
-			mbuf_tbl[num_pending++] = mbuf;
+			num_pending = 0;
 		}
+		num_pending++;
 	}
-	rte_mempool_put_bulk(mp_pending, (void **)mbuf_tbl, num_pending);
-#pragma GCC diagnostic pop
+	rte_mempool_put_bulk(mp_pending, (void **)(uintptr_t)&buf[i - num_pending], num_pending);
 }
 
 _ODP_INLINE int odp_buffer_is_valid(odp_buffer_t buf)
