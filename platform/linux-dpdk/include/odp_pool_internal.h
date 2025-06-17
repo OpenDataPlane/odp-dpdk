@@ -134,29 +134,27 @@ static inline odp_event_t _odp_event_alloc(pool_t *pool)
 	return _odp_event_from_mbuf(mbuf);
 }
 
-static inline void _odp_event_free_multi(_odp_event_hdr_t *event_hdr[], int num_free)
+static inline void _odp_event_free_multi(_odp_event_hdr_t *event_hdr[], int num)
 {
-	struct rte_mbuf *mbuf_tbl[num_free];
 	struct rte_mempool *mp_pending;
-	unsigned int num_pending;
+	uint32_t i, num_pending;
 
-	mbuf_tbl[0] = &event_hdr[0]->mb;
-	mp_pending = mbuf_tbl[0]->pool;
+	if (odp_unlikely(num <= 0))
+		return;
+
+	mp_pending = event_hdr[0]->mb.pool;
 	num_pending = 1;
 
-	for (int i = 1; i < num_free; i++) {
-		struct rte_mbuf *mbuf = &event_hdr[i]->mb;
-
-		if (mbuf->pool != mp_pending) {
-			rte_mempool_put_bulk(mp_pending, (void **)mbuf_tbl, num_pending);
-			mbuf_tbl[0] = mbuf;
-			num_pending = 1;
-			mp_pending = mbuf->pool;
-		} else {
-			mbuf_tbl[num_pending++] = mbuf;
+	for (i = 1; i < (uint32_t)num; i++) {
+		if (event_hdr[i]->mb.pool != mp_pending) {
+			rte_mempool_put_bulk(mp_pending, (void **)&event_hdr[i - num_pending],
+					     num_pending);
+			mp_pending = event_hdr[i]->mb.pool;
+			num_pending = 0;
 		}
+		num_pending++;
 	}
-	rte_mempool_put_bulk(mp_pending, (void **)mbuf_tbl, num_pending);
+	rte_mempool_put_bulk(mp_pending, (void **)&event_hdr[i - num_pending], num_pending);
 }
 
 static inline void _odp_event_free(odp_event_t event)
