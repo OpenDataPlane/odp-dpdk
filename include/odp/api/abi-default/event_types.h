@@ -1,16 +1,16 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2017-2018 Linaro Limited
- * Copyright (c) 2022-2023 Nokia
+ * Copyright (c) 2022-2024 Nokia
  */
 
 #ifndef ODP_ABI_EVENT_TYPES_H_
 #define ODP_ABI_EVENT_TYPES_H_
 
+#include <stdint.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#include <stdint.h>
 
 /** @internal Dummy type for strong typing */
 typedef struct { char dummy; /**< @internal Dummy */ } _odp_abi_event_t;
@@ -24,9 +24,11 @@ typedef _odp_abi_event_t *odp_event_t;
 #define ODP_EVENT_INVALID  ((odp_event_t)0)
 
 typedef enum {
+	ODP_EVENT_ANY = 0,
 	ODP_EVENT_BUFFER = 1,
 	ODP_EVENT_PACKET = 2,
 	ODP_EVENT_TIMEOUT = 3,
+	ODP_EVENT_VECTOR = 4,
 	ODP_EVENT_IPSEC_STATUS = 5,
 	ODP_EVENT_PACKET_VECTOR = 6,
 	ODP_EVENT_PACKET_TX_COMPL = 7,

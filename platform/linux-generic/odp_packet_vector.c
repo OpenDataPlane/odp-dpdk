@@ -17,19 +17,6 @@
 #include <inttypes.h>
 #include <stdint.h>
 
-#include <odp/visibility_begin.h>
-
-/* Packet vector header field offsets for inline functions */
-const _odp_event_vector_inline_offset_t _odp_event_vector_inline ODP_ALIGNED_CACHE = {
-	.packet    = offsetof(odp_event_vector_hdr_t, packet),
-	.pool      = offsetof(odp_event_vector_hdr_t, event_hdr.pool),
-	.size      = offsetof(odp_event_vector_hdr_t, size),
-	.uarea_addr = offsetof(odp_event_vector_hdr_t, uarea_addr),
-	.flags     = offsetof(odp_event_vector_hdr_t, flags)
-};
-
-#include <odp/visibility_end.h>
-
 static inline odp_event_vector_hdr_t *event_vector_hdr_from_event(odp_event_t event)
 {
 	return (odp_event_vector_hdr_t *)(uintptr_t)event;
@@ -90,7 +77,7 @@ int odp_packet_vector_valid(odp_packet_vector_t pktv)
 		return 0;
 
 	for (i = 0; i < pktv_hdr->size; i++) {
-		if (pktv_hdr->packet[i] == ODP_PACKET_INVALID)
+		if (pktv_hdr->event[i] == ODP_EVENT_INVALID)
 			return 0;
 	}
 
@@ -116,7 +103,7 @@ void odp_packet_vector_print(odp_packet_vector_t pktv)
 	len += _odp_snprint(&str[len], n - len, "  user area      %p\n", pktv_hdr->uarea_addr);
 
 	for (i = 0; i < pktv_hdr->size; i++) {
-		odp_packet_t pkt = pktv_hdr->packet[i];
+		odp_packet_t pkt = odp_packet_from_event(pktv_hdr->event[i]);
 		char seg_str[max_len];
 		int str_len;
 

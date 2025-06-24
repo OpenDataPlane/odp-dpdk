@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2018 Linaro Limited
- * Copyright (c) 2020-2024 Nokia
+ * Copyright (c) 2020-2025 Nokia
  */
 
 /**
@@ -39,9 +39,6 @@
 
 /* Scheduling round interval to check for MAX_SCHED_WAIT_NS */
 #define TIME_CHECK_INTERVAL  (1024 * 1024)
-
-/* Round up 'X' to a multiple of 'NUM' */
-#define ROUNDUP(X, NUM) ((NUM) * (((X) + (NUM) - 1) / (NUM)))
 
 typedef struct test_options_t {
 	uint32_t num_cpu;
@@ -186,7 +183,7 @@ static void print_usage(void)
 
 static int parse_options(int argc, char *argv[], test_options_t *test_options)
 {
-	int opt, long_index, num_group, num_join;
+	int opt, num_group, num_join;
 	int ret = 0;
 	uint32_t ctx_size = 0;
 	int pool_type = 0;
@@ -245,7 +242,7 @@ static int parse_options(int argc, char *argv[], test_options_t *test_options)
 	test_options->verbose    = 0;
 
 	while (1) {
-		opt = getopt_long(argc, argv, shortopts, longopts, &long_index);
+		opt = getopt_long(argc, argv, shortopts, longopts, NULL);
 
 		if (opt == -1)
 			break;
@@ -397,7 +394,7 @@ static int parse_options(int argc, char *argv[], test_options_t *test_options)
 	if (test_options->ctx_rd_words || test_options->ctx_rw_words) {
 		/* Round up queue handle size to a multiple of 8 for correct
 		 * context data alignment */
-		ctx_size = ROUNDUP(ctx_size, 8);
+		ctx_size = ODPH_ROUNDUP_MULTIPLE(ctx_size, 8);
 		ctx_size += 8 * test_options->ctx_rd_words;
 		ctx_size += 8 * test_options->ctx_rw_words;
 	}
@@ -405,7 +402,7 @@ static int parse_options(int argc, char *argv[], test_options_t *test_options)
 	/* When context data is modified, round up to cache line size to avoid
 	 * false sharing */
 	if (test_options->fairness || test_options->ctx_rw_words)
-		ctx_size = ROUNDUP(ctx_size, ODP_CACHE_LINE_SIZE);
+		ctx_size = ODP_CACHE_LINE_ROUNDUP(ctx_size);
 
 	test_options->ctx_size = ctx_size;
 	test_options->uarea_size = 8 * (test_options->uarea_rd + test_options->uarea_rw);
@@ -1098,7 +1095,7 @@ static int test_sched(void *arg)
 	thr = odp_thread_id();
 
 	if (forward || fairness)
-		ctx_offset = ROUNDUP(sizeof(queue_context_t), 8);
+		ctx_offset = ODPH_ROUNDUP_MULTIPLE(sizeof(queue_context_t), 8);
 
 	if (num_group > 0) {
 		uint32_t num_join = test_options->num_join;

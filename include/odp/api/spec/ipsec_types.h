@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2016-2018 Linaro Limited
- * Copyright (c) 2022 Nokia
+ * Copyright (c) 2022-2025 Nokia
  */
 
 /**
@@ -13,16 +13,16 @@
 #define ODP_API_SPEC_IPSEC_TYPES_H_
 #include <odp/visibility_begin.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 #include <odp/api/classification.h>
 #include <odp/api/crypto_types.h>
 #include <odp/api/packet_io_types.h>
 #include <odp/api/protocols.h>
 #include <odp/api/std_types.h>
 #include <odp/api/traffic_mngr.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /** @defgroup odp_ipsec ODP IPSEC
  *  @{
@@ -462,6 +462,11 @@ typedef struct odp_ipsec_config_t {
 	 * the application through the default queue and the SA destination
 	 * queues. It does not affect packets delivered through pktio
 	 * input queues.
+	 *
+	 * Generating vectors of packets can be enabled either through this
+	 * configuration or by using event aggregators as destination queue(s).
+	 * Both options cannot be enabled simultaneously in the same ODP
+	 * application.
 	 */
 	odp_pktin_vector_config_t vector;
 

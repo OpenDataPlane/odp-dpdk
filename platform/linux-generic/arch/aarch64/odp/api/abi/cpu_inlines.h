@@ -1,18 +1,18 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2016-2018 Linaro Limited
- * Copyright (c) 2021-2023 Nokia
+ * Copyright (c) 2021-2025 Nokia
  */
 
 #ifndef ODP_ARCH_CPU_INLINES_H_
 #define ODP_ARCH_CPU_INLINES_H_
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 #include <odp/api/abi/time_cpu.h>
 
 #include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /* CPU frequency is shifted to decrease integer division error */
 #define _ODP_CPU_FREQ_SHIFT 16
@@ -39,6 +39,12 @@ static inline void _odp_cpu_pause(void)
 static inline uint64_t _odp_cpu_cycles(void)
 {
 	return (_odp_time_cpu_global() * _odp_cpu_cycles_glob.res_shifted) >> _ODP_CPU_FREQ_SHIFT;
+}
+
+static inline uint64_t _odp_cpu_cycles_strict(void)
+{
+	return (_odp_time_cpu_global_strict() *
+		_odp_cpu_cycles_glob.res_shifted) >> _ODP_CPU_FREQ_SHIFT;
 }
 
 static inline  uint64_t _odp_cpu_cycles_resolution(void)

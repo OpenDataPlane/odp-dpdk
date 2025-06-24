@@ -12,10 +12,6 @@
 #ifndef ODP_API_H_
 #define ODP_API_H_
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 #include <odp/api/deprecated.h>
 #include <odp/api/version.h>
 #include <odp/api/std_types.h>
@@ -51,6 +47,7 @@ extern "C" {
 #include <odp/api/classification.h>
 #include <odp/api/rwlock.h>
 #include <odp/api/event.h>
+#include <odp/api/event_vector.h>
 #include <odp/api/random.h>
 #include <odp/api/errno.h>
 #include <odp/api/thrmask.h>
@@ -65,7 +62,4 @@ extern "C" {
 #include <odp/api/reassembly.h>
 #include <odp/api/dma.h>
 
-#ifdef __cplusplus
-}
-#endif
 #endif

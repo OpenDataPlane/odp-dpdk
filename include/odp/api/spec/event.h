@@ -13,13 +13,13 @@
 #define ODP_API_SPEC_EVENT_H_
 #include <odp/visibility_begin.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 #include <odp/api/event_types.h>
 #include <odp/api/packet_types.h>
 #include <odp/api/pool_types.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /** @addtogroup odp_event
  *  Generic event metadata and operations.
@@ -211,8 +211,8 @@ int odp_event_is_valid(odp_event_t event);
  * Frees the event based on its type. Results are undefined if event type is
  * unknown.
  *
- * In case of packet vector events (ODP_EVENT_PACKET_VECTOR) the function frees
- * the packet vector and all packets stored inside it.
+ * In case of vector events (ODP_EVENT_VECTOR and ODP_EVENT_PACKET_VECTOR)
+ * the function frees the vector and all events or packets stored inside it.
  *
  * @param event    Event handle
  *
