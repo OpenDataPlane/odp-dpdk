@@ -483,7 +483,7 @@ int odp_timer_capability(odp_timer_clk_src_t clk_src,
 	uint64_t min_tmo = tmo_ticks_to_ns_round_up(MIN_TMO_CYCLES);
 
 	if (clk_src != ODP_CLOCK_DEFAULT) {
-		_ODP_ERR("Only ODP_CLOCK_DEFAULT supported. Requested %i.\n", clk_src);
+		_ODP_DBG("Only ODP_CLOCK_DEFAULT supported. Requested %i.\n", clk_src);
 		return -1;
 	}
 
@@ -633,6 +633,11 @@ odp_timer_pool_t odp_timer_pool_create(const char *name,
 
 	if (param->res_ns == 0 && param->res_hz > MAX_RES_HZ) {
 		_ODP_ERR("Too high resolution\n");
+		return ODP_TIMER_POOL_INVALID;
+	}
+
+	if (param->priority > 0) {
+		_ODP_ERR("Only default timer pool priority supported.\n");
 		return ODP_TIMER_POOL_INVALID;
 	}
 

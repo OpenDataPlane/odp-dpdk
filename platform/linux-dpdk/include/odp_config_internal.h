@@ -170,6 +170,9 @@ extern "C" {
 /* Maximum packet vector size */
 #define CONFIG_PACKET_VECTOR_MAX_SIZE 256
 
+/* Maximum event vector size */
+#define CONFIG_EVENT_VECTOR_MAX_SIZE 256
+
 /*
  * Maximum number of IPsec SAs. The actual maximum number can be further
  * limited by the number of sessions supported by the crypto subsystem and

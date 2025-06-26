@@ -11,14 +11,14 @@
 #ifndef ODP_PLAT_BYTEORDER_INLINES_H_
 #define ODP_PLAT_BYTEORDER_INLINES_H_
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 #include <odp/api/abi/byteorder.h>
 
 #include <rte_config.h>
 #include <rte_byteorder.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /** @cond _ODP_HIDE_FROM_DOXYGEN_ */
 

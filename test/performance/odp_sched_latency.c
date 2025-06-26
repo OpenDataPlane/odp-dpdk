@@ -32,10 +32,6 @@
 #define EVENT_POOL_SIZE	  (1024 * 1024) /**< Event pool size */
 #define MAIN_THREAD	  1	/**< Thread ID performing maintenance tasks */
 
-#define CACHE_ALIGN_ROUNDUP(x)\
-	((ODP_CACHE_LINE_SIZE) * \
-	 (((x) + ODP_CACHE_LINE_SIZE - 1) / (ODP_CACHE_LINE_SIZE)))
-
 /* Test priorities */
 #define NUM_PRIOS 2 /**< Number of tested priorities */
 #define HI_PRIO	  0
@@ -624,7 +620,6 @@ static void usage(void)
 static void parse_args(int argc, char *argv[], test_args_t *args)
 {
 	int opt;
-	int long_index;
 	int i;
 
 	static const struct option longopts[] = {
@@ -666,7 +661,7 @@ static void parse_args(int argc, char *argv[], test_args_t *args)
 	args->prio[HI_PRIO].sample_events = 1;
 
 	while (1) {
-		opt = getopt_long(argc, argv, shortopts, longopts, &long_index);
+		opt = getopt_long(argc, argv, shortopts, longopts, NULL);
 
 		if (opt == -1)
 			break;	/* No more options */

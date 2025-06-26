@@ -10,12 +10,13 @@
 #include <string.h>
 
 #include <rte_config.h>
-#if defined(__clang__)
-#undef RTE_TOOLCHAIN_GCC
-#endif
-/* ppc64 rte_memcpy.h may overwrite bool with an incompatible type and define
- * vector */
 #include <rte_memcpy.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* ppc64 rte_memcpy.h may overwrite bool with an incompatible type and define vector */
 #if defined(__PPC64__) && defined(bool)
 	#undef bool
 	#define bool _Bool
@@ -50,5 +51,9 @@ _ODP_INLINE int odp_memcmp(const void *ptr1, const void *ptr2, size_t num)
 }
 
 /** @endcond */
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

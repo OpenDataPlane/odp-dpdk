@@ -17,6 +17,11 @@
 
 #include <rte_mbuf.h>
 #include <rte_mempool.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #if defined(__PPC64__) && defined(bool)
 	#undef bool
 	#define bool _Bool
@@ -142,5 +147,9 @@ _ODP_INLINE int odp_buffer_is_valid(odp_buffer_t buf)
 }
 
 /** @endcond */
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2014-2018 Linaro Limited
- * Copyright (c) 2021-2023 Nokia
+ * Copyright (c) 2021-2025 Nokia
  */
 
 /**
@@ -69,6 +69,11 @@ static inline uint64_t timer_run(int dec)
 
 	/* Time to the next timeout not available with DPDK timers */
 	return UINT64_MAX;
+}
+
+static inline void _odp_timeout_free_sp(odp_timeout_t tmo[], int num)
+{
+	_odp_event_free_sp((_odp_event_hdr_t **)(uintptr_t)tmo, num);
 }
 
 #endif

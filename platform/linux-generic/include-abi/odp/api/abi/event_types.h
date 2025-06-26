@@ -12,11 +12,11 @@
 #ifndef ODP_API_ABI_EVENT_TYPES_H_
 #define ODP_API_ABI_EVENT_TYPES_H_
 
+#include <odp/api/plat/strong_types.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#include <odp/api/plat/strong_types.h>
 
 /** @addtogroup odp_event
  *  @{
@@ -27,9 +27,11 @@ typedef ODP_HANDLE_T(odp_event_t);
 #define ODP_EVENT_INVALID _odp_cast_scalar(odp_event_t, 0)
 
 typedef enum odp_event_type_t {
+	ODP_EVENT_ANY = 0,
 	ODP_EVENT_BUFFER = 1,
 	ODP_EVENT_PACKET = 2,
 	ODP_EVENT_TIMEOUT = 3,
+	ODP_EVENT_VECTOR = 4,
 	ODP_EVENT_IPSEC_STATUS = 5,
 	ODP_EVENT_PACKET_VECTOR = 6,
 	ODP_EVENT_PACKET_TX_COMPL = 7,

@@ -11,12 +11,12 @@
 #ifndef _ODP_PLAT_PACKET_FLAG_INLINES_H_
 #define _ODP_PLAT_PACKET_FLAG_INLINES_H_
 
+#include <odp/api/abi/packet_types.h>
+#include <odp/api/plat/packet_inline_types.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#include <odp/api/abi/packet_types.h>
-#include <odp/api/plat/packet_inline_types.h>
 
 /** @cond _ODP_HIDE_FROM_DOXYGEN_ */
 

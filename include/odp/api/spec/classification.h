@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2014-2018 Linaro Limited
- * Copyright (c) 2021-2023 Nokia
+ * Copyright (c) 2021-2025 Nokia
  */
 
 /**
@@ -13,14 +13,14 @@
 #define ODP_API_SPEC_CLASSIFICATION_H_
 #include <odp/visibility_begin.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 #include <odp/api/packet_io_types.h>
 #include <odp/api/pool_types.h>
 #include <odp/api/std_types.h>
 #include <odp/api/threshold.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /** @defgroup odp_classification ODP CLASSIFICATION
  *  Packet input classification.
@@ -383,8 +383,29 @@ typedef struct odp_red_param_t {
 } odp_red_param_t;
 
 /** Back pressure (BP)
- * When back pressure is enabled for a particular flow, the HW can send
- * back pressure information to the remote peer indicating a network congestion.
+ *
+ * When back pressure is enabled, HW can send back pressure to the remote peer
+ * indicating resource shortage. Depending on the implementation, back pressure
+ * can be asserted when the fill level of the destination queue of a CoS
+ * exceeds the configured threshold or when the utilization of the packet pool
+ * associated with a CoS exceeds the configured threshold.
+ *
+ * If multiple CoSes configure back pressure for the same pktio, pool/queue
+ * and pfc level, then back pressure is sent as long as any of the CoSes
+ * assert back pressure. There does not have to be packets flowing through
+ * a CoS node for the CoS to assert back pressure, because packets may be
+ * directed to the same queue/pool by some other CoS node (which might not
+ * even have backpressure configured), some other ODP component or the ODP
+ * application.
+ *
+ * Conceptually, a configured CoS hierarchy determines unique global back
+ * pressure threshold for each (pktio, queue/pool, pfc_level)-tuple. The
+ * back pressure configuration in a CoS affects the global thresholds that
+ * have the same queue/pool as configured in the Cos, the same pfc_level
+ * (if PFC is enabled) and a pktio that is a connected to the CoS. One
+ * CoS can affect multiple global thresholds and one global threshold can
+ * be affected by multiple CoSes (in which case the minimum of the
+ * configured thresholds is used).
  */
 typedef struct odp_bp_param_t {
 	/** A boolean to enable Back pressure
@@ -523,6 +544,24 @@ typedef struct odp_cls_stats_capability_t {
 
 } odp_cls_stats_capability_t;
 
+/** Event aggregator related capabilities */
+typedef struct odp_cls_aggr_capability_t {
+	/** Supported enqueuing profile types in addition to ODP_AEP_TYPE_NONE,
+	 *  which is always supported. See odp_aggr_enq_profile_t. */
+	struct {
+		/** IPv4 fragment profile (ODP_AEP_TYPE_IPV4_FRAG) */
+		uint64_t ipv4_frag : 1;
+
+		/** IPv6 fragment profile (ODP_AEP_TYPE_IPV6_FRAG) */
+		uint64_t ipv6_frag : 1;
+
+		/** Custom profile (ODP_AEP_TYPE_CUSTOM) */
+		uint64_t custom : 1;
+
+	} enq_profile_type;
+
+} odp_cls_aggr_capability_t;
+
 /**
  * Classification capabilities
  * This capability structure defines system level classification capability
@@ -584,6 +623,9 @@ typedef struct odp_cls_capability_t {
 
 	/** Statistics counters capabilities */
 	odp_cls_stats_capability_t stats;
+
+	/** Event aggregator related capabilities */
+	odp_cls_aggr_capability_t aggr;
 
 } odp_cls_capability_t;
 
@@ -682,8 +724,26 @@ typedef struct odp_cls_cos_param {
 	/** Back Pressure configuration */
 	odp_bp_param_t bp;
 
-	/** Packet input vector configuration */
+	/** Packet input vector configuration
+	 *
+	 * Generating vectors of packets can be enabled either through this
+	 * configuration or by using event aggregators as destination queue(s).
+	 * Both options cannot be enabled simultaneously in the same ODP
+	 * application.
+	 */
 	odp_pktin_vector_config_t vector;
+
+	/** Event aggregator enqueuing profile
+	 *
+	 * This parameter has an effect only when a packet is enqueued to
+	 * an aggregator queue by this CoS.
+	 *
+	 * If the profile is not one of the supported types indicated in
+	 * odp_cls_capability_t::aggr.enq_profile_type, or if the profile
+	 * type is supported but the profile cannot be supported in this CoS
+	 * instance (e.g. due to resource constraints), CoS creation will fail.
+	 */
+	odp_aggr_enq_profile_t aggr_enq_profile;
 
 } odp_cls_cos_param_t;
 

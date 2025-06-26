@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2013-2018 Linaro Limited
- * Copyright (c) 2023 Nokia
+ * Copyright (c) 2023-2025 Nokia
  */
 
 /**
@@ -13,13 +13,13 @@
 #define ODP_API_SPEC_QUEUE_H_
 #include <odp/visibility_begin.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 #include <odp/api/event_types.h>
 #include <odp/api/queue_types.h>
 #include <odp/api/std_types.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /** @addtogroup odp_queue
  *  Queues for event passing and scheduling.
@@ -156,6 +156,55 @@ int odp_queue_context_set(odp_queue_t queue, void *context, uint32_t len);
 void *odp_queue_context(odp_queue_t queue);
 
 /**
+ * Get a queue handle of an event aggregator associated with a queue
+ *
+ * Returns a queue handle that can be used to refer to an event aggregator
+ * associated with this queue. Unless otherwise noted, the returned queue
+ * handle can be used in all contexts where queue handles are used.
+ * In particular, the queue handle can be used in odp_queue_enq() to
+ * enqueue events through an event aggregator to the underlying queue.
+ * Similarly, the queue handle can be given as a destination queue or a
+ * completion queues to various ODP APIs (such as packet I/O, classifier,
+ * crypto, IPsec) to have the generated events enqueued by ODP through
+ * the event aggregator. If event aggregation is not supported by a
+ * particular event source, passing an aggregator queue handle has the same
+ * effect as passing the handle of the underlying queue, i.e. aggregation
+ * does not occur.
+ *
+ * This function does not create a new queue but merely returns a reference
+ * to an aggregator queue which has the same lifetime as the underlying
+ * queue. The underlying queue must not be destroyed as long as any of its
+ * aggregators is in use. The aggregator queue gets destroyed when the
+ * underlying queue gets destroyed. An aggregator queue handle must not
+ * be passed to odp_queue_destroy().
+ *
+ * An aggregator queue has the same enq_mode as the underlying queue.
+ *
+ * The returned queue handle cannot be used for dequeuing events. It must
+ * not be passed to odp_queue_deq() or similar. When an event that has
+ * passed through an aggregator is dequeued by the scheduler, the indicated
+ * source queue is the underlying queue, not the aggregator queue.
+ *
+ * Aggregator queues do not have queue contexts. An application must not
+ * call odp_queue_context_set() or odp_queue_context().
+ *
+ * 'aggr_index' refers to the aggregator configured with the same index
+ * in odp_queue_param_t::aggr.
+ *
+ * If 'aggr_index' is greater than odp_queue_param_t::num_aggr,
+ * ODP_QUEUE_INVALID is returned.
+ *
+ * @param queue       Queue handle
+ * @param aggr_index  Index of the event aggregator
+ *
+ * @return event aggregator queue handle
+ * @retval ODP_QUEUE_INVALID on failure
+ *
+ * @see odp_queue_create()
+ */
+odp_queue_t odp_queue_aggr(odp_queue_t queue, uint32_t aggr_index);
+
+/**
  * Enqueue an event to a queue
  *
  * Enqueues the event into the queue. The caller loses ownership of the event on
@@ -192,6 +241,36 @@ int odp_queue_enq(odp_queue_t queue, odp_event_t ev);
  * @retval <0 on failure
  */
 int odp_queue_enq_multi(odp_queue_t queue, const odp_event_t events[], int num);
+
+/**
+ * Enqueue an event with event aggregation hints
+ *
+ * Similar to odp_queue_enq() but passes an aggregation hint to the queue
+ * if the queue is an event aggregator. If the queue is not an event
+ * aggregator, works the same way as odp_queue_enq().
+ *
+ * Queuing to an event aggregator can be done using the normal enqueueing
+ * functions if an aggregation hint is not needed.
+ *
+ * Use odp_aggr_enq_param_init() to initialize param.
+ *
+ * @param queue   Queue handle
+ * @param ev      Event handle
+ * @param param   Aggregation hint parameters
+ *
+ * @retval 0 on success
+ * @retval <0 on failure
+ */
+int odp_queue_enq_aggr(odp_queue_t queue, odp_event_t ev, const odp_aggr_enq_param_t *param);
+
+/**
+ * Initialize aggregator enqueue parameters to their default values
+ *
+ * Initialize all fields of the parameter structure to their default values
+ *
+ * @param[out] param   Aggregation hint parameters
+ */
+void odp_aggr_enq_param_init(odp_aggr_enq_param_t *param);
 
 /**
  * Dequeue an event from a queue
@@ -240,6 +319,8 @@ odp_queue_type_t odp_queue_type(odp_queue_t queue);
 /**
  * Queue schedule type
  *
+ * @note The queue must be of type #ODP_QUEUE_TYPE_SCHED
+ *
  * @param queue   Queue handle
  *
  * @return Queue schedule synchronization type
@@ -249,7 +330,7 @@ odp_schedule_sync_t odp_queue_sched_type(odp_queue_t queue);
 /**
  * Queue priority
  *
- * @note Passing an invalid queue_handle will result in UNDEFINED behavior
+ * @note The queue must be of type #ODP_QUEUE_TYPE_SCHED
  *
  * @param queue   Queue handle
  *
@@ -260,7 +341,7 @@ odp_schedule_prio_t odp_queue_sched_prio(odp_queue_t queue);
 /**
  * Queue group
  *
- * @note Passing an invalid queue_handle will result in UNDEFINED behavior
+ * @note The queue must be of type #ODP_QUEUE_TYPE_SCHED
  *
  * @param queue   Queue handle
  *
@@ -273,6 +354,8 @@ odp_schedule_group_t odp_queue_sched_group(odp_queue_t queue);
  *
  * Return number of ordered locks associated with this ordered queue.
  * Lock count is defined in odp_schedule_param_t.
+ *
+ * @note The queue must be of type #ODP_QUEUE_TYPE_SCHED
  *
  * @param queue   Queue handle
  *

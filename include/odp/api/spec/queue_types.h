@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2018 Linaro Limited
+ * Copyright (c) 2024-2025 Nokia
  */
 
 /**
@@ -12,11 +13,12 @@
 #define ODP_API_SPEC_QUEUE_TYPES_H_
 #include <odp/visibility_begin.h>
 
+#include <odp/api/event_vector_types.h>
+#include <odp/api/schedule_types.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#include <odp/api/schedule_types.h>
 
 /** @defgroup odp_queue ODP QUEUE
  *  @{
@@ -52,7 +54,17 @@ typedef enum odp_queue_type_t {
 	  * Scheduled queues are connected to the scheduler. Application must
 	  * not dequeue events directly from these queues but use the scheduler
 	  * instead. */
-	ODP_QUEUE_TYPE_SCHED
+	ODP_QUEUE_TYPE_SCHED,
+
+	/** Aggregator queue
+	  *
+	  * Aggregator queues are connected to an underlying plain or scheduled
+	  * queue. They cannot be created directly but through the creation
+	  * of the underlying queue. Application must not dequeue events
+	  * directly from these queues.
+	  */
+	ODP_QUEUE_TYPE_AGGR,
+
 } odp_queue_type_t;
 
 /**
@@ -214,6 +226,9 @@ typedef struct odp_queue_capability_t {
 
 		} waitfree;
 
+		/** Event vector generation capabilities */
+		odp_event_aggr_capability_t aggr;
+
 	} plain;
 
 } odp_queue_capability_t;
@@ -291,6 +306,36 @@ typedef struct odp_queue_param_t {
 	  * default size. The default value is 0. */
 	uint32_t size;
 
+	/** Number of event aggregators
+	  *
+	  * Event aggregators are queues which try to aggregate multiple
+	  * events into vector events before enqueuing the events or vector
+	  * events to this queue. When at least one event aggregator is
+	  * configured, an event can be enqueued directly using the queue
+	  * handle of this queue or indirectly through an event aggregator
+	  * using the queue handle of the event aggregator (see
+	  * odp_queue_aggr()).
+	  *
+	  * Two events enqueued through different aggregators (or one through
+	  * an aggregator and the other directly through this queue) may
+	  * appear in any order when dequeued.
+	  *
+	  * When >= 1, configuration must be provided for each aggregator
+	  * through the 'aggr' array.
+	  *
+	  * The default value is zero.
+	  */
+	uint32_t num_aggr;
+
+	/** Event aggregator configuration parameters
+	  *
+	  * When 'num_aggr' is non-zero, 'aggr' must point to an array
+	  * of size 'num_aggr'.
+	  *
+	  * The default value is null.
+	  */
+	const odp_event_aggr_config_t *aggr;
+
 } odp_queue_param_t;
 
 /**
@@ -301,6 +346,81 @@ typedef struct odp_queue_info_t {
 	const char *name;         /**< queue name */
 	odp_queue_param_t param;  /**< queue parameters */
 } odp_queue_info_t;
+
+/**
+ * Event aggregator enqueuing parameters
+ */
+typedef struct odp_aggr_enq_param_t {
+	/** The event being enqueued is the first event of related events.
+	  *
+	  * Give a hint to an event aggregator to make room for new events
+	  * in the aggregation queue by generating an event vector of the
+	  * events already in the aggregation queue. This makes it more
+	  * likely that this event and the related events end up in the
+	  * same event vector.
+	  *
+	  * This flag has an effect only when an event is enqueued to an
+	  * event aggregation queue.
+	  *
+	  * Default value is zero.
+	  */
+	uint8_t start_of_vector :1;
+
+	/** The event being enqueued is the last event of related events.
+	  *
+	  * Give a hint to an event aggregator to stop aggregating more
+	  * events before generating an event vector. This reduces the
+	  * delay experienced by the events being aggregated.
+	  *
+	  * This flag has an effect only when an event is enqueued to an
+	  * event aggregation queue.
+	  *
+	  * Default value is zero.
+	  */
+	uint8_t end_of_vector :1;
+
+} odp_aggr_enq_param_t;
+
+/**
+ * Event aggregator enqueuing profile
+ *
+ * This profile affects how enqueuing to an event aggregator is done.
+ * Depending on the event being enqueued and the profile chosen,
+ * start-of-vector, end-of-vector or other similar hints may
+ * be passed to the aggregator along with the event.
+ *
+ * @see odp_aggr_enq_param_t
+ */
+typedef struct odp_aggr_enq_profile_t {
+	/** Profile type. The default value is ODP_AEP_TYPE_NONE. */
+	enum {
+		/** Default enqueuing behaviour with no hints being passed */
+		ODP_AEP_TYPE_NONE,
+
+		/** Try to get fragments of the same IPv4 packet into the
+		 *  same vector by enqueuing the first and last fragments
+		 *  with the start-of-vector and/or end-of-vector hints.
+		 */
+		ODP_AEP_TYPE_IPV4_FRAG,
+
+		/** Try to get fragments of the same IPv6 packet into the
+		 *  same vector by enqueuing the first and last fragments
+		 *  with the start-of-vector and/or end-of-vector hints.
+		 */
+		ODP_AEP_TYPE_IPV6_FRAG,
+
+		/** Implementation specific behaviour. */
+		ODP_AEP_TYPE_CUSTOM,
+	} type;
+
+	/** Additional implementation specific parameter for the
+	 *  ODP_AEP_TYPE_CUSTOM profile type. Must be zero for the other
+	 *  profile types.
+	 *
+	 *  The default value is zero.
+	 */
+	uintptr_t param;
+} odp_aggr_enq_profile_t;
 
 /**
  * @}

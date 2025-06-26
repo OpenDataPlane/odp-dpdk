@@ -20,6 +20,10 @@
 
 #include <stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /** @cond _ODP_HIDE_FROM_DOXYGEN_ */
 
 #ifndef _ODP_NO_INLINE
@@ -53,7 +57,7 @@ _ODP_INLINE odp_event_t odp_packet_vector_to_event(odp_packet_vector_t pktv)
 
 _ODP_INLINE uint32_t odp_packet_vector_tbl(odp_packet_vector_t pktv, odp_packet_t **pkt_tbl)
 {
-	*pkt_tbl = _odp_event_vect_get_ptr(pktv, odp_packet_t, packet);
+	*pkt_tbl = _odp_event_vect_get_ptr(pktv, odp_packet_t, event);
 
 	return _odp_event_vect_get(pktv, uint32_t, size);
 }
@@ -98,5 +102,9 @@ _ODP_INLINE void odp_packet_vector_user_flag_set(odp_packet_vector_t pktv, int v
 }
 
 /** @endcond */
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

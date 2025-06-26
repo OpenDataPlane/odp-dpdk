@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2013-2018 Linaro Limited
- * Copyright (c) 2020-2024 Nokia
+ * Copyright (c) 2020-2025 Nokia
  */
 
 /**
@@ -13,10 +13,6 @@
 #define ODP_API_SPEC_PACKET_IO_TYPES_H_
 #include <odp/visibility_begin.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 #include <odp/api/deprecated.h>
 #include <odp/api/packet_types.h>
 #include <odp/api/packet_io_stats.h>
@@ -24,6 +20,10 @@ extern "C" {
 #include <odp/api/queue_types.h>
 #include <odp/api/reassembly.h>
 #include <odp/api/std_types.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /** @defgroup odp_packet_io ODP PACKET IO
  *  @{
@@ -303,7 +303,13 @@ typedef struct odp_pktin_queue_param_t {
 	  */
 	odp_pktin_queue_param_ovr_t *queue_param_ovr;
 
-	/** Packet input vector configuration */
+	/** Packet input vector configuration
+	 *
+	 * Generating vectors of packets can be enabled either through this
+	 * configuration or by using event aggregators as destination queue(s).
+	 * Both options cannot be enabled simultaneously in the same ODP
+	 * application.
+	 */
 	odp_pktin_vector_config_t vector;
 
 } odp_pktin_queue_param_t;

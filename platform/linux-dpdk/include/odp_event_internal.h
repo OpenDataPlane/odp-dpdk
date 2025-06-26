@@ -20,12 +20,9 @@ extern "C" {
 
 #include <stdint.h>
 
-/* DPDK */
 #include <rte_config.h>
-#if defined(__clang__)
-#undef RTE_TOOLCHAIN_GCC
-#endif
 #include <rte_mbuf.h>
+
 /* ppc64 rte_memcpy.h (included through rte_mbuf.h) may define vector */
 #if defined(__PPC64__) && defined(vector)
 	#undef vector

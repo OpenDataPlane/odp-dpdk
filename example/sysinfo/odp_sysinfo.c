@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2018 Linaro Limited
- * Copyright (c) 2022-2024 Nokia
+ * Copyright (c) 2022-2025 Nokia
  */
 
  /**
@@ -490,6 +490,42 @@ static void print_auth(odp_auth_alg_t alg)
 	printf("%s ", auth_alg_name(alg));
 }
 
+static void print_atomic_lock_free(void)
+{
+	odp_atomic_op_t lock_free_u64, lock_free_u128;
+
+	odp_atomic_lock_free_u64(&lock_free_u64);
+	odp_atomic_lock_free_u128(&lock_free_u128);
+
+	printf("\n");
+	printf("  ATOMICS\n");
+	printf("    Lock-free odp_atomic_u64_t ops\n");
+	printf("      load:	     %s\n", lock_free_u64.op.load ? "yes" : "no");
+	printf("      store:	     %s\n", lock_free_u64.op.store ? "yes" : "no");
+	printf("      fetch_add:     %s\n", lock_free_u64.op.fetch_add ? "yes" : "no");
+	printf("      add:	     %s\n", lock_free_u64.op.add ? "yes" : "no");
+	printf("      fetch_sub:     %s\n", lock_free_u64.op.fetch_sub ? "yes" : "no");
+	printf("      sub:	     %s\n", lock_free_u64.op.sub ? "yes" : "no");
+	printf("      fetch_inc:     %s\n", lock_free_u64.op.fetch_inc ? "yes" : "no");
+	printf("      inc:	     %s\n", lock_free_u64.op.inc ? "yes" : "no");
+	printf("      fetch_dec:     %s\n", lock_free_u64.op.fetch_dec ? "yes" : "no");
+	printf("      dec:	     %s\n", lock_free_u64.op.dec ? "yes" : "no");
+	printf("      min:	     %s\n", lock_free_u64.op.min ? "yes" : "no");
+	printf("      fetch_min:     %s\n", lock_free_u64.op.fetch_min ? "yes" : "no");
+	printf("      max:	     %s\n", lock_free_u64.op.max ? "yes" : "no");
+	printf("      fetch_max:     %s\n", lock_free_u64.op.fetch_max ? "yes" : "no");
+	printf("      cas:	     %s\n", lock_free_u64.op.cas ? "yes" : "no");
+	printf("      xchg:	     %s\n", lock_free_u64.op.xchg ? "yes" : "no");
+	printf("      bit_fetch_set: %s\n", lock_free_u64.op.bit_fetch_set ? "yes" : "no");
+	printf("      bit_set:	     %s\n", lock_free_u64.op.bit_set ? "yes" : "no");
+	printf("      bit_fetch_clr: %s\n", lock_free_u64.op.bit_fetch_clr ? "yes" : "no");
+	printf("      bit_clr:	     %s\n", lock_free_u64.op.bit_clr ? "yes" : "no");
+	printf("    Lock-free odp_atomic_u128_t ops\n");
+	printf("      load:	     %s\n", lock_free_u128.op.load ? "yes" : "no");
+	printf("      store:	     %s\n", lock_free_u128.op.store ? "yes" : "no");
+	printf("      cas:	     %s\n", lock_free_u128.op.cas ? "yes" : "no");
+}
+
 static int pktio_capability(appl_args_t *appl_args)
 {
 	odp_pool_param_t pool_param;
@@ -706,6 +742,7 @@ static void print_timer_capa(appl_args_t *appl_args)
 
 		printf("    max_pools_combined:   %u\n", capa->max_pools_combined);
 		printf("    max_pools:            %u\n", capa->max_pools);
+		printf("    max_priority:         %u\n", capa->max_priority);
 		printf("    max_timers:           %u\n", capa->max_timers);
 		printf("    queue_type_sched:     %i\n", capa->queue_type_sched);
 		printf("    queue_type_plain:     %i\n", capa->queue_type_plain);
@@ -722,6 +759,7 @@ static void print_timer_capa(appl_args_t *appl_args)
 		printf("      max_tmo:            %" PRIu64 " nsec\n", capa->max_tmo.max_tmo);
 		printf("    periodic\n");
 		printf("      max_pools:          %u\n", capa->periodic.max_pools);
+		printf("      max_priority:       %u\n", capa->periodic.max_priority);
 		printf("      max_timers:         %u\n", capa->periodic.max_timers);
 		printf("      min_base_freq_hz:   %" PRIu64 " %" PRIu64 "/%" PRIu64 " Hz\n",
 		       capa->periodic.min_base_freq_hz.integer,
@@ -790,7 +828,6 @@ static void parse_interfaces(appl_args_t *config, const char *optarg)
 static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 {
 	int opt;
-	int long_index;
 	static const struct option longopts[] = {
 		{"interfaces", required_argument, NULL, 'i'},
 		{"help", no_argument, NULL, 'h'},
@@ -799,7 +836,7 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 	static const char *shortopts =  "i:h";
 
 	while (1) {
-		opt = getopt_long(argc, argv, shortopts, longopts, &long_index);
+		opt = getopt_long(argc, argv, shortopts, longopts, NULL);
 
 		if (opt == -1)
 			break;	/* No more options */
@@ -1018,6 +1055,8 @@ int main(int argc, char **argv)
 	       (shm_capa.flags & ODP_SHM_HW_ACCESS) ? "HW_ACCESS " : "",
 	       (shm_capa.flags & ODP_SHM_NO_HP) ? "NO_HP " : "");
 
+	print_atomic_lock_free();
+
 	printf("\n");
 	printf("  POOL\n");
 	printf("    max_pools:                %u\n", pool_capa.max_pools);
@@ -1061,6 +1100,16 @@ int main(int argc, char **argv)
 	printf("    vector.min_cache_size:    %u\n", pool_capa.vector.min_cache_size);
 	printf("    vector.max_cache_size:    %u\n", pool_capa.vector.max_cache_size);
 	printf("    vector.stats:             0x%" PRIx64 "\n", pool_capa.vector.stats.all);
+#define capa pool_capa.event_vector
+	printf("    event_vector.max_pools:         %u\n", capa.max_pools);
+	printf("    event_vector.max_num:           %u\n", capa.max_num);
+	printf("    event_vector.max_size:          %u\n", capa.max_size);
+	printf("    event_vector.max_uarea_size:    %u B\n", capa.max_uarea_size);
+	printf("    event_vector.uarea_persistence: %i\n", capa.uarea_persistence);
+	printf("    event_vector.min_cache_size:    %u\n", capa.min_cache_size);
+	printf("    event_vector.max_cache_size:    %u\n", capa.max_cache_size);
+	printf("    event_vector.stats:             0x%" PRIx64 "\n", capa.stats.all);
+#undef capa
 
 	printf("\n");
 	printf("  POOL EXT (pkt)\n");
@@ -1104,6 +1153,11 @@ int main(int argc, char **argv)
 	printf("    threshold_bp:           0x%" PRIx8 "\n", cls_capa.threshold_bp.all_bits);
 	printf("    max_mark:               %" PRIu64 "\n", cls_capa.max_mark);
 	printf("    stats.queue:            0x%" PRIx64 "\n", cls_capa.stats.queue.all_counters);
+	#define aep_type cls_capa.aggr.enq_profile_type
+	printf("    aggr.enq_profile_type.ipv4_frag: %u\n", aep_type.ipv4_frag);
+	printf("    aggr.enq_profile_type.ipv6_frag: %u\n", aep_type.ipv6_frag);
+	printf("    aggr.enq_profile_type.custom:    %u\n", aep_type.custom);
+	#undef aep_type
 
 	printf("\n");
 	printf("  COMPRESSION\n");
@@ -1124,6 +1178,8 @@ int main(int argc, char **argv)
 	printf("    compl_mode_mask:        0x%x\n", dma_capa.compl_mode_mask);
 	printf("    queue_type_sched:       %i\n", dma_capa.queue_type_sched);
 	printf("    queue_type_plain:       %i\n", dma_capa.queue_type_plain);
+	printf("    src_seg_free:           %i\n", dma_capa.src_seg_free);
+	printf("    dst_seg_alloc:          %i\n", dma_capa.dst_seg_alloc);
 	printf("    pool.max_pools:         %u\n", dma_capa.pool.max_pools);
 	printf("    pool.max_num:           %u\n", dma_capa.pool.max_num);
 	printf("    pool.max_uarea_size:    %u B\n", dma_capa.pool.max_uarea_size);
@@ -1140,6 +1196,12 @@ int main(int argc, char **argv)
 	printf("    plain.lf.max_size:    %u\n", queue_capa.plain.lockfree.max_size);
 	printf("    plain.wf.max_num:     %u\n", queue_capa.plain.waitfree.max_num);
 	printf("    plain.wf.max_size:    %u\n", queue_capa.plain.waitfree.max_size);
+	printf("    plain.aggr.max_num:   %u\n", queue_capa.plain.aggr.max_num);
+	printf("    plain.aggr.max_num_per_queue: %u\n", queue_capa.plain.aggr.max_num_per_queue);
+	printf("    plain.aggr.max_size:  %u\n", queue_capa.plain.aggr.max_size);
+	printf("    plain.aggr.min_size:  %u\n", queue_capa.plain.aggr.min_size);
+	printf("    plain.aggr.max_tmo_ns: %" PRIu64 "\n", queue_capa.plain.aggr.max_tmo_ns);
+	printf("    plain.aggr.min_tmo_ns: %" PRIu64 "\n", queue_capa.plain.aggr.min_tmo_ns);
 
 	printf("\n");
 	printf("  SCHEDULER\n");
@@ -1152,6 +1214,12 @@ int main(int argc, char **argv)
 	printf("    lockfree_queues:      %s\n", support_level(schedule_capa.lockfree_queues));
 	printf("    waitfree_queues:      %s\n", support_level(schedule_capa.waitfree_queues));
 	printf("    order_wait:           %s\n", support_level(schedule_capa.order_wait));
+	printf("    aggr.max_num:         %u\n", schedule_capa.aggr.max_num);
+	printf("    aggr.max_num_per_queue: %u\n", schedule_capa.aggr.max_num_per_queue);
+	printf("    aggr.max_size:        %u\n", schedule_capa.aggr.max_size);
+	printf("    aggr.min_size:        %u\n", schedule_capa.aggr.min_size);
+	printf("    aggr.max_tmo_ns:      %" PRIu64 "\n", schedule_capa.aggr.max_tmo_ns);
+	printf("    aggr.min_tmo_ns:      %" PRIu64 "\n", schedule_capa.aggr.min_tmo_ns);
 
 	printf("\n");
 	printf("  STASH\n");

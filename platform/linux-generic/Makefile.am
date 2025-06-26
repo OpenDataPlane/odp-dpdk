@@ -41,6 +41,7 @@ odpapiplatinclude_HEADERS = \
 		  include/odp/api/plat/event_inlines.h \
 		  include/odp/api/plat/event_inline_types.h \
 		  include/odp/api/plat/event_validation_external.h \
+		  include/odp/api/plat/event_vector_inlines.h \
 		  include/odp/api/plat/event_vector_inline_types.h \
 		  include/odp/api/plat/hash_inlines.h \
 		  include/odp/api/plat/ipsec_inlines.h \
@@ -87,6 +88,8 @@ odpapiabiarchinclude_HEADERS += \
 		  include-abi/odp/api/abi/errno.h \
 		  include-abi/odp/api/abi/event.h \
 		  include-abi/odp/api/abi/event_types.h \
+		  include-abi/odp/api/abi/event_vector.h \
+		  include-abi/odp/api/abi/event_vector_types.h \
 		  include-abi/odp/api/abi/hash.h \
 		  include-abi/odp/api/abi/init.h \
 		  include-abi/odp/api/abi/ipsec.h \
@@ -214,6 +217,7 @@ __LIB__libodp_linux_la_SOURCES = \
 			   odp_event.c \
 			   odp_event_offsets.c \
 			   odp_event_validation.c \
+			   odp_event_vector.c \
 			   odp_fdserver.c \
 			   odp_hash_crc_gen.c \
 			   odp_impl.c \
@@ -310,6 +314,7 @@ __LIB__libodp_linux_la_SOURCES += \
 			   odp_crypto_api.c \
 			   odp_dma_api.c \
 			   odp_event_api.c \
+			   odp_event_vector_api.c \
 			   odp_hash_api.c \
 			   odp_ipsec_api.c \
 			   odp_packet_api.c \

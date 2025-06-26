@@ -29,9 +29,6 @@
 #include <protocols/eth.h>
 
 #include <rte_config.h>
-#if defined(__clang__)
-#undef RTE_TOOLCHAIN_GCC
-#endif
 #include <rte_common.h>
 #include <rte_ethdev.h>
 #include <rte_ip_frag.h>
@@ -372,13 +369,19 @@ static void prepare_rss_conf(pktio_entry_t *pktio_entry,
 	uint64_t rss_hf_capa;
 	pkt_dpdk_t *pkt_dpdk = pkt_priv(pktio_entry);
 	uint16_t port_id = pkt_dpdk->port_id;
+	int ret;
 
 	memset(&pkt_dpdk->rss_conf, 0, sizeof(struct rte_eth_rss_conf));
 
 	if (!p->hash_enable)
 		return;
 
-	rte_eth_dev_info_get(port_id, &dev_info);
+	ret = rte_eth_dev_info_get(port_id, &dev_info);
+	if (ret) {
+		_ODP_ERR("Failed to read device info: %d\n", ret);
+		return;
+	}
+
 	rss_hf_capa = dev_info.flow_type_rss_offloads;
 
 	/* Print debug info about unsupported hash protocols */
@@ -842,7 +845,11 @@ static int dpdk_start(pktio_entry_t *pktio_entry)
 	    pktio_entry->state == PKTIO_STATE_STOP_PENDING)
 		rte_eth_dev_stop(pkt_dpdk->port_id);
 
-	rte_eth_dev_info_get(port_id, &dev_info);
+	ret = rte_eth_dev_info_get(port_id, &dev_info);
+	if (ret) {
+		_ODP_ERR("Failed to read device info: %d\n", ret);
+		return -1;
+	}
 
 	/* Pcap driver reconfiguration may fail if number of rx/tx queues is set to zero */
 	if (!strncmp(dev_info.driver_name, PCAP_DRV_NAME, strlen(PCAP_DRV_NAME))) {
@@ -1258,7 +1265,12 @@ static uint32_t _dpdk_vdev_mtu(uint16_t port_id)
 	int ret;
 	int sockfd;
 
-	rte_eth_dev_info_get(port_id, &dev_info);
+	ret = rte_eth_dev_info_get(port_id, &dev_info);
+	if (ret) {
+		_ODP_ERR("Failed to read device info: %d\n", ret);
+		return 0;
+	}
+
 	if_indextoname(dev_info.if_index, ifr.ifr_name);
 	sockfd = socket(AF_INET, SOCK_DGRAM, 0);
 	ret = ioctl(sockfd, SIOCGIFMTU, &ifr);
