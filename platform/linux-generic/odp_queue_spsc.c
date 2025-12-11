@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2018 Linaro Limited
- * Copyright (c) 2021 Nokia
+ * Copyright (c) 2021-2025 Nokia
  */
 
 #include <odp_debug_internal.h>
@@ -11,109 +11,78 @@
 #include <string.h>
 #include <stdio.h>
 
-static inline void event_index_from_hdr(uint32_t event_index[],
-					_odp_event_hdr_t *event_hdr[], int num)
+static int queue_spsc_enq(odp_queue_t handle, _odp_event_hdr_t *event_hdr)
 {
-	int i;
+	queue_entry_t *queue = qentry_from_handle(handle);
+	ring_spsc_ptr_t *ring_spsc = &queue->ring_spsc;
 
-	for (i = 0; i < num; i++)
-		event_index[i] = event_hdr[i]->index.u32;
-}
-
-static inline void event_index_to_hdr(_odp_event_hdr_t *event_hdr[],
-				      uint32_t event_index[], int num)
-{
-	int i;
-
-	for (i = 0; i < num; i++) {
-		event_hdr[i] = _odp_event_hdr_from_index_u32(event_index[i]);
-		odp_prefetch(event_hdr[i]);
-	}
-}
-
-static inline int spsc_enq_multi(odp_queue_t handle,
-				 _odp_event_hdr_t *event_hdr[], int num)
-{
-	queue_entry_t *queue;
-	ring_spsc_t *ring_spsc;
-	uint32_t buf_idx[num];
-
-	queue = qentry_from_handle(handle);
-	ring_spsc = &queue->ring_spsc;
-
-	event_index_from_hdr(buf_idx, event_hdr, num);
-
-	if (odp_unlikely(queue->status < QUEUE_STATUS_READY)) {
+	if (ODP_DEBUG && odp_unlikely(queue->status < QUEUE_STATUS_READY)) {
 		_ODP_ERR("Bad queue status\n");
 		return -1;
 	}
 
-	return ring_spsc_enq_multi(ring_spsc, queue->ring_data,
-				   queue->ring_mask, buf_idx, num);
+	if (odp_likely(ring_spsc_ptr_enq(ring_spsc, queue->ring_data, queue->ring_mask,
+					 (uintptr_t)event_hdr)))
+		return 0;
+
+	return -1;
 }
 
-static inline int spsc_deq_multi(odp_queue_t handle,
-				 _odp_event_hdr_t *event_hdr[], int num)
+static inline int queue_spsc_enq_multi(odp_queue_t handle, _odp_event_hdr_t *event_hdr[], int num)
 {
-	queue_entry_t *queue;
-	int num_deq;
-	ring_spsc_t *ring_spsc;
-	uint32_t buf_idx[num];
+	queue_entry_t *queue = qentry_from_handle(handle);
+	ring_spsc_ptr_t *ring_spsc = &queue->ring_spsc;
 
-	queue = qentry_from_handle(handle);
-	ring_spsc = &queue->ring_spsc;
-
-	if (odp_unlikely(queue->status < QUEUE_STATUS_READY)) {
-		/* Bad queue, or queue has been destroyed. */
+	if (ODP_DEBUG && odp_unlikely(queue->status < QUEUE_STATUS_READY)) {
+		_ODP_ERR("Bad queue status\n");
 		return -1;
 	}
 
-	num_deq = ring_spsc_deq_multi(ring_spsc, queue->ring_data,
-				      queue->ring_mask, buf_idx, num);
-
-	if (num_deq == 0)
-		return 0;
-
-	event_index_to_hdr(event_hdr, buf_idx, num_deq);
-
-	return num_deq;
-}
-
-static int queue_spsc_enq_multi(odp_queue_t handle, _odp_event_hdr_t *event_hdr[],
-				int num)
-{
-	return spsc_enq_multi(handle, event_hdr, num);
-}
-
-static int queue_spsc_enq(odp_queue_t handle, _odp_event_hdr_t *event_hdr)
-{
-	int ret;
-
-	ret = spsc_enq_multi(handle, &event_hdr, 1);
-
-	if (ret == 1)
-		return 0;
-	else
-		return -1;
-}
-
-static int queue_spsc_deq_multi(odp_queue_t handle, _odp_event_hdr_t *event_hdr[],
-				int num)
-{
-	return spsc_deq_multi(handle, event_hdr, num);
+	return ring_spsc_ptr_enq_multi(ring_spsc, queue->ring_data,
+				       queue->ring_mask, (uintptr_t *)event_hdr, num);
 }
 
 static _odp_event_hdr_t *queue_spsc_deq(odp_queue_t handle)
 {
-	_odp_event_hdr_t *event_hdr = NULL;
-	int ret;
+	queue_entry_t *queue = qentry_from_handle(handle);
+	ring_spsc_ptr_t *ring_spsc = &queue->ring_spsc;
+	_odp_event_hdr_t *event_hdr;
 
-	ret = spsc_deq_multi(handle, &event_hdr, 1);
-
-	if (ret == 1)
-		return event_hdr;
-	else
+	if (ODP_DEBUG && odp_unlikely(queue->status < QUEUE_STATUS_READY)) {
+		/* Bad queue, or queue has been destroyed. */
 		return NULL;
+	}
+
+	if (ring_spsc_ptr_deq(ring_spsc, queue->ring_data, queue->ring_mask,
+			      (uintptr_t *)&event_hdr) == 0)
+		return NULL;
+
+	odp_prefetch(event_hdr);
+
+	return event_hdr;
+}
+
+static inline int queue_spsc_deq_multi(odp_queue_t handle, _odp_event_hdr_t *event_hdr[], int num)
+{
+	queue_entry_t *queue = qentry_from_handle(handle);
+	ring_spsc_ptr_t *ring_spsc = &queue->ring_spsc;
+	uint32_t num_deq;
+
+	if (ODP_DEBUG && odp_unlikely(queue->status < QUEUE_STATUS_READY)) {
+		/* Bad queue, or queue has been destroyed. */
+		return -1;
+	}
+
+	num_deq = ring_spsc_ptr_deq_multi(ring_spsc, queue->ring_data, queue->ring_mask,
+					  (uintptr_t *)event_hdr, num);
+
+	if (num_deq == 0)
+		return 0;
+
+	for (uint32_t i = 0; i < num_deq; i++)
+		odp_prefetch(event_hdr[i]);
+
+	return num_deq;
 }
 
 void _odp_queue_spsc_init(queue_entry_t *queue, uint32_t queue_size)
@@ -130,5 +99,5 @@ void _odp_queue_spsc_init(queue_entry_t *queue, uint32_t queue_size)
 
 	queue->ring_data = &_odp_queue_glb->ring_data[offset];
 	queue->ring_mask = queue_size - 1;
-	ring_spsc_init(&queue->ring_spsc);
+	ring_spsc_ptr_init(&queue->ring_spsc);
 }

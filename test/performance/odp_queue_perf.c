@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2018 Linaro Limited
- * Copyright (c) 2021-2024 Nokia
+ * Copyright (c) 2021-2025 Nokia
  */
 
 /**
@@ -95,7 +95,9 @@ static void print_usage(void)
 	       "  -c, --num_cpu          Number of worker threads (default 1)\n"
 	       "  -q, --num_queue        Number of queues (default 1)\n"
 	       "  -e, --num_event        Number of events per queue (default 1)\n"
-	       "  -b, --burst_size       Maximum number of events per operation (default 1)\n"
+	       "  -b, --burst_size       Maximum number of events per operation (default 1). When 0,\n"
+	       "                         single event enqueue/dequeue functions are used instead\n"
+	       "                         of multi event variants.\n"
 	       "  -p, --private          Use separate queues for each worker\n"
 	       "  -r, --num_round        Number of rounds\n"
 	       "  -l, --lockfree         Lock-free queues\n"
@@ -431,57 +433,100 @@ static int destroy_queues(test_global_t *global)
 	return ret;
 }
 
-static int run_test(void *arg)
+static inline uint32_t next_queues(odp_queue_t *src_queue, odp_queue_t *dst_queue,
+				   odp_queue_t src_queue_tbl[], odp_queue_t dst_queue_tbl[],
+				   uint32_t num_queue, uint32_t queue_idx)
 {
-	uint64_t c1, c2, cycles, nsec;
-	odp_time_t t1, t2;
-	uint32_t rounds;
-	int num_ev;
-	thread_args_t *thr_args = arg;
-	test_global_t *global = thr_args->global;
-	test_stat_t *stat = &thr_args->stats;
+	*src_queue = src_queue_tbl[queue_idx];
+	*dst_queue = dst_queue_tbl[queue_idx];
+
+	queue_idx++;
+	if (queue_idx == num_queue)
+		queue_idx = 0;
+
+	return queue_idx;
+}
+
+static inline void run_single_event(odp_queue_t src_queue_tbl[], odp_queue_t dst_queue_tbl[],
+				    uint32_t num_queue, uint32_t num_round, test_stat_t *stat)
+{
 	odp_queue_t src_queue, dst_queue;
-	uint64_t num_deq_retry = 0;
-	uint64_t num_enq_retry = 0;
-	uint64_t events = 0;
-	const uint32_t num_queue = thr_args->num_queues;
-	const uint32_t num_round = thr_args->options->num_round;
-	const uint32_t num_workers = thr_args->options->num_cpu;
-	const uint32_t max_burst = thr_args->options->max_burst;
+	odp_event_t ev;
 	uint32_t queue_idx = 0;
-	odp_event_t ev[max_burst];
-	odp_queue_t src_queue_tbl[MAX_QUEUES];
-	odp_queue_t dst_queue_tbl[MAX_QUEUES];
 
-	for (uint32_t i = 0; i < num_queue; i++) {
-		src_queue_tbl[i] = global->queue[thr_args->src_queue_id[i]];
-		dst_queue_tbl[i] = global->queue[thr_args->dst_queue_id[i]];
+	for (uint32_t i = 0; i < num_round; i++) {
+		while (1) {
+			queue_idx = next_queues(&src_queue, &dst_queue, src_queue_tbl,
+						dst_queue_tbl, num_queue, queue_idx);
+			ev = odp_queue_deq(src_queue);
+			if (odp_unlikely(ev == ODP_EVENT_INVALID)) {
+				stat->deq_retry++;
+				continue;
+			}
+			break;
+		};
+
+		while (1) {
+			int ret = odp_queue_enq(dst_queue, ev);
+
+			if (odp_unlikely(ret != 0)) {
+				stat->enq_retry++;
+				continue;
+			}
+			break;
+		};
+		stat->events++;
 	}
+	stat->rounds = num_round;
+}
 
-	/* Start all workers at the same time */
-	odp_barrier_wait(thr_args->barrier);
+static inline void run_single_event_cleanup(odp_queue_t src_queue_tbl[],
+					    odp_queue_t dst_queue_tbl[],
+					    uint32_t num_queue, uint32_t num_workers,
+					    odp_atomic_u32_t *workers_finished)
+{
+	odp_queue_t src_queue, dst_queue;
+	odp_event_t ev;
+	uint32_t queue_idx = 0;
 
-	t1 = odp_time_local_strict();
-	c1 = odp_cpu_cycles();
+	while (odp_atomic_load_u32(workers_finished) < num_workers) {
+		queue_idx = next_queues(&src_queue, &dst_queue, src_queue_tbl, dst_queue_tbl,
+					num_queue, queue_idx);
+		ev = odp_queue_deq(src_queue);
+		if (odp_unlikely(ev == ODP_EVENT_INVALID))
+			continue;
 
-	for (rounds = 0; rounds < num_round; rounds++) {
-		int num_enq = 0;
+		while (1) {
+			int ret = odp_queue_enq(dst_queue, ev);
+
+			if (odp_unlikely(ret != 0))
+				continue;
+			break;
+		};
+	}
+}
+
+static inline void run_multi_event(odp_queue_t src_queue_tbl[], odp_queue_t dst_queue_tbl[],
+				   uint32_t num_queue, uint32_t num_round, uint32_t max_burst,
+				   test_stat_t *stat)
+{
+	odp_queue_t src_queue, dst_queue;
+	odp_event_t ev[max_burst];
+	int num_ev, num_enq;
+	uint32_t queue_idx = 0;
+
+	for (uint32_t i = 0; i < num_round; i++) {
+		num_enq = 0;
 
 		do {
-			src_queue = src_queue_tbl[queue_idx];
-			dst_queue = dst_queue_tbl[queue_idx];
-
-			queue_idx++;
-			if (queue_idx == num_queue)
-				queue_idx = 0;
-
+			queue_idx = next_queues(&src_queue, &dst_queue, src_queue_tbl,
+						dst_queue_tbl, num_queue, queue_idx);
 			num_ev = odp_queue_deq_multi(src_queue, ev, max_burst);
-
 			if (odp_unlikely(num_ev < 0))
 				ODPH_ABORT("odp_queue_deq_multi() failed\n");
 
 			if (odp_unlikely(num_ev == 0))
-				num_deq_retry++;
+				stat->deq_retry++;
 
 		} while (num_ev == 0);
 
@@ -494,28 +539,26 @@ static int run_test(void *arg)
 			num_enq += num;
 
 			if (odp_unlikely(num_enq != num_ev))
-				num_enq_retry++;
+				stat->enq_retry++;
 		}
-		events += num_ev;
+		stat->events += num_ev;
 	}
+	stat->rounds = num_round;
+}
 
-	c2 = odp_cpu_cycles();
-	t2 = odp_time_local_strict();
+static inline void run_multi_event_cleanup(odp_queue_t src_queue_tbl[], odp_queue_t dst_queue_tbl[],
+					   uint32_t num_queue, uint32_t max_burst,
+					   uint32_t num_workers, odp_atomic_u32_t *workers_finished)
+{
+	odp_queue_t src_queue, dst_queue;
+	odp_event_t ev[max_burst];
+	int num_ev, num_enq;
+	uint32_t queue_idx = 0;
 
-	odp_atomic_inc_u32(&global->workers_finished);
-
-	/* Keep forwarding events in pair mode until all workers have completed */
-	while (thr_args->options->mode == TEST_MODE_PAIR &&
-	       odp_atomic_load_u32(&global->workers_finished) < num_workers) {
-		int num_enq = 0;
-
-		src_queue = src_queue_tbl[queue_idx];
-		dst_queue = dst_queue_tbl[queue_idx];
-
-		queue_idx++;
-		if (queue_idx == num_queue)
-			queue_idx = 0;
-
+	while (odp_atomic_load_u32(workers_finished) < num_workers) {
+		num_enq = 0;
+		queue_idx = next_queues(&src_queue, &dst_queue, src_queue_tbl, dst_queue_tbl,
+					num_queue, queue_idx);
 		num_ev = odp_queue_deq_multi(src_queue, ev, max_burst);
 
 		while (num_enq < num_ev) {
@@ -527,16 +570,65 @@ static int run_test(void *arg)
 			num_enq += num;
 		}
 	}
+}
+
+static int run_test(void *arg)
+{
+	uint64_t c1, c2, cycles, nsec;
+	odp_time_t t1, t2;
+	thread_args_t *thr_args = arg;
+	test_global_t *global = thr_args->global;
+	test_stat_t *stat = &thr_args->stats;
+	test_stat_t local_stat = {0};
+	const uint32_t num_queue = thr_args->num_queues;
+	const uint32_t num_round = thr_args->options->num_round;
+	const uint32_t num_workers = thr_args->options->num_cpu;
+	const uint32_t max_burst = thr_args->options->max_burst;
+	const odp_bool_t single_event = max_burst == 0 ? 1 : 0;
+	odp_queue_t src_queue_tbl[MAX_QUEUES];
+	odp_queue_t dst_queue_tbl[MAX_QUEUES];
+
+	for (uint32_t i = 0; i < num_queue; i++) {
+		src_queue_tbl[i] = global->queue[thr_args->src_queue_id[i]];
+		dst_queue_tbl[i] = global->queue[thr_args->dst_queue_id[i]];
+	}
+
+	/* Start all workers at the same time */
+	odp_barrier_wait(thr_args->barrier);
+
+	t1 = odp_time_local_strict();
+	c1 = odp_cpu_cycles_strict();
+
+	if (single_event)
+		run_single_event(src_queue_tbl, dst_queue_tbl, num_queue, num_round, &local_stat);
+	else
+		run_multi_event(src_queue_tbl, dst_queue_tbl, num_queue, num_round, max_burst,
+				&local_stat);
+
+	c2 = odp_cpu_cycles_strict();
+	t2 = odp_time_local_strict();
+
+	odp_atomic_inc_u32(&global->workers_finished);
+
+	/* Keep forwarding events in pair mode until all workers have completed */
+	if (thr_args->options->mode == TEST_MODE_PAIR) {
+		if (single_event)
+			run_single_event_cleanup(src_queue_tbl, dst_queue_tbl, num_queue,
+						 num_workers, &global->workers_finished);
+		else
+			run_multi_event_cleanup(src_queue_tbl, dst_queue_tbl, num_queue, max_burst,
+						num_workers, &global->workers_finished);
+	}
 
 	nsec   = odp_time_diff_ns(t2, t1);
 	cycles = odp_cpu_cycles_diff(c2, c1);
 
-	stat->rounds = rounds;
-	stat->events = events;
+	stat->rounds = local_stat.rounds;
+	stat->events = local_stat.events;
 	stat->nsec   = nsec;
 	stat->cycles = cycles;
-	stat->deq_retry = num_deq_retry;
-	stat->enq_retry = num_enq_retry;
+	stat->deq_retry = local_stat.deq_retry;
+	stat->enq_retry = local_stat.enq_retry;
 
 	return 0;
 }
@@ -758,7 +850,7 @@ static int output_results(test_global_t *global)
 	       (1000.0 * events_sum) / nsec_ave);
 
 	if (global->common_options.is_export) {
-		if (test_common_write("cycles per event,events per sec (M),TOTAL events per sec (M),"
+		if (test_common_write("cycles per event,events per sec (M),total events per sec (M),"
 				      "dequeue retries,enqueue retries\n")) {
 			test_common_write_term();
 			return -1;

@@ -138,6 +138,7 @@ noinst_HEADERS = \
 		  include/odp_classification_datamodel.h \
 		  include/odp_classification_internal.h \
 		  include/odp_config_internal.h \
+		  include/odp_crypto_internal.h \
 		  include/odp_debug_internal.h \
 		  include/odp_errno_define.h \
 		  include/odp_event_internal.h \
@@ -173,15 +174,20 @@ noinst_HEADERS = \
 		  include/odp_random_std_internal.h \
 		  include/odp_random_openssl_internal.h \
 		  include/odp_ring_common.h \
-		  include/odp_ring_internal.h \
 		  include/odp_ring_mpmc_internal.h \
+		  include/odp_ring_mpmc_ptr_internal.h \
 		  include/odp_ring_mpmc_u32_internal.h \
 		  include/odp_ring_mpmc_u64_internal.h \
-		  include/odp_ring_ptr_internal.h \
+		  include/odp_ring_mpmc_rst_internal.h \
+		  include/odp_ring_mpmc_rst_ptr_internal.h \
+		  include/odp_ring_mpmc_rst_u32_internal.h \
+		  include/odp_ring_mpmc_rst_u64_internal.h \
 		  include/odp_ring_spsc_internal.h \
+		  include/odp_ring_spsc_ptr_internal.h \
+		  include/odp_ring_spsc_u32_internal.h \
 		  include/odp_ring_st_internal.h \
-		  include/odp_ring_u32_internal.h \
-		  include/odp_ring_u64_internal.h \
+		  include/odp_ring_st_ptr_internal.h \
+		  include/odp_ring_st_u32_internal.h \
 		  include/odp_schedule_if.h \
 		  include/odp_shm_internal.h \
 		  include/odp_sorted_list_internal.h \
@@ -212,6 +218,7 @@ __LIB__libodp_linux_la_SOURCES = \
 			   miniz/miniz_tinfl.c miniz/miniz_tinfl.h \
 			   odp_cpumask.c \
 			   odp_cpumask_task.c \
+			   odp_crypto.c \
 			   odp_dma.c \
 			   odp_errno.c \
 			   odp_event.c \

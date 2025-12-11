@@ -42,7 +42,8 @@
 
 typedef struct test_options_t {
 	uint32_t num_cpu;
-	uint32_t num_queue;
+	uint32_t num_queue; /* Active queues (excludes dummy queues) */
+	uint32_t num_def;
 	uint32_t num_low;
 	uint32_t num_high;
 	uint32_t num_dummy;
@@ -50,14 +51,18 @@ typedef struct test_options_t {
 	uint32_t num_sched;
 	int      num_group;
 	uint32_t num_join;
+	uint32_t num_prefetch;
 	uint32_t max_burst;
+	odp_cache_stash_config_t cache_stash_config;
 	odp_pool_type_t pool_type;
 	int      queue_type;
+	int      thr_type;
 	int      forward;
 	int      fairness;
 	uint32_t event_size;
 	uint32_t queue_size;
-	uint32_t tot_queue;
+	uint32_t forward_group_size;
+	uint32_t tot_queue; /* All queues (includes dummy queues) */
 	uint32_t tot_event;
 	int      touch_data;
 	uint32_t stress;
@@ -99,9 +104,16 @@ typedef struct test_global_t {
 	odp_schedule_config_t schedule_config;
 	odp_barrier_t barrier;
 	odp_pool_t pool;
+	odp_pool_t evv_pool;
 	odp_cpumask_t cpumask;
 	odp_shm_t ctx_shm;
-	odp_queue_t queue[MAX_QUEUES];
+	struct {
+		odp_queue_t dummy[MAX_QUEUES];
+		odp_queue_t def_prio[MAX_QUEUES];
+		odp_queue_t low_prio[MAX_QUEUES];
+		odp_queue_t high_prio[MAX_QUEUES];
+		odp_queue_t all[MAX_QUEUES];
+	} queue;
 	odp_schedule_group_t group[MAX_GROUPS];
 	odph_thread_t thread_tbl[ODP_THREAD_COUNT_MAX];
 	test_stat_t stat[ODP_THREAD_COUNT_MAX];
@@ -134,6 +146,65 @@ static int setup_sig_handler(void)
 	return 0;
 }
 
+static void set_cache_stash(odp_cache_stash_region_t *region, uint32_t level, uint32_t len,
+			    uint32_t offset)
+{
+	if (level == 0) {
+		region->l2.len = len;
+		region->l2.offset = offset;
+	} else {
+		region->l3.len = len;
+		region->l3.offset = offset;
+	}
+}
+
+static int parse_cache_stash_config(char *optarg, test_options_t *test_options)
+{
+	uint32_t region, level, offset, len;
+	odp_cache_stash_config_t *stash_config = &test_options->cache_stash_config;
+
+	if (sscanf(optarg, "%u,%u,%u,%u", &region, &level, &offset, &len) != 4) {
+		ODPH_ERR("Invalid number of arguments for cache stashing\n");
+		return -1;
+	}
+
+	if (region > 3) {
+		ODPH_ERR("Invalid region for cache stashing: %u\n", region);
+		return -1;
+	}
+
+	if (level > 1) {
+		ODPH_ERR("Invalid cache level for cache stashing: %u\n", level);
+		return -1;
+	}
+
+	if (len == 0) {
+		ODPH_ERR("Invalid len for cache stashing: %u\n", len);
+		return -1;
+	}
+
+	stash_config->regions.all |= (1U << (region * 2 + level));
+
+	switch (region) {
+	case 0:
+		set_cache_stash(&stash_config->event_metadata, level, len, offset);
+		break;
+	case 1:
+		set_cache_stash(&stash_config->event_data, level, len, offset);
+		break;
+	case 2:
+		set_cache_stash(&stash_config->event_user_area, level, len, offset);
+		break;
+	case 3:
+		set_cache_stash(&stash_config->queue_context, level, len, offset);
+		break;
+	default:
+		break;
+	}
+
+	return 0;
+}
+
 static void print_usage(void)
 {
 	printf("\n"
@@ -142,11 +213,9 @@ static void print_usage(void)
 	       "Usage: odp_sched_perf [options]\n"
 	       "\n"
 	       "  -c, --num_cpu          Number of CPUs (worker threads). 0: all available CPUs. Default: 1.\n"
-	       "  -q, --num_queue        Number of queues. Default: 1.\n"
-	       "  -L, --num_low          Number of lowest priority queues out of '--num_queue' queues. Rest of\n"
-	       "                         the queues are default (or highest) priority. Default: 0.\n"
-	       "  -H, --num_high         Number of highest priority queues out of '--num_queue' queues. Rest of\n"
-	       "                         the queues are default (or lowest) priority. Default: 0.\n"
+	       "  -q, --num_def          Number of default priority queues. Default: 1.\n"
+	       "  -L, --num_low          Number of lowest priority queues. Default: 0.\n"
+	       "  -H, --num_high         Number of highest priority queues. Default: 0.\n"
 	       "  -d, --num_dummy        Number of empty queues. Default: 0.\n"
 	       "  -e, --num_event        Number of events per queue. Default: 100.\n"
 	       "  -s, --num_sched        Number of events to schedule per thread. If zero, the application runs\n"
@@ -158,8 +227,19 @@ static void print_usage(void)
 	       "                         if num_cpu is multiple of num_group and num_group is multiple of num_join.\n"
 	       "                         0: join all groups (default)\n"
 	       "  -b, --burst            Maximum number of events per operation. Default: 100.\n"
+	       "  -C, --cache_stash      Enable common group level cache stashing. Format: region,level,offset,len\n"
+	       "                         region: 0: Event metadata, 1: Event data, 2: Event user area, 3: Queue context\n"
+	       "                         level: 0: L2, 1: L3\n"
+	       "                         offset/len: in bytes\n"
+	       "                         E.g.: 1,0,16,32 enables 32-byte L2 stash on event data with a 16-byte offset\n"
+	       "                         For stashing multiple regions, use -C multiple times\n"
 	       "  -t, --type             Queue type. 0: parallel, 1: atomic, 2: ordered. Default: 0.\n"
-	       "  -f, --forward          0: Keep event in the original queue, 1: Forward event to the next queue. Default: 0.\n"
+	       "  -T, --thr_type         Thread type. 0: worker thread, 1: control thread. Default: 0\n"
+	       "  -f, --forward          0: Keep event in the original queue (default)\n"
+	       "                         1: Forward event between all queues\n"
+	       "                         N: Forward events between queues of N identical queue sets. In this mode 'num_def',\n"
+	       "                            'num_low', and 'num_high' options are per set, so the total number of active\n"
+	       "                            queues is N * (num_def + num_low + num_high).\n"
 	       "  -F, --fairness         0: Don't count events per queue, 1: Count and report events relative to average. Default: 0.\n"
 	       "  -w, --wait_ns          Number of nsec to wait before enqueueing events. Default: 0.\n"
 	       "  -S, --stress           CPU stress function(s) to be called for each event data word (requires -n or -m).\n"
@@ -175,7 +255,8 @@ static void print_usage(void)
 	       "  -m, --rw_words         Number of event data words (uint64_t) to modify before enqueueing it. Default: 0.\n"
 	       "  -u, --uarea_rd         Number of user area words (uint64_t) to read on every event. Default: 0.\n"
 	       "  -U, --uarea_rw         Number of user area words (uint64_t) to modify on every event. Default: 0.\n"
-	       "  -p, --pool_type        Pool type. 0: buffer, 1: packet. Default: 0.\n"
+	       "  -p, --pool_type        Pool type. 0: buffer, 1: packet, 2: event vector. Default: 0.\n"
+	       "  -P, --prefetch         Number of events to be prefetched. Default: 0.\n"
 	       "  -v, --verbose          Verbose output.\n"
 	       "  -h, --help             This help\n"
 	       "\n");
@@ -190,7 +271,7 @@ static int parse_options(int argc, char *argv[], test_options_t *test_options)
 
 	static const struct option longopts[] = {
 		{"num_cpu",      required_argument, NULL, 'c'},
-		{"num_queue",    required_argument, NULL, 'q'},
+		{"num_def",      required_argument, NULL, 'q'},
 		{"num_low",      required_argument, NULL, 'L'},
 		{"num_high",     required_argument, NULL, 'H'},
 		{"num_dummy",    required_argument, NULL, 'd'},
@@ -199,7 +280,9 @@ static int parse_options(int argc, char *argv[], test_options_t *test_options)
 		{"num_group",    required_argument, NULL, 'g'},
 		{"num_join",     required_argument, NULL, 'j'},
 		{"burst",        required_argument, NULL, 'b'},
+		{"cache_stash",  required_argument, NULL, 'C'},
 		{"type",         required_argument, NULL, 't'},
+		{"thr_type",     required_argument, NULL, 'T'},
 		{"forward",      required_argument, NULL, 'f'},
 		{"fairness",     required_argument, NULL, 'F'},
 		{"wait_ns",      required_argument, NULL, 'w'},
@@ -211,35 +294,19 @@ static int parse_options(int argc, char *argv[], test_options_t *test_options)
 		{"uarea_rd",     required_argument, NULL, 'u'},
 		{"uarea_rw",     required_argument, NULL, 'U'},
 		{"pool_type",    required_argument, NULL, 'p'},
+		{"prefetch",     required_argument, NULL, 'P'},
 		{"verbose",      no_argument,       NULL, 'v'},
 		{"help",         no_argument,       NULL, 'h'},
 		{NULL, 0, NULL, 0}
 	};
 
-	static const char *shortopts = "+c:q:L:H:d:e:s:g:j:b:t:f:F:w:S:k:l:n:m:p:u:U:vh";
+	static const char *shortopts = "+c:q:L:H:d:e:s:g:j:b:C:t:T:f:F:w:S:k:l:n:m:p:P:u:U:vh";
 
 	test_options->num_cpu    = 1;
-	test_options->num_queue  = 1;
-	test_options->num_low    = 0;
-	test_options->num_high   = 0;
-	test_options->num_dummy  = 0;
+	test_options->num_def    = 1;
 	test_options->num_event  = 100;
 	test_options->num_sched  = 100000;
-	test_options->num_group  = 0;
-	test_options->num_join   = 0;
 	test_options->max_burst  = 100;
-	test_options->queue_type = 0;
-	test_options->forward    = 0;
-	test_options->fairness   = 0;
-	test_options->stress     = 0;
-	test_options->ctx_rd_words = 0;
-	test_options->ctx_rw_words = 0;
-	test_options->rd_words   = 0;
-	test_options->rw_words   = 0;
-	test_options->uarea_rd   = 0;
-	test_options->uarea_rw   = 0;
-	test_options->wait_ns    = 0;
-	test_options->verbose    = 0;
 
 	while (1) {
 		opt = getopt_long(argc, argv, shortopts, longopts, NULL);
@@ -252,7 +319,7 @@ static int parse_options(int argc, char *argv[], test_options_t *test_options)
 			test_options->num_cpu = atoi(optarg);
 			break;
 		case 'q':
-			test_options->num_queue = atoi(optarg);
+			test_options->num_def = atoi(optarg);
 			break;
 		case 'L':
 			test_options->num_low = atoi(optarg);
@@ -275,11 +342,18 @@ static int parse_options(int argc, char *argv[], test_options_t *test_options)
 		case 'j':
 			test_options->num_join = atoi(optarg);
 			break;
+		case 'C':
+			if (parse_cache_stash_config(optarg, test_options))
+				ret = -1;
+			break;
 		case 'b':
 			test_options->max_burst = atoi(optarg);
 			break;
 		case 't':
 			test_options->queue_type = atoi(optarg);
+			break;
+		case 'T':
+			test_options->thr_type = atoi(optarg);
 			break;
 		case 'f':
 			test_options->forward = atoi(optarg);
@@ -311,6 +385,9 @@ static int parse_options(int argc, char *argv[], test_options_t *test_options)
 		case 'p':
 			pool_type = atoi(optarg);
 			break;
+		case 'P':
+			test_options->num_prefetch = atoi(optarg);
+			break;
 		case 'w':
 			test_options->wait_ns = atoll(optarg);
 			break;
@@ -325,13 +402,20 @@ static int parse_options(int argc, char *argv[], test_options_t *test_options)
 			break;
 		}
 	}
-	if (pool_type == 0) {
+	switch (pool_type) {
+	case 0:
 		test_options->pool_type = ODP_POOL_BUFFER;
-	} else if (pool_type == 1) {
+		break;
+	case 1:
 		test_options->pool_type = ODP_POOL_PACKET;
-	} else {
+		break;
+	case 2:
+		test_options->pool_type = ODP_POOL_EVENT_VECTOR;
+		break;
+	default:
 		ODPH_ERR("Invalid pool type: %d.\n", pool_type);
 		ret = -1;
+		break;
 	}
 
 	test_options->touch_data = test_options->rd_words ||
@@ -342,14 +426,22 @@ static int parse_options(int argc, char *argv[], test_options_t *test_options)
 		ret = -1;
 	}
 
-	if ((test_options->num_queue + test_options->num_dummy) > MAX_QUEUES) {
-		ODPH_ERR("Too many queues. Max supported %i.\n", MAX_QUEUES);
+	test_options->forward_group_size = test_options->num_def + test_options->num_low +
+						test_options->num_high;
+	/* In queue group forward mode the queue count options are per group */
+	if (test_options->forward > 1) {
+		test_options->num_def *= test_options->forward;
+		test_options->num_low *= test_options->forward;
+		test_options->num_high *= test_options->forward;
+	} else if (test_options->forward < 0) {
+		ODPH_ERR("Invalid forward mode %i.\n", test_options->forward);
 		ret = -1;
 	}
 
-	if ((test_options->num_low + test_options->num_high) > test_options->num_queue) {
-		ODPH_ERR("Number of low/high prio %u/%u exceed number of queues %u.\n",
-			 test_options->num_low, test_options->num_high, test_options->num_queue);
+	test_options->num_queue = test_options->num_def + test_options->num_low +
+					test_options->num_high;
+	if ((test_options->num_queue + test_options->num_dummy) > MAX_QUEUES) {
+		ODPH_ERR("Too many queues. Max supported %i.\n", MAX_QUEUES);
 		ret = -1;
 	}
 
@@ -370,7 +462,7 @@ static int parse_options(int argc, char *argv[], test_options_t *test_options)
 		       num_group, num_group - (test_options->num_cpu * num_join));
 
 		if (test_options->forward) {
-			printf("Error: Cannot forward when some queues are not served.\n");
+			ODPH_ERR("Cannot forward when some queues are not served.\n");
 			ret = -1;
 		}
 	}
@@ -383,9 +475,8 @@ static int parse_options(int argc, char *argv[], test_options_t *test_options)
 	test_options->queue_size = test_options->num_event;
 
 	if (test_options->forward) {
-		/* When forwarding, all events may end up into
-		 * a single queue */
-		test_options->queue_size = test_options->tot_event;
+		/* When forwarding, events may accumulate into a single queue. */
+		test_options->queue_size *= test_options->forward_group_size;
 	}
 
 	if (test_options->forward || test_options->fairness)
@@ -422,15 +513,14 @@ static int set_num_cpu(test_global_t *global)
 
 	/* One thread used for the main thread */
 	if (num_cpu > ODP_THREAD_COUNT_MAX - 1) {
-		printf("Error: Too many workers. Maximum is %i.\n",
-		       ODP_THREAD_COUNT_MAX - 1);
+		ODPH_ERR("Too many workers. Maximum is %i.\n", ODP_THREAD_COUNT_MAX - 1);
 		return -1;
 	}
 
 	ret = odp_cpumask_default_worker(&global->cpumask, num_cpu);
 
 	if (num_cpu && ret != num_cpu) {
-		printf("Error: Too many workers. Max supported %i\n.", ret);
+		ODPH_ERR("Too many workers. Max supported %i\n.", ret);
 		return -1;
 	}
 
@@ -463,7 +553,7 @@ static void print_options(test_options_t *options)
 	printf("\nScheduler performance test\n");
 	printf("  num sched                 %u\n", options->num_sched);
 	printf("  num cpu                   %u\n", options->num_cpu);
-	printf("  num queues                %u\n", options->num_queue);
+	printf("  num default prio queues   %u\n", options->num_def);
 	printf("  num lowest prio queues    %u\n", options->num_low);
 	printf("  num highest prio queues   %u\n", options->num_high);
 	printf("  num empty queues          %u\n", options->num_dummy);
@@ -478,7 +568,7 @@ static void print_options(test_options_t *options)
 		printf("\n");
 
 	printf("  num join                  %u\n", options->num_join);
-	printf("  forward events            %i\n", options->forward ? 1 : 0);
+	printf("  forward events            %i\n", options->forward);
 	printf("  wait                      %" PRIu64 " nsec\n", options->wait_ns);
 	printf("  events per queue          %u\n", options->num_event);
 	printf("  queue size                %u\n", options->queue_size);
@@ -504,28 +594,108 @@ static void print_options(test_options_t *options)
 		printf(" (rd: %u, rw: %u)", 8 * options->uarea_rd, 8 * options->uarea_rw);
 	printf("\n");
 
-	printf("  pool type                 %s\n", options->pool_type == ODP_POOL_BUFFER ?
-						   "buffer" : "packet");
+	printf("  pool type                 %s\n", options->pool_type == ODP_POOL_BUFFER ? "buffer"
+						   : options->pool_type == ODP_POOL_PACKET ? "packet"
+						   : "event vector");
 
-	printf("  queue type                %s\n\n", options->queue_type == 0 ? "parallel" :
-						     options->queue_type == 1 ? "atomic" :
-						     "ordered");
+	printf("  queue type                %s\n", options->queue_type == 0 ? "parallel" :
+						   options->queue_type == 1 ? "atomic" :
+						   "ordered");
+	printf("  thread type               %s\n\n", options->thr_type == 0 ? "worker" :
+						     "control");
 
 	printf("Extra rd/rw ops per event (queue context + user area + event data)\n");
 	printf("  read                      %u bytes\n", options->tot_rd_size);
 	printf("  write                     %u bytes\n\n", options->tot_rw_size);
 }
 
-static int create_pool(test_global_t *global)
+static int create_pool_helper(const char *name, odp_pool_t *pool_ptr, odp_pool_type_t pool_type,
+			      uint32_t tot_event, uint32_t uarea_size,
+			      uint32_t event_size)
 {
 	odp_pool_capability_t pool_capa;
 	odp_pool_param_t pool_param;
-	odp_pool_t pool;
-	uint32_t max_num, max_size, max_uarea;
+	uint32_t max_num, max_uarea;
+	uint32_t max_vector_size = 0;
+	uint32_t max_size = 0;
+	uint32_t max_vector_pools = 0;
+
+	if (odp_pool_capability(&pool_capa)) {
+		ODPH_ERR("Pool capa failed\n");
+		return -1;
+	}
+
+	if (pool_type == ODP_POOL_BUFFER) {
+		max_num = pool_capa.buf.max_num;
+		max_size = pool_capa.buf.max_size;
+		max_uarea = pool_capa.buf.max_uarea_size;
+	} else if (pool_type == ODP_POOL_PACKET) {
+		max_num = pool_capa.pkt.max_num;
+		max_size = pool_capa.pkt.max_seg_len;
+		max_uarea = pool_capa.pkt.max_uarea_size;
+	} else {
+		max_num = pool_capa.event_vector.max_num;
+		max_vector_size = pool_capa.event_vector.max_size;
+		max_uarea = pool_capa.event_vector.max_uarea_size;
+		max_vector_pools = pool_capa.event_vector.max_pools;
+	}
+
+	if (max_num && tot_event > max_num) {
+		ODPH_ERR("Max events supported %u\n", max_num);
+		return -1;
+	}
+
+	if (max_size && event_size > max_size) {
+		ODPH_ERR("Max supported event size %u\n", max_size);
+		return -1;
+	}
+
+	if (uarea_size > max_uarea) {
+		ODPH_ERR("Max supported user area size %u\n", max_uarea);
+		return -1;
+	}
+
+	if (pool_type == ODP_POOL_EVENT_VECTOR && !max_vector_pools) {
+		ODPH_ERR("Event vector pools not supported\n");
+		return 77; /* Return 77 to indicate "test skipped" to Automake */
+	}
+
+	odp_pool_param_init(&pool_param);
+	pool_param.type = pool_type;
+
+	if (pool_param.type == ODP_POOL_BUFFER) {
+		pool_param.buf.num        = tot_event;
+		pool_param.buf.size       = event_size;
+		pool_param.buf.align      = 8;
+		pool_param.buf.uarea_size = uarea_size;
+	} else if (pool_param.type == ODP_POOL_PACKET) {
+		pool_param.pkt.num        = tot_event;
+		pool_param.pkt.len        = event_size;
+		pool_param.pkt.seg_len    = event_size;
+		pool_param.pkt.align      = 8;
+		pool_param.pkt.uarea_size = uarea_size;
+	} else {
+		pool_param.event_vector.num        = tot_event;
+		pool_param.event_vector.uarea_size = uarea_size;
+		pool_param.event_vector.max_size   = max_vector_size;
+	}
+
+	*pool_ptr = odp_pool_create(name, &pool_param);
+	if (*pool_ptr == ODP_POOL_INVALID) {
+		ODPH_ERR("Pool creation failed for type %d (%s)\n", pool_param.type, name);
+		return -1;
+	}
+
+	return 0;
+}
+
+static int create_pool(test_global_t *global)
+{
 	test_options_t *test_options = &global->test_options;
 	uint32_t tot_event = test_options->tot_event;
 	uint32_t event_size = 16;
 	uint32_t uarea_size = test_options->uarea_size;
+	int ret;
 
 	if (test_options->touch_data) {
 		event_size = test_options->rd_words + test_options->rw_words;
@@ -533,59 +703,17 @@ static int create_pool(test_global_t *global)
 	}
 	test_options->event_size = event_size;
 
-	if (odp_pool_capability(&pool_capa)) {
-		ODPH_ERR("Error: pool capa failed\n");
-		return -1;
-	}
+	ret = create_pool_helper("sched perf", &global->pool, test_options->pool_type, tot_event,
+				 uarea_size, event_size);
+	if (ret)
+		return ret;
 
-	if (test_options->pool_type == ODP_POOL_BUFFER) {
-		max_num = pool_capa.buf.max_num;
-		max_size = pool_capa.buf.max_size;
-		max_uarea = pool_capa.buf.max_uarea_size;
-	} else {
-		max_num = pool_capa.pkt.max_num;
-		max_size = pool_capa.pkt.max_seg_len;
-		max_uarea = pool_capa.pkt.max_uarea_size;
+	if (test_options->pool_type == ODP_POOL_EVENT_VECTOR) {
+		ret = create_pool_helper("sched perf event vector content", &global->evv_pool,
+					 ODP_POOL_BUFFER, tot_event, 0, event_size);
+		if (ret)
+			return ret;
 	}
-
-	if (max_num && tot_event > max_num) {
-		ODPH_ERR("Error: max events supported %u\n", max_num);
-		return -1;
-	}
-
-	if (max_size && event_size > max_size) {
-		ODPH_ERR("Error: max supported event size %u\n", max_size);
-		return -1;
-	}
-
-	if (uarea_size > max_uarea) {
-		ODPH_ERR("Error: max supported user area size %u\n", max_uarea);
-		return -1;
-	}
-
-	odp_pool_param_init(&pool_param);
-	if (test_options->pool_type == ODP_POOL_BUFFER) {
-		pool_param.type = ODP_POOL_BUFFER;
-		pool_param.buf.num = tot_event;
-		pool_param.buf.size = event_size;
-		pool_param.buf.align = 8;
-		pool_param.buf.uarea_size = uarea_size;
-	} else {
-		pool_param.type = ODP_POOL_PACKET;
-		pool_param.pkt.num = tot_event;
-		pool_param.pkt.len = event_size;
-		pool_param.pkt.seg_len = event_size;
-		pool_param.pkt.align = 8;
-		pool_param.pkt.uarea_size = uarea_size;
-	}
-
-	pool = odp_pool_create("sched perf", &pool_param);
-	if (pool == ODP_POOL_INVALID) {
-		ODPH_ERR("Error: pool create failed\n");
-		return -1;
-	}
-
-	global->pool = pool;
 
 	return 0;
 }
@@ -597,30 +725,32 @@ static int create_groups(test_global_t *global)
 	uint32_t i;
 	test_options_t *test_options = &global->test_options;
 	uint32_t num_group = test_options->num_group;
+	odp_schedule_group_param_t group_param;
 
 	if (test_options->num_group <= 0)
 		return 0;
 
 	if (odp_schedule_capability(&sched_capa)) {
-		printf("Error: schedule capability failed\n");
+		ODPH_ERR("Schedule capability failed\n");
 		return -1;
 	}
 
 	if (num_group > sched_capa.max_groups) {
-		printf("Error: Too many sched groups (max_groups capa %u)\n",
-		       sched_capa.max_groups);
+		ODPH_ERR("Too many sched groups (max_groups capa %u)\n", sched_capa.max_groups);
 		return -1;
 	}
 
 	odp_thrmask_zero(&thrmask);
+	odp_schedule_group_param_init(&group_param);
+	group_param.cache_stash_hints.common = test_options->cache_stash_config;
 
 	for (i = 0; i < num_group; i++) {
 		odp_schedule_group_t group;
 
-		group = odp_schedule_group_create("test_group", &thrmask);
+		group = odp_schedule_group_create_2("test_group", &thrmask, &group_param);
 
 		if (group == ODP_SCHED_GROUP_INVALID) {
-			printf("Error: Group create failed %u\n", i);
+			ODPH_ERR("Group create failed %u\n", i);
 			return -1;
 		}
 
@@ -630,12 +760,154 @@ static int create_groups(test_global_t *global)
 	return 0;
 }
 
-static int create_queues(test_global_t *global)
+static void setup_forwarding(test_global_t *global)
+{
+	const test_options_t *test_options = &global->test_options;
+	const uint32_t forward_group_size = test_options->forward_group_size;
+	const uint32_t num_groups = test_options->forward;
+	uint32_t num_low = test_options->num_low;
+	uint32_t num_high = test_options->num_high;
+	uint32_t num_def = test_options->num_def;
+	const uint32_t num_high_per_group = num_high / num_groups;
+	const uint32_t num_low_per_group = num_low / num_groups;
+	const uint32_t num_def_per_group = num_def / num_groups;
+	odp_queue_t cur_queue, first_queue;
+
+	for (uint32_t i = 0; i < num_groups; i++) {
+		uint32_t num_group_low = num_low_per_group;
+		uint32_t num_group_high = num_high_per_group;
+		uint32_t num_group_def = num_def_per_group;
+
+		if (num_group_low) {
+			first_queue = global->queue.low_prio[--num_low];
+			num_group_low--;
+		} else if (num_group_high) {
+			first_queue = global->queue.high_prio[--num_high];
+			num_group_high--;
+		} else {
+			first_queue = global->queue.def_prio[--num_def];
+			num_group_def--;
+		}
+		cur_queue = first_queue;
+
+		for (uint32_t j = 0; j < forward_group_size; j++) {
+			queue_context_t *qc = (queue_context_t *)odp_queue_context(cur_queue);
+			odp_queue_t *next_queue = &qc->next;
+			const uint32_t next_id = j + 1;
+
+			if (next_id == forward_group_size) {
+				/* Last queue points to the first one */
+				*next_queue = first_queue;
+				break;
+			}
+
+			/* Mix low, high and default priority queues */
+			switch (next_id % 3) {
+			case 0:
+				if (num_group_low) {
+					*next_queue = global->queue.low_prio[--num_low];
+					num_group_low--;
+				} else if (num_group_high) {
+					*next_queue = global->queue.high_prio[--num_high];
+					num_group_high--;
+				} else {
+					*next_queue = global->queue.def_prio[--num_def];
+					num_group_def--;
+				}
+				break;
+			case 1:
+				if (num_group_high) {
+					*next_queue = global->queue.high_prio[--num_high];
+					num_group_high--;
+				} else if (num_group_low) {
+					*next_queue = global->queue.low_prio[--num_low];
+					num_group_low--;
+				} else {
+					*next_queue = global->queue.def_prio[--num_def];
+					num_group_def--;
+				}
+				break;
+			default:
+				if (num_group_def) {
+					*next_queue = global->queue.def_prio[--num_def];
+					num_group_def--;
+				} else if (num_group_high) {
+					*next_queue = global->queue.high_prio[--num_high];
+					num_group_high--;
+				} else {
+					*next_queue = global->queue.low_prio[--num_low];
+					num_group_low--;
+				}
+				break;
+			}
+			cur_queue = *next_queue;
+		}
+	}
+}
+
+static int set_queue_contexts(test_global_t *global, uint8_t *ctx)
+{
+	test_options_t *test_options = &global->test_options;
+	uint32_t tot_queue = test_options->tot_queue;
+	uint32_t ctx_size = test_options->ctx_size;
+	uint32_t first = test_options->num_dummy;
+
+	if (ctx_size == 0)
+		return 0;
+
+	for (uint32_t i = first; i < tot_queue; i++) {
+		if (test_options->fairness) {
+			/* Cast increases alignment, but it's ok, since ctx and ctx_size are both
+			 * cache line aligned. */
+			queue_context_t *qc = (queue_context_t *)(uintptr_t)ctx;
+
+			odp_atomic_init_u64(&qc->count, 0);
+		}
+
+		if (odp_queue_context_set(global->queue.all[i], ctx, ctx_size)) {
+			ODPH_ERR("Context set failed %u\n", i);
+			return -1;
+		}
+
+		ctx += ctx_size;
+	}
+
+	if (test_options->forward)
+		setup_forwarding(global);
+
+	return 0;
+}
+
+static int create_queues(test_global_t *global, odp_queue_param_t *queue_param, int num_groups,
+			 odp_queue_t queue[], uint32_t num)
+{
+	static uint32_t total_queues;
+
+	for (uint32_t i = 0; i < num; i++) {
+		if (num_groups > 0) /* Divide all queues evenly into groups */
+			queue_param->sched.group = global->group[(total_queues + i) % num_groups];
+
+		queue[i] = odp_queue_create(NULL, queue_param);
+
+		if (queue[i] == ODP_QUEUE_INVALID) {
+			ODPH_ERR("Queue create failed %u\n", i);
+			return -1;
+		}
+	}
+
+	/* Copy all queue handles to a single array for simpler initialization and clean-up */
+	for (uint32_t i = 0; i < num; i++)
+		global->queue.all[total_queues + i] = queue[i];
+	total_queues += num;
+
+	return 0;
+}
+
+static int create_all_queues(test_global_t *global)
 {
 	odp_queue_param_t queue_param;
 	odp_queue_t queue;
 	odp_schedule_sync_t sync;
-	odp_schedule_prio_t prio;
 	uint32_t i, j, first;
 	test_options_t *test_options = &global->test_options;
 	uint32_t event_size = test_options->event_size;
@@ -644,7 +916,7 @@ static int create_queues(test_global_t *global)
 	uint32_t tot_queue = test_options->tot_queue;
 	uint32_t num_low = test_options->num_low;
 	uint32_t num_high = test_options->num_high;
-	uint32_t num_default = test_options->num_queue - num_low - num_high;
+	uint32_t num_default = test_options->num_def;
 	int num_group = test_options->num_group;
 	int type = test_options->queue_type;
 	odp_pool_t pool = global->pool;
@@ -660,22 +932,20 @@ static int create_queues(test_global_t *global)
 		sync = ODP_SCHED_SYNC_ORDERED;
 
 	if (tot_queue > global->schedule_config.num_queues) {
-		printf("Max queues supported %u\n",
-		       global->schedule_config.num_queues);
+		ODPH_ERR("Max queues supported %u\n", global->schedule_config.num_queues);
 		return -1;
 	}
 
 	if (global->schedule_config.queue_size &&
 	    queue_size > global->schedule_config.queue_size) {
-		printf("Max queue size %u\n",
-		       global->schedule_config.queue_size);
+		ODPH_ERR("Max queue size %u\n", global->schedule_config.queue_size);
 		return -1;
 	}
 
 	if (ctx_size) {
 		ctx = odp_shm_addr(global->ctx_shm);
 		if (ctx == NULL) {
-			printf("Bad queue context\n");
+			ODPH_ERR("Bad queue context\n");
 			return -1;
 		}
 	}
@@ -683,6 +953,7 @@ static int create_queues(test_global_t *global)
 	odp_queue_param_init(&queue_param);
 	queue_param.type = ODP_QUEUE_TYPE_SCHED;
 	queue_param.sched.sync  = sync;
+	queue_param.sched.prio = odp_schedule_default_prio();
 	queue_param.size = queue_size;
 	if (num_group == -1)
 		queue_param.sched.group = ODP_SCHED_GROUP_WORKER;
@@ -691,100 +962,44 @@ static int create_queues(test_global_t *global)
 
 	first = test_options->num_dummy;
 
-	for (i = 0; i < tot_queue; i++) {
-		if (num_group > 0) {
-			odp_schedule_group_t group;
+	/* Dummy queues */
+	if (create_queues(global, &queue_param, num_group, global->queue.dummy,
+			  test_options->num_dummy)) {
+		ODPH_ERR("Dummy queue create failed\n");
+		return -1;
+	}
 
-			/* Divide all queues evenly into groups */
-			group = global->group[i % num_group];
-			queue_param.sched.group = group;
-		}
+	/* Lowest priority queues */
+	queue_param.sched.prio = odp_schedule_min_prio();
+	if (create_queues(global, &queue_param, num_group, global->queue.low_prio, num_low)) {
+		ODPH_ERR("Lowest priority queue create failed\n");
+		return -1;
+	}
 
-		/* Create low, high and default queues in a mixed order. Dummy queues are created
-		 * first and with default priority. */
-		prio = odp_schedule_default_prio();
-		if (i >= first) {
-			switch (i % 3) {
-			case 0:
-				if (num_low) {
-					num_low--;
-					prio = odp_schedule_min_prio();
-				} else if (num_high) {
-					num_high--;
-					prio = odp_schedule_max_prio();
-				} else {
-					num_default--;
-				}
-				break;
-			case 1:
-				if (num_high) {
-					num_high--;
-					prio = odp_schedule_max_prio();
-				} else if (num_low) {
-					num_low--;
-					prio = odp_schedule_min_prio();
-				} else {
-					num_default--;
-				}
-				break;
-			default:
-				if (num_default) {
-					num_default--;
-				} else if (num_high) {
-					num_high--;
-					prio = odp_schedule_max_prio();
-				} else {
-					num_low--;
-					prio = odp_schedule_min_prio();
-				}
-				break;
-			}
-		}
+	/* Highest priority queues */
+	queue_param.sched.prio = odp_schedule_max_prio();
+	if (create_queues(global, &queue_param, num_group, global->queue.high_prio, num_high)) {
+		ODPH_ERR("Highest priority queue create failed\n");
+		return -1;
+	}
 
-		queue_param.sched.prio = prio;
+	/* Default priority queues */
+	queue_param.sched.prio = odp_schedule_default_prio();
+	if (create_queues(global, &queue_param, num_group, global->queue.def_prio, num_default)) {
+		ODPH_ERR("Default priority queue create failed\n");
+		return -1;
+	}
 
-		queue = odp_queue_create(NULL, &queue_param);
-
-		global->queue[i] = queue;
-
-		if (queue == ODP_QUEUE_INVALID) {
-			printf("Error: Queue create failed %u\n", i);
-			return -1;
-		}
+	if (set_queue_contexts(global, ctx)) {
+		ODPH_ERR("Set queue context failed\n");
+		return -1;
 	}
 
 	/* Store events into queues. Dummy queues are allocated from
 	 * the beginning of the array, so that usage of those affect allocation
 	 * of active queues. Dummy queues are left empty. */
 	for (i = first; i < tot_queue; i++) {
-		queue = global->queue[i];
-
-		if (ctx_size) {
-			/*
-			 * Cast increases alignment, but it's ok, since ctx and
-			 * ctx_size are both cache line aligned.
-			 */
-			queue_context_t *qc = (queue_context_t *)(uintptr_t)ctx;
-
-			if (test_options->forward) {
-				uint32_t next = i + 1;
-
-				if (next == tot_queue)
-					next = first;
-
-				qc->next = global->queue[next];
-			}
-
-			if (test_options->fairness)
-				odp_atomic_init_u64(&qc->count, 0);
-
-			if (odp_queue_context_set(queue, ctx, ctx_size)) {
-				printf("Error: Context set failed %u\n", i);
-				return -1;
-			}
-
-			ctx += ctx_size;
-		}
+		queue = global->queue.all[i];
 
 		for (j = 0; j < num_event; j++) {
 			odp_event_t ev;
@@ -795,36 +1010,76 @@ static int create_queues(test_global_t *global)
 				odp_buffer_t buf = odp_buffer_alloc(pool);
 
 				if (buf == ODP_BUFFER_INVALID) {
-					ODPH_ERR("Error: alloc failed %u/%u\n", i, j);
+					ODPH_ERR("Alloc failed %u/%u\n", i, j);
 					return -1;
 				}
 				ev = odp_buffer_to_event(buf);
 
 				data  = odp_buffer_addr(buf);
 				words = odp_buffer_size(buf) / 8;
-			} else {
+			} else if (test_options->pool_type == ODP_POOL_PACKET) {
 				odp_packet_t pkt = odp_packet_alloc(pool, event_size);
 
 				if (pkt == ODP_PACKET_INVALID) {
-					ODPH_ERR("Error: alloc failed %u/%u\n", i, j);
+					ODPH_ERR("Alloc failed %u/%u\n", i, j);
 					return -1;
 				}
 				ev = odp_packet_to_event(pkt);
 
 				data  = odp_packet_data(pkt);
 				words = odp_packet_seg_len(pkt) / 8;
+			} else {
+				odp_event_vector_t evv = odp_event_vector_alloc(pool);
+				odp_event_t *tbl;
+				odp_buffer_t buf;
+
+				if (evv == ODP_EVENT_VECTOR_INVALID) {
+					ODPH_ERR("Alloc failed %u/%u\n", i, j);
+					return -1;
+				}
+				odp_event_vector_tbl(evv, &tbl);
+				buf = odp_buffer_alloc(global->evv_pool);
+
+				if (buf == ODP_BUFFER_INVALID) {
+					ODPH_ERR("Alloc failed %u/%u\n", i, j);
+					odp_event_vector_free(evv);
+					return -1;
+				}
+				tbl[0] = odp_buffer_to_event(buf);
+				data   = odp_buffer_addr(buf);
+				words  = odp_buffer_size(buf) / 8;
+
+				odp_event_vector_size_set(evv, 1);
+				ev = odp_event_vector_to_event(evv);
 			}
 
 			init_val = init_data(init_val, data, words);
 
 			if (odp_queue_enq(queue, ev)) {
-				ODPH_ERR("Error: enqueue failed %u/%u\n", i, j);
+				ODPH_ERR("Enqueue failed %u/%u\n", i, j);
 				return -1;
 			}
 		}
 	}
 
 	return 0;
+}
+
+static int schedule_config(test_global_t *global)
+{
+	test_options_t *test_options = &global->test_options;
+	odp_schedule_group_param_t group_param;
+
+	odp_schedule_config_init(&global->schedule_config);
+	odp_schedule_group_param_init(&group_param);
+	group_param.cache_stash_hints.common = test_options->cache_stash_config;
+
+	if (test_options->num_group == -1)
+		global->schedule_config.sched_group.worker_param = group_param;
+	else if (test_options->num_group == 0)
+		global->schedule_config.sched_group.all_param = group_param;
+
+	return odp_schedule_config(&global->schedule_config);
 }
 
 static int join_group(test_global_t *global, int grp_index, int thr)
@@ -837,8 +1092,7 @@ static int join_group(test_global_t *global, int grp_index, int thr)
 	group = global->group[grp_index];
 
 	if (odp_schedule_group_join(group, &thrmask)) {
-		printf("Error: Group %i join failed (thr %i)\n",
-		       grp_index, thr);
+		ODPH_ERR("Group %i join failed (thr %i)\n", grp_index, thr);
 		return -1;
 	}
 
@@ -856,8 +1110,7 @@ static int join_all_groups(test_global_t *global, int thr)
 
 	for (i = 0; i < num_group; i++) {
 		if (join_group(global, i, thr)) {
-			printf("Error: Group %u join failed (thr %i)\n",
-			       i, thr);
+			ODPH_ERR("Group %u join failed (thr %i)\n", i, thr);
 			return -1;
 		}
 	}
@@ -880,7 +1133,7 @@ static void print_queue_fairness(test_global_t *global)
 		return;
 
 	for (i = first; i < tot_queue; i++) {
-		ctx = odp_queue_context(global->queue[i]);
+		ctx = odp_queue_context(global->queue.all[i]);
 		total += odp_atomic_load_u64(&ctx->count);
 	}
 
@@ -892,7 +1145,7 @@ static void print_queue_fairness(test_global_t *global)
 	printf("        1      2      3      4      5      6      7      8      9     10");
 
 	for (i = first; i < tot_queue; i++) {
-		ctx = odp_queue_context(global->queue[i]);
+		ctx = odp_queue_context(global->queue.all[i]);
 
 		if ((i % 10) == 0)
 			printf("\n   ");
@@ -922,9 +1175,9 @@ static int destroy_queues(test_global_t *global)
 		odp_event_free(ev);
 
 	for (i = 0; i < tot_queue; i++) {
-		if (global->queue[i] != ODP_QUEUE_INVALID) {
-			if (odp_queue_destroy(global->queue[i])) {
-				printf("Error: Queue destroy failed %u\n", i);
+		if (global->queue.all[i] != ODP_QUEUE_INVALID) {
+			if (odp_queue_destroy(global->queue.all[i])) {
+				ODPH_ERR("Queue destroy failed %u\n", i);
 				return -1;
 			}
 		}
@@ -946,7 +1199,7 @@ static int destroy_groups(test_global_t *global)
 		odp_schedule_group_t group = global->group[i];
 
 		if (odp_schedule_group_destroy(group)) {
-			printf("Error: Group destroy failed %u\n", i);
+			ODPH_ERR("Group destroy failed %u\n", i);
 			return -1;
 		}
 	}
@@ -1002,12 +1255,19 @@ static uint64_t rw_data(odp_event_t ev[], int num, uint32_t rd_words, uint32_t r
 	uint64_t *data;
 	uint32_t j;
 	uint64_t sum = 0;
+	odp_event_vector_t evv;
+	odp_event_t *tbl;
 
 	for (int i = 0; i < num; i++) {
-		if (pool_type == ODP_POOL_BUFFER)
+		if (pool_type == ODP_POOL_BUFFER) {
 			data = odp_buffer_addr(odp_buffer_from_event(ev[i]));
-		else
+		} else if (pool_type == ODP_POOL_PACKET) {
 			data = odp_packet_data(odp_packet_from_event(ev[i]));
+		} else {
+			evv = odp_event_vector_from_event(ev[i]);
+			odp_event_vector_tbl(evv, &tbl);
+			data = odp_buffer_addr(odp_buffer_from_event(tbl[0]));
+		}
 
 		for (j = 0; j < rd_words; j++)
 			sum += data[j];
@@ -1028,12 +1288,19 @@ static uint64_t rw_data_stress(odp_event_t ev[], int num, uint32_t rd_words, uin
 	uint64_t word;
 	uint32_t j;
 	uint64_t sum = 0;
+	odp_event_vector_t evv;
+	odp_event_t *tbl;
 
 	for (int i = 0; i < num; i++) {
-		if (pool_type == ODP_POOL_BUFFER)
+		if (pool_type == ODP_POOL_BUFFER) {
 			data = odp_buffer_addr(odp_buffer_from_event(ev[i]));
-		else
+		} else if (pool_type == ODP_POOL_PACKET) {
 			data = odp_packet_data(odp_packet_from_event(ev[i]));
+		} else {
+			evv = odp_event_vector_from_event(ev[i]);
+			odp_event_vector_tbl(evv, &tbl);
+			data = odp_buffer_addr(odp_buffer_from_event(tbl[0]));
+		}
 
 		for (j = 0; j < rd_words + rw_words; j++) {
 			word = data[j];
@@ -1082,6 +1349,7 @@ static int test_sched(void *arg)
 	const uint32_t uarea_rd = test_options->uarea_rd;
 	const uint32_t uarea_rw = test_options->uarea_rw;
 	const odp_pool_type_t pool_type = test_options->pool_type;
+	const uint32_t num_prefetch = test_options->num_prefetch;
 	int touch_ctx = ctx_rd_words || ctx_rw_words;
 	odp_atomic_u32_t *exit_threads = &global->exit_threads;
 	uint32_t ctx_offset = 0;
@@ -1187,13 +1455,15 @@ static int test_sched(void *arg)
 				odp_time_wait_ns(wait_ns);
 			}
 
+			if (num_prefetch)
+				odp_schedule_prefetch(num_prefetch);
+
 			while (num) {
 				num_enq = odp_queue_enq_multi(queue, &ev[i],
 							      num);
 
 				if (num_enq < 0) {
-					printf("Error: Enqueue failed. Round %u\n",
-					       rounds);
+					ODPH_ERR("Enqueue failed. Round %u\n", rounds);
 					odp_event_free_multi(&ev[i], num);
 					ret = -1;
 					break;
@@ -1222,7 +1492,7 @@ static int test_sched(void *arg)
 				} else if (odp_time_diff_ns(cur_time,
 							    last_retry_ts) >
 						MAX_SCHED_WAIT_NS) {
-					printf("Error: scheduling timed out\n");
+					ODPH_ERR("Scheduling timed out\n");
 					ret = -1;
 					break;
 				}
@@ -1231,7 +1501,7 @@ static int test_sched(void *arg)
 
 		/* <0 not specified as an error but checking anyway */
 		if (num < 0) {
-			printf("Error: Sched failed. Round %u\n", rounds);
+			ODPH_ERR("Sched failed. Round %u\n", rounds);
 			ret = -1;
 			break;
 		}
@@ -1283,7 +1553,7 @@ static int test_sched(void *arg)
 			queue = ((queue_context_t *)odp_queue_context(queue))->next;
 
 		if (odp_queue_enq(queue, ev[0])) {
-			printf("Error: Queue enqueue failed\n");
+			ODPH_ERR("Queue enqueue failed\n");
 			odp_event_free(ev[0]);
 			ret = -1;
 		}
@@ -1301,6 +1571,8 @@ static int start_workers(test_global_t *global, odp_instance_t instance)
 	uint32_t num_join  = test_options->num_join;
 	int num_cpu   = test_options->num_cpu;
 	odph_thread_param_t thr_param[num_cpu];
+	odp_thread_type_t thr_type = test_options->thr_type ?
+				     ODP_THREAD_CONTROL : ODP_THREAD_WORKER;
 
 	odp_atomic_init_u32(&global->num_worker, num_cpu);
 
@@ -1314,7 +1586,7 @@ static int start_workers(test_global_t *global, odp_instance_t instance)
 		odph_thread_param_init(&thr_param[i]);
 		thr_param[i].start    = test_sched;
 		thr_param[i].arg      = &global->thread_arg[i];
-		thr_param[i].thr_type = ODP_THREAD_WORKER;
+		thr_param[i].thr_type = thr_type;
 
 		global->thread_arg[i].global = global;
 		global->thread_arg[i].first_group = 0;
@@ -1333,7 +1605,7 @@ static int start_workers(test_global_t *global, odp_instance_t instance)
 				 num_cpu);
 
 	if (ret != num_cpu) {
-		printf("Error: thread create failed %i\n", ret);
+		ODPH_ERR("Thread create failed %i\n", ret);
 		return -1;
 	}
 
@@ -1470,7 +1742,7 @@ static int output_results(test_global_t *global)
 		if (test_common_write("schedule calls,enqueue calls,duration (msec),"
 				      "num cycles (M),cycles per round,cycles per event,"
 				      "ave events received,rounds per sec (M),"
-				      "events per sec (M), TOTAL events per sec (M)\n")) {
+				      "events per sec (M),total events per sec (M)\n")) {
 			ODPH_ERR("Export failed\n");
 			test_common_write_term();
 			return -1;
@@ -1502,17 +1774,18 @@ int main(int argc, char **argv)
 	odp_shm_t shm;
 	test_global_t *global;
 	test_common_options_t common_options;
+	int ret;
 
 	/* Let helper collect its own arguments (e.g. --odph_proc) */
 	argc = odph_parse_options(argc, argv);
 	if (odph_options(&helper_options)) {
-		ODPH_ERR("Error: Reading ODP helper options failed.\n");
+		ODPH_ERR("Reading ODP helper options failed\n");
 		exit(EXIT_FAILURE);
 	}
 
 	argc = test_common_parse_options(argc, argv);
 	if (test_common_options(&common_options)) {
-		ODPH_ERR("Error: Reading test options failed\n");
+		ODPH_ERR("Reading test options failed\n");
 		exit(EXIT_FAILURE);
 	}
 
@@ -1529,25 +1802,25 @@ int main(int argc, char **argv)
 
 	/* Init ODP before calling anything else */
 	if (odp_init_global(&instance, &init, NULL)) {
-		printf("Error: Global init failed.\n");
+		ODPH_ERR("Global init failed\n");
 		return -1;
 	}
 
 	/* Init this thread */
 	if (odp_init_local(instance, ODP_THREAD_CONTROL)) {
-		printf("Error: Local init failed.\n");
+		ODPH_ERR("Local init failed\n");
 		return -1;
 	}
 
 	shm = odp_shm_reserve("sched_perf_global", sizeof(test_global_t), ODP_CACHE_LINE_SIZE, 0);
 	if (shm == ODP_SHM_INVALID) {
-		ODPH_ERR("Error: SHM reserve failed.\n");
+		ODPH_ERR("SHM reserve failed\n");
 		exit(EXIT_FAILURE);
 	}
 
 	global = odp_shm_addr(shm);
 	if (global == NULL) {
-		ODPH_ERR("Error: SHM alloc failed\n");
+		ODPH_ERR("SHM alloc failed\n");
 		exit(EXIT_FAILURE);
 	}
 	test_globals = global;
@@ -1560,7 +1833,7 @@ int main(int argc, char **argv)
 	global->common_options = common_options;
 
 	if (setup_sig_handler()) {
-		ODPH_ERR("Error: signal handler setup failed\n");
+		ODPH_ERR("Signal handler setup failed\n");
 		exit(EXIT_FAILURE);
 	}
 
@@ -1576,25 +1849,25 @@ int main(int argc, char **argv)
 		global->ctx_shm = odp_shm_reserve("queue contexts", size,
 						  ODP_CACHE_LINE_SIZE, 0);
 		if (global->ctx_shm == ODP_SHM_INVALID) {
-			printf("Error: SHM reserve %" PRIu64 " bytes failed\n",
-			       size);
+			ODPH_ERR("SHM reserve %" PRIu64 " bytes failed\n", size);
 			return -1;
 		}
 	}
 
-	odp_schedule_config_init(&global->schedule_config);
-	odp_schedule_config(&global->schedule_config);
+	if (schedule_config(global))
+		return -1;
 
 	if (set_num_cpu(global))
 		return -1;
 
-	if (create_pool(global))
-		return -1;
+	ret = create_pool(global);
+	if (ret)
+		return ret;
 
 	if (create_groups(global))
 		return -1;
 
-	if (create_queues(global))
+	if (create_all_queues(global))
 		return -1;
 
 	if (global->test_options.verbose)
@@ -1620,7 +1893,13 @@ int main(int argc, char **argv)
 		return -1;
 
 	if (odp_pool_destroy(global->pool)) {
-		printf("Error: Pool destroy failed.\n");
+		ODPH_ERR("Pool destroy failed.\n");
+		return -1;
+	}
+
+	if (global->test_options.pool_type == ODP_POOL_EVENT_VECTOR &&
+	    odp_pool_destroy(global->evv_pool)) {
+		ODPH_ERR("Event vector content pool destroy failed.\n");
 		return -1;
 	}
 
@@ -1628,17 +1907,17 @@ int main(int argc, char **argv)
 		odp_shm_free(global->ctx_shm);
 
 	if (odp_shm_free(shm)) {
-		ODPH_ERR("Error: SHM free failed.\n");
+		ODPH_ERR("SHM free failed\n");
 		exit(EXIT_FAILURE);
 	}
 
 	if (odp_term_local()) {
-		printf("Error: term local failed.\n");
+		ODPH_ERR("Term local failed\n");
 		return -1;
 	}
 
 	if (odp_term_global(instance)) {
-		printf("Error: term global failed.\n");
+		ODPH_ERR("Term global failed\n");
 		return -1;
 	}
 

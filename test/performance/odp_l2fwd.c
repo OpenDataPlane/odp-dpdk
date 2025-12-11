@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2014-2018 Linaro Limited
- * Copyright (c) 2019-2024 Nokia
+ * Copyright (c) 2019-2025 Nokia
  * Copyright (c) 2020-2021 Marvell
  */
 
@@ -147,6 +147,8 @@ typedef struct {
 	uint32_t num_vec;       /* Number of vectors per pool */
 	uint64_t vec_tmo_ns;    /* Vector formation timeout in ns */
 	uint32_t vec_size;      /* Vector size */
+	uint64_t wait_ns;       /* Extra wait in ns */
+	uint64_t memcpy_bytes;  /* Extra memcpy bytes */
 	int verbose;            /* Verbose output */
 	uint32_t packet_len;    /* Maximum packet length supported */
 	uint32_t seg_len;       /* Pool segment length */
@@ -291,6 +293,8 @@ typedef struct {
 	uint32_t vector_num;
 	uint32_t vector_max_size;
 	char cpumaskstr[ODP_CPUMASK_STR_SIZE];
+	odp_shm_t memcpy_shm; /* Shared memory block for memcpy */
+	uint8_t *memcpy_data; /* Data for memcpy */
 
 } args_t;
 
@@ -495,7 +499,7 @@ static inline int copy_packets(odp_packet_t *pkt_tbl, int pkts)
  * Return number of packets remaining in the pkt_tbl
  */
 static inline int process_extra_features(const appl_args_t *appl_args, odp_packet_t *pkt_tbl,
-					 int pkts, stats_t *stats)
+					 int pkts, stats_t *stats, uint8_t *const memcpy_src)
 {
 	if (odp_unlikely(appl_args->extra_feat)) {
 		uint16_t rd_words = appl_args->data_rd;
@@ -529,6 +533,16 @@ static inline int process_extra_features(const appl_args_t *appl_args, odp_packe
 
 				pkts -= rx_drops;
 			}
+		}
+
+		if (appl_args->wait_ns)
+			odp_time_wait_ns(appl_args->wait_ns);
+
+		if (appl_args->memcpy_bytes) {
+			const uint64_t bytes = appl_args->memcpy_bytes;
+			uint8_t *memcpy_dst = memcpy_src + bytes;
+
+			memcpy(memcpy_dst, memcpy_src, bytes);
 		}
 	}
 	return pkts;
@@ -691,7 +705,7 @@ static int handle_rx_state(state_t *state, odp_event_t evs[], int num)
  */
 static int run_worker_sched_mode_vector(void *arg)
 {
-	int thr;
+	const int thr = odp_thread_id();
 	int i;
 	int pktio, num_pktio;
 	uint16_t max_burst;
@@ -699,13 +713,15 @@ static int run_worker_sched_mode_vector(void *arg)
 	odp_pktout_queue_t pktout[MAX_PKTIOS];
 	odp_queue_t tx_queue[MAX_PKTIOS];
 	thread_args_t *thr_args = arg;
+	const int thr_idx = thr_args->thr_idx;
 	stats_t *stats = &thr_args->stats;
 	const appl_args_t *appl_args = &gbl_args->appl;
+	uint8_t *const memcpy_src = appl_args->memcpy_bytes ?
+		&gbl_args->memcpy_data[thr_idx * 2 * appl_args->memcpy_bytes] : NULL;
 	state_t *state = appl_args->has_state ? &thr_args->state : NULL;
 	int use_event_queue = gbl_args->appl.out_mode;
 	pktin_mode_t in_mode = gbl_args->appl.in_mode;
 
-	thr = odp_thread_id();
 	max_burst = gbl_args->appl.burst_rx;
 
 	odp_thrmask_zero(&mask);
@@ -771,7 +787,7 @@ static int run_worker_sched_mode_vector(void *arg)
 
 			prefetch_data(appl_args->prefetch, pkt_tbl, pkts);
 
-			pkts = process_extra_features(appl_args, pkt_tbl, pkts, stats);
+			pkts = process_extra_features(appl_args, pkt_tbl, pkts, stats, memcpy_src);
 
 			if (odp_unlikely(pkts == 0)) {
 				if (pkt_vec != ODP_PACKET_VECTOR_INVALID)
@@ -841,7 +857,7 @@ static int run_worker_sched_mode_vector(void *arg)
 static int run_worker_sched_mode(void *arg)
 {
 	int pkts;
-	int thr;
+	const int thr = odp_thread_id();
 	int dst_idx;
 	int i;
 	int pktio, num_pktio;
@@ -851,13 +867,15 @@ static int run_worker_sched_mode(void *arg)
 	odp_queue_t tx_queue[MAX_PKTIOS];
 	char extra_str[EXTRA_STR_LEN];
 	thread_args_t *thr_args = arg;
+	const int thr_idx = thr_args->thr_idx;
 	stats_t *stats = &thr_args->stats;
 	const appl_args_t *appl_args = &gbl_args->appl;
+	uint8_t *const memcpy_src = appl_args->memcpy_bytes ?
+		&gbl_args->memcpy_data[thr_idx * 2 * appl_args->memcpy_bytes] : NULL;
 	state_t *state = appl_args->has_state ? &thr_args->state : NULL;
 	int use_event_queue = gbl_args->appl.out_mode;
 	pktin_mode_t in_mode = gbl_args->appl.in_mode;
 
-	thr = odp_thread_id();
 	max_burst = gbl_args->appl.burst_rx;
 
 	memset(extra_str, 0, EXTRA_STR_LEN);
@@ -926,7 +944,7 @@ static int run_worker_sched_mode(void *arg)
 
 		prefetch_data(appl_args->prefetch, pkt_tbl, pkts);
 
-		pkts = process_extra_features(appl_args, pkt_tbl, pkts, stats);
+		pkts = process_extra_features(appl_args, pkt_tbl, pkts, stats, memcpy_src);
 
 		if (odp_unlikely(pkts == 0))
 			continue;
@@ -987,7 +1005,7 @@ static int run_worker_sched_mode(void *arg)
  */
 static int run_worker_plain_queue_mode(void *arg)
 {
-	int thr;
+	const int thr = odp_thread_id();
 	int pkts;
 	uint16_t max_burst;
 	odp_packet_t pkt_tbl[MAX_PKT_BURST];
@@ -997,13 +1015,15 @@ static int run_worker_plain_queue_mode(void *arg)
 	odp_queue_t tx_queue;
 	int pktio = 0;
 	thread_args_t *thr_args = arg;
+	const int thr_idx = thr_args->thr_idx;
 	stats_t *stats = &thr_args->stats;
 	const appl_args_t *appl_args = &gbl_args->appl;
+	uint8_t *const memcpy_src = appl_args->memcpy_bytes ?
+		&gbl_args->memcpy_data[thr_idx * 2 * appl_args->memcpy_bytes] : NULL;
 	state_t *state = appl_args->has_state ? &thr_args->state : NULL;
 	int use_event_queue = gbl_args->appl.out_mode;
 	int i;
 
-	thr = odp_thread_id();
 	max_burst = gbl_args->appl.burst_rx;
 
 	num_pktio = thr_args->num_pktio;
@@ -1041,7 +1061,7 @@ static int run_worker_plain_queue_mode(void *arg)
 
 		prefetch_data(appl_args->prefetch, pkt_tbl, pkts);
 
-		pkts = process_extra_features(appl_args, pkt_tbl, pkts, stats);
+		pkts = process_extra_features(appl_args, pkt_tbl, pkts, stats, memcpy_src);
 
 		if (odp_unlikely(pkts == 0))
 			continue;
@@ -1086,7 +1106,7 @@ static int run_worker_plain_queue_mode(void *arg)
  */
 static int run_worker_direct_mode(void *arg)
 {
-	int thr;
+	const int thr = odp_thread_id();
 	int pkts;
 	uint16_t max_burst;
 	odp_packet_t pkt_tbl[MAX_PKT_BURST];
@@ -1096,12 +1116,14 @@ static int run_worker_direct_mode(void *arg)
 	odp_queue_t tx_queue;
 	int pktio = 0;
 	thread_args_t *thr_args = arg;
+	const int thr_idx = thr_args->thr_idx;
 	stats_t *stats = &thr_args->stats;
 	const appl_args_t *appl_args = &gbl_args->appl;
+	uint8_t *const memcpy_src = appl_args->memcpy_bytes ?
+		&gbl_args->memcpy_data[thr_idx * 2 * appl_args->memcpy_bytes] : NULL;
 	state_t *state = appl_args->has_state ? &thr_args->state : NULL;
 	int use_event_queue = gbl_args->appl.out_mode;
 
-	thr = odp_thread_id();
 	max_burst = gbl_args->appl.burst_rx;
 
 	num_pktio = thr_args->num_pktio;
@@ -1135,7 +1157,7 @@ static int run_worker_direct_mode(void *arg)
 
 		prefetch_data(appl_args->prefetch, pkt_tbl, pkts);
 
-		pkts = process_extra_features(appl_args, pkt_tbl, pkts, stats);
+		pkts = process_extra_features(appl_args, pkt_tbl, pkts, stats, memcpy_src);
 
 		if (odp_unlikely(pkts == 0))
 			continue;
@@ -1915,6 +1937,10 @@ static void usage(char *progname)
 	       "                                 from every received packet. Number of words is\n"
 	       "                                 rounded down to fit into the first segment of a\n"
 	       "                                 packet. Default is 0.\n"
+	       "  -E, --memcpy <num>             Number of bytes to memcpy per RX burst before\n"
+	       "                                 forwarding packets. Default: 0.\n"
+	       "  -W, --wait_ns <ns>             Number of nsecs to wait per receive burst before\n"
+	       "                                 forwarding packets. Default: 0.\n"
 	       "  -y, --pool_per_if              Create a packet (and packet vector) pool per\n"
 	       "                                 interface.\n"
 	       "                                 0: Share a single pool between all interfaces\n"
@@ -1980,6 +2006,7 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 		{"accuracy", required_argument, NULL, 'a'},
 		{"interface", required_argument, NULL, 'i'},
 		{"mode", required_argument, NULL, 'm'},
+		{"memcpy", required_argument, NULL, 'E'},
 		{"out_mode", required_argument, NULL, 'o'},
 		{"output_map", required_argument, NULL, 'O'},
 		{"dst_addr", required_argument, NULL, 'r'},
@@ -1997,6 +2024,7 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 		{"pool_per_if", required_argument, NULL, 'y'},
 		{"num_pkt", required_argument, NULL, 'n'},
 		{"num_vec", required_argument, NULL, 'w'},
+		{"wait_ns", required_argument, NULL, 'W'},
 		{"vec_size", required_argument, NULL, 'x'},
 		{"vec_tmo_ns", required_argument, NULL, 'z'},
 		{"vector_mode", no_argument, NULL, 'u'},
@@ -2015,8 +2043,8 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 		{NULL, 0, NULL, 0}
 	};
 
-	static const char *shortopts = "+c:t:a:i:m:o:O:r:d:s:e:k:g:G:I:"
-				       "b:q:p:R:y:n:l:L:w:x:X:z:M:F:uPfTC:vVh";
+	static const char *shortopts = "+c:t:a:i:m:o:O:r:d:s:e:E:k:g:G:I:"
+				       "b:q:p:R:y:n:l:L:w:W:x:X:z:M:F:uPfTC:vVh";
 
 	appl_args->time = 0; /* loop forever if time to run is 0 */
 	appl_args->accuracy = 1; /* get and print pps stats second */
@@ -2200,6 +2228,9 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 		case 'e':
 			appl_args->error_check = atoi(optarg);
 			break;
+		case 'E':
+			appl_args->memcpy_bytes = atoll(optarg);
+			break;
 		case 'k':
 			appl_args->chksum = atoi(optarg);
 			break;
@@ -2279,6 +2310,9 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 			break;
 		case 'w':
 			appl_args->num_vec = atoi(optarg);
+			break;
+		case 'W':
+			appl_args->wait_ns = atoll(optarg);
 			break;
 		case 'x':
 			appl_args->vec_size = atoi(optarg);
@@ -2414,8 +2448,9 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 		appl_args->burst_rx = MAX_PKT_BURST;
 
 	appl_args->extra_feat = 0;
-	if (appl_args->error_check || appl_args->chksum ||
-	    appl_args->packet_copy || appl_args->data_rd || appl_args->verbose_pkt)
+	if (appl_args->error_check || appl_args->chksum || appl_args->packet_copy ||
+	    appl_args->data_rd || appl_args->verbose_pkt || appl_args->wait_ns ||
+	    appl_args->memcpy_bytes)
 		appl_args->extra_feat = 1;
 
 	appl_args->has_state = 0;
@@ -2485,13 +2520,20 @@ static void print_options(void)
 					   appl_args->if_count : 1);
 
 	if (appl_args->extra_feat || appl_args->has_state) {
-		printf("Extra features:     %s%s%s%s%s%s\n",
+		printf("Extra features:     %s%s%s%s%s%s%s%s\n",
 		       appl_args->error_check ? "error_check " : "",
 		       appl_args->chksum ? "chksum " : "",
 		       appl_args->packet_copy ? "packet_copy " : "",
 		       appl_args->data_rd ? "data_rd" : "",
 		       appl_args->tx_compl.mode != ODP_PACKET_TX_COMPL_DISABLED ? "tx_compl" : "",
-		       appl_args->verbose_pkt ? "verbose_pkt" : "");
+		       appl_args->verbose_pkt ? "verbose_pkt" : "",
+		       appl_args->wait_ns ? "wait_ns" : "",
+		       appl_args->memcpy_bytes ? "memcpy" : "");
+
+		if (appl_args->memcpy_bytes)
+			printf("  Memcpy:           %" PRIu64 " bytes\n", appl_args->memcpy_bytes);
+		if (appl_args->wait_ns)
+			printf("  Wait:             %" PRIu64 " ns\n", appl_args->wait_ns);
 	}
 
 	printf("Num worker threads: %i\n", appl_args->num_workers);
@@ -2526,6 +2568,7 @@ static void gbl_args_init(args_t *args)
 
 	memset(args, 0, sizeof(args_t));
 	odp_atomic_init_u32(&args->exit_threads, 0);
+	args->memcpy_shm = ODP_SHM_INVALID;
 
 	for (pktio = 0; pktio < MAX_PKTIOS; pktio++) {
 		args->pktios[pktio].pktio = ODP_PKTIO_INVALID;
@@ -2601,6 +2644,30 @@ static int set_vector_pool_params(odp_pool_param_t *params, const odp_pool_capab
 	params->vector.num = num_vec;
 	params->vector.max_size = vec_size;
 	params->type = ODP_POOL_VECTOR;
+
+	return 0;
+}
+
+static int reserve_memcpy_memory(args_t *args)
+{
+	uint64_t total_bytes;
+
+	if (args->appl.memcpy_bytes == 0)
+		return 0;
+
+	/* Private memory area (read + write) for each worker */
+	total_bytes = 2 * args->appl.memcpy_bytes * args->appl.num_workers;
+
+	args->memcpy_shm = odp_shm_reserve("memcpy_shm", total_bytes, ODP_CACHE_LINE_SIZE, 0);
+	if (args->memcpy_shm == ODP_SHM_INVALID) {
+		ODPH_ERR("Reserving %" PRIu64 " bytes for memcpy failed.\n", total_bytes);
+		return -1;
+	}
+	args->memcpy_data = odp_shm_addr(args->memcpy_shm);
+	if (args->memcpy_data == NULL) {
+		ODPH_ERR("Shared mem addr for memcpy failed.\n");
+		return -1;
+	}
 
 	return 0;
 }
@@ -2707,8 +2774,8 @@ int main(int argc, char *argv[])
 
 	print_options();
 
-	for (i = 0; i < num_workers; i++)
-		gbl_args->thread_args[i].thr_idx = i;
+	if (reserve_memcpy_memory(gbl_args))
+		exit(EXIT_FAILURE);
 
 	if_count = gbl_args->appl.if_count;
 
@@ -2980,6 +3047,7 @@ int main(int argc, char *argv[])
 		thr_param[i].thr_type = ODP_THREAD_WORKER;
 
 		gbl_args->thread_args[i].num_grp_join = 0;
+		gbl_args->thread_args[i].thr_idx = i;
 
 		/* Fill in list of groups to join */
 		if (gbl_args->appl.num_groups > 0) {
@@ -3075,6 +3143,11 @@ int main(int argc, char *argv[])
 
 	free(gbl_args->appl.if_names);
 	free(gbl_args->appl.if_str);
+
+	if (gbl_args->memcpy_shm != ODP_SHM_INVALID && odp_shm_free(gbl_args->memcpy_shm)) {
+		ODPH_ERR("Shared mem free failed\n");
+		exit(EXIT_FAILURE);
+	}
 
 	for (i = 0; i < gbl_args->appl.num_om; i++)
 		free(gbl_args->appl.output_map[i]);
