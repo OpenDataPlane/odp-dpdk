@@ -836,6 +836,13 @@ static odp_schedule_group_t schedule_group_create(const char *name,
 	return group;
 }
 
+static odp_schedule_group_t schedule_group_create_2(const char *name,
+						    const odp_thrmask_t *mask,
+						    const odp_schedule_group_param_t *p ODP_UNUSED)
+{
+	return schedule_group_create(name, mask);
+}
+
 static int schedule_group_destroy(odp_schedule_group_t group)
 {
 	odp_thrmask_t zero;
@@ -963,8 +970,12 @@ static int schedule_group_info(odp_schedule_group_t group,
 
 	if (group < NUM_SCHED_GRPS && group >= SCHED_GROUP_NAMED &&
 	    _odp_eventdev_gbl->grp[group].allocated) {
+		memset(info, 0, sizeof(*info));
 		info->name    = _odp_eventdev_gbl->grp[group].name;
 		info->thrmask = _odp_eventdev_gbl->grp[group].mask;
+		info->num     = _odp_eventdev_gbl->num_prio;
+		for (int i = 0; i < _odp_eventdev_gbl->num_prio; i++)
+			info->level[i] = i;
 		ret = 0;
 	} else {
 		ret = -1;
@@ -1024,6 +1035,8 @@ static int schedule_capability(odp_schedule_capability_t *capa)
 	capa->max_queue_size    = _odp_eventdev_gbl->config.nb_events_limit;
 	capa->max_ordered_locks = schedule_max_ordered_locks();
 	capa->max_groups        = schedule_num_grps();
+	capa->max_group_prios   = NUM_SCHED_GRPS * odp_schedule_num_prio();
+	capa->min_prio          = 0;
 	capa->max_prios         = odp_schedule_num_prio();
 
 	return 0;
@@ -1075,7 +1088,6 @@ const schedule_fn_t _odp_schedule_eventdev_fn = {
 	.pktio_start = schedule_pktio_start,
 	.thr_add = schedule_thr_add,
 	.thr_rem = schedule_thr_rem,
-	.num_grps = schedule_num_grps,
 	.create_queue = schedule_create_queue,
 	.destroy_queue = schedule_destroy_queue,
 	.sched_queue = NULL,
@@ -1111,6 +1123,7 @@ const _odp_schedule_api_fn_t _odp_schedule_eventdev_api = {
 	.schedule_default_prio    = schedule_default_prio,
 	.schedule_num_prio        = schedule_num_prio,
 	.schedule_group_create    = schedule_group_create,
+	.schedule_group_create_2  = schedule_group_create_2,
 	.schedule_group_destroy   = schedule_group_destroy,
 	.schedule_group_lookup    = schedule_group_lookup,
 	.schedule_group_join      = schedule_group_join,
