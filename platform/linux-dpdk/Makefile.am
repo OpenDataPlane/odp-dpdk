@@ -134,6 +134,7 @@ noinst_HEADERS = \
 		  ${top_srcdir}/platform/linux-generic/include/odp_chksum_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_classification_internal.h \
 		  include/odp_config_internal.h \
+		  ${top_srcdir}/platform/linux-generic/include/odp_crypto_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_debug_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_classification_datamodel.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_classification_internal.h \
@@ -207,6 +208,7 @@ __LIB__libodp_dpdk_la_SOURCES = \
 			   ../linux-generic/miniz/miniz_tinfl.c ../linux-generic/miniz/miniz_tinfl.h \
 			   ../linux-generic/odp_cpumask.c \
 			   ../linux-generic/odp_cpumask_task.c \
+			   ../linux-generic/odp_crypto.c \
 			   odp_dma.c \
 			   odp_crypto.c \
 			   odp_errno.c \

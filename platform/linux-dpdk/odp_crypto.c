@@ -20,6 +20,7 @@
 #include <odp/api/plat/packet_inlines.h>
 #include <odp/api/plat/time_inlines.h>
 
+#include <odp_crypto_internal.h>
 #include <odp_debug_internal.h>
 #include <odp_global_data.h>
 #include <odp_init_internal.h>
@@ -1703,6 +1704,20 @@ void odp_crypto_session_param_init(odp_crypto_session_param_t *param)
 uint64_t odp_crypto_session_to_u64(odp_crypto_session_t hdl)
 {
 	return (uint64_t)hdl;
+}
+
+void odp_crypto_session_print(odp_crypto_session_t hdl)
+{
+	crypto_session_entry_t *session;
+
+	if (hdl == ODP_CRYPTO_SESSION_INVALID) {
+		_ODP_ERR("Invalid crypto session\n");
+		return;
+	}
+
+	session = (crypto_session_entry_t *)(uintptr_t)hdl;
+
+	_odp_crypto_session_print("DPDK", session->cdev_id, &session->p);
 }
 
 static uint8_t *crypto_prepare_digest(const crypto_session_entry_t *session,
