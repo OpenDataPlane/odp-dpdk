@@ -33,13 +33,13 @@ cmds below for Ubuntu, where it has been compiled and tested.
 On Ubuntu install pcap development library:
     sudo apt-get install libpcap-dev
 
-Right now ODP-DPDK supports DPDK v21.11, v22.11 (recommended version), and
-v23.11.
+Right now ODP-DPDK supports DPDK v22.11, v23.11 (recommended version), and
+v24.11.
 
 Compile DPDK
 ------------
 Fetch the DPDK code:
-    git clone https://dpdk.org/git/dpdk-stable --branch 22.11 --depth 1 ./<dpdk-dir>
+    git clone https://dpdk.org/git/dpdk-stable --branch 23.11 --depth 1 ./<dpdk-dir>
 
 Prepare the build directory:
     cd <dpdk-dir>
