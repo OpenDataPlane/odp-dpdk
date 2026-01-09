@@ -158,7 +158,7 @@ noinst_HEADERS = \
 		  ${top_srcdir}/platform/linux-generic/include/odp_pkt_queue_internal.h \
 		  include/odp_pool_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_posix_extensions.h \
-		  include/odp_queue_basic_internal.h \
+		  ${top_srcdir}/platform/linux-generic/include/odp_queue_basic_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_queue_if.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_queue_lf.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_random_std_internal.h \
@@ -241,11 +241,11 @@ __LIB__libodp_dpdk_la_SOURCES = \
 			   ../linux-generic/pktio/null.c \
 			   ../linux-generic/odp_pkt_queue.c \
 			   odp_pool.c \
-			   odp_queue_basic.c \
+			   ../linux-generic/odp_queue_basic.c \
 			   odp_queue_eventdev.c \
 			   odp_queue_if.c \
 			   ../linux-generic/odp_queue_lf.c \
-			   odp_queue_spsc.c \
+			   ../linux-generic/odp_queue_spsc.c \
 			   ../linux-generic/odp_random.c \
 			   ../linux-generic/odp_random_std.c \
 			   ../linux-generic/odp_random_openssl.c \
