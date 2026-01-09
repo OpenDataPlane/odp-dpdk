@@ -421,8 +421,8 @@ static int io_setup(ml_model_t *mdl)
 		goto error;
 	}
 	mdl->rte.inp_seg_p = &mdl->rte.inp_seg;
-	_ODP_DBG("Input addr: %p, length: %u, iova: %p\n", mdl->rte.inp_seg.addr,
-		 mdl->rte.inp_seg.length, (void *)mdl->rte.inp_seg.iova_addr);
+	_ODP_DBG("Input addr: %p, length: %u, iova: 0x%" PRIx64 "\n", mdl->rte.inp_seg.addr,
+		 mdl->rte.inp_seg.length, mdl->rte.inp_seg.iova_addr);
 
 	snprintf(name, ML_MAX_STR_LEN - 1, "_odp_ml_%u_output", mdl->rte.id);
 	name[ML_MAX_STR_LEN - 1] = 0;
@@ -440,8 +440,8 @@ static int io_setup(ml_model_t *mdl)
 		goto error;
 	}
 	mdl->rte.out_seg_p = &mdl->rte.out_seg;
-	_ODP_DBG("Output addr: %p, length: %u, iova: %p\n", mdl->rte.out_seg.addr,
-		 mdl->rte.out_seg.length, (void *)mdl->rte.out_seg.iova_addr);
+	_ODP_DBG("Output addr: %p, length: %u, iova: 0x%" PRIx64 "\n", mdl->rte.out_seg.addr,
+		 mdl->rte.out_seg.length, mdl->rte.out_seg.iova_addr);
 
 	return 0;
 
@@ -525,7 +525,7 @@ static void dbg_print_rte_model_info(const struct rte_ml_model_info *rtei)
 	_ODP_DBG("Max Batches: %u\n", rtei->max_batches);
 	_ODP_DBG("Number of Inputs: %u\n", rtei->nb_inputs);
 	_ODP_DBG("Number of Outputs: %u\n", rtei->nb_outputs);
-	_ODP_DBG("Size of weights and biases: %lu\n", rtei->wb_size);
+	_ODP_DBG("Size of weights and biases: %" PRIu64 "\n", rtei->wb_size);
 
 	for (int j = 0; j < (int)rtei->nb_inputs; j++) {
 		const struct rte_ml_io_info *inp = &rtei->input_info[j];
@@ -534,8 +534,8 @@ static void dbg_print_rte_model_info(const struct rte_ml_model_info *rtei)
 		_ODP_DBG("Input %d Number of Dimensions: %u\n", j, inp->nb_dims);
 		_ODP_DBG("Input %d Shape: %s\n", j, shape_str(inp, str, sizeof(str)));
 		_ODP_DBG("Input %d Type: %d\n", j, inp->type);
-		_ODP_DBG("Input %d Number of Elements: %lu\n", j, inp->nb_elements);
-		_ODP_DBG("Input %d Size: %lu\n", j, inp->size);
+		_ODP_DBG("Input %d Number of Elements: %" PRIu64 "\n", j, inp->nb_elements);
+		_ODP_DBG("Input %d Size: %" PRIu64 "\n", j, inp->size);
 	}
 
 	for (int j = 0; j < (int)rtei->nb_outputs; j++) {
@@ -545,8 +545,8 @@ static void dbg_print_rte_model_info(const struct rte_ml_model_info *rtei)
 		_ODP_DBG("Output %d Number of Dimensions: %u\n", j, out->nb_dims);
 		_ODP_DBG("Output %d Shape: %s\n", j, shape_str(out, str, sizeof(str)));
 		_ODP_DBG("Output %d Type: %d\n", j, out->type);
-		_ODP_DBG("Output %d Number of Elements: %lu\n", j, out->nb_elements);
-		_ODP_DBG("Output %d Size: %lu\n", j, out->size);
+		_ODP_DBG("Output %d Number of Elements: %" PRIu64 "\n", j, out->nb_elements);
+		_ODP_DBG("Output %d Size: %" PRIu64 "\n", j, out->size);
 	}
 }
 
