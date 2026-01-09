@@ -165,6 +165,7 @@ noinst_HEADERS = \
 		  ${top_srcdir}/platform/linux-generic/include/odp_random_openssl_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_ring_common.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_ring_mpmc_internal.h \
+		  ${top_srcdir}/platform/linux-generic/include/odp_ring_mpmc_ptr_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_ring_mpmc_u32_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_ring_mpmc_u64_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_ring_mpmc_rst_internal.h \
