@@ -57,8 +57,7 @@ Build and install DPDK:
 3. Compile ODP-DPDK
 =================================================
 
-Build dependencies are listed in DEPENDENCIES. Use absolute DPDK directory
-path with the --with-dpdk-path option.
+Build dependencies are listed in DEPENDENCIES.
 
     cd <odp-dir>
     ./bootstrap

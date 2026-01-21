@@ -44,7 +44,7 @@ fi
 DPDK_LIBS=$DPDK_LIBS_LIBODP
 
 # Use PKG_CHECK_MODULES_STATIC to look for rte_net_pcap in Libs.private
-PKG_CHECK_MODULES_STATIC([DPDK_STATIC], [libdpdk])
+PKG_CHECK_MODULES_STATIC([DPDK_STATIC], [libdpdk >= ${dpdk_min_version}])
 have_pmd_pcap=no
 if grep -q "librte_net_pcap" <<< "$DPDK_STATIC_LIBS"; then
 have_pmd_pcap=yes
