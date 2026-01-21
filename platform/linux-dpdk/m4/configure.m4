@@ -56,12 +56,6 @@ else
 	DPDK_CFLAGS="${DPDK_CFLAGS} -D_GNU_SOURCE"
 fi
 
-case "${host}" in
-  i?86* | x86*)
-    DPDK_CFLAGS="${DPDK_CFLAGS} -msse4.2"
-  ;;
-esac
-
 # Required for experimental rte_event_port_unlinks_in_progress() API
 DPDK_CFLAGS="${DPDK_CFLAGS} -DALLOW_EXPERIMENTAL_API"
 
