@@ -5,6 +5,8 @@
 ODP_IMPLEMENTATION_NAME="odp-dpdk"
 ODP_LIB_NAME="odp-dpdk"
 
+dpdk_min_version="22.11.0"
+
 ODP_VISIBILITY
 ODP_ATOMIC
 
@@ -23,14 +25,6 @@ ODP_SCHEDULER
 ODP_TIMER
 
 ##########################################################################
-# Set DPDK install path
-##########################################################################
-AC_ARG_WITH([dpdk-path],
-[AS_HELP_STRING([--with-dpdk-path=DIR],
-		[path to DPDK build directory [default=system] (linux-dpdk)])],
-    [DPDK_PATH="$withval"],[DPDK_PATH=system])
-
-##########################################################################
 # Use shared DPDK library
 ##########################################################################
 dpdk_shared=no
@@ -47,7 +41,7 @@ AC_ARG_ENABLE([dpdk-shared],
 # DPDK pmd drivers are not linked unless the --whole-archive option is
 # used. No spaces are allowed between the --whole-archive flags.
 ##########################################################################
-ODP_DPDK([$DPDK_PATH], [$dpdk_shared], [],
+ODP_DPDK([$dpdk_min_version], [$dpdk_shared], [],
 	 [AC_MSG_FAILURE([can't find DPDK])])
 AM_CONDITIONAL([ODP_PKTIO_PCAP], [test x$have_pmd_pcap = xyes])
 
@@ -61,12 +55,6 @@ else
 	# DPDK uses strnlen() internally
 	DPDK_CFLAGS="${DPDK_CFLAGS} -D_GNU_SOURCE"
 fi
-
-case "${host}" in
-  i?86* | x86*)
-    DPDK_CFLAGS="${DPDK_CFLAGS} -msse4.2"
-  ;;
-esac
 
 # Required for experimental rte_event_port_unlinks_in_progress() API
 DPDK_CFLAGS="${DPDK_CFLAGS} -DALLOW_EXPERIMENTAL_API"

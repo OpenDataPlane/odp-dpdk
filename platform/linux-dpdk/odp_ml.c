@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: BSD-3-Clause
- * Copyright (c) 2023-2024 Nokia
+ * Copyright (c) 2023-2025 Nokia
  */
 
 #include <odp/autoheader_external.h>
@@ -44,6 +44,7 @@
 #define ML_MAX_MODEL_SIZE (1024 * 1024 * 1024)
 #define ML_MAX_MODELS_CREATED CONFIG_ML_MAX_MODELS
 #define ML_MAX_MODELS_LOADED CONFIG_ML_MAX_MODELS
+#define ML_MAX_ENGINES 1
 
 /* Error codes */
 enum {
@@ -139,6 +140,16 @@ static inline ml_model_t *ml_model_from_handle(odp_ml_model_t model)
 	return (ml_model_t *)(uintptr_t)model;
 }
 
+int odp_ml_num_engines(void)
+{
+	if (odp_global_ro.disable.ml) {
+		_ODP_PRINT("ML is disabled\n");
+		return 0;
+	}
+
+	return ML_MAX_ENGINES;
+}
+
 int odp_ml_capability(odp_ml_capability_t *capa)
 {
 	odp_pool_capability_t pool_capa;
@@ -195,9 +206,21 @@ int odp_ml_capability(odp_ml_capability_t *capa)
 	return 0;
 }
 
+int odp_ml_engine_capability(uint32_t engine_id, odp_ml_capability_t *capa)
+{
+	if (engine_id > ML_MAX_ENGINES) {
+		_ODP_ERR("Engine ID %u exceeds maximum number of engines %d\n",
+			 engine_id, ML_MAX_ENGINES);
+		return -1;
+	}
+
+	return odp_ml_capability(capa);
+}
+
 void odp_ml_config_init(odp_ml_config_t *config)
 {
 	memset(config, 0, sizeof(odp_ml_config_t));
+	config->engine_id = ODP_ML_ENGINE_ANY;
 	config->max_models_created = 1;
 	config->max_models_loaded = 1;
 }
@@ -206,6 +229,12 @@ int odp_ml_config(const odp_ml_config_t *config)
 {
 	if (!config) {
 		_ODP_ERR("Config must not be NULL\n");
+		return -1;
+	}
+
+	if (config->engine_id > ML_MAX_ENGINES) {
+		_ODP_ERR("Engine ID %u exceeds maximum number of engines %d\n",
+			 config->engine_id, ML_MAX_ENGINES);
 		return -1;
 	}
 
@@ -249,6 +278,9 @@ int odp_ml_config(const odp_ml_config_t *config)
 	}
 
 	_odp_ml_glb->ml_config = *config;
+	if (_odp_ml_glb->ml_config.engine_id == ODP_ML_ENGINE_ANY)
+		_odp_ml_glb->ml_config.engine_id = 1; /* Default to first engine */
+
 	return 0;
 }
 
@@ -389,8 +421,8 @@ static int io_setup(ml_model_t *mdl)
 		goto error;
 	}
 	mdl->rte.inp_seg_p = &mdl->rte.inp_seg;
-	_ODP_DBG("Input addr: %p, length: %u, iova: %p\n", mdl->rte.inp_seg.addr,
-		 mdl->rte.inp_seg.length, (void *)mdl->rte.inp_seg.iova_addr);
+	_ODP_DBG("Input addr: %p, length: %u, iova: 0x%" PRIx64 "\n", mdl->rte.inp_seg.addr,
+		 mdl->rte.inp_seg.length, mdl->rte.inp_seg.iova_addr);
 
 	snprintf(name, ML_MAX_STR_LEN - 1, "_odp_ml_%u_output", mdl->rte.id);
 	name[ML_MAX_STR_LEN - 1] = 0;
@@ -408,8 +440,8 @@ static int io_setup(ml_model_t *mdl)
 		goto error;
 	}
 	mdl->rte.out_seg_p = &mdl->rte.out_seg;
-	_ODP_DBG("Output addr: %p, length: %u, iova: %p\n", mdl->rte.out_seg.addr,
-		 mdl->rte.out_seg.length, (void *)mdl->rte.out_seg.iova_addr);
+	_ODP_DBG("Output addr: %p, length: %u, iova: 0x%" PRIx64 "\n", mdl->rte.out_seg.addr,
+		 mdl->rte.out_seg.length, mdl->rte.out_seg.iova_addr);
 
 	return 0;
 
@@ -493,7 +525,7 @@ static void dbg_print_rte_model_info(const struct rte_ml_model_info *rtei)
 	_ODP_DBG("Max Batches: %u\n", rtei->max_batches);
 	_ODP_DBG("Number of Inputs: %u\n", rtei->nb_inputs);
 	_ODP_DBG("Number of Outputs: %u\n", rtei->nb_outputs);
-	_ODP_DBG("Size of weights and biases: %lu\n", rtei->wb_size);
+	_ODP_DBG("Size of weights and biases: %" PRIu64 "\n", rtei->wb_size);
 
 	for (int j = 0; j < (int)rtei->nb_inputs; j++) {
 		const struct rte_ml_io_info *inp = &rtei->input_info[j];
@@ -502,8 +534,8 @@ static void dbg_print_rte_model_info(const struct rte_ml_model_info *rtei)
 		_ODP_DBG("Input %d Number of Dimensions: %u\n", j, inp->nb_dims);
 		_ODP_DBG("Input %d Shape: %s\n", j, shape_str(inp, str, sizeof(str)));
 		_ODP_DBG("Input %d Type: %d\n", j, inp->type);
-		_ODP_DBG("Input %d Number of Elements: %lu\n", j, inp->nb_elements);
-		_ODP_DBG("Input %d Size: %lu\n", j, inp->size);
+		_ODP_DBG("Input %d Number of Elements: %" PRIu64 "\n", j, inp->nb_elements);
+		_ODP_DBG("Input %d Size: %" PRIu64 "\n", j, inp->size);
 	}
 
 	for (int j = 0; j < (int)rtei->nb_outputs; j++) {
@@ -513,8 +545,8 @@ static void dbg_print_rte_model_info(const struct rte_ml_model_info *rtei)
 		_ODP_DBG("Output %d Number of Dimensions: %u\n", j, out->nb_dims);
 		_ODP_DBG("Output %d Shape: %s\n", j, shape_str(out, str, sizeof(str)));
 		_ODP_DBG("Output %d Type: %d\n", j, out->type);
-		_ODP_DBG("Output %d Number of Elements: %lu\n", j, out->nb_elements);
-		_ODP_DBG("Output %d Size: %lu\n", j, out->size);
+		_ODP_DBG("Output %d Number of Elements: %" PRIu64 "\n", j, out->nb_elements);
+		_ODP_DBG("Output %d Size: %" PRIu64 "\n", j, out->size);
 	}
 }
 
@@ -531,6 +563,12 @@ odp_ml_model_t odp_ml_model_create(const char *name, const odp_ml_model_param_t 
 
 	if (_odp_ml_glb == NULL) {
 		_ODP_ERR("No ML devices\n");
+		return ODP_ML_MODEL_INVALID;
+	}
+
+	if (odp_unlikely(param->engine_id > ML_MAX_ENGINES)) {
+		_ODP_ERR("Engine ID %u exceeds maximum number of engines %d\n",
+			 param->engine_id, ML_MAX_ENGINES);
 		return ODP_ML_MODEL_INVALID;
 	}
 
@@ -607,6 +645,10 @@ odp_ml_model_t odp_ml_model_create(const char *name, const odp_ml_model_param_t 
 	info->index = i;
 	info->num_inputs = rtei->nb_inputs;
 	info->num_outputs = rtei->nb_outputs;
+	if (param->engine_id == ODP_ML_ENGINE_ANY)
+		info->engine_id = _odp_ml_glb->ml_config.engine_id;
+	else
+		info->engine_id = param->engine_id;
 
 	for (int j = 0; j < (int)rtei->nb_inputs; j++) {
 		odp_ml_input_info_t *inp_info = &mdl->input_info[j];
@@ -812,6 +854,10 @@ static const char *data_type_str(odp_ml_data_type_t data_type)
 		return "uint16";
 	case ODP_ML_DATA_TYPE_INT16:
 		return "int16";
+	case ODP_ML_DATA_TYPE_INT24:
+		return "int24";
+	case ODP_ML_DATA_TYPE_UINT24:
+		return "uint24";
 	case ODP_ML_DATA_TYPE_INT32:
 		return "int32";
 	case ODP_ML_DATA_TYPE_UINT32:
@@ -824,6 +870,8 @@ static const char *data_type_str(odp_ml_data_type_t data_type)
 		return "fp16";
 	case ODP_ML_DATA_TYPE_FP32:
 		return "fp32";
+	case ODP_ML_DATA_TYPE_FP64:
+		return "fp64";
 	case ODP_ML_DATA_TYPE_BFP16:
 		return "bfp16";
 	default:
@@ -1860,7 +1908,7 @@ int odp_ml_run_multi(odp_ml_model_t model, const odp_ml_data_t data[],
 		     const odp_ml_run_param_t param[], int num)
 {
 	int i;
-	int ret;
+	int ret = -1;
 
 	if (odp_unlikely(num < 1)) {
 		_ODP_ERR("Bad number of runs\n");

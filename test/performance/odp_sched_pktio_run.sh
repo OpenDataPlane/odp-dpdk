@@ -68,15 +68,15 @@ run_sched_pktio()
 --vdev net_pcap0,iface=$IF0"
 
 	GEN_LOG=odp_packet_gen_tmp.log
-	(odp_packet_gen${EXEEXT} --gap 0 -i 0 \
+	(odp_packet_gen${EXEEXT} --gap 0 -w 10 -q 100000 -i 0 \
 			--ipv4_src 192.168.0.1 --ipv4_dst 192.168.0.2 \
 			-r 0 -t 1 2>&1 > $GEN_LOG) \
 			2>&1 > $GEN_LOG &
 
 	GEN_PID=$!
 
-	# Run test for 5 sec
-	sleep 5
+	# Run test for 1 sec
+	sleep 1
 
 	kill -2 ${GEN_PID}
 	wait ${GEN_PID}

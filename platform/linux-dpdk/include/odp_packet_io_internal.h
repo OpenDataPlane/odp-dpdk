@@ -289,15 +289,13 @@ extern const pktio_if_ops_t * const _odp_pktio_if_ops[];
 
 /* Dummy function required by odp_pktin_recv_mq_tmo() */
 static inline int
-_odp_sock_recv_mq_tmo_try_int_driven(const struct odp_pktin_queue_t queues[],
+_odp_sock_recv_mq_tmo_try_int_driven(const odp_pktin_queue_t queues[] ODP_UNUSED,
 				     uint32_t num_q ODP_UNUSED,
 				     uint32_t *from ODP_UNUSED,
 				     odp_packet_t packets[] ODP_UNUSED,
 				     int num ODP_UNUSED,
 				     uint64_t usecs ODP_UNUSED,
 				     int *trial_successful) {
-	(void)queues;
-
 	*trial_successful = 0;
 	return 0;
 }

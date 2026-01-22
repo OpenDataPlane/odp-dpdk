@@ -884,7 +884,7 @@ static int pktout_enqueue(odp_queue_t queue, _odp_event_hdr_t *event_hdr)
 
 	_ODP_ASSERT(odp_event_type(_odp_event_from_hdr(event_hdr)) == ODP_EVENT_PACKET);
 
-	if (_odp_sched_fn->ord_enq_multi(queue, (void **)event_hdr, 1, &nbr))
+	if (_odp_sched_fn->ord_enq_multi(queue, (void **)&event_hdr, 1, &nbr))
 		return (nbr == 1 ? 0 : -1);
 
 	nbr = odp_pktout_send(_odp_queue_fn->get_pktout(queue), &pkt, 1);
@@ -1466,7 +1466,9 @@ void odp_pktio_print(odp_pktio_t hdl)
 		       (entry->state ==  PKTIO_STATE_OPENED ? "opened" :
 							      "unknown"))));
 	memset(addr, 0, sizeof(addr));
-	odp_pktio_mac_addr(hdl, addr, ETH_ALEN);
+	if (odp_pktio_mac_addr(hdl, addr, ETH_ALEN) < 0)
+		_ODP_ERR("Unable to get MAC address\n");
+
 	len += snprintf(&str[len], n - len,
 			"  mac               %02x:%02x:%02x:%02x:%02x:%02x\n",
 			addr[0], addr[1], addr[2], addr[3], addr[4], addr[5]);

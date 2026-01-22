@@ -5,7 +5,7 @@ env:
   ARCH: x86_64
   CC: gcc
   CONTAINER_NAMESPACE: ghcr.io/opendataplane/odp-docker-images
-  OS: ubuntu_20.04
+  OS: ubuntu_24.04
 
 jobs:
   Checkpatch:
@@ -36,7 +36,7 @@ jobs:
           ./scripts/ci-checkpatches.sh ${COMMIT_RANGE}
 
   Documentation:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
@@ -98,10 +98,9 @@ jobs:
       - if: ${{ failure() }}
         uses: ./.github/actions/build-failure-log
 
-  Build_static_u24:
+  Build_static:
     runs-on: ubuntu-22.04
     env:
-      OS: ubuntu_24.04
       CONF: "--disable-shared --without-openssl --without-pcap"
     strategy:
       fail-fast: false
@@ -153,7 +152,7 @@ jobs:
     runs-on: ubuntu-22.04
     env:
       ARCH: i386
-      OS: ubuntu_18.04
+      OS: debian_12
     strategy:
       fail-fast: false
       matrix:
@@ -181,10 +180,8 @@ jobs:
       - if: ${{ failure() }}
         uses: ./.github/actions/build-failure-log
 
-  Build_gcc_u24:
+  Build_gcc_versions:
     runs-on: ubuntu-22.04
-    env:
-      OS: ubuntu_24.04
     strategy:
       fail-fast: false
       matrix:
@@ -331,21 +328,21 @@ jobs:
       - if: ${{ failure() }}
         uses: ./.github/actions/run-failure-log
 
-  Run_dpdk-21_11:
+  Run_dpdk-22_11:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}" -e ARCH="${ARCH}"
-               -e CONF="${CONF}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-dpdk_21.11 /odp/scripts/ci/check.sh
+               -e CONF="${CONF}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-dpdk_22.11 /odp/scripts/ci/check.sh
       - if: ${{ failure() }}
         uses: ./.github/actions/run-failure-log
 
-  Run_dpdk-23_11:
+  Run_dpdk-24_11:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}" -e ARCH="${ARCH}"
-                -e CONF="${CONF}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-dpdk_23.11 /odp/scripts/ci/check.sh
+               -e CONF="${CONF}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-dpdk_24.11 /odp/scripts/ci/check.sh
       - if: ${{ failure() }}
         uses: ./.github/actions/run-failure-log
 
@@ -363,8 +360,6 @@ jobs:
                $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH} /odp/scripts/ci/check_validation.sh
   Run_sanitizer:
     runs-on: ubuntu-22.04
-    env:
-      OS: ubuntu_22.04
     strategy:
       fail-fast: false
       matrix:

@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2013-2018 Linaro Limited
- * Copyright (c) 2020-2024 Nokia
+ * Copyright (c) 2020-2025 Nokia
  *
  * Copyright(c) 2010-2014 Intel Corporation
  *   - lib/eal/linux/eal_hugepage_info.c
@@ -23,6 +23,7 @@
 #include <odp_packet_internal.h>
 
 #include <errno.h>
+#include <limits.h>
 #include <string.h>
 #include <stdio.h>
 #include <inttypes.h>
@@ -170,7 +171,7 @@ static char *get_hugepage_dir(uint64_t hugepage_sz)
  */
 static uint64_t read_cpufreq(const char *filename, int id)
 {
-	char path[256], buffer[256], *endptr = NULL;
+	char path[256], buffer[256];
 	FILE *file;
 	uint64_t ret = 0;
 
@@ -181,8 +182,16 @@ static uint64_t read_cpufreq(const char *filename, int id)
 	if (file == NULL)
 		return ret;
 
-	if (fgets(buffer, sizeof(buffer), file) != NULL)
-		ret = strtoull(buffer, &endptr, 0) * 1000;
+	if (fgets(buffer, sizeof(buffer), file) != NULL) {
+		errno = 0;
+		ret = strtoull(buffer, NULL, 10);
+		if (errno) {
+			_ODP_ERR("Out of range CPU frequency from %s\n", path);
+			ret = 0;
+		} else {
+			ret *= 1000;
+		}
+	}
 
 	fclose(file);
 

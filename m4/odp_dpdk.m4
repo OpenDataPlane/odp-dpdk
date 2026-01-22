@@ -2,19 +2,20 @@
 # Copyright (c) 2017 Linaro Limited
 #
 
-# ODP_DPDK (DPDK_SHARED, ACTION-IF-FOUND, ACTION-IF-NOT-FOUND)
-# -----------------------------------------------------------------------
+# ODP_DPDK (DPDK_MIN_VERSION, DPDK_SHARED, ACTION-IF-FOUND, ACTION-IF-NOT-FOUND)
+# ------------------------------------------------------------------------------
 # Configure DPDK using pkg-config information
 AC_DEFUN([ODP_DPDK], [dnl
-dpdk_shared="$1"
+dpdk_min_version="$1"
+dpdk_shared="$2"
 if test "x$dpdk_shared" = "xyes" ; then
-    PKG_CHECK_MODULES([DPDK], [libdpdk],
+    PKG_CHECK_MODULES([DPDK], [libdpdk >= ${dpdk_min_version}],
                       [AC_MSG_NOTICE([Using shared DPDK lib])
-                       m4_default([$2], [:])], [m4_default([$3], [:])])
+                       m4_default([$3], [:])], [m4_default([$4], [:])])
 else
-    PKG_CHECK_MODULES_STATIC([DPDK], [libdpdk],
+    PKG_CHECK_MODULES_STATIC([DPDK], [libdpdk >= ${dpdk_min_version}],
                              [AC_MSG_NOTICE([Using static DPDK lib])
-                              m4_default([$2], [:])], [m4_default([$3], [:])])
+                              m4_default([$3], [:])], [m4_default([$4], [:])])
 fi
 if test "x$dpdk_shared" = "xyes"; then
     DPDK_LIBS_LIBODP="$DPDK_LIBS"
@@ -43,7 +44,7 @@ fi
 DPDK_LIBS=$DPDK_LIBS_LIBODP
 
 # Use PKG_CHECK_MODULES_STATIC to look for rte_net_pcap in Libs.private
-PKG_CHECK_MODULES_STATIC([DPDK_STATIC], [libdpdk])
+PKG_CHECK_MODULES_STATIC([DPDK_STATIC], [libdpdk >= ${dpdk_min_version}])
 have_pmd_pcap=no
 if grep -q "librte_net_pcap" <<< "$DPDK_STATIC_LIBS"; then
 have_pmd_pcap=yes

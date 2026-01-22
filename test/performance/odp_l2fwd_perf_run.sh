@@ -69,7 +69,7 @@ run_l2fwd_perf()
 --vdev net_pcap2,iface=$IF2"
 
 	# Max 2 workers
-	odp_l2fwd_perf${EXEEXT} -i 0,1 -m 0 -t 5 -c 2 | tee $LOG
+	odp_l2fwd_perf${EXEEXT} -i 0,1 -m 0 -t 1 -c 2 | tee $LOG
 	ret=${PIPESTATUS[0]}
 	kill -2 ${GEN_PID}
 	wait ${GEN_PID}

@@ -663,6 +663,7 @@ static void init_obj_priv_data(struct rte_mempool *mp ODP_UNUSED, void *arg, voi
 	struct priv_data_t *priv_data = arg;
 	struct rte_mbuf *mb = mbuf;
 	_odp_event_hdr_t *event_hdr = (_odp_event_hdr_t *)mbuf;
+	odp_event_vector_hdr_t *evv_hdr;
 	pool_t *pool = priv_data->pool;
 	void *uarea = pool->uarea_base_addr + i * pool->uarea_size;
 	void **obj_uarea;
@@ -689,7 +690,9 @@ static void init_obj_priv_data(struct rte_mempool *mp ODP_UNUSED, void *arg, voi
 		break;
 	case ODP_POOL_VECTOR:
 	case ODP_POOL_EVENT_VECTOR:
-		obj_uarea = &((odp_event_vector_hdr_t *)mbuf)->uarea_addr;
+		evv_hdr = (odp_event_vector_hdr_t *)mbuf;
+		evv_hdr->event_type = ODP_EVENT_ANY;
+		obj_uarea = &evv_hdr->uarea_addr;
 		break;
 	default:
 		_ODP_ABORT("Invalid pool type: %i\n", priv_data->type);
@@ -1393,6 +1396,7 @@ static void init_ext_obj(struct rte_mempool *mp, void *arg, void *mbuf, unsigned
 	pool_t *pool = mb_ctor_arg->pool;
 	void *uarea = pool->uarea_base_addr + i * pool->uarea_size;
 	_odp_event_hdr_t *event_hdr = (_odp_event_hdr_t *)mbuf;
+	odp_event_vector_hdr_t *evv_hdr;
 	void **obj_uarea;
 	odp_pool_ext_param_t *p = &pool->ext_param;
 	uint32_t app_hdr_offset = sizeof(odp_packet_hdr_t);
@@ -1406,8 +1410,7 @@ static void init_ext_obj(struct rte_mempool *mp, void *arg, void *mbuf, unsigned
 	/* Start of buffer is just after the ODP type specific header
 	 * which contains in the very beginning the rte_mbuf struct */
 	mb->buf_addr = (char *)mb + mb_ctor_arg->seg_buf_offset;
-#if RTE_VERSION < RTE_VERSION_NUM(22, 11, 0, 0) || \
-	(RTE_VERSION < RTE_VERSION_NUM(23, 03, 0, 0) && RTE_IOVA_AS_PA) || \
+#if (RTE_VERSION < RTE_VERSION_NUM(23, 03, 0, 0) && RTE_IOVA_AS_PA) || \
 	(RTE_VERSION >= RTE_VERSION_NUM(23, 03, 0, 0) && RTE_IOVA_IN_MBUF)
 	mb->buf_iova = rte_mempool_virt2iova(mb) + mb_ctor_arg->seg_buf_offset;
 #endif
@@ -1448,7 +1451,9 @@ static void init_ext_obj(struct rte_mempool *mp, void *arg, void *mbuf, unsigned
 		break;
 	case ODP_POOL_VECTOR:
 	case ODP_POOL_EVENT_VECTOR:
-		obj_uarea = &((odp_event_vector_hdr_t *)mbuf)->uarea_addr;
+		evv_hdr = (odp_event_vector_hdr_t *)mbuf;
+		evv_hdr->event_type = ODP_EVENT_ANY;
+		obj_uarea = &evv_hdr->uarea_addr;
 		break;
 	default:
 		_ODP_ABORT("Invalid pool type: %i\n", mb_ctor_arg->type);
