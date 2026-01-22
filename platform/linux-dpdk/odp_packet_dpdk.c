@@ -19,12 +19,12 @@
 
 #include <odp_classification_internal.h>
 #include <odp_debug_internal.h>
-#include <odp_eventdev_internal.h>
 #include <odp_libconfig_internal.h>
 #include <odp_packet_dpdk.h>
 #include <odp_packet_internal.h>
 #include <odp_packet_io_internal.h>
 #include <odp_pool_internal.h>
+#include <odp_rx_adapter_internal.h>
 #include <odp_string_internal.h>
 #include <protocols/eth.h>
 
@@ -505,8 +505,7 @@ static int dpdk_init_global(void)
 static int dpdk_term_global(void)
 {
 	/* Eventdev takes care of closing pktio devices */
-	if (!_odp_eventdev_gbl ||
-	    _odp_eventdev_gbl->rx_adapter.status == RX_ADAPTER_INIT) {
+	if (!_odp_rx_adapter_initialized()) {
 		uint16_t port_id;
 
 		RTE_ETH_FOREACH_DEV(port_id) {
@@ -754,8 +753,7 @@ static int close_pkt_dpdk(pktio_entry_t *pktio_entry)
 {
 	pkt_dpdk_t * const pkt_dpdk = pkt_priv(pktio_entry);
 
-	if (_odp_eventdev_gbl &&
-	    _odp_eventdev_gbl->rx_adapter.status != RX_ADAPTER_INIT)
+	if (_odp_rx_adapter_initialized())
 		_odp_rx_adapter_port_stop(pkt_dpdk->port_id);
 	else
 		rte_eth_dev_stop(pkt_dpdk->port_id);

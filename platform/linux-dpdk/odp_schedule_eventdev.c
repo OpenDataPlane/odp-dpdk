@@ -313,6 +313,13 @@ int _odp_rx_adapter_close(void)
 	return ret;
 }
 
+int _odp_rx_adapter_initialized(void)
+{
+	if (_odp_eventdev_gbl && _odp_eventdev_gbl->rx_adapter.status != RX_ADAPTER_INIT)
+		return 1;
+	return 0;
+}
+
 void _odp_rx_adapter_port_stop(uint16_t port_id)
 {
 	uint8_t rx_adapter_id = _odp_eventdev_gbl->rx_adapter.id;

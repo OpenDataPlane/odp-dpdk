@@ -29,6 +29,7 @@ extern "C" {
 #include <odp_packet_io_internal.h>
 #include <odp_ptr_ring_mpmc_internal.h>
 #include <odp_queue_if.h>
+#include <odp_rx_adapter_internal.h>
 #include <odp_schedule_if.h>
 
 #include <rte_config.h>
@@ -156,10 +157,6 @@ int _odp_service_setup(uint32_t service_id);
 int _odp_dummy_link_queues(uint8_t dev_id, uint8_t dummy_linked_queues[], int num);
 
 int _odp_dummy_unlink_queues(uint8_t dev_id, uint8_t dummy_linked_queues[], int num);
-
-void _odp_rx_adapter_port_stop(uint16_t port_id);
-
-int _odp_rx_adapter_close(void);
 
 static inline uint8_t event_schedule_type(odp_schedule_sync_t sync)
 {
