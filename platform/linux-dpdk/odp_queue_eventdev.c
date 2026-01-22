@@ -665,9 +665,11 @@ static odp_queue_t queue_create(const char *name,
 		}
 		if (param->size > _odp_eventdev_gbl->sched_config.max_queue_size)
 			return ODP_QUEUE_INVALID;
-	} else {
+	} else if (type == ODP_QUEUE_TYPE_PLAIN) {
 		if (param->size > _odp_eventdev_gbl->plain_config.max_queue_size)
 			return ODP_QUEUE_INVALID;
+	} else {
+		return ODP_QUEUE_INVALID;
 	}
 
 	/* Only blocking queues supported */
@@ -781,6 +783,11 @@ static int queue_context_set(odp_queue_t handle, void *context,
 	qentry_from_handle(handle)->param.context = context;
 	odp_mb_full();
 	return 0;
+}
+
+static odp_queue_t queue_aggr(odp_queue_t handle ODP_UNUSED, uint32_t aggr_index ODP_UNUSED)
+{
+	return ODP_QUEUE_INVALID;
 }
 
 static odp_queue_t queue_lookup(const char *name)
@@ -1289,6 +1296,12 @@ static int queue_api_enq(odp_queue_t handle, odp_event_t ev)
 	return queue->enqueue(handle, (_odp_event_hdr_t *)(uintptr_t)ev);
 }
 
+static int queue_api_enq_aggr(odp_queue_t handle, odp_event_t ev,
+			      const odp_aggr_enq_param_t *param ODP_UNUSED)
+{
+	return queue_api_enq(handle, ev);
+}
+
 static int queue_api_deq_multi(odp_queue_t handle, odp_event_t ev[], int num)
 {
 	queue_entry_t *queue = qentry_from_handle(handle);
@@ -1325,8 +1338,10 @@ _odp_queue_api_fn_t _odp_queue_eventdev_api = {
 	.queue_lookup = queue_lookup,
 	.queue_capability = queue_capability,
 	.queue_context_set = queue_context_set,
+	.queue_aggr = queue_aggr,
 	.queue_enq = queue_api_enq,
 	.queue_enq_multi = queue_api_enq_multi,
+	.queue_enq_aggr = queue_api_enq_aggr,
 	.queue_deq = queue_api_deq,
 	.queue_deq_multi = queue_api_deq_multi,
 	.queue_type = queue_type,

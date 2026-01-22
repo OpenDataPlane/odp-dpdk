@@ -945,6 +945,11 @@ static void schedule_order_lock_wait(uint32_t lock_index)
 	(void)lock_index;
 }
 
+static void ord_stash_release(odp_queue_t queue ODP_UNUSED)
+{
+	/* Nothing to do */
+}
+
 static void order_lock(void)
 {
 	/* Nothing to do */
@@ -1025,6 +1030,7 @@ const schedule_fn_t _odp_schedule_eventdev_fn = {
 	.destroy_queue = schedule_destroy_queue,
 	.sched_queue = NULL,
 	.ord_enq_multi = NULL,
+	.ord_stash_release = ord_stash_release,
 	.init_global = schedule_init_global,
 	.term_global = schedule_term_global,
 	.init_local  = schedule_init_local,

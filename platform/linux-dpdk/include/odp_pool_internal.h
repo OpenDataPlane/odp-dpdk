@@ -71,7 +71,7 @@ typedef struct ODP_ALIGNED_CACHE {
 	uint32_t		uarea_size;
 	uint32_t		trailer_size; /* Endmark size */
 	uint32_t		num_populated;
-	odp_pool_type_t		type_2;
+	odp_pool_type_t		type_2; /* Pool type from application PoV */
 	char			name[ODP_POOL_NAME_LEN];
 
 } pool_t;
@@ -101,6 +101,11 @@ static inline pool_t *_odp_pool_entry(odp_pool_t pool_hdl)
 static inline odp_pool_t _odp_pool_handle(pool_t *pool)
 {
 	return (odp_pool_t)(uintptr_t)pool;
+}
+
+static inline odp_pool_type_t _odp_pool_type(odp_pool_t pool_hdl)
+{
+	return _odp_pool_entry(pool_hdl)->type_2;
 }
 
 static inline int _odp_event_alloc_multi(pool_t *pool, _odp_event_hdr_t *event_hdr[], int num)
