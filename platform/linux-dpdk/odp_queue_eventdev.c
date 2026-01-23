@@ -959,7 +959,9 @@ static int queue_info(odp_queue_t handle, odp_queue_info_t *info)
 		return -1;
 	}
 
+	memset(info, 0, sizeof(*info));
 	info->name = queue->name;
+	info->type = queue->type;
 	info->param = queue->param;
 
 	UNLOCK(queue);
