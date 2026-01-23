@@ -9,7 +9,6 @@
 #include <odp/api/buffer.h>
 #include <odp/api/crypto.h>
 #include <odp/api/debug.h>
-#include <odp/api/deprecated.h>
 #include <odp/api/hints.h>
 #include <odp/api/shared_memory.h>
 #include <odp/api/spinlock.h>
@@ -1487,12 +1486,7 @@ int odp_crypto_session_create(const odp_crypto_session_param_t *param,
 		return -1;
 	}
 
-#if ODP_DEPRECATED_API
-	if (param->op_type != ODP_CRYPTO_OP_TYPE_BASIC &&
-	    param->op_type != ODP_CRYPTO_OP_TYPE_LEGACY) {
-#else
 	if (param->op_type != ODP_CRYPTO_OP_TYPE_BASIC) {
-#endif
 		*status = ODP_CRYPTO_SES_ERR_PARAMS;
 		*session_out = ODP_CRYPTO_SESSION_INVALID;
 		return -1;
@@ -1827,60 +1821,6 @@ static int linearize_pkt(const crypto_session_entry_t *session, odp_packet_t pkt
 	return rte_pktmbuf_linearize(mbuf);
 }
 
-#if ODP_DEPRECATED_API
-static int copy_data_and_metadata(odp_packet_t dst, odp_packet_t src)
-{
-	int md_copy;
-	int rc;
-
-	md_copy = _odp_packet_copy_md_possible(odp_packet_pool(dst),
-					       odp_packet_pool(src));
-	if (odp_unlikely(md_copy < 0)) {
-		_ODP_ERR("Unable to copy packet metadata\n");
-		return -1;
-	}
-
-	rc = odp_packet_copy_from_pkt(dst, 0, src, 0, odp_packet_len(src));
-	if (odp_unlikely(rc < 0)) {
-		_ODP_ERR("Unable to copy packet data\n");
-		return -1;
-	}
-
-	_odp_packet_copy_md(packet_hdr(dst), packet_hdr(src), md_copy);
-	return 0;
-}
-
-static odp_packet_t get_output_packet(const crypto_session_entry_t *session,
-				      odp_packet_t pkt_in,
-				      odp_packet_t pkt_out)
-{
-	int rc;
-
-	if (odp_likely(pkt_in == pkt_out))
-		return pkt_out;
-
-	if (pkt_out == ODP_PACKET_INVALID) {
-		odp_pool_t pool = session->p.output_pool;
-
-		_ODP_ASSERT(pool != ODP_POOL_INVALID);
-		if (pool == odp_packet_pool(pkt_in)) {
-			pkt_out = pkt_in;
-		} else {
-			pkt_out = odp_packet_copy(pkt_in, pool);
-			if (odp_likely(pkt_out != ODP_PACKET_INVALID))
-				odp_packet_free(pkt_in);
-		}
-		return pkt_out;
-	}
-	rc = copy_data_and_metadata(pkt_out, pkt_in);
-	if (odp_unlikely(rc < 0))
-		return ODP_PACKET_INVALID;
-
-	odp_packet_free(pkt_in);
-	return pkt_out;
-}
-#endif
-
 /*
  * Return number of ops allocated and packets consumed.
  */
@@ -1914,16 +1854,6 @@ static int op_alloc(crypto_op_t *op[],
 		session = (crypto_session_entry_t *)(intptr_t)param[n].session;
 		_ODP_ASSERT(session != NULL);
 
-#if ODP_DEPRECATED_API
-		if (odp_unlikely(session->p.op_type == ODP_CRYPTO_OP_TYPE_LEGACY)) {
-			pkt = get_output_packet(session, pkt_in[n], pkt_out[n]);
-			if (odp_unlikely(pkt == ODP_PACKET_INVALID)) {
-				for (int i = n; i < num_pkts; i++)
-					rte_crypto_op_free((struct rte_crypto_op *)op[i]);
-				break;
-			}
-		}
-#endif
 		op[n]->state.pkt = pkt;
 	}
 	return n;
@@ -2229,11 +2159,6 @@ int odp_crypto_op_enq(const odp_packet_t pkt_in[],
 		session = (crypto_session_entry_t *)(intptr_t)param[i].session;
 		_ODP_ASSERT(ODP_CRYPTO_ASYNC == session->p.op_mode);
 		_ODP_ASSERT(ODP_QUEUE_INVALID != session->p.compl_queue);
-
-#if ODP_DEPRECATED_API
-		if (session->p.op_type != ODP_CRYPTO_OP_TYPE_BASIC)
-			out_pkts[i] = pkt_out[i];
-#endif
 	}
 
 	num_pkt = odp_crypto_int(pkt_in, out_pkts, param, num_pkt);
