@@ -333,14 +333,6 @@ int odp_event_filter_packet(const odp_event_t event[],
 	return num_pkt;
 }
 
-void *odp_packet_tail(odp_packet_t pkt)
-{
-	struct rte_mbuf *mb = &(packet_hdr(pkt)->mb);
-
-	mb = rte_pktmbuf_lastseg(mb);
-	return (void *)(rte_pktmbuf_mtod(mb, char *) + mb->data_len);
-}
-
 static void _copy_head_metadata(struct rte_mbuf *newhead,
 				struct rte_mbuf *oldhead)
 {
