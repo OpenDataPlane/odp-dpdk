@@ -1063,14 +1063,16 @@ static int recv_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 		nb_rx = rte_eth_rx_burst(port_id, (uint16_t)index,
 					 (struct rte_mbuf **)min_burst, min);
 
-		for (uint16_t i = 0; i < nb_rx; i++) {
-			if (i < num)
-				pkt_table[i] = min_burst[i];
-			else
-				odp_packet_free(min_burst[i]);
-		}
+		for (uint16_t i = 0; i < nb_rx && i < num; i++)
+			pkt_table[i] = min_burst[i];
 
-		nb_rx = RTE_MIN(num, nb_rx);
+		if (nb_rx > num) {
+			int drops = nb_rx - num;
+
+			odp_packet_free_multi(&min_burst[num], drops);
+			odp_atomic_add_u64(&pktio_entry->stats_extra.in_discards, drops);
+			nb_rx = num;
+		}
 	}
 
 	if (!lockless)
