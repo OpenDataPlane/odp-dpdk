@@ -134,6 +134,9 @@ _ODP_INLINE void odp_buffer_free_multi(const odp_buffer_t buf[], int num)
 
 _ODP_INLINE int odp_buffer_is_valid(odp_buffer_t buf)
 {
+	if (odp_unlikely(buf == ODP_BUFFER_INVALID))
+		return 0;
+
 	if (odp_event_is_valid(odp_buffer_to_event(buf)) == 0)
 		return 0;
 

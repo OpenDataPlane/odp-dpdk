@@ -88,24 +88,6 @@ ODP_STATIC_ASSERT(sizeof(_odp_dummy_mbuf.hash.rss) == sizeof(uint32_t),
 ODP_STATIC_ASSERT(sizeof(_odp_dummy_mbuf.ol_flags) == sizeof(uint64_t),
 		  "ol_flags should be uint64_t");
 
-/* Check that invalid values are the same. Some versions of Clang  and pedantic
- * build have trouble with the strong type casting, and complain that these
- * invalid values are not integral constants.
- *
- * Invalid values are required to be equal for _odp_buffer_is_valid() to work
- * properly. */
-#ifndef __clang__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wpedantic"
-ODP_STATIC_ASSERT(ODP_PACKET_INVALID == 0, "Packet invalid not 0");
-ODP_STATIC_ASSERT(ODP_BUFFER_INVALID == 0, "Buffer invalid not 0");
-ODP_STATIC_ASSERT(ODP_EVENT_INVALID  == 0, "Event invalid not 0");
-ODP_STATIC_ASSERT(ODP_PACKET_VECTOR_INVALID == 0, "Packet vector invalid not 0");
-ODP_STATIC_ASSERT(ODP_PACKET_TX_COMPL_INVALID == 0, "Packet TX completion invalid not 0");
-ODP_STATIC_ASSERT(ODP_TIMEOUT_INVALID == 0, "Timeout invalid not 0");
-#pragma GCC diagnostic pop
-#endif
-
 /* Calculate the number of segments */
 static inline int num_segments(uint32_t len, uint32_t seg_len)
 {
