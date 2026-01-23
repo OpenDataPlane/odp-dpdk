@@ -341,13 +341,6 @@ void *odp_packet_tail(odp_packet_t pkt)
 	return (void *)(rte_pktmbuf_mtod(mb, char *) + mb->data_len);
 }
 
-void *odp_packet_push_head(odp_packet_t pkt, uint32_t len)
-{
-	struct rte_mbuf *mb = &(packet_hdr(pkt)->mb);
-
-	return (void *)rte_pktmbuf_prepend(mb, len);
-}
-
 static void _copy_head_metadata(struct rte_mbuf *newhead,
 				struct rte_mbuf *oldhead)
 {
@@ -408,16 +401,6 @@ int odp_packet_extend_head(odp_packet_t *pkt, uint32_t len, void **data_ptr,
 		*seg_len = mb->data_len;
 
 	return 0;
-}
-
-void *odp_packet_pull_head(odp_packet_t pkt, uint32_t len)
-{
-	struct rte_mbuf *mb = pkt_to_mbuf(pkt);
-
-	if (odp_unlikely(len >= mb->data_len))
-		return NULL;
-
-	return (void *)rte_pktmbuf_adj(mb, len);
 }
 
 int odp_packet_trunc_head(odp_packet_t *pkt, uint32_t len, void **data_ptr,

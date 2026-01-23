@@ -94,6 +94,8 @@ extern "C" {
 	#define odp_packet_ts_set __odp_packet_ts_set
 	#define odp_packet_ts_request __odp_packet_ts_request
 	#define odp_packet_head __odp_packet_head
+	#define odp_packet_pull_head __odp_packet_pull_head
+	#define odp_packet_push_head __odp_packet_push_head
 	#define odp_packet_is_segmented __odp_packet_is_segmented
 	#define odp_packet_first_seg __odp_packet_first_seg
 	#define odp_packet_last_seg __odp_packet_last_seg
@@ -502,6 +504,23 @@ _ODP_INLINE void odp_packet_ts_request(odp_packet_t pkt, int enable)
 _ODP_INLINE void *odp_packet_head(odp_packet_t pkt)
 {
 	return (uint8_t *)odp_packet_data(pkt) - odp_packet_headroom(pkt);
+}
+
+_ODP_INLINE void *odp_packet_pull_head(odp_packet_t pkt, uint32_t len)
+{
+	struct rte_mbuf *mb = (struct rte_mbuf *)pkt;
+
+	if (odp_unlikely(len >= mb->data_len))
+		return NULL;
+
+	return (void *)rte_pktmbuf_adj(mb, (uint16_t)len);
+}
+
+_ODP_INLINE void *odp_packet_push_head(odp_packet_t pkt, uint32_t len)
+{
+	struct rte_mbuf *mb = (struct rte_mbuf *)pkt;
+
+	return (void *)rte_pktmbuf_prepend(mb, (uint16_t)len);
 }
 
 _ODP_INLINE int odp_packet_is_segmented(odp_packet_t pkt)
