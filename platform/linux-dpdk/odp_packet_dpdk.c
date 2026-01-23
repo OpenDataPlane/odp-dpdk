@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2013-2018 Linaro Limited
- * Copyright (c) 2019-2023 Nokia
+ * Copyright (c) 2019-2026 Nokia
  */
 
 #include <odp_posix_extensions.h>
@@ -30,6 +30,7 @@
 
 #include <rte_config.h>
 #include <rte_common.h>
+#include <rte_errno.h>
 #include <rte_ethdev.h>
 #include <rte_ip_frag.h>
 #include <rte_udp.h>
@@ -133,8 +134,6 @@ const pktio_if_ops_t * const _odp_pktio_if_ops[]  = {
 };
 
 extern void *pktio_entry_ptr[CONFIG_PKTIO_ENTRIES];
-
-static uint32_t mtu_get_pkt_dpdk(pktio_entry_t *pktio_entry);
 
 static inline int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], uint16_t num);
 
@@ -648,7 +647,7 @@ static int setup_pkt_dpdk(odp_pktio_t pktio ODP_UNUSED,
 			  pktio_entry_t *pktio_entry,
 			  const char *netdev, odp_pool_t pool ODP_UNUSED)
 {
-	uint32_t mtu;
+	uint16_t mtu;
 	struct rte_eth_dev_info dev_info;
 	pkt_dpdk_t * const pkt_dpdk = pkt_priv(pktio_entry);
 	int i, ret;
@@ -704,9 +703,9 @@ static int setup_pkt_dpdk(odp_pktio_t pktio ODP_UNUSED,
 
 	_dpdk_print_port_mac(pkt_dpdk->port_id);
 
-	mtu = mtu_get_pkt_dpdk(pktio_entry);
-	if (mtu == 0) {
-		_ODP_ERR("Failed to read interface MTU\n");
+	ret = rte_eth_dev_get_mtu(pkt_dpdk->port_id, &mtu);
+	if (ret) {
+		_ODP_ERR("Failed to retrieve device %s MTU: %s\n", netdev, rte_strerror(-ret));
 		return -1;
 	}
 	pkt_dpdk->mtu = mtu + _ODP_ETHHDR_LEN;
@@ -1225,48 +1224,6 @@ static int send_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 		_odp_pktio_tx_ts_set(pktio_entry);
 
 	return pkts;
-}
-
-static uint32_t _dpdk_vdev_mtu(uint16_t port_id)
-{
-	struct rte_eth_dev_info dev_info;
-	struct ifreq ifr;
-	int ret;
-	int sockfd;
-
-	ret = rte_eth_dev_info_get(port_id, &dev_info);
-	if (ret) {
-		_ODP_ERR("Failed to read device info: %d\n", ret);
-		return 0;
-	}
-
-	if_indextoname(dev_info.if_index, ifr.ifr_name);
-	sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-	ret = ioctl(sockfd, SIOCGIFMTU, &ifr);
-	close(sockfd);
-	if (ret < 0) {
-		_ODP_DBG("ioctl SIOCGIFMTU error\n");
-		return 0;
-	}
-
-	return ifr.ifr_mtu;
-}
-
-static uint32_t mtu_get_pkt_dpdk(pktio_entry_t *pktio_entry)
-{
-	uint16_t mtu = 0;
-	int ret;
-
-	ret = rte_eth_dev_get_mtu(pkt_priv(pktio_entry)->port_id, &mtu);
-	if (ret < 0)
-		return 0;
-
-	/* some dpdk PMD vdev does not support getting mtu size,
-	 * try to use system call if dpdk cannot get mtu value.
-	 */
-	if (mtu == 0)
-		mtu = _dpdk_vdev_mtu(pkt_priv(pktio_entry)->port_id);
-	return mtu;
 }
 
 static uint32_t dpdk_maxlen_get(pktio_entry_t *pktio_entry)
