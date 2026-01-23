@@ -35,9 +35,6 @@ typedef struct _odp_event_hdr_int_t {
 	/* Buffer index in the pool */
 	uint32_t  index;
 
-	/* Pool type */
-	int8_t    type;
-
 	/* Event type. Maybe different than pool type (crypto compl event) */
 	int8_t    event_type;
 
