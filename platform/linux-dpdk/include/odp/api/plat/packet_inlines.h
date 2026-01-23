@@ -97,6 +97,8 @@ extern "C" {
 	#define odp_packet_pull_head __odp_packet_pull_head
 	#define odp_packet_push_head __odp_packet_push_head
 	#define odp_packet_tail __odp_packet_tail
+	#define odp_packet_pull_tail __odp_packet_pull_tail
+	#define odp_packet_push_tail __odp_packet_push_tail
 	#define odp_packet_is_segmented __odp_packet_is_segmented
 	#define odp_packet_first_seg __odp_packet_first_seg
 	#define odp_packet_last_seg __odp_packet_last_seg
@@ -530,6 +532,27 @@ _ODP_INLINE void *odp_packet_tail(odp_packet_t pkt)
 
 	mb = rte_pktmbuf_lastseg(mb);
 	return (void *)(rte_pktmbuf_mtod(mb, char *) + mb->data_len);
+}
+
+_ODP_INLINE void *odp_packet_pull_tail(odp_packet_t pkt, uint32_t len)
+{
+	struct rte_mbuf *mb = (struct rte_mbuf *)pkt;
+	struct rte_mbuf *mb_last = rte_pktmbuf_lastseg(mb);
+
+	if (odp_unlikely(len >= mb_last->data_len))
+		return NULL;
+
+	if (odp_unlikely(rte_pktmbuf_trim(mb, (uint16_t)len)))
+		return NULL;
+
+	return odp_packet_tail(pkt);
+}
+
+_ODP_INLINE void *odp_packet_push_tail(odp_packet_t pkt, uint32_t len)
+{
+	struct rte_mbuf *mb = (struct rte_mbuf *)pkt;
+
+	return (void *)rte_pktmbuf_append(mb, (uint16_t)len);
 }
 
 _ODP_INLINE int odp_packet_is_segmented(odp_packet_t pkt)

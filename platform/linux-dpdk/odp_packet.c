@@ -436,13 +436,6 @@ int odp_packet_trunc_head(odp_packet_t *pkt, uint32_t len, void **data_ptr,
 	return 0;
 }
 
-void *odp_packet_push_tail(odp_packet_t pkt, uint32_t len)
-{
-	struct rte_mbuf *mb = &(packet_hdr(pkt)->mb);
-
-	return (void *)rte_pktmbuf_append(mb, len);
-}
-
 int odp_packet_extend_tail(odp_packet_t *pkt, uint32_t len, void **data_ptr,
 			   uint32_t *seg_len)
 {
@@ -499,20 +492,6 @@ int odp_packet_extend_tail(odp_packet_t *pkt, uint32_t len, void **data_ptr,
 		odp_packet_offset(*pkt, old_pkt_len, seg_len, NULL);
 
 	return 0;
-}
-
-void *odp_packet_pull_tail(odp_packet_t pkt, uint32_t len)
-{
-	struct rte_mbuf *mb = pkt_to_mbuf(pkt);
-	struct rte_mbuf *mb_last = rte_pktmbuf_lastseg(mb);
-
-	if (odp_unlikely(len >= mb_last->data_len))
-		return NULL;
-
-	if (rte_pktmbuf_trim(mb, len))
-		return NULL;
-	else
-		return odp_packet_tail(pkt);
 }
 
 int odp_packet_trunc_tail(odp_packet_t *pkt, uint32_t len, void **tail_ptr,
