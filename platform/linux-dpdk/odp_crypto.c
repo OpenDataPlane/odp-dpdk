@@ -1664,7 +1664,12 @@ int _odp_crypto_term_global(void)
 void odp_crypto_session_param_init(odp_crypto_session_param_t *param)
 {
 	memset(param, 0, sizeof(odp_crypto_session_param_t));
+	param->op = ODP_CRYPTO_OP_ENCODE;
 	param->op_type = ODP_CRYPTO_OP_TYPE_BASIC;
+	param->op_mode = ODP_CRYPTO_SYNC;
+	param->cipher_alg = ODP_CIPHER_ALG_NULL;
+	param->auth_alg = ODP_AUTH_ALG_NULL;
+	param->output_pool = ODP_POOL_INVALID;
 }
 
 uint64_t odp_crypto_session_to_u64(odp_crypto_session_t hdl)
