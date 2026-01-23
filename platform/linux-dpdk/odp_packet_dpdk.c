@@ -56,11 +56,19 @@
 /* DPDK poll mode drivers requiring minimum RX burst size DPDK_MIN_RX_BURST */
 #define IXGBE_DRV_NAME "net_ixgbe"
 #define I40E_DRV_NAME "net_i40e"
+#define IAVF_DRV_NAME "net_iavf"
+#define ICE_DRV_NAME "net_ice"
+#define VIRTIO_DRV_NAME "net_virtio"
 
 #define PCAP_DRV_NAME "net_pcap"
 
-/* Minimum RX burst size */
-#define DPDK_MIN_RX_BURST 4
+/* Minimum RX burst size
+ * The same drivers might require different minimum burst sizes depending
+ * on the underlying hardware (e.g., for net_i40e, i40e_rxtx_vec_neon.c
+ * requires 4 while i40e_rxtx_vec_avx2.c and i40e_rxtx_vec_avx512.c require 8).
+ * Here a common minimum value is set for all such drivers.
+ */
+#define DPDK_MIN_RX_BURST 8
 
 /* Number of packet buffers to prefetch in RX */
 #define NUM_RX_PREFETCH 4
@@ -70,6 +78,7 @@ typedef struct {
 	int multicast_enable;
 	int num_rx_desc_default;
 	int num_tx_desc_default;
+	int min_rx_burst;
 	int rx_drop_en;
 	int tx_offload_multi_segs;
 } dpdk_opt_t;
@@ -182,6 +191,15 @@ static int init_options(pktio_entry_t *pktio_entry,
 		return -1;
 	opt->multicast_enable = !!opt->multicast_enable;
 
+	if (!lookup_opt("min_rx_burst", dev_info->driver_name, &opt->min_rx_burst))
+		return -1;
+
+	if (opt->min_rx_burst < 0 || opt->min_rx_burst > UINT8_MAX) {
+		_ODP_ERR("min_rx_burst value %d must be 0-%" PRIu8 "\n",
+			 opt->min_rx_burst, UINT8_MAX);
+		return -1;
+	}
+
 	if (!lookup_opt("tx_offload_multi_segs", dev_info->driver_name,
 			&opt->tx_offload_multi_segs))
 		return -1;
@@ -193,6 +211,7 @@ static int init_options(pktio_entry_t *pktio_entry,
 	_ODP_DBG("  num_rx_desc: %d\n", opt->num_rx_desc_default);
 	_ODP_DBG("  num_tx_desc: %d\n", opt->num_tx_desc_default);
 	_ODP_DBG("  rx_drop_en:  %d\n", opt->rx_drop_en);
+	_ODP_DBG("  min_rx_burst: %d\n", opt->min_rx_burst);
 	_ODP_DBG("  tx_offload_multi_segs: %d\n", opt->tx_offload_multi_segs);
 
 	return 0;
@@ -666,6 +685,8 @@ static int setup_pkt_dpdk(odp_pktio_t pktio ODP_UNUSED,
 	uint16_t port_id;
 	struct rte_eth_conf eth_conf;
 
+	memset(pkt_dpdk, 0, sizeof(pkt_dpdk_t));
+
 	if (!rte_eth_dev_get_port_by_name(netdev, &port_id))
 		pkt_dpdk->port_id = port_id;
 	else if (_dpdk_netdev_is_valid(netdev))
@@ -703,15 +724,21 @@ static int setup_pkt_dpdk(odp_pktio_t pktio ODP_UNUSED,
 		return -1;
 	}
 
-	/* Drivers requiring minimum burst size. Supports also *_vf versions
-	 * of the drivers. */
-	if (!strncmp(dev_info.driver_name, IXGBE_DRV_NAME,
-		     strlen(IXGBE_DRV_NAME)) ||
-	    !strncmp(dev_info.driver_name, I40E_DRV_NAME,
-		     strlen(I40E_DRV_NAME)))
+	/* Use user provided value */
+	if (pkt_dpdk->opt.min_rx_burst > 0) {
+		pkt_dpdk->min_rx_burst = pkt_dpdk->opt.min_rx_burst;
+	} else if (!strncmp(dev_info.driver_name, IXGBE_DRV_NAME, strlen(IXGBE_DRV_NAME)) ||
+		   !strncmp(dev_info.driver_name, I40E_DRV_NAME, strlen(I40E_DRV_NAME)) ||
+		   !strncmp(dev_info.driver_name, IAVF_DRV_NAME, strlen(IAVF_DRV_NAME)) ||
+		   !strncmp(dev_info.driver_name, ICE_DRV_NAME, strlen(ICE_DRV_NAME)) ||
+		   !strncmp(dev_info.driver_name, VIRTIO_DRV_NAME, strlen(VIRTIO_DRV_NAME))) {
+		/* Drivers requiring minimum burst size. Supports also *_vf versions
+		 * of the drivers.
+		 */
 		pkt_dpdk->min_rx_burst = DPDK_MIN_RX_BURST;
-	else
-		pkt_dpdk->min_rx_burst = 0;
+		_ODP_WARN("DPDK PMD %s requires the number of packets to retrieve\n"
+			  "be divisible by %d\n", dev_info.driver_name, DPDK_MIN_RX_BURST);
+	}
 
 	_dpdk_print_port_mac(pkt_dpdk->port_id);
 
