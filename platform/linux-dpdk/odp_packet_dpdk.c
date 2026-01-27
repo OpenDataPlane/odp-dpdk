@@ -504,6 +504,31 @@ static int dpdk_output_queues_config(pktio_entry_t *pktio_entry,
 	return 0;
 }
 
+static void dpdk_print(pktio_entry_t *pktio_entry)
+{
+	dpdk_opt_t *opt = &pkt_priv(pktio_entry)->opt;
+	int max_len = 512;
+	char str[max_len];
+	int len = 0;
+	int n = max_len - 1;
+
+	len += _odp_snprint(&str[len], n - len, "DPDK pktio config:\n");
+	len += _odp_snprint(&str[len], n - len, "  multicast             %d\n",
+			    opt->multicast_enable);
+	len += _odp_snprint(&str[len], n - len, "  num_rx_desc           %d\n",
+			    opt->num_rx_desc_default);
+	len += _odp_snprint(&str[len], n - len, "  num_tx_desc           %d\n",
+			    opt->num_tx_desc_default);
+	len += _odp_snprint(&str[len], n - len, "  rx_drop_en            %d\n",
+			    opt->rx_drop_en);
+	len += _odp_snprint(&str[len], n - len, "  min_rx_burst          %d\n",
+			    opt->min_rx_burst);
+	len += _odp_snprint(&str[len], n - len, "  tx_offload_multi_segs %d\n",
+			    opt->tx_offload_multi_segs);
+	str[len] = '\0';
+	_ODP_PRINT("\n%s", str);
+}
+
 static int dpdk_init_global(void)
 {
 	return 0;
@@ -1587,7 +1612,7 @@ static int dpdk_pktout_stats(pktio_entry_t *pktio_entry, uint32_t index,
 
 const pktio_if_ops_t _odp_dpdk_pktio_ops = {
 	.name = "odp-dpdk",
-	.print = NULL,
+	.print = dpdk_print,
 	.init_global = dpdk_init_global,
 	.init_local = NULL,
 	.term = dpdk_term_global,
