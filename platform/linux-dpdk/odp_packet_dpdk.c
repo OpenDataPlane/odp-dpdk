@@ -205,6 +205,9 @@ static int init_options(pktio_entry_t *pktio_entry,
 		return -1;
 	opt->tx_offload_multi_segs = !!opt->tx_offload_multi_segs;
 
+	if (!opt->tx_offload_multi_segs)
+		_ODP_WARN("Multi segment packet send not enabled\n");
+
 	_ODP_DBG("DPDK interface (%s): %" PRIu16 "\n", dev_info->driver_name,
 		 pkt_priv(pktio_entry)->port_id);
 	_ODP_DBG("  multicast:   %d\n", opt->multicast_enable);
