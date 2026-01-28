@@ -910,17 +910,8 @@ static int dpdk_start(pktio_entry_t *pktio_entry)
 	return 0;
 }
 
-static int stop_pkt_dpdk(pktio_entry_t *pktio_entry)
+static int stop_pkt_dpdk(pktio_entry_t *pktio_entry ODP_UNUSED)
 {
-	pkt_dpdk_t *pkt_dpdk = pkt_priv(pktio_entry);
-	unsigned int i;
-	uint16_t port_id = pkt_dpdk->port_id;
-
-	for (i = 0; i < pktio_entry->num_in_queue; i++)
-		rte_eth_dev_rx_queue_stop(port_id, i);
-	for (i = 0; i < pktio_entry->num_out_queue; i++)
-		rte_eth_dev_tx_queue_stop(port_id, i);
-
 	return 0;
 }
 
