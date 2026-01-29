@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2017-2018 Linaro Limited
- * Copyright (c) 2018-2025 Nokia
+ * Copyright (c) 2018-2026 Nokia
  */
 
 #include <odp_posix_extensions.h>
@@ -1793,47 +1793,38 @@ static void crypto_fill_sym_param(const crypto_session_entry_t *session,
 }
 
 /*
- * Attempt to change a multi segment packet to a single segment packet by
- * reducing the headroom. Shift packet data toward the start of the first
- * segment and trim the tail, hopefully getting rid of the tail segment.
+ * Attempt to change a multi segment packet to a single segment packet
+ * if the session does not support segmented packets.
  *
- * This fails if the packet data does not fit in the first segment with
- * the new headroom. A temporary copy to a bigger buffer would be needed
- * in that case.
+ * This fails if the packet data does not fit in single segment.
+ * A temporary copy to a bigger buffer would be needed in that case.
  *
  * Do nothing for single segment packets.
- *
- * We assume that odp_crypto_operation() makes no promise to not shift
- * packet data within the packet. If that is not the case, the shifting
- * done here needs to be undone after the crypto operation.
- *
  */
 static int linearize_pkt(const crypto_session_entry_t *session, odp_packet_t pkt)
 {
-	const uint32_t new_headroom = RTE_PKTMBUF_HEADROOM;
-	uint32_t headroom;
-	uint32_t len;
-	uint32_t shift;
-	int rc;
+	struct rte_mbuf *mbuf = (struct rte_mbuf *)pkt;
+	uint32_t new_headroom;
 
-	if (odp_likely(odp_packet_num_segs(pkt) == 1))
+	if (odp_likely(session->flags.chained_bufs_ok))
 		return 0;
-	if (session->flags.chained_bufs_ok)
+	if (odp_likely(rte_pktmbuf_linearize(mbuf) == 0))
 		return 0;
+	if (rte_pktmbuf_pkt_len(mbuf) > mbuf->buf_len)
+		return 1;
 
-	headroom = odp_packet_headroom(pkt);
-	if (odp_unlikely(new_headroom >= headroom))
-		return -1;
+	/*
+	 * The packet fits single segment, but there was not enough tailroom
+	 * in the first segment. Shift data of the first segment to increase
+	 * the tailroom and try rte_pktmbuf_linearize() again.
+	 */
+	new_headroom = mbuf->buf_len - rte_pktmbuf_pkt_len(mbuf);
+	memmove((char *)mbuf->buf_addr + new_headroom,
+		(char *)mbuf->buf_addr + mbuf->data_off,
+		rte_pktmbuf_data_len(mbuf));
+	mbuf->data_off = new_headroom;
 
-	len = odp_packet_len(pkt);
-	shift = headroom - new_headroom;
-	odp_packet_push_head(pkt, shift);
-	odp_packet_move_data(pkt, 0, shift, len);
-	/* We rely on our trunc implementation to not change the handle */
-	rc = odp_packet_trunc_tail(&pkt, shift, NULL, NULL);
-	_ODP_ASSERT(rc == 0);
-
-	return odp_packet_num_segs(pkt) != 1;
+	return rte_pktmbuf_linearize(mbuf);
 }
 
 #if ODP_DEPRECATED_API
