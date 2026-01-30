@@ -1,0 +1,5 @@
+<map id="odp_schedule_capability_t" name="odp_schedule_capability_t">
+<area shape="rect" id="Node000001" title="Scheduler capabilities." alt="" coords="13,93,207,119"/>
+<area shape="rect" id="Node000002" href="$structodp__event__aggr__capability__t.html" title="Event aggregator capabilities." alt="" coords="5,5,215,31"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="113,45,113,93,107,93,107,45"/>
+</map>

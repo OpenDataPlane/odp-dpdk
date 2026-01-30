@@ -1,0 +1,38 @@
+<map id="init.h" name="init.h">
+<area shape="rect" id="Node000001" title="ODP initialization." alt="" coords="870,5,925,31"/>
+<area shape="rect" id="Node000002" href="$debug__inlines_8h.html" title="ODP Debug inlines." alt="" coords="849,152,973,177"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="902,44,912,152,907,152,897,45"/>
+<area shape="rect" id="Node000015" href="$spec_2shared__memory_8h.html" title="ODP shared memory." alt="" coords="709,79,848,104"/>
+<area shape="poly" id="edge14_Node000001_Node000015" title=" " alt="" coords="868,40,799,81,797,76,865,35"/>
+<area shape="rect" id="Node000017" href="$thread__inline__types_8h_source.html" title=" " alt="" coords="935,79,1097,104"/>
+<area shape="poly" id="edge16_Node000001_Node000017" title=" " alt="" coords="930,35,998,76,995,81,927,40"/>
+<area shape="rect" id="Node000003" href="$buffer__inlines_8h_source.html" title=" " alt="" coords="5,233,128,258"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="835,180,638,195,485,198,333,205,244,213,140,228,107,235,105,230,140,223,244,208,332,199,484,193,638,189,835,175"/>
+<area shape="rect" id="Node000004" href="$crypto__inlines_8h_source.html" title=" " alt="" coords="152,233,277,258"/>
+<area shape="poly" id="edge3_Node000002_Node000004" title=" " alt="" coords="835,180,680,194,560,200,440,208,290,228,256,235,255,230,289,223,440,202,559,194,680,189,835,175"/>
+<area shape="rect" id="Node000005" href="$dma__inlines_8h_source.html" title=" " alt="" coords="302,233,415,258"/>
+<area shape="poly" id="edge4_Node000002_Node000005" title=" " alt="" coords="835,180,719,193,628,200,539,209,427,228,397,235,396,230,426,223,538,204,628,195,718,187,835,175"/>
+<area shape="rect" id="Node000006" href="$event__inlines_8h_source.html" title=" " alt="" coords="439,233,561,258"/>
+<area shape="poly" id="edge5_Node000002_Node000006" title=" " alt="" coords="835,181,573,228,542,235,541,230,571,223,835,176"/>
+<area shape="rect" id="Node000007" href="$event__vector__inlines_8h.html" title="Event vector inline functions." alt="" coords="585,233,754,258"/>
+<area shape="poly" id="edge6_Node000002_Node000007" title=" " alt="" coords="863,184,705,235,704,230,862,179"/>
+<area shape="rect" id="Node000008" href="$ipsec__inlines_8h_source.html" title=" " alt="" coords="778,233,897,258"/>
+<area shape="poly" id="edge7_Node000002_Node000008" title=" " alt="" coords="892,189,850,234,846,231,888,186"/>
+<area shape="rect" id="Node000009" href="$packet__inlines_8h.html" title="ODP packet inline functions." alt="" coords="921,233,1047,258"/>
+<area shape="poly" id="edge8_Node000002_Node000009" title=" " alt="" coords="933,186,975,231,971,234,929,189"/>
+<area shape="rect" id="Node000010" href="$packet__vector__inlines_8h.html" title="Packet vector inline functions." alt="" coords="1071,233,1246,258"/>
+<area shape="poly" id="edge9_Node000002_Node000010" title=" " alt="" coords="960,179,1123,230,1122,235,959,184"/>
+<area shape="rect" id="Node000011" href="$rwlock__recursive__inlines_8h_source.html" title=" " alt="" coords="1271,233,1465,258"/>
+<area shape="poly" id="edge10_Node000002_Node000011" title=" " alt="" coords="986,176,1259,223,1302,230,1301,235,1258,228,986,181"/>
+<area shape="rect" id="Node000012" href="$schedule__inlines_8h_source.html" title=" " alt="" coords="1490,233,1633,258"/>
+<area shape="poly" id="edge11_Node000002_Node000012" title=" " alt="" coords="987,175,1126,189,1234,196,1342,205,1478,223,1515,230,1514,235,1477,228,1341,210,1234,201,1125,194,986,180"/>
+<area shape="rect" id="Node000013" href="$spinlock__recursive__inlines_8h_source.html" title=" " alt="" coords="1657,225,1799,265"/>
+<area shape="poly" id="edge12_Node000002_Node000013" title=" " alt="" coords="987,175,1173,190,1319,195,1463,202,1646,223,1657,225,1656,230,1645,228,1463,207,1318,200,1173,195,986,180"/>
+<area shape="rect" id="Node000014" href="$timer__inlines_8h_source.html" title=" " alt="" coords="1823,233,1942,258"/>
+<area shape="poly" id="edge13_Node000002_Node000014" title=" " alt="" coords="987,175,1113,185,1220,190,1402,191,1583,196,1689,206,1812,223,1846,230,1845,235,1812,228,1688,211,1583,202,1402,196,1220,195,1113,190,986,180"/>
+<area shape="rect" id="Node000016" href="$shared__memory_8h.html" title="ODP shared memory." alt="" coords="685,152,824,177"/>
+<area shape="poly" id="edge15_Node000015_Node000016" title=" " alt="" coords="773,118,761,153,756,151,768,116"/>
+<area shape="poly" id="edge17_Node000017_Node000002" title=" " alt="" coords="989,114,929,154,926,150,986,110"/>
+<area shape="rect" id="Node000018" href="$thread__inlines_8h_source.html" title=" " alt="" coords="997,152,1123,177"/>
+<area shape="poly" id="edge18_Node000017_Node000018" title=" " alt="" coords="1033,114,1055,150,1051,153,1028,117"/>
+</map>

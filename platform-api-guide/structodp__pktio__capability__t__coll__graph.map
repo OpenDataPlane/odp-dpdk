@@ -1,0 +1,23 @@
+<map id="odp_pktio_capability_t" name="odp_pktio_capability_t">
+<area shape="rect" id="Node000001" title="Packet IO capabilities." alt="" coords="673,203,843,228"/>
+<area shape="rect" id="Node000002" href="$structodp__pktio__config__t.html" title="Packet IO configuration options." alt="" coords="363,79,507,104"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="522,102,586,118,650,141,703,171,743,200,740,205,700,175,648,146,584,123,520,107"/>
+<area shape="rect" id="Node000003" href="$unionodp__pktin__config__opt__t.html" title="Packet input configuration options bit field." alt="" coords="15,5,187,31"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="188,31,303,54,389,76,388,81,302,59,187,36"/>
+<area shape="rect" id="Node000004" href="$unionodp__pktout__config__opt__t.html" title="Packet output configuration options bit field." alt="" coords="11,55,192,80"/>
+<area shape="poly" id="edge3_Node000002_Node000004" title=" " alt="" coords="206,72,363,84,363,89,206,77"/>
+<area shape="rect" id="Node000005" href="$structodp__pktio__parser__config__t.html" title="Parser configuration." alt="" coords="5,104,197,129"/>
+<area shape="poly" id="edge4_Node000002_Node000005" title=" " alt="" coords="211,106,302,99,363,95,363,100,303,105,211,112"/>
+<area shape="rect" id="Node000006" href="$structodp__reass__config__t.html" title="Fragment reassembly configuration." alt="" coords="28,153,175,179"/>
+<area shape="poly" id="edge5_Node000002_Node000006" title=" " alt="" coords="188,154,245,143,302,126,326,113,363,102,364,107,328,118,304,131,246,148,189,159"/>
+<area shape="rect" id="Node000007" href="$unionodp__pktio__set__op__t.html" title="Packet IO set operations." alt="" coords="361,128,509,153"/>
+<area shape="poly" id="edge6_Node000001_Node000007" title=" " alt="" coords="523,152,650,178,722,200,720,205,649,183,522,157"/>
+<area shape="rect" id="Node000008" href="$structodp__pktin__vector__capability__t.html" title="Packet input vector capabilities." alt="" coords="327,177,544,203"/>
+<area shape="poly" id="edge7_Node000001_Node000008" title=" " alt="" coords="558,197,673,206,673,211,557,202"/>
+<area shape="rect" id="Node000009" href="$structodp__lso__capability__t.html" title="Large Send Offload (LSO) capabilities." alt="" coords="358,227,513,252"/>
+<area shape="poly" id="edge8_Node000001_Node000009" title=" " alt="" coords="527,237,649,231,692,225,693,231,650,237,527,243"/>
+<area shape="rect" id="Node000010" href="$structodp__reass__capability__t.html" title="Reassembly capabilities." alt="" coords="350,276,521,301"/>
+<area shape="poly" id="edge9_Node000001_Node000010" title=" " alt="" coords="534,277,591,268,649,255,691,241,729,226,731,230,693,246,650,261,592,273,535,282"/>
+<area shape="rect" id="Node000011" href="$structodp__pktio__stats__capability__t.html" title="Packet IO statistics capabilities." alt="" coords="331,325,539,351"/>
+<area shape="poly" id="edge10_Node000001_Node000011" title=" " alt="" coords="552,321,601,309,648,292,702,259,742,226,745,230,705,264,650,296,603,314,553,326"/>
+</map>
