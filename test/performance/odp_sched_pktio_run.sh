@@ -56,7 +56,7 @@ run_sched_pktio()
 --proc-type auto --no-pci --vdev net_pcap1,iface=$IF1 \
 --vdev net_pcap2,iface=$IF2"
 
-	odp_sched_pktio${EXEEXT} -i 0,1 -c 1 -s &
+	odp_sched_pktio${EXEEXT} -i 0,1 -c 1 --wait_link 10 -s &
 
 	TEST_PID=$!
 

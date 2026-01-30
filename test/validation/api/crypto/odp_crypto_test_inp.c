@@ -44,6 +44,7 @@ static void test_defaults(uint8_t fill)
 	CU_ASSERT(param.auth_alg == ODP_AUTH_ALG_NULL);
 	CU_ASSERT(param.auth_iv_len == 0);
 	CU_ASSERT(param.auth_aad_len == 0);
+	CU_ASSERT(param.output_pool == ODP_POOL_INVALID);
 }
 
 static void test_default_values(void)
@@ -58,11 +59,6 @@ static void print_alg_test_param(const crypto_op_test_param_t *p)
 	const char *auth_mode   = p->session.auth_range_in_bits   ? "bit" : "byte";
 
 	switch (p->session.op_type) {
-#if ODP_DEPRECATED_API
-	case ODP_CRYPTO_OP_TYPE_LEGACY:
-		printf("legacy ");
-		break;
-#endif
 	case ODP_CRYPTO_OP_TYPE_BASIC:
 		printf("basic ");
 		break;
@@ -217,7 +213,6 @@ static int session_create(crypto_session_t *session,
 	ses_params.cipher_alg = ref->cipher;
 	ses_params.auth_alg = ref->auth;
 	ses_params.compl_queue = suite_context.queue;
-	ses_params.output_pool = suite_context.pool;
 	ses_params.cipher_key = cipher_key;
 	ses_params.cipher_iv_len = ref->cipher_iv_length;
 	ses_params.auth_iv_len = ref->auth_iv_length;
@@ -388,9 +383,6 @@ static void alg_test_op_types(odp_crypto_op_t op,
 			      odp_bool_t session_creation_must_fail)
 {
 	odp_crypto_op_type_t op_types[] = {
-#if ODP_DEPRECATED_API
-		ODP_CRYPTO_OP_TYPE_LEGACY,
-#endif
 		ODP_CRYPTO_OP_TYPE_BASIC,
 		ODP_CRYPTO_OP_TYPE_OOP,
 		ODP_CRYPTO_OP_TYPE_BASIC_AND_OOP,

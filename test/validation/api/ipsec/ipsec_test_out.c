@@ -1,13 +1,17 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2017-2018 Linaro Limited
  * Copyright (c) 2020 Marvell
- * Copyright (c) 2020-2022 Nokia
+ * Copyright (c) 2020-2025 Nokia
  */
+
+#include <stddef.h>
 
 #include <odp/helper/odph_api.h>
 
 #include "ipsec.h"
 #include "test_vectors.h"
+
+#define MAX_FAILURES 100
 
 /*
  * Miscellaneous parameters for combined out+in tests
@@ -130,6 +134,26 @@ static struct cipher_auth_comb_param cipher_auth_comb[] = {
 	},
 };
 
+static void print_test_flags(const ipsec_test_flags *flags)
+{
+	const char *tr = "transport";
+
+	if (flags->tunnel)
+		tr = flags->tunnel_is_v6 ? "in-IPv6 tunnel"
+					 : "in-IPv4 tunnel";
+	printf("\n      %s%s %s-%s",
+	       flags->udp_encap ? "UDP " : "",
+	       flags->ah ? "AH" : "ESP",
+	       flags->v6 ? "IPv6" : "IPv4",
+	       tr);
+}
+
+static int is_outer_header_ipv6(const ipsec_test_flags *flags)
+{
+	return ((flags->tunnel && flags->tunnel_is_v6) ||
+		(!flags->tunnel && flags->v6));
+}
+
 static void test_out_ipv4_ah_sha256(void)
 {
 	odp_ipsec_sa_param_t param;
@@ -151,7 +175,9 @@ static void test_out_ipv4_ah_sha256(void)
 		.out = {
 			{ .status.warn.all = 0,
 			  .status.error.all = 0,
-			  .pkt_res = &pkt_ipv4_icmp_0_ah_sha256_1 },
+			  .pkt_res = &pkt_ipv4_icmp_0_ah_sha256_1,
+			  .seq_num = 1,
+			},
 		},
 	};
 
@@ -190,7 +216,9 @@ static void test_out_ipv4_ah_sha256_tun_ipv4(void)
 		.out = {
 			{ .status.warn.all = 0,
 			  .status.error.all = 0,
-			  .pkt_res = &pkt_ipv4_icmp_0_ah_tun_ipv4_sha256_1 },
+			  .pkt_res = &pkt_ipv4_icmp_0_ah_tun_ipv4_sha256_1,
+			  .seq_num = 1,
+			},
 		},
 	};
 
@@ -235,7 +263,9 @@ static void test_out_ipv4_ah_sha256_tun_ipv6(void)
 		.out = {
 			{ .status.warn.all = 0,
 			  .status.error.all = 0,
-			  .pkt_res = &pkt_ipv4_icmp_0_ah_tun_ipv6_sha256_1 },
+			  .pkt_res = &pkt_ipv4_icmp_0_ah_tun_ipv6_sha256_1,
+			  .seq_num = 1,
+			},
 		},
 	};
 
@@ -265,7 +295,9 @@ static void test_out_ipv4_esp_null_sha256(void)
 		.out = {
 			{ .status.warn.all = 0,
 			  .status.error.all = 0,
-			  .pkt_res = &pkt_ipv4_icmp_0_esp_null_sha256_1 },
+			  .pkt_res = &pkt_ipv4_icmp_0_esp_null_sha256_1,
+			  .seq_num = 1,
+			},
 		},
 	};
 
@@ -304,8 +336,9 @@ static void test_out_ipv4_esp_null_sha256_tun_ipv4(void)
 		.out = {
 			{ .status.warn.all = 0,
 			  .status.error.all = 0,
-			  .pkt_res =
-				  &pkt_ipv4_icmp_0_esp_tun_ipv4_null_sha256_1 },
+			  .pkt_res = &pkt_ipv4_icmp_0_esp_tun_ipv4_null_sha256_1,
+			  .seq_num = 1,
+			},
 		},
 	};
 
@@ -350,8 +383,9 @@ static void test_out_ipv4_esp_null_sha256_tun_ipv6(void)
 		.out = {
 			{ .status.warn.all = 0,
 			  .status.error.all = 0,
-			  .pkt_res =
-				  &pkt_ipv4_icmp_0_esp_tun_ipv6_null_sha256_1 },
+			  .pkt_res = &pkt_ipv4_icmp_0_esp_tun_ipv6_null_sha256_1,
+			  .seq_num = 1,
+			},
 		},
 	};
 
@@ -375,11 +409,12 @@ static void test_ipsec_stats_zero_assert(odp_ipsec_stats_t *stats)
 
 static void test_ipsec_stats_test_assert(odp_ipsec_stats_t *stats,
 					 enum ipsec_test_stats test,
-					 uint64_t succ_bytes)
+					 uint64_t succ_bytes,
+					 uint32_t num_pkts)
 {
 	if (test == IPSEC_TEST_STATS_SUCCESS) {
-		CU_ASSERT(stats->success == 1);
-		CU_ASSERT(stats->success_bytes >= succ_bytes);
+		CU_ASSERT(stats->success == num_pkts);
+		CU_ASSERT(stats->success_bytes >= succ_bytes * num_pkts);
 	} else {
 		CU_ASSERT(stats->success == 0);
 		CU_ASSERT(stats->success_bytes == 0);
@@ -387,7 +422,7 @@ static void test_ipsec_stats_test_assert(odp_ipsec_stats_t *stats,
 
 	if (test == IPSEC_TEST_STATS_PROTO_ERR) {
 		/* Braces needed by CU macro */
-		CU_ASSERT(stats->proto_err == 1);
+		CU_ASSERT(stats->proto_err == num_pkts);
 	} else {
 		/* Braces needed by CU macro */
 		CU_ASSERT(stats->proto_err == 0);
@@ -395,7 +430,7 @@ static void test_ipsec_stats_test_assert(odp_ipsec_stats_t *stats,
 
 	if (test == IPSEC_TEST_STATS_AUTH_ERR) {
 		/* Braces needed by CU macro */
-		CU_ASSERT(stats->auth_err == 1);
+		CU_ASSERT(stats->auth_err == num_pkts);
 	} else {
 		/* Braces needed by CU macro */
 		CU_ASSERT(stats->auth_err == 0);
@@ -408,54 +443,71 @@ static void test_ipsec_stats_test_assert(odp_ipsec_stats_t *stats,
 	CU_ASSERT(stats->hard_exp_pkts_err == 0);
 }
 
-static void ipsec_pkt_proto_err_set(odp_packet_t pkt)
+static void ipsec_pkt_proto_err_set(ipsec_test_packet *pkt, const ipsec_test_flags *flags)
 {
-	uint32_t l3_off = odp_packet_l3_offset(pkt);
-	odph_ipv4hdr_t ip;
+	uint32_t proto_off;
+	uint8_t *proto;
 
-	memset(&ip, 0, sizeof(ip));
+	if (is_outer_header_ipv6(flags)) {
+		proto_off = pkt->l3_offset + offsetof(odph_ipv6hdr_t, next_hdr);
+		CU_ASSERT_FATAL(proto_off < MAX_PKT_LEN);
+		if (pkt->data[proto_off] == ODPH_IPPROTO_HOPOPTS)
+			proto_off = pkt->l3_offset + sizeof(odph_ipv6hdr_t) +
+				offsetof(odph_ipv6hdr_ext_t, next_hdr);
+	} else {
+		proto_off = pkt->l3_offset + offsetof(odph_ipv4hdr_t, proto);
+	}
+	CU_ASSERT(proto_off < pkt->len);
+	CU_ASSERT_FATAL(proto_off < MAX_PKT_LEN);
+	proto = &pkt->data[proto_off];
 
 	/* Simulate proto error by corrupting protocol field */
-
-	odp_packet_copy_to_mem(pkt, l3_off, sizeof(ip), &ip);
-
-	if (ip.proto == ODPH_IPPROTO_ESP)
-		ip.proto = ODPH_IPPROTO_AH;
-	else
-		ip.proto = ODPH_IPPROTO_ESP;
-
-	odp_packet_copy_from_mem(pkt, l3_off, sizeof(ip), &ip);
+	switch (*proto) {
+	case ODPH_IPPROTO_ESP:
+		*proto = ODPH_IPPROTO_AH;
+		break;
+	case ODPH_IPPROTO_AH:
+		*proto = ODPH_IPPROTO_ESP;
+		break;
+	default:
+		CU_FAIL("Unexpected IPsec protocol");
+		break;
+	}
 }
 
-static void ipsec_pkt_auth_err_set(odp_packet_t pkt)
+static void ipsec_pkt_auth_err_set(ipsec_test_packet *pkt, const ipsec_test_flags *flags)
 {
-	uint32_t data, len;
+	uint32_t offset_into_icv; /* offset to some ICV octet */
+
+	if (flags->ah) {
+		offset_into_icv = pkt->l4_offset + offsetof(odph_ahhdr_t, icv);
+	} else {
+		/* ICV is at the end of ESP packets */
+		offset_into_icv = pkt->len - 1;
+	}
+	CU_ASSERT_FATAL(offset_into_icv < MAX_PKT_LEN);
 
 	/* Simulate auth error by corrupting ICV */
-
-	len = odp_packet_len(pkt);
-	odp_packet_copy_to_mem(pkt, len - sizeof(data), sizeof(data), &data);
-	data = ~data;
-	odp_packet_copy_from_mem(pkt, len - sizeof(data), sizeof(data), &data);
+	pkt->data[offset_into_icv] = ~pkt->data[offset_into_icv];
 }
 
-static void ipsec_pkt_update(odp_packet_t pkt, const ipsec_test_flags *flags)
+static void ipsec_pkt_update(ipsec_test_packet *pkt, const ipsec_test_flags *flags)
 {
 	if (flags && flags->stats == IPSEC_TEST_STATS_PROTO_ERR)
-		ipsec_pkt_proto_err_set(pkt);
-
+		ipsec_pkt_proto_err_set(pkt, flags);
 	if (flags && flags->stats == IPSEC_TEST_STATS_AUTH_ERR)
-		ipsec_pkt_auth_err_set(pkt);
+		ipsec_pkt_auth_err_set(pkt, flags);
 }
 
-static void ipsec_check_out_in_one(const ipsec_test_part *part_outbound,
-				   const ipsec_test_part *part_inbound,
-				   odp_ipsec_sa_t sa,
-				   odp_ipsec_sa_t sa_in,
-				   const ipsec_test_flags *flags)
+static uint32_t ipsec_check_out_in_one(const ipsec_test_part *part_outbound,
+				       const ipsec_test_part *part_inbound,
+				       odp_ipsec_sa_t sa,
+				       odp_ipsec_sa_t sa_in,
+				       const ipsec_test_flags *flags)
 {
 	int num_out = part_outbound->num_pkt;
 	odp_packet_t pkto[num_out];
+	uint32_t max_len = 0;
 	int i;
 
 	num_out = ipsec_check_out(part_outbound, sa, pkto);
@@ -464,13 +516,64 @@ static void ipsec_check_out_in_one(const ipsec_test_part *part_outbound,
 		ipsec_test_part part_in = *part_inbound;
 		ipsec_test_packet pkt_in;
 
-		ipsec_pkt_update(pkto[i], flags);
-
 		ipsec_test_packet_from_pkt(&pkt_in, &pkto[i]);
-		part_in.pkt_in = &pkt_in;
+		if (pkt_in.len > max_len)
+			max_len = pkt_in.len;
+		ipsec_pkt_update(&pkt_in, flags);
+		rebuild_ethernet_header(&pkt_in);
 
+		part_in.pkt_in = &pkt_in;
 		ipsec_check_in_one(&part_in, sa_in);
 	}
+	return max_len;
+}
+
+/*
+ * Invoke the out-in test with and without packet segmentation.
+ *
+ * First we test with unsegmented packets. Then we test with two-segment
+ * packets with all possible segment boundaries in the outbound step and
+ * unsegmented packets in the inbound step and finally vice versa. This
+ * way processing of segmented packets gets checked against processing
+ * of unsegmented packets.
+ */
+static uint32_t test_out_in(const ipsec_test_part *part_outbound,
+			    const ipsec_test_part *part_inbound,
+			    odp_ipsec_sa_t sa,
+			    odp_ipsec_sa_t sa_in,
+			    const ipsec_test_flags *flags)
+{
+	uint32_t seg_len, max_len, num_pkts = 0;
+	ipsec_test_part p_out = *part_outbound;
+	ipsec_test_part p_in = *part_inbound;
+
+	/* CUnit chokes with too many assertions */
+	if (CU_get_number_of_failures() > MAX_FAILURES)
+		return 0;
+
+	for (seg_len = 0; seg_len < p_out.pkt_in->len; seg_len++) {
+		p_out.first_seg_len = seg_len;
+		p_in.first_seg_len = 0;
+		ipsec_check_out_in_one(&p_out, &p_in, sa, sa_in, flags);
+		num_pkts++;
+		p_out.out[0].seq_num++;
+	}
+
+	/* Do not duplicate inbound testing done in the sync or async test suite */
+	if (suite_context.outbound_op_mode == ODP_IPSEC_OP_MODE_INLINE &&
+	    suite_context.inbound_op_mode  != ODP_IPSEC_OP_MODE_INLINE) {
+		return num_pkts;
+	}
+
+	for (seg_len = 1, max_len = UINT32_MAX; seg_len < max_len; seg_len++) {
+		p_out.first_seg_len = 0;
+		p_in.first_seg_len = seg_len;
+		max_len = ipsec_check_out_in_one(&p_out, &p_in, sa, sa_in, flags);
+		num_pkts++;
+		p_out.out[0].seq_num++;
+	}
+
+	return num_pkts;
 }
 
 static int sa_creation_failure_ok(const odp_ipsec_sa_param_t *param)
@@ -579,8 +682,7 @@ static void test_out_in_common(const ipsec_test_flags *flags,
 
 	CU_ASSERT_FATAL(ODP_IPSEC_SA_INVALID != sa_in);
 
-	if ((flags->tunnel && flags->tunnel_is_v6) ||
-	    (!flags->tunnel && flags->v6))
+	if (is_outer_header_ipv6(flags))
 		out_l3_type = ODP_PROTO_L3_TYPE_IPV6;
 	if (flags->ah)
 		out_l4_type = ODP_PROTO_L4_TYPE_AH;
@@ -595,6 +697,7 @@ static void test_out_in_common(const ipsec_test_flags *flags,
 			  .status.error.all = 0,
 			  .l3_type = out_l3_type,
 			  .l4_type = out_l4_type,
+			  .seq_num = 1,
 			},
 		},
 	};
@@ -647,7 +750,7 @@ static void test_out_in_common(const ipsec_test_flags *flags,
 		}
 	}
 
-	ipsec_check_out_in_one(&test_out, &test_in, sa_out, sa_in, flags);
+	uint32_t num_pkts_sent = test_out_in(&test_out, &test_in, sa_out, sa_in, flags);
 
 	if (flags->stats != IPSEC_TEST_STATS_NONE) {
 		uint64_t succ_bytes = 0;
@@ -675,10 +778,11 @@ static void test_out_in_common(const ipsec_test_flags *flags,
 		 */
 		CU_ASSERT(odp_ipsec_stats(sa_out, &stats) == 0);
 		test_ipsec_stats_test_assert(&stats, IPSEC_TEST_STATS_SUCCESS,
-					     succ_bytes);
+					     succ_bytes, num_pkts_sent);
 
 		CU_ASSERT(odp_ipsec_stats(sa_in, &stats) == 0);
-		test_ipsec_stats_test_assert(&stats, flags->stats, succ_bytes);
+		test_ipsec_stats_test_assert(&stats, flags->stats,
+					     succ_bytes, num_pkts_sent);
 	}
 
 	ipsec_sa_destroy(sa_out);
@@ -697,7 +801,7 @@ static void test_esp_out_in(struct cipher_param *cipher,
 		return;
 
 	if (flags->display_algo)
-		printf("\n    %s (keylen %d) %s (keylen %d) ",
+		printf("\n        %s (keylen %d) %s (keylen %d) ",
 		       cipher->name, cipher_keylen, auth->name, auth_keylen);
 
 	test_out_in_common(flags, cipher->algo, cipher->key,
@@ -705,22 +809,42 @@ static void test_esp_out_in(struct cipher_param *cipher,
 			   cipher->key_extra, auth->key_extra);
 }
 
+static int iterate_flags(ipsec_test_flags *flags, uint32_t *iterator)
+{
+	while (*iterator < 0x8) {
+		flags->v6           = *iterator & 0x4;
+		flags->tunnel       = *iterator & 0x2;
+		flags->tunnel_is_v6 = *iterator & 0x1;
+		*iterator += 1;
+
+		/* Return success if valid flag combination */
+		if (flags->tunnel || !flags->tunnel_is_v6)
+			return 1;
+	}
+	return 0;
+}
+
 static void test_esp_out_in_all(const ipsec_test_flags *flags_in)
 {
+	uint32_t iter = 0;
 	uint32_t c;
 	uint32_t a;
 	ipsec_test_flags flags = *flags_in;
 
 	flags.ah = false;
 
-	for (c = 0; c < ODPH_ARRAY_SIZE(ciphers); c++)
-		for (a = 0; a < ODPH_ARRAY_SIZE(auths); a++)
-			test_esp_out_in(&ciphers[c], &auths[a], &flags);
+	while (iterate_flags(&flags, &iter)) {
+		print_test_flags(&flags);
 
-	for (c = 0; c < ODPH_ARRAY_SIZE(cipher_auth_comb); c++)
-		test_esp_out_in(&cipher_auth_comb[c].cipher,
-				&cipher_auth_comb[c].auth,
-				&flags);
+		for (c = 0; c < ODPH_ARRAY_SIZE(ciphers); c++)
+			for (a = 0; a < ODPH_ARRAY_SIZE(auths); a++)
+				test_esp_out_in(&ciphers[c], &auths[a], &flags);
+
+		for (c = 0; c < ODPH_ARRAY_SIZE(cipher_auth_comb); c++)
+			test_esp_out_in(&cipher_auth_comb[c].cipher,
+					&cipher_auth_comb[c].auth,
+					&flags);
+	}
 }
 
 /*
@@ -732,7 +856,6 @@ static void test_esp_out_in_all_basic(void)
 	ipsec_test_flags flags;
 
 	memset(&flags, 0, sizeof(flags));
-	flags.display_algo = true;
 
 	test_esp_out_in_all(&flags);
 
@@ -753,32 +876,37 @@ static void test_inline_hdr_in_packet(void)
 }
 
 static void test_ah_out_in(struct auth_param *auth,
-			   const ipsec_test_flags *flags_in)
+			   const ipsec_test_flags *flags)
 {
 	int auth_keylen = auth->key ? 8 * auth->key->length : 0;
-	ipsec_test_flags flags = *flags_in;
 
 	if (ipsec_check_ah(auth->algo, auth_keylen) != ODP_TEST_ACTIVE)
 		return;
 
-	if (flags.display_algo)
-		printf("\n    %s (keylen %d) ", auth->name, auth_keylen);
+	if (flags->display_algo)
+		printf("\n        %s (keylen %d) ", auth->name, auth_keylen);
 
-	flags.ah = true;
-
-	test_out_in_common(&flags, ODP_CIPHER_ALG_NULL, NULL,
+	test_out_in_common(flags, ODP_CIPHER_ALG_NULL, NULL,
 			   auth->algo, auth->key,
 			   NULL, auth->key_extra);
 }
 
-static void test_ah_out_in_all(const ipsec_test_flags *flags)
+static void test_ah_out_in_all(const ipsec_test_flags *flags_in)
 {
+	ipsec_test_flags flags = *flags_in;
+	uint32_t iter = 0;
 	uint32_t a;
 
-	for (a = 0; a < ODPH_ARRAY_SIZE(auths); a++)
-		test_ah_out_in(&auths[a], flags);
-	for (a = 0; a < ODPH_ARRAY_SIZE(ah_auths); a++)
-		test_ah_out_in(&ah_auths[a], flags);
+	flags.ah = true;
+
+	while (iterate_flags(&flags, &iter)) {
+		print_test_flags(&flags);
+
+		for (a = 0; a < ODPH_ARRAY_SIZE(auths); a++)
+			test_ah_out_in(&auths[a], &flags);
+		for (a = 0; a < ODPH_ARRAY_SIZE(ah_auths); a++)
+			test_ah_out_in(&ah_auths[a], &flags);
+	}
 }
 
 static void test_ah_out_in_all_basic(void)
@@ -786,7 +914,6 @@ static void test_ah_out_in_all_basic(void)
 	ipsec_test_flags flags;
 
 	memset(&flags, 0, sizeof(flags));
-	flags.display_algo = true;
 
 	test_ah_out_in_all(&flags);
 
@@ -821,7 +948,9 @@ static void test_out_ipv4_esp_udp_null_sha256(void)
 		.out = {
 			{ .status.warn.all = 0,
 			  .status.error.all = 0,
-			  .pkt_res = &pkt_ipv4_icmp_0_esp_udp_null_sha256_1 },
+			  .pkt_res = &pkt_ipv4_icmp_0_esp_udp_null_sha256_1,
+			  .seq_num = 1,
+			},
 		},
 	};
 
@@ -864,6 +993,7 @@ static void test_out_ipv4_ah_sha256_frag_check(void)
 	test2.opt.frag_mode = ODP_IPSEC_FRAG_DISABLED;
 	test2.num_pkt = 1;
 	test2.out[0].pkt_res = &pkt_ipv4_icmp_0_ah_sha256_1;
+	test2.out[0].seq_num = 1;
 
 	ipsec_check_out_one(&test, sa);
 
@@ -904,7 +1034,9 @@ static void test_out_ipv4_ah_sha256_frag_check_2(void)
 		.out = {
 			{ .status.warn.all = 0,
 			  .status.error.all = 0,
-			  .pkt_res = &pkt_ipv4_icmp_0_ah_sha256_1 },
+			  .pkt_res = &pkt_ipv4_icmp_0_ah_sha256_1,
+			  .seq_num = 1,
+			},
 		},
 	};
 
@@ -952,6 +1084,7 @@ static void test_out_ipv4_esp_null_sha256_frag_check(void)
 	test2.opt.frag_mode = ODP_IPSEC_FRAG_DISABLED;
 	test2.num_pkt = 1;
 	test2.out[0].pkt_res = &pkt_ipv4_icmp_0_esp_null_sha256_1;
+	test2.out[0].seq_num = 1;
 
 	ipsec_check_out_one(&test, sa);
 
@@ -993,7 +1126,9 @@ static void test_out_ipv4_esp_null_sha256_frag_check_2(void)
 		.out = {
 			{ .status.warn.all = 0,
 			  .status.error.all = 0,
-			  .pkt_res = &pkt_ipv4_icmp_0_esp_null_sha256_1 },
+			  .pkt_res = &pkt_ipv4_icmp_0_esp_null_sha256_1,
+			  .seq_num = 1,
+			},
 		},
 	};
 
@@ -1027,7 +1162,9 @@ static void test_out_ipv6_ah_sha256(void)
 		.out = {
 			{ .status.warn.all = 0,
 			  .status.error.all = 0,
-			  .pkt_res = &pkt_ipv6_icmp_0_ah_sha256_1 },
+			  .pkt_res = &pkt_ipv6_icmp_0_ah_sha256_1,
+			  .seq_num = 1,
+			},
 		},
 	};
 
@@ -1066,7 +1203,9 @@ static void test_out_ipv6_ah_sha256_tun_ipv4(void)
 		.out = {
 			{ .status.warn.all = 0,
 			  .status.error.all = 0,
-			  .pkt_res = &pkt_ipv6_icmp_0_ah_tun_ipv4_sha256_1 },
+			  .pkt_res = &pkt_ipv6_icmp_0_ah_tun_ipv4_sha256_1,
+			  .seq_num = 1,
+			},
 		},
 	};
 
@@ -1111,7 +1250,9 @@ static void test_out_ipv6_ah_sha256_tun_ipv6(void)
 		.out = {
 			{ .status.warn.all = 0,
 			  .status.error.all = 0,
-			  .pkt_res = &pkt_ipv6_icmp_0_ah_tun_ipv6_sha256_1 },
+			  .pkt_res = &pkt_ipv6_icmp_0_ah_tun_ipv6_sha256_1,
+			  .seq_num = 1,
+			},
 		},
 	};
 
@@ -1141,7 +1282,9 @@ static void test_out_ipv6_esp_null_sha256(void)
 		.out = {
 			{ .status.warn.all = 0,
 			  .status.error.all = 0,
-			  .pkt_res = &pkt_ipv6_icmp_0_esp_null_sha256_1 },
+			  .pkt_res = &pkt_ipv6_icmp_0_esp_null_sha256_1,
+			  .seq_num = 1,
+			},
 		},
 	};
 
@@ -1180,8 +1323,9 @@ static void test_out_ipv6_esp_null_sha256_tun_ipv4(void)
 		.out = {
 			{ .status.warn.all = 0,
 			  .status.error.all = 0,
-			  .pkt_res =
-				  &pkt_ipv6_icmp_0_esp_tun_ipv4_null_sha256_1 },
+			  .pkt_res = &pkt_ipv6_icmp_0_esp_tun_ipv4_null_sha256_1,
+			  .seq_num = 1,
+			},
 		},
 	};
 
@@ -1226,8 +1370,9 @@ static void test_out_ipv6_esp_null_sha256_tun_ipv6(void)
 		.out = {
 			{ .status.warn.all = 0,
 			  .status.error.all = 0,
-			  .pkt_res =
-				  &pkt_ipv6_icmp_0_esp_tun_ipv6_null_sha256_1 },
+			  .pkt_res = &pkt_ipv6_icmp_0_esp_tun_ipv6_null_sha256_1,
+			  .seq_num = 1,
+			},
 		},
 	};
 
@@ -1258,7 +1403,9 @@ static void test_out_ipv6_esp_udp_null_sha256(void)
 		.out = {
 			{ .status.warn.all = 0,
 			  .status.error.all = 0,
-			  .pkt_res = &pkt_ipv6_icmp_0_esp_udp_null_sha256_1 },
+			  .pkt_res = &pkt_ipv6_icmp_0_esp_udp_null_sha256_1,
+			  .seq_num = 1,
+			},
 		},
 	};
 
@@ -1316,6 +1463,7 @@ static void test_out_dummy_esp_null_sha256_tun(odp_ipsec_tunnel_param_t tunnel)
 	test.num_pkt = 1;
 	test.out[0].l3_type = out_l3_type;
 	test.out[0].l4_type = ODP_PROTO_L4_TYPE_ESP;
+	test.out[0].seq_num = 1;
 
 	test_in.num_pkt = 1;
 	test_in.out[0].l3_type = ODP_PROTO_L3_TYPE_IPV4;
@@ -1328,6 +1476,7 @@ static void test_out_dummy_esp_null_sha256_tun(odp_ipsec_tunnel_param_t tunnel)
 	test_empty.num_pkt = 1;
 	test_empty.out[0].l3_type = out_l3_type;
 	test_empty.out[0].l4_type = ODP_PROTO_L4_TYPE_ESP;
+	test_empty.out[0].seq_num = 2;
 
 	ipsec_check_out_in_one(&test, &test_in, sa, sa2, NULL);
 	ipsec_check_out_in_one(&test_empty, &test_in, sa, sa2, NULL);
@@ -1393,7 +1542,9 @@ static void test_out_ipv4_udp_esp_null_sha256(void)
 		.out = {
 			{ .status.warn.all = 0,
 			  .status.error.all = 0,
-			  .pkt_res = &pkt_ipv4_udp_esp_null_sha256 },
+			  .pkt_res = &pkt_ipv4_udp_esp_null_sha256,
+			  .seq_num = 1,
+			},
 		},
 	};
 
@@ -1438,6 +1589,7 @@ static void test_out_ipv4_null_aes_xcbc(void)
 			  .l3_type = ODP_PROTO_L3_TYPE_IPV4,
 			  .l4_type = _ODP_PROTO_L4_TYPE_UNDEF,
 			  .pkt_res = &pkt_ipv4_null_aes_xcbc_esp,
+			  .seq_num = 1,
 			},
 		},
 	};
@@ -1541,6 +1693,7 @@ static void test_sa_info(void)
 			  .status.error.all = 0,
 			  .l3_type = ODP_PROTO_L3_TYPE_IPV4,
 			  .l4_type = ODP_PROTO_L4_TYPE_ESP,
+			  .seq_num = 1,
 			},
 		},
 	};
@@ -1598,15 +1751,12 @@ static void test_sa_info(void)
 
 static void test_test_sa_update_seq_num(void)
 {
-	ipsec_test_flags flags;
+	struct cipher_param cipher = {"NULL", ODP_CIPHER_ALG_NULL, NULL, NULL};
+	struct auth_param auth = {"SHA1-HMAC", ODP_AUTH_ALG_SHA1_HMAC, &key_5a_160, NULL};
+	ipsec_test_flags flags = {.part_flags.test_sa_seq_num = true};
 
-	memset(&flags, 0, sizeof(flags));
-	flags.display_algo = true;
-	flags.part_flags.test_sa_seq_num = true;
-
-	test_out_in_all(&flags);
-
-	printf("\n  ");
+	test_esp_out_in(&cipher, &auth, &flags);
+	test_ah_out_in(&auth, &flags);
 }
 
 #define SOFT_LIMIT_PKT_CNT 1024UL
@@ -1702,20 +1852,25 @@ static void test_out_ipv4_esp_sa_expiry(enum ipsec_test_sa_expiry expiry)
 
 	test_out.out[0].sa_expiry = IPSEC_TEST_EXPIRY_IGNORED;
 
-	for (i = 0; i < limit - delta; i += inc)
+	for (i = 0; i < limit - delta; i += inc) {
+		test_out.out[0].seq_num++;
 		ipsec_check_out_one(&test_out, out_sa);
+	}
 
 	sa_expiry_notified = false;
 	test_out.out[0].sa_expiry = expiry;
 
-	for (; i <= limit && !sa_expiry_notified; i += inc)
+	for (; i <= limit && !sa_expiry_notified; i += inc) {
+		test_out.out[0].seq_num++;
 		ipsec_check_out_one(&test_out, out_sa);
+	}
 
 	CU_ASSERT(sa_expiry_notified);
 
-	for (; i <= limit + delta; i += inc)
+	for (; i <= limit + delta; i += inc) {
+		test_out.out[0].seq_num++;
 		ipsec_check_out_one(&test_out, out_sa);
-
+	}
 	ipsec_sa_destroy(out_sa);
 }
 
@@ -1811,23 +1966,33 @@ static void ipsec_test_default_values(void)
 
 static void test_ipsec_stats(void)
 {
-	ipsec_test_flags flags;
+	ipsec_test_flags flags = {.stats = IPSEC_TEST_STATS_SUCCESS};
 
-	memset(&flags, 0, sizeof(flags));
-
-	printf("\n        Stats : success");
-	flags.stats = IPSEC_TEST_STATS_SUCCESS;
 	test_out_in_all(&flags);
+}
 
-	printf("\n        Stats : proto err");
-	flags.stats = IPSEC_TEST_STATS_PROTO_ERR;
+/* inbound test only, outbound part is the same as in test_ipsec_stats() */
+void test_ipsec_proto_err(void)
+{
+	ipsec_test_flags flags = {.stats = IPSEC_TEST_STATS_PROTO_ERR};
+	/*
+	 * This test cannot be run in inline inbound mode since incorrect
+	 * IPsec protocol would cause SA search failure and the packet might
+	 * then not be consumed by inline IPsec at all. And the test is not
+	 * prepared for that.
+	 */
+	if (suite_context.inbound_op_mode == ODP_IPSEC_OP_MODE_INLINE)
+		return;
+
 	test_out_in_all(&flags);
+}
 
-	printf("\n        Stats : auth err");
-	flags.stats = IPSEC_TEST_STATS_AUTH_ERR;
+/* inbound test only, outbound part is the same as in test_ipsec_stats() */
+void test_ipsec_auth_err(void)
+{
+	ipsec_test_flags flags = {.stats = IPSEC_TEST_STATS_AUTH_ERR};
+
 	test_out_in_all(&flags);
-
-	printf("\n  ");
 }
 
 static void test_udp_encap(void)
@@ -1836,38 +2001,7 @@ static void test_udp_encap(void)
 
 	memset(&flags, 0, sizeof(flags));
 	flags.udp_encap = 1;
-	flags.tunnel = 0;
-
-	printf("\n        IPv4 Transport");
-	flags.v6 = 0;
 	test_esp_out_in_all(&flags);
-
-	printf("\n        IPv6 Transport");
-	flags.v6 = 1;
-	test_esp_out_in_all(&flags);
-
-	flags.tunnel = 1;
-
-	printf("\n        IPv4-in-IPv4 Tunnel");
-	flags.v6 = 0;
-	flags.tunnel_is_v6 = 0;
-	test_esp_out_in_all(&flags);
-
-	printf("\n        IPv4-in-IPv6 Tunnel");
-	flags.v6 = 0;
-	flags.tunnel_is_v6 = 1;
-	test_esp_out_in_all(&flags);
-
-	printf("\n        IPv6-in-IPv4 Tunnel");
-	flags.v6 = 1;
-	flags.tunnel_is_v6 = 0;
-	test_esp_out_in_all(&flags);
-
-	printf("\n        IPv6-in-IPv6 Tunnel");
-	flags.v6 = 1;
-	flags.tunnel_is_v6 = 1;
-	test_esp_out_in_all(&flags);
-
 	printf("\n  ");
 }
 
@@ -1900,6 +2034,7 @@ static void test_max_num_sa(void)
 			  .status.error.all = 0,
 			  .l3_type = ODP_PROTO_L3_TYPE_IPV4,
 			  .l4_type = ODP_PROTO_L4_TYPE_ESP,
+			  .seq_num = 1,
 			},
 		},
 	};
@@ -2046,11 +2181,15 @@ odp_testinfo_t ipsec_out_suite[] = {
 				  ipsec_check_esp_null_sha256),
 	ODP_TEST_INFO_CONDITIONAL(test_out_ipv4_null_aes_xcbc,
 				  ipsec_check_esp_null_aes_xcbc),
-	ODP_TEST_INFO_CONDITIONAL(test_sa_info,
-				  ipsec_check_esp_aes_cbc_128_sha1),
 	ODP_TEST_INFO_CONDITIONAL(test_out_ipv4_esp_sa_pkt_expiry,
 				  ipsec_check_esp_aes_cbc_128_sha1),
 	ODP_TEST_INFO_CONDITIONAL(test_out_ipv4_esp_sa_byte_expiry,
+				  ipsec_check_esp_aes_cbc_128_sha1),
+	ODP_TEST_INFO_NULL,
+};
+
+odp_testinfo_t ipsec_out_in_suite[] = {
+	ODP_TEST_INFO_CONDITIONAL(test_sa_info,
 				  ipsec_check_esp_aes_cbc_128_sha1),
 	ODP_TEST_INFO_CONDITIONAL(test_test_sa_update_seq_num,
 				  ipsec_check_test_sa_update_seq_num),

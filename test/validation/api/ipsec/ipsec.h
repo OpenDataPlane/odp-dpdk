@@ -17,6 +17,7 @@
 /* test arrays: */
 extern odp_testinfo_t ipsec_in_suite[];
 extern odp_testinfo_t ipsec_out_suite[];
+extern odp_testinfo_t ipsec_out_in_suite[];
 
 int ipsec_init(odp_instance_t *inst);
 int ipsec_term(odp_instance_t inst);
@@ -83,6 +84,9 @@ typedef struct {
 typedef struct {
 	ipsec_test_part_flags_t flags;
 
+	/* if nonzero, use a segmented test packet */
+	uint32_t first_seg_len;
+
 	/* Input for the inbound or outbound IPsec operation */
 	const ipsec_test_packet *pkt_in;
 	int num_opt;
@@ -122,7 +126,7 @@ void ipsec_sa_param_fill(odp_ipsec_sa_param_t *param,
 			 const odp_crypto_key_t *auth_key_extra);
 
 void ipsec_sa_destroy(odp_ipsec_sa_t sa);
-odp_packet_t ipsec_packet(const ipsec_test_packet *itp);
+odp_packet_t ipsec_packet(const ipsec_test_packet *itp, uint32_t first_seg_len);
 void ipsec_check_in_one(const ipsec_test_part *part, odp_ipsec_sa_t sa);
 int ipsec_check_out(const ipsec_test_part *part,
 		    odp_ipsec_sa_t sa,
@@ -130,6 +134,7 @@ int ipsec_check_out(const ipsec_test_part *part,
 void ipsec_check_out_one(const ipsec_test_part *part, odp_ipsec_sa_t sa);
 int ipsec_test_sa_update_seq_num(odp_ipsec_sa_t sa, uint32_t seq_num);
 void ipsec_test_packet_from_pkt(ipsec_test_packet *test_pkt, odp_packet_t *pkt);
+void rebuild_ethernet_header(ipsec_test_packet *pkt);
 int ipsec_check(odp_bool_t ah,
 		odp_cipher_alg_t cipher,
 		uint32_t cipher_bits,
@@ -158,5 +163,8 @@ int ipsec_check_esp_aes_gcm_128_reass_ipv6(void);
 int ipsec_check_esp_null_aes_xcbc(void);
 void ipsec_status_event_get(odp_ipsec_sa_t sa,
 			    enum ipsec_test_sa_expiry sa_expiry);
+
+void test_ipsec_proto_err(void);
+void test_ipsec_auth_err(void);
 
 #endif

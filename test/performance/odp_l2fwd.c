@@ -32,6 +32,7 @@
 
 #include <odp_api.h>
 #include <odp/helper/odph_api.h>
+#include <pktio_common.h>
 
 /* Maximum number of worker threads */
 #define MAX_WORKERS            (ODP_THREAD_COUNT_MAX - 1)
@@ -46,7 +47,7 @@
 #define MAX_PKT_BURST          32
 
 /* Maximum number of pktio queues per interface */
-#define MAX_QUEUES             32
+#define MAX_QUEUES             2048
 
 /* Maximum number of schedule groups */
 #define MAX_GROUPS             32
@@ -56,6 +57,9 @@
 
 /* Default vector size */
 #define DEFAULT_VEC_SIZE       MAX_PKT_BURST
+
+/* Max event vector size */
+#define MAX_EVENT_VEC_SIZE     (4U * MAX_PKT_BURST)
 
 /* Default vector timeout */
 #define DEFAULT_VEC_TMO        ODP_TIME_MSEC_IN_NS
@@ -77,6 +81,13 @@ typedef enum pktout_mode_t {
 	PKTOUT_DIRECT,
 	PKTOUT_QUEUE
 } pktout_mode_t;
+
+/* Vector mode */
+typedef enum vector_mode_t {
+	VECTOR_MODE_DISABLED = 0,
+	VECTOR_MODE_EVENT = 1,
+	VECTOR_MODE_PACKET = 2
+} vector_mode_t;
 
 static inline int sched_mode(pktin_mode_t in_mode)
 {
@@ -143,9 +154,9 @@ typedef struct {
 	int flow_control;       /* Flow control mode */
 	bool pause_rx;          /* Reception of pause frames enabled */
 	bool pause_tx;          /* Transmission of pause frames enabled */
-	bool vector_mode;       /* Vector mode enabled */
+	vector_mode_t vector_mode; /* Vector mode */
 	uint32_t num_vec;       /* Number of vectors per pool */
-	uint64_t vec_tmo_ns;    /* Vector formation timeout in ns */
+	int64_t vec_tmo_ns;     /* Vector formation timeout in ns */
 	uint32_t vec_size;      /* Vector size */
 	uint64_t wait_ns;       /* Extra wait in ns */
 	uint64_t memcpy_bytes;  /* Extra memcpy bytes */
@@ -158,6 +169,9 @@ typedef struct {
 	int mtu;                /* Interface MTU */
 	int num_om;
 	int num_prio;
+	uint32_t sched_prefetch; /* Number of events to prefetch */
+	odp_cache_stash_config_t cache_stash_config; /* Cache stash configuration */
+	uint32_t wait_sec;
 
 	struct {
 		odp_packet_tx_compl_mode_t mode;
@@ -297,6 +311,13 @@ typedef struct {
 	uint8_t *memcpy_data; /* Data for memcpy */
 
 } args_t;
+
+/** Long option only settings */
+enum longopt_only {
+	OPT_WAIT_LINK = 256,
+	OPT_SCHED_PREFETCH = 257,
+	OPT_CACHE_STASH = 258
+};
 
 /* Global pointer to args */
 static args_t *gbl_args;
@@ -699,7 +720,7 @@ static int handle_rx_state(state_t *state, odp_event_t evs[], int num)
 }
 
 /*
- * Packet IO worker thread using scheduled queues and vector mode.
+ * Packet IO worker thread using scheduled queues and packet vector mode.
  *
  * arg  thread arguments of type 'thread_args_t *'
  */
@@ -721,6 +742,7 @@ static int run_worker_sched_mode_vector(void *arg)
 	state_t *state = appl_args->has_state ? &thr_args->state : NULL;
 	int use_event_queue = gbl_args->appl.out_mode;
 	pktin_mode_t in_mode = gbl_args->appl.in_mode;
+	const uint32_t sched_prefetch = appl_args->sched_prefetch;
 
 	max_burst = gbl_args->appl.burst_rx;
 
@@ -747,7 +769,7 @@ static int run_worker_sched_mode_vector(void *arg)
 		pktout[pktio]   = thr_args->pktio[pktio].pktout;
 	}
 
-	printf("[%02i] PKTIN_SCHED_%s_VECTOR, %s\n", thr,
+	printf("[%02i] PKTIN_SCHED_%s_PACKET_VECTOR, %s\n", thr,
 	       (in_mode == SCHED_PARALLEL) ? "PARALLEL" :
 	       ((in_mode == SCHED_ATOMIC) ? "ATOMIC" : "ORDERED"),
 	       (use_event_queue) ? "PKTOUT_QUEUE" : "PKTOUT_DIRECT");
@@ -801,6 +823,9 @@ static int run_worker_sched_mode_vector(void *arg)
 			dst_idx = gbl_args->dst_port_from_idx[src_idx];
 			fill_eth_addrs(pkt_tbl, pkts, dst_idx);
 
+			if (sched_prefetch)
+				odp_schedule_prefetch(sched_prefetch);
+
 			send_packets(pkt_tbl, pkts, use_event_queue, dst_idx, tx_queue[dst_idx],
 				     pktout[dst_idx], state, stats);
 
@@ -850,6 +875,157 @@ static int run_worker_sched_mode_vector(void *arg)
 }
 
 /*
+ * Packet IO worker thread using scheduled queues and event vector mode.
+ *
+ * arg  thread arguments of type 'thread_args_t *'
+ */
+static int run_worker_sched_mode_event_vector(void *arg)
+{
+	const int thr = odp_thread_id();
+	int i;
+	int pktio, num_pktio;
+	uint16_t max_burst;
+	odp_thrmask_t mask;
+	odp_pktout_queue_t pktout[MAX_PKTIOS];
+	odp_queue_t tx_queue[MAX_PKTIOS];
+	thread_args_t *thr_args = arg;
+	const int thr_idx = thr_args->thr_idx;
+	stats_t *stats = &thr_args->stats;
+	const appl_args_t *appl_args = &gbl_args->appl;
+	uint8_t *const memcpy_src = appl_args->memcpy_bytes ?
+		&gbl_args->memcpy_data[thr_idx * 2 * appl_args->memcpy_bytes] : NULL;
+	state_t *state = appl_args->has_state ? &thr_args->state : NULL;
+	int use_event_queue = gbl_args->appl.out_mode;
+	pktin_mode_t in_mode = gbl_args->appl.in_mode;
+	const uint32_t sched_prefetch = appl_args->sched_prefetch;
+
+	max_burst = gbl_args->appl.burst_rx;
+
+	odp_thrmask_zero(&mask);
+	odp_thrmask_set(&mask, thr);
+
+	/* Join non-default groups */
+	for (i = 0; i < thr_args->num_grp_join; i++) {
+		if (odp_schedule_group_join(thr_args->group[i], &mask)) {
+			ODPH_ERR("Join failed: %i\n", i);
+			return -1;
+		}
+	}
+
+	num_pktio = thr_args->num_pktio;
+
+	if (num_pktio > MAX_PKTIOS) {
+		ODPH_ERR("Too many pktios %i\n", num_pktio);
+		return -1;
+	}
+
+	for (pktio = 0; pktio < num_pktio; pktio++) {
+		tx_queue[pktio] = thr_args->pktio[pktio].tx_queue;
+		pktout[pktio]   = thr_args->pktio[pktio].pktout;
+	}
+
+	printf("[%02i] PKTIN_SCHED_%s_EVENT_VECTOR, %s\n", thr,
+	       (in_mode == SCHED_PARALLEL) ? "PARALLEL" :
+	       ((in_mode == SCHED_ATOMIC) ? "ATOMIC" : "ORDERED"),
+	       (use_event_queue) ? "PKTOUT_QUEUE" : "PKTOUT_DIRECT");
+
+	odp_barrier_wait(&gbl_args->init_barrier);
+
+	/* Loop packets */
+	while (!odp_atomic_load_u32(&gbl_args->exit_threads)) {
+		odp_event_t  ev_tbl[MAX_PKT_BURST];
+		odp_packet_t pkt_tbl[MAX_EVENT_VEC_SIZE];
+		int events;
+
+		events = odp_schedule_multi_no_wait(NULL, ev_tbl, max_burst);
+
+		if (events <= 0)
+			continue;
+
+		for (i = 0; i < events; i++) {
+			odp_event_t *event_tbl = NULL;
+			odp_packet_t pkt;
+			int src_idx, dst_idx;
+			int pkts = 0;
+
+			if (odp_event_type(ev_tbl[i]) == ODP_EVENT_PACKET) {
+				pkt = odp_packet_from_event(ev_tbl[i]);
+				pkt_tbl[0] = pkt;
+				pkts = 1;
+			} else if (odp_event_type(ev_tbl[i]) == ODP_EVENT_VECTOR) {
+				odp_event_vector_t evv = odp_event_vector_from_event(ev_tbl[i]);
+
+				pkts = odp_event_vector_tbl(evv, &event_tbl);
+				odp_packet_from_event_multi(pkt_tbl, event_tbl, pkts);
+				odp_event_vector_free(evv);
+			} else if (state != NULL) {
+				pkts = handle_rx_state(state, ev_tbl, events);
+
+				if (pkts <= 0)
+					continue;
+			}
+
+			prefetch_data(appl_args->prefetch, pkt_tbl, pkts);
+
+			pkts = process_extra_features(appl_args, pkt_tbl, pkts, stats, memcpy_src);
+
+			if (odp_unlikely(pkts == 0))
+				continue;
+
+			/* packets from the same queue are from the same interface */
+			src_idx = odp_packet_input_index(pkt_tbl[0]);
+			ODPH_ASSERT(src_idx >= 0);
+			dst_idx = gbl_args->dst_port_from_idx[src_idx];
+			fill_eth_addrs(pkt_tbl, pkts, dst_idx);
+
+			if (sched_prefetch)
+				odp_schedule_prefetch(sched_prefetch);
+
+			send_packets(pkt_tbl, pkts, use_event_queue, dst_idx, tx_queue[dst_idx],
+				     pktout[dst_idx], state, stats);
+		}
+	}
+
+	/*
+	 * Free prefetched packets before entering the thread barrier.
+	 * Such packets can block sending of later packets in other threads
+	 * that then would never enter the thread barrier and we would
+	 * end up in a dead-lock.
+	 */
+	odp_schedule_pause();
+	while (1) {
+		odp_event_t  ev;
+
+		ev = odp_schedule(NULL, ODP_SCHED_NO_WAIT);
+		if (ev == ODP_EVENT_INVALID)
+			break;
+
+		odp_event_free(ev);
+	}
+
+	/* Make sure that latest stat writes are visible to other threads */
+	odp_mb_full();
+
+	/* Wait until pktio devices are stopped */
+	odp_barrier_wait(&gbl_args->term_barrier);
+
+	/* Free remaining events in queues */
+	odp_schedule_resume();
+	while (1) {
+		odp_event_t  ev;
+
+		ev = odp_schedule(NULL, odp_schedule_wait_time(ODP_TIME_SEC_IN_NS));
+
+		if (ev == ODP_EVENT_INVALID)
+			break;
+
+		odp_event_free(ev);
+	}
+
+	return 0;
+}
+
+/*
  * Packet IO worker thread using scheduled queues
  *
  * arg  thread arguments of type 'thread_args_t *'
@@ -875,6 +1051,7 @@ static int run_worker_sched_mode(void *arg)
 	state_t *state = appl_args->has_state ? &thr_args->state : NULL;
 	int use_event_queue = gbl_args->appl.out_mode;
 	pktin_mode_t in_mode = gbl_args->appl.in_mode;
+	const uint32_t sched_prefetch = appl_args->sched_prefetch;
 
 	max_burst = gbl_args->appl.burst_rx;
 
@@ -954,6 +1131,9 @@ static int run_worker_sched_mode(void *arg)
 		ODPH_ASSERT(src_idx >= 0);
 		dst_idx = gbl_args->dst_port_from_idx[src_idx];
 		fill_eth_addrs(pkt_tbl, pkts, dst_idx);
+
+		if (sched_prefetch)
+			odp_schedule_prefetch(sched_prefetch);
 
 		send_packets(pkt_tbl, pkts, use_event_queue, dst_idx, tx_queue[dst_idx],
 			     pktout[dst_idx], state, stats);
@@ -1175,7 +1355,7 @@ static int run_worker_direct_mode(void *arg)
 }
 
 static int set_pktin_vector_params(odp_pktin_queue_param_t *pktin_param, odp_pool_t vec_pool,
-				   odp_pktio_capability_t pktio_capa)
+				   const odp_pktio_capability_t *pktio_capa)
 {
 	uint64_t vec_tmo_ns;
 	uint32_t vec_size;
@@ -1188,39 +1368,83 @@ static int set_pktin_vector_params(odp_pktin_queue_param_t *pktin_param, odp_poo
 	else
 		vec_size = gbl_args->appl.vec_size;
 
-	if (vec_size > pktio_capa.vector.max_size ||
-	    vec_size < pktio_capa.vector.min_size) {
+	if (vec_size > pktio_capa->vector.max_size || vec_size < pktio_capa->vector.min_size) {
 		if (gbl_args->appl.vec_size == 0) {
-			vec_size = (vec_size > pktio_capa.vector.max_size) ?
-				pktio_capa.vector.max_size : pktio_capa.vector.min_size;
+			vec_size = (vec_size > pktio_capa->vector.max_size) ?
+				pktio_capa->vector.max_size : pktio_capa->vector.min_size;
 			printf("\nWarning: Modified vector size to %u\n\n", vec_size);
 		} else {
 			ODPH_ERR("Invalid pktio vector size %u, valid range [%u, %u]\n",
-				 vec_size, pktio_capa.vector.min_size, pktio_capa.vector.max_size);
+				 vec_size, pktio_capa->vector.min_size,
+				 pktio_capa->vector.max_size);
 			return -1;
 		}
 	}
 	pktin_param->vector.max_size = vec_size;
 
-	if (gbl_args->appl.vec_tmo_ns == 0)
-		vec_tmo_ns = DEFAULT_VEC_TMO;
-	else
-		vec_tmo_ns = gbl_args->appl.vec_tmo_ns;
+	vec_tmo_ns = gbl_args->appl.vec_tmo_ns < 0 ? DEFAULT_VEC_TMO :
+			(uint64_t)gbl_args->appl.vec_tmo_ns;
 
-	if (vec_tmo_ns > pktio_capa.vector.max_tmo_ns ||
-	    vec_tmo_ns < pktio_capa.vector.min_tmo_ns) {
-		if (gbl_args->appl.vec_tmo_ns == 0) {
-			vec_tmo_ns = (vec_tmo_ns > pktio_capa.vector.max_tmo_ns) ?
-				pktio_capa.vector.max_tmo_ns : pktio_capa.vector.min_tmo_ns;
+	if (vec_tmo_ns > pktio_capa->vector.max_tmo_ns ||
+	    vec_tmo_ns < pktio_capa->vector.min_tmo_ns) {
+		if (gbl_args->appl.vec_tmo_ns < 0) {
+			vec_tmo_ns = (vec_tmo_ns > pktio_capa->vector.max_tmo_ns) ?
+				pktio_capa->vector.max_tmo_ns : pktio_capa->vector.min_tmo_ns;
 			printf("\nWarning: Modified vector timeout to %" PRIu64 "\n\n", vec_tmo_ns);
 		} else {
 			ODPH_ERR("Invalid vector timeout %" PRIu64 ", valid range [%" PRIu64
 				 ", %" PRIu64 "]\n", vec_tmo_ns,
-				 pktio_capa.vector.min_tmo_ns, pktio_capa.vector.max_tmo_ns);
+				 pktio_capa->vector.min_tmo_ns, pktio_capa->vector.max_tmo_ns);
 			return -1;
 		}
 	}
 	pktin_param->vector.max_tmo_ns = vec_tmo_ns;
+
+	return 0;
+}
+
+static int set_event_aggr_config(odp_event_aggr_config_t *config, odp_pool_t vec_pool,
+				 const odp_schedule_capability_t *capa)
+{
+	uint64_t vec_tmo_ns;
+	uint32_t vec_size, max_size;
+
+	memset(config, 0, sizeof(odp_event_aggr_config_t));
+	config->pool = vec_pool;
+	config->event_type = ODP_EVENT_PACKET;
+
+	vec_size = gbl_args->appl.vec_size == 0 ? DEFAULT_VEC_SIZE :
+			(uint64_t)gbl_args->appl.vec_size;
+
+	max_size = ODPH_MIN(capa->aggr.max_size, MAX_EVENT_VEC_SIZE);
+	if (vec_size > max_size || vec_size < capa->aggr.min_size) {
+		if (gbl_args->appl.vec_size == 0) {
+			vec_size = vec_size > max_size ? max_size : capa->aggr.min_size;
+			printf("\nWarning: Modified vector size to %u\n\n", vec_size);
+		} else {
+			ODPH_ERR("Invalid vector size %u, valid range [%u, %u]\n",
+				 vec_size, capa->aggr.min_size, max_size);
+			return -1;
+		}
+	}
+	config->max_size = vec_size;
+
+	vec_tmo_ns = gbl_args->appl.vec_tmo_ns < 0 ? DEFAULT_VEC_TMO :
+			(uint64_t)gbl_args->appl.vec_tmo_ns;
+
+	if (vec_tmo_ns > capa->aggr.max_tmo_ns || vec_tmo_ns < capa->aggr.min_tmo_ns) {
+		if (gbl_args->appl.vec_tmo_ns < 0) {
+			vec_tmo_ns = vec_tmo_ns > capa->aggr.max_tmo_ns ?
+				capa->aggr.max_tmo_ns : capa->aggr.min_tmo_ns;
+			printf("\nWarning: Modified vector timeout to %" PRIu64 "\n\n", vec_tmo_ns);
+		} else {
+			ODPH_ERR("Invalid vector timeout %" PRIu64 ", valid range [%" PRIu64
+				 ", %" PRIu64 "]\n", vec_tmo_ns,
+				 capa->aggr.min_tmo_ns, capa->aggr.max_tmo_ns);
+			return -1;
+		}
+	}
+	config->max_tmo_ns = vec_tmo_ns;
 
 	return 0;
 }
@@ -1243,6 +1467,7 @@ static int create_pktio(const char *dev, int idx, int num_rx, int num_tx, odp_po
 	odp_pktio_capability_t pktio_capa;
 	odp_pktio_config_t config;
 	odp_pktin_queue_param_t pktin_param;
+	odp_event_aggr_config_t aggr_config;
 	odp_pktout_queue_param_t pktout_param;
 	odp_queue_param_t compl_queue;
 	odp_pktio_op_mode_t mode_rx;
@@ -1436,8 +1661,8 @@ static int create_pktio(const char *dev, int idx, int num_rx, int num_tx, odp_po
 		}
 	}
 
-	if (num_rx > (int)pktio_capa.max_input_queues) {
-		num_rx  = pktio_capa.max_input_queues;
+	if (num_rx > (int)pktio_capa.max_input_queues || num_rx > MAX_QUEUES) {
+		num_rx  = ODPH_MIN((int)pktio_capa.max_input_queues, MAX_QUEUES);
 		mode_rx = ODP_PKTIO_OP_MT;
 		printf("Warning: %s: maximum number of input queues: %i\n", dev, num_rx);
 	}
@@ -1446,10 +1671,12 @@ static int create_pktio(const char *dev, int idx, int num_rx, int num_tx, odp_po
 		printf("Warning: %s: sharing %i input queues between %i workers\n",
 		       dev, num_rx, gbl_args->appl.num_workers);
 
-	if (num_tx > (int)pktio_capa.max_output_queues) {
+	if (num_tx > (int)pktio_capa.max_output_queues || num_tx > MAX_QUEUES) {
+		int num_tx_orig = num_tx;
+
+		num_tx  = ODPH_MIN((int)pktio_capa.max_output_queues, MAX_QUEUES);
 		printf("Warning: %s: sharing %i output queues between %i workers\n",
-		       dev, pktio_capa.max_output_queues, num_tx);
-		num_tx  = pktio_capa.max_output_queues;
+		       dev, num_tx, num_tx_orig);
 		mode_tx = ODP_PKTIO_OP_MT;
 	}
 
@@ -1461,13 +1688,31 @@ static int create_pktio(const char *dev, int idx, int num_rx, int num_tx, odp_po
 	pktout_param.op_mode    = mode_tx;
 	pktout_param.num_queues = num_tx;
 
-	if (gbl_args->appl.vector_mode) {
+	if (gbl_args->appl.vector_mode == VECTOR_MODE_PACKET) {
 		if (!pktio_capa.vector.supported) {
 			ODPH_ERR("Packet vector input not supported: %s\n", dev);
 			return -1;
 		}
-		if (set_pktin_vector_params(&pktin_param, vec_pool, pktio_capa))
+		if (set_pktin_vector_params(&pktin_param, vec_pool, &pktio_capa))
 			return -1;
+	}
+
+	if (gbl_args->appl.vector_mode == VECTOR_MODE_EVENT) {
+		odp_schedule_capability_t sched_capa;
+
+		if (odp_schedule_capability(&sched_capa)) {
+			ODPH_ERR("Scheduler capability query failed: %s\n", dev);
+			return -1;
+		}
+
+		if (!sched_capa.aggr.max_num) {
+			ODPH_ERR("Event vector input not supported: %s\n", dev);
+			return -1;
+		}
+		if (set_event_aggr_config(&aggr_config, vec_pool, &sched_capa))
+			return -1;
+		pktin_param.queue_param.aggr = &aggr_config;
+		pktin_param.queue_param.num_aggr = 1;
 	}
 
 	if (num_rx > 0 && odp_pktin_queue_config(pktio, &pktin_param)) {
@@ -1531,6 +1776,56 @@ static int create_pktio(const char *dev, int idx, int num_rx, int num_tx, odp_po
 	gbl_args->pktios[idx].pktio        = pktio;
 
 	return 0;
+}
+
+static int start_pktios(args_t *gbl_args)
+{
+	appl_args_t *appl = &gbl_args->appl;
+	int if_count = appl->if_count;
+	odp_pktio_t pktios[MAX_PKTIOS];
+	const char *names[MAX_PKTIOS];
+
+	for (int i = 0; i < if_count; i++) {
+		if (odp_pktio_start(gbl_args->pktios[i].pktio)) {
+			ODPH_ERR("Error (%s): Pktio start failed.\n", appl->if_names[i]);
+			return -1;
+		}
+
+		pktios[i] = gbl_args->pktios[i].pktio;
+		names[i] = appl->if_names[i];
+	}
+
+	/* Wait until all links are up */
+	if (appl->wait_sec && pktio_common_check_link_status_wait(pktios, names, if_count,
+								  appl->wait_sec) == -1)
+		return -1;
+
+	pktio_common_print_link_info_multi(pktios, names, if_count);
+
+	return 0;
+}
+
+static int stop_pktios(args_t *gbl_args)
+{
+	uint32_t i;
+	odp_pktio_t pktio;
+	int ret = 0;
+	appl_args_t *appl = &gbl_args->appl;
+	uint32_t if_count = appl->if_count;
+
+	for (i = 0; i < if_count; i++) {
+		pktio = gbl_args->pktios[i].pktio;
+
+		if (pktio == ODP_PKTIO_INVALID)
+			continue;
+
+		if (odp_pktio_stop(pktio)) {
+			ODPH_ERR("Error (%s): Pktio stop failed.\n", appl->if_names[i]);
+			ret = -1;
+		}
+	}
+
+	return ret;
 }
 
 /*
@@ -1851,6 +2146,80 @@ static void init_port_lookup_tbl(void)
 	}
 }
 
+static void set_cache_stash(odp_cache_stash_region_t *region, uint32_t level, uint32_t len,
+			    uint32_t offset)
+{
+	if (level == 0) {
+		region->l2.len = len;
+		region->l2.offset = offset;
+	} else {
+		region->l3.len = len;
+		region->l3.offset = offset;
+	}
+}
+
+static int parse_cache_stash_config(char *optarg, appl_args_t *appl)
+{
+	uint32_t region, level, offset, len;
+	odp_cache_stash_region_t *stash_region;
+	odp_cache_stash_config_t *stash_config = &appl->cache_stash_config;
+
+	if (sscanf(optarg, "%u,%u,%u,%u", &region, &level, &offset, &len) != 4) {
+		ODPH_ERR("Invalid number of arguments for cache stashing\n");
+		return -1;
+	}
+
+	if (region > 3) {
+		ODPH_ERR("Invalid region for cache stashing: %u\n", region);
+		return -1;
+	}
+
+	if (level > 1) {
+		ODPH_ERR("Invalid cache level for cache stashing: %u\n", level);
+		return -1;
+	}
+
+	if (len == 0) {
+		ODPH_ERR("Invalid len for cache stashing: %u\n", len);
+		return -1;
+	}
+
+	switch (region) {
+	case 0: /* event_metadata */
+		stash_region = &stash_config->event_metadata;
+		if (level == 0)
+			stash_config->regions.event_metadata_l2 = 1;
+		else
+			stash_config->regions.event_metadata_l3 = 1;
+		break;
+	case 1: /* event_data */
+		stash_region = &stash_config->event_data;
+		if (level == 0)
+			stash_config->regions.event_data_l2 = 1;
+		else
+			stash_config->regions.event_data_l3 = 1;
+		break;
+	case 2: /* event_user_area */
+		stash_region = &stash_config->event_user_area;
+		if (level == 0)
+			stash_config->regions.event_user_area_l2 = 1;
+		else
+			stash_config->regions.event_user_area_l3 = 1;
+		break;
+	default: /* queue_context */
+		stash_region = &stash_config->queue_context;
+		if (level == 0)
+			stash_config->regions.queue_context_l2 = 1;
+		else
+			stash_config->regions.queue_context_l3 = 1;
+		break;
+	}
+
+	set_cache_stash(stash_region, level, len, offset);
+
+	return 0;
+}
+
 /*
  * Print usage information
  */
@@ -1948,14 +2317,19 @@ static void usage(char *progname)
 	       "                                 1: Create a pool per interface\n"
 	       "  -n, --num_pkt <num>            Number of packets per pool. Default is 16k or\n"
 	       "                                 the maximum capability. Use 0 for the default.\n"
-	       "  -u, --vector_mode              Enable vector mode.\n"
+	       "  -u, --vector_mode <num>        Enable vector mode.\n"
 	       "                                 Supported only with scheduler packet input\n"
 	       "                                 modes (1-3).\n"
+	       "                                 0: Disabled (default)\n"
+	       "                                 1: Event vector mode\n"
+	       "                                 2: Packet vector mode\n"
 	       "  -w, --num_vec <num>            Number of vectors per pool.\n"
 	       "                                 Default is num_pkts divided by vec_size.\n"
 	       "  -x, --vec_size <num>           Vector size (default %i).\n"
-	       "  -z, --vec_tmo_ns <ns>          Vector timeout in ns (default %llu ns).\n"
-	       "  -M, --mtu <len>                Interface MTU in bytes.\n"
+	       "  -z, --vec_tmo_ns <ns>          Vector timeout in ns (default %llu ns).\n",
+	       DEFAULT_VEC_SIZE, DEFAULT_VEC_TMO);
+
+	printf("  -M, --mtu <len>                Interface MTU in bytes.\n"
 	       "  -P, --promisc_mode             Enable promiscuous mode.\n"
 	       "  -l, --packet_len <len>         Maximum length of packets supported\n"
 	       "                                 (default %d).\n"
@@ -1964,10 +2338,8 @@ static void usage(char *progname)
 	       "  -F, --prefetch <num>           Prefetch packet data in 64 byte multiples\n"
 	       "                                 (default 1).\n"
 	       "  -f, --flow_aware               Enable flow aware scheduling.\n"
-	       "  -T, --input_ts                 Enable packet input timestamping.\n",
-	       DEFAULT_VEC_SIZE, DEFAULT_VEC_TMO, POOL_PKT_LEN);
-
-	printf("  -C, --tx_compl <mode,n,max_id> Enable transmit completion with a specified\n"
+	       "  -T, --input_ts                 Enable packet input timestamping.\n"
+	       "  -C, --tx_compl <mode,n,max_id> Enable transmit completion with a specified\n"
 	       "                                 completion mode for nth packet, with maximum\n"
 	       "                                 completion ID per worker thread in case of poll\n"
 	       "                                 completion (comma-separated, no spaces).\n"
@@ -1979,11 +2351,21 @@ static void usage(char *progname)
 	       "                                 2: Enable transmission of pause frames\n"
 	       "                                 3: Enable reception and transmission of pause\n"
 	       "                                    frames\n"
+	       "  --cache_stash <num>            Enable common group level cache stashing. Format: region,level,offset,len\n"
+	       "                                 region: 0: Event metadata, 1: Event data, 2: Event user area, 3: Queue context\n"
+	       "                                 level: 0: L2, 1: L3\n"
+	       "                                 offset/len: in bytes\n"
+	       "                                 E.g.: 1,0,16,32 enables 32-byte L2 stash on event data with a 16-byte offset\n"
+	       "                                 A region can be cached on multiple levels by specifying this option more than once.\n"
+	       "                                 Similarly, to stash multiple regions, use --cache_stash multiple times.\n"
+	       "  --schedule_prefetch <num>      Number of events to be prefetched for scheduling. Default: 0.\n"
+	       "  --wait_link <sec>              Wait up to <sec> seconds for network links to be up.\n"
+	       "                                 Default: 0 (don't check link status)\n"
 	       "  -v, --verbose                  Verbose output.\n"
 	       "  -V, --verbose_pkt              Print debug information on every received\n"
 	       "                                 packet.\n"
 	       "  -h, --help                     Display help and exit.\n\n"
-	       "\n");
+	       "\n", POOL_PKT_LEN);
 }
 
 /*
@@ -2025,9 +2407,10 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 		{"num_pkt", required_argument, NULL, 'n'},
 		{"num_vec", required_argument, NULL, 'w'},
 		{"wait_ns", required_argument, NULL, 'W'},
+		{"wait_link",   required_argument, NULL, OPT_WAIT_LINK},
 		{"vec_size", required_argument, NULL, 'x'},
 		{"vec_tmo_ns", required_argument, NULL, 'z'},
-		{"vector_mode", no_argument, NULL, 'u'},
+		{"vector_mode", required_argument, NULL, 'u'},
 		{"mtu", required_argument, NULL, 'M'},
 		{"promisc_mode", no_argument, NULL, 'P'},
 		{"packet_len", required_argument, NULL, 'l'},
@@ -2037,6 +2420,8 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 		{"input_ts", no_argument, NULL, 'T'},
 		{"tx_compl", required_argument, NULL, 'C'},
 		{"flow_control", required_argument, NULL, 'X'},
+		{"cache_stash", required_argument, NULL, OPT_CACHE_STASH},
+		{"schedule_prefetch", required_argument, NULL, OPT_SCHED_PREFETCH},
 		{"verbose", no_argument, NULL, 'v'},
 		{"verbose_pkt", no_argument, NULL, 'V'},
 		{"help", no_argument, NULL, 'h'},
@@ -2044,38 +2429,17 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 	};
 
 	static const char *shortopts = "+c:t:a:i:m:o:O:r:d:s:e:E:k:g:G:I:"
-				       "b:q:p:R:y:n:l:L:w:W:x:X:z:M:F:uPfTC:vVh";
+				       "b:q:p:R:y:n:l:L:w:W:x:X:z:M:F:u:PfTC:vVh";
 
-	appl_args->time = 0; /* loop forever if time to run is 0 */
 	appl_args->accuracy = 1; /* get and print pps stats second */
 	appl_args->cpu_count = 1; /* use one worker by default */
 	appl_args->dst_change = 1; /* change eth dst address by default */
 	appl_args->src_change = 1; /* change eth src address by default */
-	appl_args->num_groups = 0; /* use default group */
-	appl_args->group_mode = 0;
-	appl_args->error_check = 0; /* don't check packet errors by default */
-	appl_args->packet_copy = 0;
-	appl_args->burst_rx = 0;
-	appl_args->rx_queues = 0;
-	appl_args->verbose = 0;
-	appl_args->verbose_pkt = 0;
-	appl_args->chksum = 0; /* don't use checksum offload by default */
-	appl_args->pool_per_if = 0;
-	appl_args->num_pkt = 0;
 	appl_args->packet_len = POOL_PKT_LEN;
 	appl_args->seg_len = UINT32_MAX;
-	appl_args->mtu = 0;
-	appl_args->promisc_mode = 0;
-	appl_args->vector_mode = 0;
-	appl_args->num_vec = 0;
-	appl_args->vec_size = 0;
-	appl_args->vec_tmo_ns = 0;
-	appl_args->flow_aware = 0;
-	appl_args->input_ts = 0;
-	appl_args->num_prio = 0;
+	appl_args->vector_mode = VECTOR_MODE_DISABLED;
+	appl_args->vec_tmo_ns = -1;
 	appl_args->prefetch = 1;
-	appl_args->data_rd = 0;
-	appl_args->flow_control = 0;
 
 	while (1) {
 		opt = getopt_long(argc, argv, shortopts, longopts, NULL);
@@ -2306,7 +2670,7 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 			appl_args->promisc_mode = 1;
 			break;
 		case 'u':
-			appl_args->vector_mode = 1;
+			appl_args->vector_mode = atoi(optarg);
 			break;
 		case 'w':
 			appl_args->num_vec = atoi(optarg);
@@ -2326,6 +2690,9 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 			break;
 		case 'z':
 			appl_args->vec_tmo_ns = atoi(optarg);
+			break;
+		case OPT_WAIT_LINK:
+			appl_args->wait_sec = atoi(optarg);
 			break;
 		case 'F':
 			appl_args->prefetch = atoi(optarg);
@@ -2386,6 +2753,13 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 
 			free(tmp_str);
 			break;
+		case OPT_CACHE_STASH:
+			if (parse_cache_stash_config(optarg, appl_args))
+				exit(EXIT_FAILURE);
+			break;
+		case OPT_SCHED_PREFETCH:
+			appl_args->sched_prefetch = atoi(optarg);
+			break;
 		case 'v':
 			appl_args->verbose = 1;
 			break;
@@ -2427,6 +2801,19 @@ static void parse_args(int argc, char *argv[], appl_args_t *appl_args)
 		exit(EXIT_FAILURE);
 	}
 
+	if (appl_args->rx_queues > MAX_QUEUES) {
+		ODPH_ERR("Number of RX queues per interface (%i) too large. Maximum is %i.\n",
+			 appl_args->rx_queues, MAX_QUEUES);
+		exit(EXIT_FAILURE);
+	}
+
+	if (appl_args->vector_mode != VECTOR_MODE_DISABLED &&
+	    appl_args->vector_mode != VECTOR_MODE_PACKET &&
+	    appl_args->vector_mode != VECTOR_MODE_EVENT) {
+		ODPH_ERR("Invalid vector mode: %d\n", appl_args->vector_mode);
+		exit(EXIT_FAILURE);
+	}
+
 	if (appl_args->tx_compl.mode != ODP_PACKET_TX_COMPL_DISABLED &&
 	    appl_args->tx_compl.nth == 0) {
 		ODPH_ERR("Invalid packet interval for transmit completion: %u\n",
@@ -2464,6 +2851,7 @@ static void print_options(void)
 {
 	int i;
 	appl_args_t *appl_args = &gbl_args->appl;
+	odp_cache_stash_config_t *cs_conf = &appl_args->cache_stash_config;
 
 	printf("\n"
 	       "odp_l2fwd options\n"
@@ -2551,15 +2939,57 @@ static void print_options(void)
 	printf("Segment length:     %u\n", appl_args->seg_len == UINT32_MAX ? 0 :
 	       appl_args->seg_len);
 	printf("Read data:          %u bytes\n", appl_args->data_rd * 8);
-	printf("Prefetch data       %u bytes\n", appl_args->prefetch * 64);
+	printf("Prefetch data:      %u bytes\n", appl_args->prefetch * 64);
+	printf("Vector mode:        %s\n", appl_args->vector_mode == VECTOR_MODE_PACKET ?
+		"packet" : appl_args->vector_mode == VECTOR_MODE_EVENT ? "event" : "disabled");
 	printf("Vectors per pool:   %u\n", appl_args->num_vec);
 	printf("Vector size:        %u\n", appl_args->vec_size);
 	printf("Priority per IF:   ");
 
 	for (i = 0; i < appl_args->if_count; i++)
 		printf(" %i", appl_args->prio[i]);
+	printf("\n");
 
-	printf("\n\n");
+	printf("Schedule prefetch:  %u events\n", appl_args->sched_prefetch);
+
+	printf("Cache stash:        ");
+	if (cs_conf->regions.all) {
+		printf("\n%-18s %10s %8s %10s %8s\n",
+		       "Region", "L2 offset", "L2 len", "L3 offset", "L3 len");
+		printf("----------------------------------------------------------\n");
+
+		printf("%-18s %10d %8d %10d %8d\n",
+		       "Event metadata",
+		       cs_conf->event_metadata.l2.offset,
+		       cs_conf->event_metadata.l2.len,
+		       cs_conf->event_metadata.l3.offset,
+		       cs_conf->event_metadata.l3.len);
+
+		printf("%-18s %10d %8d %10d %8d\n",
+		       "Event data",
+		       cs_conf->event_data.l2.offset,
+		       cs_conf->event_data.l2.len,
+		       cs_conf->event_data.l3.offset,
+		       cs_conf->event_data.l3.len);
+
+		printf("%-18s %10d %8d %10d %8d\n",
+		       "Event user area",
+		       cs_conf->event_user_area.l2.offset,
+		       cs_conf->event_user_area.l2.len,
+		       cs_conf->event_user_area.l3.offset,
+		       cs_conf->event_user_area.l3.len);
+
+		printf("%-18s %10d %8d %10d %8d\n",
+		       "Queue context",
+		       cs_conf->queue_context.l2.offset,
+		       cs_conf->queue_context.l2.len,
+		       cs_conf->queue_context.l3.offset,
+		       cs_conf->queue_context.l3.len);
+	} else {
+		printf("disabled\n");
+	}
+
+	printf("\n");
 }
 
 static void gbl_args_init(args_t *args)
@@ -2582,16 +3012,20 @@ static void gbl_args_init(args_t *args)
 	args->appl.tx_compl.mode = ODP_PACKET_TX_COMPL_DISABLED;
 }
 
-static void create_groups(int num, odp_schedule_group_t *group)
+static void create_groups(int num, odp_schedule_group_t *group,
+			  odp_cache_stash_config_t *cache_stash_config)
 {
 	int i;
 	odp_thrmask_t zero;
+	odp_schedule_group_param_t group_param;
 
 	odp_thrmask_zero(&zero);
+	odp_schedule_group_param_init(&group_param);
+	group_param.cache_stash_hints.common = *cache_stash_config;
 
 	/* Create groups */
 	for (i = 0; i < num; i++) {
-		group[i] = odp_schedule_group_create(NULL, &zero);
+		group[i] = odp_schedule_group_create_2(NULL, &zero, &group_param);
 
 		if (group[i] == ODP_SCHED_GROUP_INVALID) {
 			ODPH_ERR("Group create failed\n");
@@ -2604,10 +3038,7 @@ static int set_vector_pool_params(odp_pool_param_t *params, const odp_pool_capab
 {
 	uint32_t num_vec, vec_size;
 
-	if (gbl_args->appl.vec_size == 0)
-		vec_size = DEFAULT_VEC_SIZE;
-	else
-		vec_size = gbl_args->appl.vec_size;
+	vec_size = gbl_args->appl.vec_size == 0 ? DEFAULT_VEC_SIZE : gbl_args->appl.vec_size;
 
 	ODPH_ASSERT(pool_capa->vector.max_size > 0);
 	if (vec_size > pool_capa->vector.max_size) {
@@ -2648,6 +3079,51 @@ static int set_vector_pool_params(odp_pool_param_t *params, const odp_pool_capab
 	return 0;
 }
 
+static int set_event_vector_pool_params(odp_pool_param_t *params,
+					const odp_pool_capability_t *pool_capa)
+{
+	uint32_t num_vec, vec_size, max_size;
+
+	vec_size = gbl_args->appl.vec_size == 0 ? DEFAULT_VEC_SIZE : gbl_args->appl.vec_size;
+
+	max_size = ODPH_MIN(pool_capa->event_vector.max_size, MAX_EVENT_VEC_SIZE);
+	if (vec_size > max_size) {
+		if (gbl_args->appl.vec_size == 0) {
+			vec_size = max_size;
+			printf("\nWarning: Vector size reduced to %u\n\n", vec_size);
+		} else {
+			ODPH_ERR("Vector size too big %u. Maximum is %u.\n", vec_size, max_size);
+			return -1;
+		}
+	}
+
+	if (gbl_args->appl.num_vec == 0) {
+		uint32_t num_pkt =  gbl_args->appl.num_pkt ?
+			gbl_args->appl.num_pkt : DEFAULT_NUM_PKT;
+
+		num_vec = (num_pkt + vec_size - 1) / vec_size;
+	} else {
+		num_vec = gbl_args->appl.num_vec;
+	}
+
+	if (pool_capa->event_vector.max_num && num_vec > pool_capa->event_vector.max_num) {
+		if (gbl_args->appl.num_vec == 0) {
+			num_vec = pool_capa->event_vector.max_num;
+			printf("\nWarning: number of vectors reduced to %u\n\n", num_vec);
+		} else {
+			ODPH_ERR("Too many vectors (%u) per pool. Maximum is %u.\n",
+				 num_vec, pool_capa->event_vector.max_num);
+			return -1;
+		}
+	}
+
+	params->event_vector.num = num_vec;
+	params->event_vector.max_size = vec_size;
+	params->type = ODP_POOL_EVENT_VECTOR;
+
+	return 0;
+}
+
 static int reserve_memcpy_memory(args_t *args)
 {
 	uint64_t total_bytes;
@@ -2670,6 +3146,62 @@ static int reserve_memcpy_memory(args_t *args)
 	}
 
 	return 0;
+}
+
+static int create_vector_pools(args_t *args, odp_pool_capability_t *pool_capa,
+			       odp_pool_t vec_pool_tbl[])
+{
+	odp_pool_param_t params;
+	int num_vec_pools;
+	vector_mode_t mode = args->appl.vector_mode;
+
+	if (mode == VECTOR_MODE_DISABLED)
+		return 0;
+
+	if (!sched_mode(args->appl.in_mode)) {
+		ODPH_ERR("Vector mode only supports scheduler pktin modes (1-3)\n");
+		return -1;
+	}
+
+	num_vec_pools = args->appl.pool_per_if ? gbl_args->appl.if_count : 1;
+
+	if ((mode == VECTOR_MODE_PACKET && num_vec_pools > (int)pool_capa->vector.max_pools) ||
+	    (mode == VECTOR_MODE_EVENT && num_vec_pools > (int)pool_capa->event_vector.max_pools)) {
+		ODPH_ERR("Too many vector pools %i\n", num_vec_pools);
+		return -1;
+	}
+
+	odp_pool_param_init(&params);
+
+	if (mode == VECTOR_MODE_PACKET) {
+		if (set_vector_pool_params(&params, pool_capa))
+			return -1;
+	} else {
+		if (set_event_vector_pool_params(&params, pool_capa))
+			return -1;
+	}
+
+	args->vector_num = mode == VECTOR_MODE_PACKET ? params.vector.num : params.event_vector.num;
+	args->vector_max_size = mode == VECTOR_MODE_PACKET ? params.vector.max_size :
+				params.event_vector.max_size;
+
+	/* Print resulting values */
+	printf("Vectors per pool:   %u\n", args->vector_num);
+	printf("Vector size:        %u\n", args->vector_max_size);
+
+	for (int i = 0; i < num_vec_pools; i++) {
+		vec_pool_tbl[i] = odp_pool_create("vector pool", &params);
+
+		if (vec_pool_tbl[i] == ODP_POOL_INVALID) {
+			ODPH_ERR("Vector pool create failed %i\n", i);
+			exit(EXIT_FAILURE);
+		}
+
+		if (args->appl.verbose)
+			odp_pool_print(vec_pool_tbl[i]);
+	}
+
+	return num_vec_pools;
 }
 
 /*
@@ -2700,6 +3232,7 @@ int main(int argc, char *argv[])
 	odp_schedule_config_t sched_config;
 	odp_schedule_capability_t sched_capa;
 	uint32_t pkt_len, num_pkt, seg_len;
+	odp_schedule_group_param_t group_param;
 
 	/* Let helper collect its own arguments (e.g. --odph_proc) */
 	argc = odph_parse_options(argc, argv);
@@ -2872,49 +3405,17 @@ int main(int argc, char *argv[])
 			odp_pool_print(pool_tbl[i]);
 	}
 
-	/* Create vector pool */
-	num_vec_pools = 0;
-	if (gbl_args->appl.vector_mode) {
-		if (!sched_mode(gbl_args->appl.in_mode)) {
-			ODPH_ERR("Vector mode only supports scheduler pktin modes (1-3)\n");
-			return -1;
-		}
-
-		num_vec_pools = gbl_args->appl.pool_per_if ? if_count : 1;
-		if (num_vec_pools > (int)pool_capa.vector.max_pools) {
-			ODPH_ERR("Too many vector pools %i\n", num_vec_pools);
-			return -1;
-		}
-
-		odp_pool_param_init(&params);
-		if (set_vector_pool_params(&params, &pool_capa))
-			return -1;
-
-		gbl_args->vector_num = params.vector.num;
-		gbl_args->vector_max_size = params.vector.max_size;
-
-		/* Print resulting values */
-		printf("Vectors per pool:   %u\n", gbl_args->vector_num);
-		printf("Vector size:        %u\n", gbl_args->vector_max_size);
-
-		for (i = 0; i < num_vec_pools; i++) {
-			vec_pool_tbl[i] = odp_pool_create("vector pool", &params);
-
-			if (vec_pool_tbl[i] == ODP_POOL_INVALID) {
-				ODPH_ERR("Vector pool create failed %i\n", i);
-				exit(EXIT_FAILURE);
-			}
-
-			if (gbl_args->appl.verbose)
-				odp_pool_print(vec_pool_tbl[i]);
-		}
-	}
+	num_vec_pools = create_vector_pools(gbl_args, &pool_capa, vec_pool_tbl);
+	if (num_vec_pools < 0)
+		exit(EXIT_FAILURE);
 
 	printf("\n");
 
 	bind_workers();
 
 	odp_schedule_config_init(&sched_config);
+	odp_schedule_group_param_init(&group_param);
+	group_param.cache_stash_hints.common = gbl_args->appl.cache_stash_config;
 
 	if (odp_schedule_capability(&sched_capa)) {
 		ODPH_ERR("Schedule capability failed\n");
@@ -2941,7 +3442,15 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 
-	odp_schedule_config(&sched_config);
+	if (num_groups == -1)
+		sched_config.sched_group.worker_param = group_param;
+	else if (num_groups == 0)
+		sched_config.sched_group.all_param = group_param;
+
+	if (odp_schedule_config(&sched_config)) {
+		ODPH_ERR("Schedule configuration failed\n");
+		exit(EXIT_FAILURE);
+	}
 
 	/* Default */
 	if (num_groups == 0) {
@@ -2951,7 +3460,7 @@ int main(int argc, char *argv[])
 		group[0]   = ODP_SCHED_GROUP_WORKER;
 		num_groups = 1;
 	} else {
-		create_groups(num_groups, group);
+		create_groups(num_groups, group, &gbl_args->appl.cache_stash_config);
 	}
 
 	pool = pool_tbl[0];
@@ -2998,15 +3507,12 @@ int main(int argc, char *argv[])
 			}
 			gbl_args->dst_eth_addr[i] = new_addr;
 		}
-
-		ret = odp_pktio_start(gbl_args->pktios[i].pktio);
-		if (ret) {
-			ODPH_ERR("Pktio start failed: %s\n", gbl_args->appl.if_names[i]);
-			exit(EXIT_FAILURE);
-		}
 	}
 
 	gbl_args->pktios[i].pktio = ODP_PKTIO_INVALID;
+
+	if (start_pktios(gbl_args))
+		exit(EXIT_FAILURE);
 
 	bind_queues();
 
@@ -3018,13 +3524,18 @@ int main(int argc, char *argv[])
 	odp_barrier_init(&gbl_args->init_barrier, num_workers + 1);
 	odp_barrier_init(&gbl_args->term_barrier, num_workers + 1);
 
-	if (gbl_args->appl.in_mode == DIRECT_RECV)
+	if (gbl_args->appl.in_mode == DIRECT_RECV) {
 		thr_run_func = run_worker_direct_mode;
-	else if (gbl_args->appl.in_mode == PLAIN_QUEUE)
+	} else if (gbl_args->appl.in_mode == PLAIN_QUEUE) {
 		thr_run_func = run_worker_plain_queue_mode;
-	else /* SCHED_PARALLEL / SCHED_ATOMIC / SCHED_ORDERED */
-		thr_run_func = gbl_args->appl.vector_mode ?
-			run_worker_sched_mode_vector : run_worker_sched_mode;
+	} else  { /* SCHED_PARALLEL / SCHED_ATOMIC / SCHED_ORDERED */
+		if (gbl_args->appl.vector_mode == VECTOR_MODE_PACKET)
+			thr_run_func = run_worker_sched_mode_vector;
+		else if (gbl_args->appl.vector_mode == VECTOR_MODE_EVENT)
+			thr_run_func = run_worker_sched_mode_event_vector;
+		else
+			thr_run_func = run_worker_sched_mode;
+	}
 
 	/* Create worker threads */
 	odph_thread_common_param_init(&thr_common);
@@ -3097,12 +3608,8 @@ int main(int argc, char *argv[])
 	ret = print_speed_stats(num_workers, stats, gbl_args->appl.time,
 				gbl_args->appl.accuracy);
 
-	for (i = 0; i < if_count; ++i) {
-		if (odp_pktio_stop(gbl_args->pktios[i].pktio)) {
-			ODPH_ERR("Pktio stop failed: %s\n", gbl_args->appl.if_names[i]);
-			exit(EXIT_FAILURE);
-		}
-	}
+	if (stop_pktios(gbl_args))
+		exit(EXIT_FAILURE);
 
 	odp_atomic_store_u32(&gbl_args->exit_threads, 1);
 	if (gbl_args->appl.in_mode != DIRECT_RECV)

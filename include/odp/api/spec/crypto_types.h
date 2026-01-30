@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2014-2018 Linaro Limited
- * Copyright (c) 2021-2024 Nokia
+ * Copyright (c) 2021-2025 Nokia
  */
 
 /**
@@ -133,6 +133,14 @@ typedef enum {
 	 *  COUNT || BEARER || DIRECTION || 0...0 ||
 	 */
 	ODP_CIPHER_ALG_SNOW3G_UEA2,
+
+	/** NEA4 confidentiality algorithm
+	 *
+	 *  SNOW 5G based NEA4 algorithm.
+	 *
+	 *  IV is 128 bits.
+	 */
+	ODP_CIPHER_ALG_SNOW5G_NEA4,
 
 	/** Confidentiality 128-EEA2 algorithm
 	 *
@@ -340,6 +348,14 @@ typedef enum {
 	 */
 	ODP_AUTH_ALG_SNOW3G_UIA2,
 
+	/** NIA4 integrity algorithm
+	 *
+	 *  SNOW 5G based NIA4 algorithm.
+	 *
+	 *  IV is 128 bits.
+	 */
+	ODP_AUTH_ALG_SNOW5G_NIA4,
+
 	/** Integrity 128-EIA2 algorithm
 	 *
 	 *  AES_CMAC-based 128-EIA2 algorithm.
@@ -511,6 +527,9 @@ typedef union odp_crypto_cipher_algos_t {
 		/** ODP_CIPHER_ALG_SNOW3G_UEA2 */
 		uint32_t snow3g_uea2 : 1;
 
+		/** ODP_CIPHER_ALG_SNOW5G_NEA4 */
+		uint32_t snow5g_nea4 : 1;
+
 		/** ODP_CIPHER_ALG_AES_EEA2 */
 		uint32_t aes_eea2 : 1;
 
@@ -610,6 +629,9 @@ typedef union odp_crypto_auth_algos_t {
 		/** ODP_AUTH_ALG_SNOW3G_UIA2 */
 		uint32_t snow3g_uia2 : 1;
 
+		/** ODP_AUTH_ALG_SNOW5G_NIA4 */
+		uint32_t snow5g_nia4 : 1;
+
 		/** ODP_AUTH_ALG_AES_EIA2 */
 		uint32_t aes_eia2 : 1;
 
@@ -692,17 +714,6 @@ typedef struct odp_crypto_key {
  * Type of odp_crypto_op()/odp_crypto_op_enq() calls.
  */
 typedef enum odp_crypto_op_type_t {
-	/**
-	 * Input packet data and metadata are copied to the output packet
-	 * and then processed. Output packet is allocated by the caller
-	 * or by ODP.
-	 *
-	 * @deprecated Use another crypto op type instead.
-	 */
-#if ODP_DEPRECATED_API
-	ODP_CRYPTO_OP_TYPE_LEGACY,
-#endif
-
 	/**
 	 * Input packet data and metadata are copied to the output packet
 	 * and then processed. Output packet is allocated by ODP.
@@ -909,12 +920,10 @@ typedef struct odp_crypto_session_param_t {
 
 	/** Output pool
 	 *
-	 *  When the output packet is not specified during the call to
-	 *  crypto operation in the legacy operation type, the output
-	 *  packet will be allocated from this pool.
+	 *  This field is unused and will be deprecated later.
+	 *  The value must be left to the default value.
 	 *
-	 *  In ODP_CRYPTO_OP_TYPE_BASIC and ODP_CRYPTO_OP_TYPE_OOP
-	 *  operation types this must be set to ODP_POOL_INVALID.
+	 *  Default value is ODP_POOL_INVALID.
 	 */
 	odp_pool_t output_pool;
 
