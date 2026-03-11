@@ -325,7 +325,7 @@ static int packet_suite_term(void)
 	if (odp_pool_destroy(default_pool) != 0)
 		return -1;
 
-	return 0;
+	return odp_cunit_print_inactive();
 }
 
 /* Set all non-conflicting metadata flags */
@@ -3600,8 +3600,10 @@ static int packet_vector_suite_term(void)
 
 	odp_packet_vector_free(pktv_default);
 	odp_pool_destroy(vector_default_pool);
-	return 0;
+
+	return odp_cunit_print_inactive();
 }
+
 static void packet_test_max_pools(void)
 {
 	odp_pool_param_t param;
@@ -3784,7 +3786,7 @@ static int packet_parse_suite_term(void)
 	if (odp_pool_destroy(parse_test.pool))
 		return -1;
 
-	return 0;
+	return odp_cunit_print_inactive();
 }
 
 static void parse_test_alloc(odp_packet_t pkt[], const uint8_t test_packet[],
