@@ -1816,7 +1816,7 @@ static void test_multi_out_in(odp_ipsec_sa_t out_sa,
 		if (reass_status == ODP_PACKET_REASS_COMPLETE) {
 			pkt_len = odp_packet_len(pkt);
 			l3_off = odp_packet_l3_offset(pkt);
-			CU_ASSERT(ODP_PACKET_OFFSET_INVALID != l3_off)
+			CU_ASSERT(ODP_PACKET_OFFSET_INVALID != l3_off);
 
 			orig_ip_len += pkt_len - l3_off;
 		}
@@ -1829,8 +1829,9 @@ static void test_multi_out_in(odp_ipsec_sa_t out_sa,
 			test_in.out[0].orig_ip_len = orig_ip_len;
 		}
 		ipsec_test_packet_from_pkt(&test_pkt, &pkt);
-		test_in.pkt_in = &test_pkt;
+		rebuild_ethernet_header(&test_pkt);
 
+		test_in.pkt_in = &test_pkt;
 		ipsec_check_in_one(&test_in, in_sa);
 	}
 }
@@ -2363,5 +2364,7 @@ odp_testinfo_t ipsec_in_suite[] = {
 				  ipsec_check_esp_aes_gcm_128_reass_ipv6),
 	ODP_TEST_INFO_CONDITIONAL(test_in_ipv4_null_aes_xcbc_esp,
 				  ipsec_check_esp_null_aes_xcbc),
+	ODP_TEST_INFO(test_ipsec_proto_err),
+	ODP_TEST_INFO(test_ipsec_auth_err),
 	ODP_TEST_INFO_NULL,
 };

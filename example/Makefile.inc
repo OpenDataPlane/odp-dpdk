@@ -19,3 +19,5 @@ AM_LDFLAGS += -static
 endif
 
 AM_LDFLAGS += $(PLAT_DEP_LIBS)
+
+@VALGRIND_CHECK_RULES@

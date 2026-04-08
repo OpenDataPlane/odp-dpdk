@@ -612,6 +612,13 @@ int _odp_fdserver_init_global(void)
 		return -1;
 	}
 
+	/*
+	 * Flush stdio buffers before fork so that the same buffered
+	 * data does not end up in both the parent and the child
+	 * process and eventually get written out twice.
+	 */
+	fflush(stdout);
+	fflush(stderr);
 	/* fork a server process: */
 	server_pid = fork();
 	if (server_pid == -1) {
@@ -624,16 +631,26 @@ int _odp_fdserver_init_global(void)
 		sigset_t sigset;
 		struct sigaction action;
 
+		/*
+		 * Flush again in case someone wrote something between
+		 * the first flush and fork. The data is already duplicate
+		 * at this point, but it is probably less confusing to output
+		 * it now rather than sometime later (probably at fdserver
+		 * termination time).
+		 */
+		fflush(stdout);
+		fflush(stderr);
+
 		sigfillset(&sigset);
 		/* undefined if these are ignored, as per POSIX */
-		sigdelset(&sigset, SIGFPE);
-		sigdelset(&sigset, SIGILL);
-		sigdelset(&sigset, SIGSEGV);
+		(void)sigdelset(&sigset, SIGFPE);
+		(void)sigdelset(&sigset, SIGILL);
+		(void)sigdelset(&sigset, SIGSEGV);
 		/* can not be masked */
-		sigdelset(&sigset, SIGKILL);
-		sigdelset(&sigset, SIGSTOP);
+		(void)sigdelset(&sigset, SIGKILL);
+		(void)sigdelset(&sigset, SIGSTOP);
 		/* these we want to handle */
-		sigdelset(&sigset, SIGTERM);
+		(void)sigdelset(&sigset, SIGTERM);
 		if (sigprocmask(SIG_SETMASK, &sigset, NULL) == -1) {
 			_ODP_ERR("Could not set signal mask");
 			exit(1);
@@ -644,10 +661,10 @@ int _odp_fdserver_init_global(void)
 		action.sa_handler = SIG_DFL;
 		sigemptyset(&action.sa_mask);
 		action.sa_flags = 0;
-		sigaction(SIGFPE, &action, NULL);
-		sigaction(SIGILL, &action, NULL);
-		sigaction(SIGSEGV, &action, NULL);
-		sigaction(SIGTERM, &action, NULL);
+		(void)sigaction(SIGFPE, &action, NULL);
+		(void)sigaction(SIGILL, &action, NULL);
+		(void)sigaction(SIGSEGV, &action, NULL);
+		(void)sigaction(SIGTERM, &action, NULL);
 
 		/* TODO: pin the server on appropriate service cpu mask */
 		/* when (if) we can agree on the usage of service mask  */
@@ -665,7 +682,7 @@ int _odp_fdserver_init_global(void)
 		/* allocate the space for the file descriptor<->key table: */
 		fd_table = malloc(FDSERVER_MAX_ENTRIES * sizeof(fdentry_t));
 		if (!fd_table) {
-			_ODP_ERR("maloc failed!\n");
+			_ODP_ERR("malloc() failed!\n");
 			exit(1);
 		}
 

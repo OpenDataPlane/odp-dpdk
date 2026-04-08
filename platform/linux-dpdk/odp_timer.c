@@ -5,7 +5,6 @@
 
 #include <odp_posix_extensions.h>
 
-#include <odp/api/deprecated.h>
 #include <odp/api/queue.h>
 #include <odp/api/shared_memory.h>
 #include <odp/api/std.h>
@@ -750,11 +749,6 @@ odp_timer_pool_t odp_timer_pool_create(const char *name,
 	}
 
 	return timer_pool_to_hdl(timer_pool);
-}
-
-void ODP_DEPRECATE(odp_timer_pool_start)(void)
-{
-	/* Nothing to do */
 }
 
 int odp_timer_pool_start_multi(odp_timer_pool_t timer_pool[], int num)

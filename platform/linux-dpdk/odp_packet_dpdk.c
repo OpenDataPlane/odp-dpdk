@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2013-2018 Linaro Limited
- * Copyright (c) 2019-2023 Nokia
+ * Copyright (c) 2019-2026 Nokia
  */
 
 #include <odp_posix_extensions.h>
@@ -19,17 +19,18 @@
 
 #include <odp_classification_internal.h>
 #include <odp_debug_internal.h>
-#include <odp_eventdev_internal.h>
 #include <odp_libconfig_internal.h>
 #include <odp_packet_dpdk.h>
 #include <odp_packet_internal.h>
 #include <odp_packet_io_internal.h>
 #include <odp_pool_internal.h>
+#include <odp_rx_adapter_internal.h>
 #include <odp_string_internal.h>
 #include <protocols/eth.h>
 
 #include <rte_config.h>
 #include <rte_common.h>
+#include <rte_errno.h>
 #include <rte_ethdev.h>
 #include <rte_ip_frag.h>
 #include <rte_udp.h>
@@ -55,15 +56,19 @@
 /* DPDK poll mode drivers requiring minimum RX burst size DPDK_MIN_RX_BURST */
 #define IXGBE_DRV_NAME "net_ixgbe"
 #define I40E_DRV_NAME "net_i40e"
+#define IAVF_DRV_NAME "net_iavf"
+#define ICE_DRV_NAME "net_ice"
+#define VIRTIO_DRV_NAME "net_virtio"
 
 #define PCAP_DRV_NAME "net_pcap"
 
-/* Minimum RX burst size */
-#define DPDK_MIN_RX_BURST 4
-
-/* Limits for setting link MTU */
-#define DPDK_MTU_MIN (RTE_ETHER_MIN_MTU + _ODP_ETHHDR_LEN)
-#define DPDK_MTU_MAX (9000 + _ODP_ETHHDR_LEN)
+/* Minimum RX burst size
+ * The same drivers might require different minimum burst sizes depending
+ * on the underlying hardware (e.g., for net_i40e, i40e_rxtx_vec_neon.c
+ * requires 4 while i40e_rxtx_vec_avx2.c and i40e_rxtx_vec_avx512.c require 8).
+ * Here a common minimum value is set for all such drivers.
+ */
+#define DPDK_MIN_RX_BURST 8
 
 /* Number of packet buffers to prefetch in RX */
 #define NUM_RX_PREFETCH 4
@@ -73,6 +78,7 @@ typedef struct {
 	int multicast_enable;
 	int num_rx_desc_default;
 	int num_tx_desc_default;
+	int min_rx_burst;
 	int rx_drop_en;
 	int tx_offload_multi_segs;
 } dpdk_opt_t;
@@ -103,10 +109,6 @@ typedef struct ODP_ALIGNED_CACHE {
 	struct rte_eth_rss_conf rss_conf;
 	/* Maximum transmission unit */
 	uint16_t mtu;
-	/* Maximum supported MTU value */
-	uint32_t mtu_max;
-	/* DPDK MTU has been modified */
-	uint8_t mtu_set;
 	/* Number of RX descriptors per queue */
 	uint16_t num_rx_desc[ODP_PKTIN_MAX_QUEUES];
 	/* Number of TX descriptors per queue */
@@ -141,8 +143,6 @@ const pktio_if_ops_t * const _odp_pktio_if_ops[]  = {
 };
 
 extern void *pktio_entry_ptr[CONFIG_PKTIO_ENTRIES];
-
-static uint32_t mtu_get_pkt_dpdk(pktio_entry_t *pktio_entry);
 
 static inline int input_pkts(pktio_entry_t *pktio_entry, odp_packet_t pkt_table[], uint16_t num);
 
@@ -191,10 +191,22 @@ static int init_options(pktio_entry_t *pktio_entry,
 		return -1;
 	opt->multicast_enable = !!opt->multicast_enable;
 
+	if (!lookup_opt("min_rx_burst", dev_info->driver_name, &opt->min_rx_burst))
+		return -1;
+
+	if (opt->min_rx_burst < 0 || opt->min_rx_burst > UINT8_MAX) {
+		_ODP_ERR("min_rx_burst value %d must be 0-%" PRIu8 "\n",
+			 opt->min_rx_burst, UINT8_MAX);
+		return -1;
+	}
+
 	if (!lookup_opt("tx_offload_multi_segs", dev_info->driver_name,
 			&opt->tx_offload_multi_segs))
 		return -1;
 	opt->tx_offload_multi_segs = !!opt->tx_offload_multi_segs;
+
+	if (!opt->tx_offload_multi_segs)
+		_ODP_WARN("Multi segment packet send not enabled\n");
 
 	_ODP_DBG("DPDK interface (%s): %" PRIu16 "\n", dev_info->driver_name,
 		 pkt_priv(pktio_entry)->port_id);
@@ -202,6 +214,7 @@ static int init_options(pktio_entry_t *pktio_entry,
 	_ODP_DBG("  num_rx_desc: %d\n", opt->num_rx_desc_default);
 	_ODP_DBG("  num_tx_desc: %d\n", opt->num_tx_desc_default);
 	_ODP_DBG("  rx_drop_en:  %d\n", opt->rx_drop_en);
+	_ODP_DBG("  min_rx_burst: %d\n", opt->min_rx_burst);
 	_ODP_DBG("  tx_offload_multi_segs: %d\n", opt->tx_offload_multi_segs);
 
 	return 0;
@@ -255,40 +268,33 @@ static int dpdk_maxlen_set(pktio_entry_t *pktio_entry, uint32_t maxlen_input,
 	ret = rte_eth_dev_set_mtu(pkt_dpdk->port_id, mtu);
 	if (odp_unlikely(ret))
 		_ODP_ERR("rte_eth_dev_set_mtu() failed: %d\n", ret);
-
-	pkt_dpdk->mtu = maxlen_input;
-	pkt_dpdk->mtu_set = 1;
+	else
+		pkt_dpdk->mtu = maxlen_input;
 
 	return ret;
-}
-
-static int get_eth_overhead(const struct rte_eth_dev_info *dev_info)
-{
-	uint32_t eth_overhead;
-
-	if (dev_info->max_mtu != UINT16_MAX &&
-	    dev_info->max_rx_pktlen > dev_info->max_mtu)
-		eth_overhead = dev_info->max_rx_pktlen - dev_info->max_mtu;
-	else
-		eth_overhead = RTE_ETHER_HDR_LEN + RTE_ETHER_CRC_LEN;
-
-	return eth_overhead;
 }
 
 static int dpdk_setup_eth_dev(pktio_entry_t *pktio_entry, const struct rte_eth_dev_info *dev_info)
 {
 	int ret;
 	pkt_dpdk_t *pkt_dpdk = pkt_priv(pktio_entry);
+	odp_pktio_capability_t *capa = &pktio_entry->capa;
 	struct rte_eth_conf eth_conf;
-	pool_t *pool = _odp_pool_entry(pktio_entry->pool);
 	uint64_t rx_offloads = 0;
 	uint64_t tx_offloads = 0;
 
 	memset(&eth_conf, 0, sizeof(eth_conf));
 
-	eth_conf.rxmode.mq_mode = RTE_ETH_MQ_RX_RSS;
+	if (pkt_dpdk->rss_conf.rss_hf == 0) {
+		eth_conf.rxmode.mq_mode = RTE_ETH_MQ_RX_NONE;
+	} else {
+		eth_conf.rxmode.mq_mode = RTE_ETH_MQ_RX_RSS;
+		eth_conf.rx_adv_conf.rss_conf = pkt_dpdk->rss_conf;
+	}
 	eth_conf.txmode.mq_mode = RTE_ETH_MQ_TX_NONE;
-	eth_conf.rx_adv_conf.rss_conf = pkt_dpdk->rss_conf;
+
+	if (capa->set_op.op.maxlen)
+		eth_conf.rxmode.mtu = pkt_dpdk->mtu - _ODP_ETHHDR_LEN;
 
 	/* Setup RX checksum offloads */
 	if (pktio_entry->config.pktin.bit.ipv4_chksum)
@@ -329,12 +335,6 @@ static int dpdk_setup_eth_dev(pktio_entry_t *pktio_entry, const struct rte_eth_d
 
 	eth_conf.txmode.offloads = tx_offloads;
 
-	/* RX packet len same size as pool segment minus headroom and double
-	 * VLAN tag
-	 */
-	eth_conf.rxmode.mtu = rte_pktmbuf_data_room_size(pool->rte_mempool) -
-				get_eth_overhead(dev_info) - RTE_PKTMBUF_HEADROOM;
-
 	ret = rte_eth_dev_configure(pkt_dpdk->port_id,
 				    pktio_entry->num_in_queue,
 				    pktio_entry->num_out_queue, &eth_conf);
@@ -373,6 +373,7 @@ static void prepare_rss_conf(pktio_entry_t *pktio_entry,
 
 	memset(&pkt_dpdk->rss_conf, 0, sizeof(struct rte_eth_rss_conf));
 
+	/* Flow hashing not enabled */
 	if (!p->hash_enable)
 		return;
 
@@ -384,36 +385,42 @@ static void prepare_rss_conf(pktio_entry_t *pktio_entry,
 
 	rss_hf_capa = dev_info.flow_type_rss_offloads;
 
+	/* Flow hashing is enabled but device does not support RSS */
+	if (rss_hf_capa == 0) {
+		_ODP_WARN("DPDK: flow hashing is enabled but not supported by the device\n");
+		return;
+	}
+
 	/* Print debug info about unsupported hash protocols */
 	if (p->hash_proto.proto.ipv4 &&
 	    ((rss_hf_capa & RTE_ETH_RSS_IPV4) == 0))
-		_ODP_PRINT("DPDK: hash_proto.ipv4 not supported (rss_hf_capa 0x%" PRIx64 ")\n",
-			   rss_hf_capa);
+		_ODP_WARN("DPDK: hash_proto.ipv4 not supported (rss_hf_capa 0x%" PRIx64 ")\n",
+			  rss_hf_capa);
 
 	if (p->hash_proto.proto.ipv4_udp &&
 	    ((rss_hf_capa & RTE_ETH_RSS_NONFRAG_IPV4_UDP) == 0))
-		_ODP_PRINT("DPDK: hash_proto.ipv4_udp not supported (rss_hf_capa 0x%" PRIx64 ")\n",
-			   rss_hf_capa);
+		_ODP_WARN("DPDK: hash_proto.ipv4_udp not supported (rss_hf_capa 0x%" PRIx64 ")\n",
+			  rss_hf_capa);
 
 	if (p->hash_proto.proto.ipv4_tcp &&
 	    ((rss_hf_capa & RTE_ETH_RSS_NONFRAG_IPV4_TCP) == 0))
-		_ODP_PRINT("DPDK: hash_proto.ipv4_tcp not supported (rss_hf_capa 0x%" PRIx64 ")\n",
-			   rss_hf_capa);
+		_ODP_WARN("DPDK: hash_proto.ipv4_tcp not supported (rss_hf_capa 0x%" PRIx64 ")\n",
+			  rss_hf_capa);
 
 	if (p->hash_proto.proto.ipv6 &&
 	    ((rss_hf_capa & RTE_ETH_RSS_IPV6) == 0))
-		_ODP_PRINT("DPDK: hash_proto.ipv6 not supported (rss_hf_capa 0x%" PRIx64 ")\n",
-			   rss_hf_capa);
+		_ODP_WARN("DPDK: hash_proto.ipv6 not supported (rss_hf_capa 0x%" PRIx64 ")\n",
+			  rss_hf_capa);
 
 	if (p->hash_proto.proto.ipv6_udp &&
 	    ((rss_hf_capa & RTE_ETH_RSS_NONFRAG_IPV6_UDP) == 0))
-		_ODP_PRINT("DPDK: hash_proto.ipv6_udp not supported (rss_hf_capa 0x%" PRIx64 ")\n",
-			   rss_hf_capa);
+		_ODP_WARN("DPDK: hash_proto.ipv6_udp not supported (rss_hf_capa 0x%" PRIx64 ")\n",
+			  rss_hf_capa);
 
 	if (p->hash_proto.proto.ipv6_tcp &&
 	    ((rss_hf_capa & RTE_ETH_RSS_NONFRAG_IPV6_TCP) == 0))
-		_ODP_PRINT("DPDK: hash_proto.ipv6_tcp not supported (rss_hf_capa 0x%" PRIx64 ")\n",
-			   rss_hf_capa);
+		_ODP_WARN("DPDK: hash_proto.ipv6_tcp not supported (rss_hf_capa 0x%" PRIx64 ")\n",
+			  rss_hf_capa);
 
 	hash_proto_to_rss_conf(&pkt_dpdk->rss_conf, &p->hash_proto);
 
@@ -497,6 +504,31 @@ static int dpdk_output_queues_config(pktio_entry_t *pktio_entry,
 	return 0;
 }
 
+static void dpdk_print(pktio_entry_t *pktio_entry)
+{
+	dpdk_opt_t *opt = &pkt_priv(pktio_entry)->opt;
+	int max_len = 512;
+	char str[max_len];
+	int len = 0;
+	int n = max_len - 1;
+
+	len += _odp_snprint(&str[len], n - len, "DPDK pktio config:\n");
+	len += _odp_snprint(&str[len], n - len, "  multicast             %d\n",
+			    opt->multicast_enable);
+	len += _odp_snprint(&str[len], n - len, "  num_rx_desc           %d\n",
+			    opt->num_rx_desc_default);
+	len += _odp_snprint(&str[len], n - len, "  num_tx_desc           %d\n",
+			    opt->num_tx_desc_default);
+	len += _odp_snprint(&str[len], n - len, "  rx_drop_en            %d\n",
+			    opt->rx_drop_en);
+	len += _odp_snprint(&str[len], n - len, "  min_rx_burst          %d\n",
+			    opt->min_rx_burst);
+	len += _odp_snprint(&str[len], n - len, "  tx_offload_multi_segs %d\n",
+			    opt->tx_offload_multi_segs);
+	str[len] = '\0';
+	_ODP_PRINT("\n%s", str);
+}
+
 static int dpdk_init_global(void)
 {
 	return 0;
@@ -505,8 +537,7 @@ static int dpdk_init_global(void)
 static int dpdk_term_global(void)
 {
 	/* Eventdev takes care of closing pktio devices */
-	if (!_odp_eventdev_gbl ||
-	    _odp_eventdev_gbl->rx_adapter.status == RX_ADAPTER_INIT) {
+	if (!_odp_rx_adapter_initialized()) {
 		uint16_t port_id;
 
 		RTE_ETH_FOREACH_DEV(port_id) {
@@ -578,18 +609,16 @@ static int dpdk_init_capability(pktio_entry_t *pktio_entry,
 
 	/* Check if setting MTU is supported */
 	ret = rte_eth_dev_set_mtu(pkt_dpdk->port_id, pkt_dpdk->mtu - _ODP_ETHHDR_LEN);
-	/* From DPDK 21.11 onwards, calling rte_eth_dev_set_mtu() before device is configured with
-	 * rte_eth_dev_configure() will result in failure. The least hacky (unfortunately still
-	 * very hacky) way to continue checking the support is to take into account that the
-	 * function will fail earlier with -ENOTSUP if MTU setting is not supported by device than
-	 * if the device was not yet configured. */
-	if (ret != -ENOTSUP) {
+	if (ret == 0) {
 		capa->set_op.op.maxlen = 1;
 		capa->maxlen.equal = true;
-		capa->maxlen.min_input = DPDK_MTU_MIN;
-		capa->maxlen.max_input = pkt_dpdk->mtu_max;
-		capa->maxlen.min_output = DPDK_MTU_MIN;
-		capa->maxlen.max_output = pkt_dpdk->mtu_max;
+		capa->maxlen.min_input = dev_info->min_mtu + _ODP_ETHHDR_LEN;
+		capa->maxlen.max_input = dev_info->max_mtu + _ODP_ETHHDR_LEN;
+		capa->maxlen.min_output = dev_info->min_mtu + _ODP_ETHHDR_LEN;
+		capa->maxlen.max_output = dev_info->max_mtu + _ODP_ETHHDR_LEN;
+	} else if (ret != -ENOTSUP) {
+		_ODP_ERR("Failed to probe MTU capability: %d\n", ret);
+		return -1;
 	}
 
 	ptype_cnt = rte_eth_dev_get_supported_ptypes(pkt_dpdk->port_id,
@@ -677,11 +706,14 @@ static int setup_pkt_dpdk(odp_pktio_t pktio ODP_UNUSED,
 			  pktio_entry_t *pktio_entry,
 			  const char *netdev, odp_pool_t pool ODP_UNUSED)
 {
-	uint32_t mtu;
+	uint16_t mtu;
 	struct rte_eth_dev_info dev_info;
 	pkt_dpdk_t * const pkt_dpdk = pkt_priv(pktio_entry);
 	int i, ret;
 	uint16_t port_id;
+	struct rte_eth_conf eth_conf;
+
+	memset(pkt_dpdk, 0, sizeof(pkt_dpdk_t));
 
 	if (!rte_eth_dev_get_port_by_name(netdev, &port_id))
 		pkt_dpdk->port_id = port_id;
@@ -704,32 +736,46 @@ static int setup_pkt_dpdk(odp_pktio_t pktio ODP_UNUSED,
 		return -1;
 	}
 
+	memset(&eth_conf, 0, sizeof(eth_conf));
+	ret = rte_eth_dev_configure(pkt_dpdk->port_id,
+				    _ODP_MIN(1, dev_info.max_rx_queues),
+				    _ODP_MIN(1, dev_info.max_tx_queues),
+				    &eth_conf);
+	if (ret) {
+		_ODP_ERR("Failed to configure device %s: err=%d\n", netdev, ret);
+		return -1;
+	}
+
 	/* Initialize runtime options */
 	if (init_options(pktio_entry, &dev_info)) {
 		_ODP_ERR("Initializing runtime options failed\n");
 		return -1;
 	}
 
-	/* Drivers requiring minimum burst size. Supports also *_vf versions
-	 * of the drivers. */
-	if (!strncmp(dev_info.driver_name, IXGBE_DRV_NAME,
-		     strlen(IXGBE_DRV_NAME)) ||
-	    !strncmp(dev_info.driver_name, I40E_DRV_NAME,
-		     strlen(I40E_DRV_NAME)))
+	/* Use user provided value */
+	if (pkt_dpdk->opt.min_rx_burst > 0) {
+		pkt_dpdk->min_rx_burst = pkt_dpdk->opt.min_rx_burst;
+	} else if (!strncmp(dev_info.driver_name, IXGBE_DRV_NAME, strlen(IXGBE_DRV_NAME)) ||
+		   !strncmp(dev_info.driver_name, I40E_DRV_NAME, strlen(I40E_DRV_NAME)) ||
+		   !strncmp(dev_info.driver_name, IAVF_DRV_NAME, strlen(IAVF_DRV_NAME)) ||
+		   !strncmp(dev_info.driver_name, ICE_DRV_NAME, strlen(ICE_DRV_NAME)) ||
+		   !strncmp(dev_info.driver_name, VIRTIO_DRV_NAME, strlen(VIRTIO_DRV_NAME))) {
+		/* Drivers requiring minimum burst size. Supports also *_vf versions
+		 * of the drivers.
+		 */
 		pkt_dpdk->min_rx_burst = DPDK_MIN_RX_BURST;
-	else
-		pkt_dpdk->min_rx_burst = 0;
+		_ODP_WARN("DPDK PMD %s requires the number of packets to retrieve\n"
+			  "be divisible by %d\n", dev_info.driver_name, DPDK_MIN_RX_BURST);
+	}
 
 	_dpdk_print_port_mac(pkt_dpdk->port_id);
 
-	mtu = mtu_get_pkt_dpdk(pktio_entry);
-	if (mtu == 0) {
-		_ODP_ERR("Failed to read interface MTU\n");
+	ret = rte_eth_dev_get_mtu(pkt_dpdk->port_id, &mtu);
+	if (ret) {
+		_ODP_ERR("Failed to retrieve device %s MTU: %s\n", netdev, rte_strerror(-ret));
 		return -1;
 	}
 	pkt_dpdk->mtu = mtu + _ODP_ETHHDR_LEN;
-	pkt_dpdk->mtu_max = RTE_MAX(pkt_dpdk->mtu, DPDK_MTU_MAX);
-	pkt_dpdk->mtu_set = 0;
 
 	if (dpdk_init_capability(pktio_entry, &dev_info)) {
 		_ODP_ERR("Failed to initialize capability\n");
@@ -754,8 +800,7 @@ static int close_pkt_dpdk(pktio_entry_t *pktio_entry)
 {
 	pkt_dpdk_t * const pkt_dpdk = pkt_priv(pktio_entry);
 
-	if (_odp_eventdev_gbl &&
-	    _odp_eventdev_gbl->rx_adapter.status != RX_ADAPTER_INIT)
+	if (_odp_rx_adapter_initialized())
 		_odp_rx_adapter_port_stop(pkt_dpdk->port_id);
 	else
 		rte_eth_dev_stop(pkt_dpdk->port_id);
@@ -877,16 +922,6 @@ static int dpdk_start(pktio_entry_t *pktio_entry)
 	if (dpdk_setup_eth_rx(pktio_entry, pkt_dpdk, &dev_info))
 		return -1;
 
-	/* Restore MTU value resetted by dpdk_setup_eth_rx() */
-	if (pkt_dpdk->mtu_set && pktio_entry->capa.set_op.op.maxlen) {
-		ret = dpdk_maxlen_set(pktio_entry, pkt_dpdk->mtu, 0);
-		if (ret) {
-			_ODP_ERR("Restoring device MTU failed: err=%d, port=%" PRIu8 "\n",
-				 ret, port_id);
-			return -1;
-		}
-	}
-
 	/* Use simpler function when packet parsing and classifying are not required */
 	if (pktio_entry->parse_layer == ODP_PROTO_LAYER_NONE)
 		pkt_dpdk->mbuf_to_pkt_fn = input_pkts_minimal;
@@ -903,17 +938,8 @@ static int dpdk_start(pktio_entry_t *pktio_entry)
 	return 0;
 }
 
-static int stop_pkt_dpdk(pktio_entry_t *pktio_entry)
+static int stop_pkt_dpdk(pktio_entry_t *pktio_entry ODP_UNUSED)
 {
-	pkt_dpdk_t *pkt_dpdk = pkt_priv(pktio_entry);
-	unsigned int i;
-	uint16_t port_id = pkt_dpdk->port_id;
-
-	for (i = 0; i < pktio_entry->num_in_queue; i++)
-		rte_eth_dev_rx_queue_stop(port_id, i);
-	for (i = 0; i < pktio_entry->num_out_queue; i++)
-		rte_eth_dev_tx_queue_stop(port_id, i);
-
 	return 0;
 }
 
@@ -1083,14 +1109,16 @@ static int recv_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 		nb_rx = rte_eth_rx_burst(port_id, (uint16_t)index,
 					 (struct rte_mbuf **)min_burst, min);
 
-		for (uint16_t i = 0; i < nb_rx; i++) {
-			if (i < num)
-				pkt_table[i] = min_burst[i];
-			else
-				odp_packet_free(min_burst[i]);
-		}
+		for (uint16_t i = 0; i < nb_rx && i < num; i++)
+			pkt_table[i] = min_burst[i];
 
-		nb_rx = RTE_MIN(num, nb_rx);
+		if (nb_rx > num) {
+			int drops = nb_rx - num;
+
+			odp_packet_free_multi(&min_burst[num], drops);
+			odp_atomic_add_u64(&pktio_entry->stats_extra.in_discards, drops);
+			nb_rx = num;
+		}
 	}
 
 	if (!lockless)
@@ -1256,48 +1284,6 @@ static int send_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 		_odp_pktio_tx_ts_set(pktio_entry);
 
 	return pkts;
-}
-
-static uint32_t _dpdk_vdev_mtu(uint16_t port_id)
-{
-	struct rte_eth_dev_info dev_info;
-	struct ifreq ifr;
-	int ret;
-	int sockfd;
-
-	ret = rte_eth_dev_info_get(port_id, &dev_info);
-	if (ret) {
-		_ODP_ERR("Failed to read device info: %d\n", ret);
-		return 0;
-	}
-
-	if_indextoname(dev_info.if_index, ifr.ifr_name);
-	sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-	ret = ioctl(sockfd, SIOCGIFMTU, &ifr);
-	close(sockfd);
-	if (ret < 0) {
-		_ODP_DBG("ioctl SIOCGIFMTU error\n");
-		return 0;
-	}
-
-	return ifr.ifr_mtu;
-}
-
-static uint32_t mtu_get_pkt_dpdk(pktio_entry_t *pktio_entry)
-{
-	uint16_t mtu = 0;
-	int ret;
-
-	ret = rte_eth_dev_get_mtu(pkt_priv(pktio_entry)->port_id, &mtu);
-	if (ret < 0)
-		return 0;
-
-	/* some dpdk PMD vdev does not support getting mtu size,
-	 * try to use system call if dpdk cannot get mtu value.
-	 */
-	if (mtu == 0)
-		mtu = _dpdk_vdev_mtu(pkt_priv(pktio_entry)->port_id);
-	return mtu;
 }
 
 static uint32_t dpdk_maxlen_get(pktio_entry_t *pktio_entry)
@@ -1626,7 +1612,7 @@ static int dpdk_pktout_stats(pktio_entry_t *pktio_entry, uint32_t index,
 
 const pktio_if_ops_t _odp_dpdk_pktio_ops = {
 	.name = "odp-dpdk",
-	.print = NULL,
+	.print = dpdk_print,
 	.init_global = dpdk_init_global,
 	.init_local = NULL,
 	.term = dpdk_term_global,

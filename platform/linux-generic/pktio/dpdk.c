@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2016-2018 Linaro Limited
- * Copyright (c) 2019-2023 Nokia
+ * Copyright (c) 2019-2025 Nokia
  */
 
 #include <odp/autoheader_internal.h>
@@ -10,7 +10,6 @@
 #include <odp_posix_extensions.h>
 
 #include <odp/api/cpumask.h>
-#include <odp/api/deprecated.h>
 #include <odp/api/hints.h>
 #include <odp/api/packet.h>
 #include <odp/api/packet_io.h>
@@ -74,6 +73,9 @@ ODP_STATIC_ASSERT(CONFIG_PACKET_HEADROOM == RTE_PKTMBUF_HEADROOM,
 /* DPDK poll mode drivers requiring minimum RX burst size DPDK_MIN_RX_BURST */
 #define IXGBE_DRV_NAME "net_ixgbe"
 #define I40E_DRV_NAME "net_i40e"
+#define IAVF_DRV_NAME "net_iavf"
+#define ICE_DRV_NAME "net_ice"
+#define VIRTIO_DRV_NAME "net_virtio"
 
 #define PCAP_DRV_NAME "net_pcap"
 
@@ -87,8 +89,13 @@ ODP_STATIC_ASSERT((DPDK_NB_MBUF % DPDK_MEMPOOL_CACHE_SIZE == 0) &&
 		  (DPDK_MEMPOOL_CACHE_SIZE <= DPDK_MBUF_BUF_SIZE * 10 / 15)
 		  , "DPDK mempool cache size failure");
 
-/* Minimum RX burst size */
-#define DPDK_MIN_RX_BURST 4
+/* Minimum RX burst size
+ * The same drivers might require different minimum burst sizes depending
+ * on the underlying hardware (e.g., for net_i40e, i40e_rxtx_vec_neon.c
+ * requires 4 while i40e_rxtx_vec_avx2.c and i40e_rxtx_vec_avx512.c require 8).
+ * Here a common minimum value is set for all such drivers.
+ */
+#define DPDK_MIN_RX_BURST 8
 
 ODP_STATIC_ASSERT(DPDK_MIN_RX_BURST <= UINT8_MAX, "DPDK_MIN_RX_BURST too large");
 
@@ -100,6 +107,7 @@ ODP_STATIC_ASSERT(DPDK_MIN_RX_BURST <= UINT8_MAX, "DPDK_MIN_RX_BURST too large")
 typedef struct {
 	int num_rx_desc_default;
 	int num_tx_desc_default;
+	int min_rx_burst;
 	uint8_t multicast_en;
 	uint8_t rx_drop_en;
 	uint8_t set_flow_hash;
@@ -154,8 +162,6 @@ typedef struct ODP_ALIGNED_CACHE {
 	uint32_t data_room;
 	/* Maximum supported MTU value */
 	uint32_t mtu_max;
-	/* DPDK MTU has been modified */
-	uint8_t mtu_set;
 	/* Use system call to get/set vdev promisc mode */
 	uint8_t vdev_sysc_promisc;
 	/* Number of RX descriptors per queue */
@@ -245,12 +251,21 @@ static int init_options(pktio_entry_t *pktio_entry,
 		return -1;
 	opt->multicast_en = !!val;
 
+	if (!lookup_opt("min_rx_burst", dev_info->driver_name, &val))
+		return -1;
+
+	if (val < 0) {
+		_ODP_ERR("min_rx_burst value %d must be non-negative\n", val);
+		return -1;
+	}
+
 	_ODP_DBG("DPDK interface (%s): %" PRIu16 "\n", dev_info->driver_name,
 		 pkt_priv(pktio_entry)->port_id);
 	_ODP_DBG("  multicast_en: %d\n", opt->multicast_en);
 	_ODP_DBG("  num_rx_desc: %d\n", opt->num_rx_desc_default);
 	_ODP_DBG("  num_tx_desc: %d\n", opt->num_tx_desc_default);
 	_ODP_DBG("  rx_drop_en: %d\n", opt->rx_drop_en);
+	_ODP_DBG("  min_rx_burst: %d\n", opt->min_rx_burst);
 
 	return 0;
 }
@@ -625,7 +640,7 @@ static inline int mbuf_to_pkt(pktio_entry_t *pktio_entry,
 	uint16_t pkt_len;
 	struct rte_mbuf *mbuf;
 	void *data;
-	int i, j, num;
+	int i, num;
 	uint32_t max_len;
 	int nb_pkts = 0;
 	int nb_cls = 0;
@@ -643,10 +658,8 @@ static inline int mbuf_to_pkt(pktio_entry_t *pktio_entry,
 	num = _odp_packet_alloc_multi(pool, max_len + frame_offset,
 				      pkt_table, mbuf_num);
 	if (num != mbuf_num) {
-		_ODP_DBG("_odp_packet_alloc_multi() unable to allocate all packets: "
-			 "%d/%" PRIu16 " allocated\n", num, mbuf_num);
-		for (i = num; i < mbuf_num; i++)
-			rte_pktmbuf_free(mbuf_table[i]);
+		rte_pktmbuf_free_bulk(&mbuf_table[num], mbuf_num - num);
+		odp_atomic_add_u64(&pktio_entry->stats_extra.in_discards, mbuf_num - num);
 	}
 
 	for (i = 0; i < num; i++) {
@@ -735,9 +748,8 @@ static inline int mbuf_to_pkt(pktio_entry_t *pktio_entry,
 
 fail:
 	odp_packet_free_multi(&pkt_table[i], num - i);
-
-	for (j = i; j < num; j++)
-		rte_pktmbuf_free(mbuf_table[j]);
+	rte_pktmbuf_free_bulk(&mbuf_table[i], num - i);
+	odp_atomic_add_u64(&pktio_entry->stats_extra.in_discards, num - i);
 
 	return (i > 0 ? i : -1);
 }
@@ -860,7 +872,7 @@ static inline int pkt_to_mbuf(pktio_entry_t *pktio_entry,
 {
 	pkt_dpdk_t *pkt_dpdk = pkt_priv(pktio_entry);
 	char *data;
-	uint16_t i, j, pkt_len;
+	uint16_t i, pkt_len;
 	uint8_t chksum_enabled = pktio_entry->enabled.chksum_insert;
 	uint8_t tx_ts_enabled = _odp_pktio_tx_ts_enabled(pktio_entry);
 	odp_pktout_config_opt_t *pktout_cfg = &pktio_entry->config.pktout;
@@ -895,8 +907,7 @@ static inline int pkt_to_mbuf(pktio_entry_t *pktio_entry,
 	return i;
 
 fail:
-	for (j = i; j < num; j++)
-		rte_pktmbuf_free(mbuf_table[j]);
+	rte_pktmbuf_free_bulk(&mbuf_table[i], num - i);
 
 	return i > 0 ? i : -1;
 }
@@ -950,6 +961,7 @@ static inline int mbuf_to_pkt_zero(pktio_entry_t *pktio_entry,
 		if (odp_unlikely(mbuf->nb_segs != 1)) {
 			_ODP_ERR("Segmented buffers not supported\n");
 			rte_pktmbuf_free(mbuf);
+			odp_atomic_inc_u64(&pktio_entry->stats_extra.in_discards);
 			continue;
 		}
 
@@ -1044,6 +1056,7 @@ static inline int mbuf_to_pkt_zero_minimal(pktio_entry_t *pktio_entry,
 		if (odp_unlikely(mbuf->nb_segs != 1)) {
 			_ODP_ERR("Segmented buffers not supported\n");
 			rte_pktmbuf_free(mbuf);
+			odp_atomic_inc_u64(&pktio_entry->stats_extra.in_discards);
 			continue;
 		}
 
@@ -1090,7 +1103,8 @@ static inline int pkt_to_mbuf_zero(pktio_entry_t *pktio_entry,
 		if (odp_unlikely(pkt_len > mtu))
 			goto fail;
 
-		if (odp_likely(pkt_hdr->seg_count == 1)) {
+		if (odp_likely(pkt_hdr->seg_count == 1 &&
+			       odp_atomic_load_u32(&pkt_hdr->ref_cnt) <= 1)) {
 			mbuf_update(mbuf, pkt_hdr, pkt_len);
 
 			if (odp_unlikely(chksum_enabled))
@@ -1129,56 +1143,6 @@ static int dpdk_netdev_is_valid(const char *s)
 	return 1;
 }
 
-static uint32_t dpdk_vdev_mtu_get(uint16_t port_id)
-{
-	struct rte_eth_dev_info dev_info;
-	struct ifreq ifr;
-	int sockfd;
-	uint32_t mtu;
-	int ret;
-
-	memset(&dev_info, 0, sizeof(struct rte_eth_dev_info));
-
-	ret = rte_eth_dev_info_get(port_id, &dev_info);
-	if (ret != 0) {
-		_ODP_ERR("DPDK: rte_eth_dev_info_get() failed with return value: %d, port: %u\n",
-			 ret, port_id);
-		return 0;
-	}
-	if_indextoname(dev_info.if_index, ifr.ifr_name);
-
-	sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-	if (sockfd < 0) {
-		_ODP_ERR("Failed to create control socket\n");
-		return 0;
-	}
-
-	mtu = _odp_mtu_get_fd(sockfd, ifr.ifr_name);
-	close(sockfd);
-	return mtu;
-}
-
-static uint32_t dpdk_mtu_get(pktio_entry_t *pktio_entry)
-{
-	pkt_dpdk_t *pkt_dpdk = pkt_priv(pktio_entry);
-	uint32_t mtu = 0;
-
-	if (rte_eth_dev_get_mtu(pkt_dpdk->port_id, (uint16_t *)&mtu))
-		return 0;
-
-	/* Some DPDK PMD virtual devices do not support getting MTU size.
-	 * Try to use system call if DPDK cannot get MTU value.
-	 */
-	if (mtu == 0)
-		mtu = dpdk_vdev_mtu_get(pkt_dpdk->port_id);
-
-	/* Mbuf chaining not yet supported */
-	if (pkt_dpdk->data_room && pkt_dpdk->data_room < mtu)
-		return pkt_dpdk->data_room;
-
-	return mtu;
-}
-
 static uint32_t dpdk_maxlen(pktio_entry_t *pktio_entry)
 {
 	pkt_dpdk_t *pkt_dpdk = pkt_priv(pktio_entry);
@@ -1199,9 +1163,8 @@ static int dpdk_maxlen_set(pktio_entry_t *pktio_entry, uint32_t maxlen_input,
 	ret = rte_eth_dev_set_mtu(pkt_dpdk->port_id, mtu);
 	if (odp_unlikely(ret))
 		_ODP_ERR("rte_eth_dev_set_mtu() failed: %d\n", ret);
-
-	pkt_dpdk->mtu = maxlen_input;
-	pkt_dpdk->mtu_set = 1;
+	else
+		pkt_dpdk->mtu = maxlen_input;
 
 	return ret;
 }
@@ -1291,15 +1254,23 @@ static int dpdk_setup_eth_dev(pktio_entry_t *pktio_entry)
 {
 	int ret;
 	pkt_dpdk_t *pkt_dpdk = pkt_priv(pktio_entry);
+	odp_pktio_capability_t *capa = &pktio_entry->capa;
 	struct rte_eth_conf eth_conf;
 	uint64_t rx_offloads = 0;
 	uint64_t tx_offloads = 0;
 
 	memset(&eth_conf, 0, sizeof(eth_conf));
 
-	eth_conf.rxmode.mq_mode = RTE_ETH_MQ_RX_RSS;
+	if (pkt_dpdk->rss_conf.rss_hf == 0)
+		eth_conf.rxmode.mq_mode = RTE_ETH_MQ_RX_NONE;
+	else {
+		eth_conf.rxmode.mq_mode = RTE_ETH_MQ_RX_RSS;
+		eth_conf.rx_adv_conf.rss_conf = pkt_dpdk->rss_conf;
+	}
 	eth_conf.txmode.mq_mode = RTE_ETH_MQ_TX_NONE;
-	eth_conf.rx_adv_conf.rss_conf = pkt_dpdk->rss_conf;
+
+	if (capa->set_op.op.maxlen)
+		eth_conf.rxmode.mtu = pkt_dpdk->mtu - _ODP_ETHHDR_LEN;
 
 	/* Setup RX checksum offloads */
 	if (pktio_entry->config.pktin.bit.ipv4_chksum)
@@ -1346,14 +1317,14 @@ static int dpdk_close(pktio_entry_t *pktio_entry)
 {
 	pkt_dpdk_t *pkt_dpdk = pkt_priv(pktio_entry);
 	unsigned idx;
-	unsigned i, j;
+	unsigned int i;
 
 	/* Free cache packets */
 	for (i = 0; i < ODP_PKTIN_MAX_QUEUES; i++) {
 		idx = pkt_dpdk->rx_cache[i].idx;
 
-		for (j = 0; j < pkt_dpdk->rx_cache[i].count; j++)
-			rte_pktmbuf_free(pkt_dpdk->rx_cache[i].pkt[idx++]);
+		rte_pktmbuf_free_bulk(&pkt_dpdk->rx_cache[i].pkt[idx],
+				      pkt_dpdk->rx_cache[i].count);
 	}
 
 	return 0;
@@ -1529,39 +1500,46 @@ static void prepare_rss_conf(pktio_entry_t *pktio_entry,
 
 	memset(&pkt_dpdk->rss_conf, 0, sizeof(struct rte_eth_rss_conf));
 
+	/* Flow hashing not enabled */
 	if (!p->hash_enable)
 		return;
+
+	/* Flow hashing is enabled but device does not support RSS */
+	if (rss_hf_capa == 0) {
+		_ODP_WARN("DPDK: flow hashing is enabled but not supported by the device\n");
+		return;
+	}
 
 	/* Print debug info about unsupported hash protocols */
 	if (p->hash_proto.proto.ipv4 &&
 	    ((rss_hf_capa & RTE_ETH_RSS_IPV4) == 0))
-		_ODP_PRINT("DPDK: hash_proto.ipv4 not supported (rss_hf_capa 0x%" PRIx64 ")\n",
-			   rss_hf_capa);
+		_ODP_WARN("DPDK: hash_proto.ipv4 not supported (rss_hf_capa 0x%" PRIx64 ")\n",
+			  rss_hf_capa);
 
 	if (p->hash_proto.proto.ipv4_udp &&
 	    ((rss_hf_capa & RTE_ETH_RSS_NONFRAG_IPV4_UDP) == 0))
-		_ODP_PRINT("DPDK: hash_proto.ipv4_udp not supported (rss_hf_capa 0x%" PRIx64 ")\n",
-			   rss_hf_capa);
+		_ODP_WARN("DPDK: hash_proto.ipv4_udp not supported (rss_hf_capa 0x%" PRIx64 ")\n",
+			  rss_hf_capa);
 
 	if (p->hash_proto.proto.ipv4_tcp &&
 	    ((rss_hf_capa & RTE_ETH_RSS_NONFRAG_IPV4_TCP) == 0))
-		_ODP_PRINT("DPDK: hash_proto.ipv4_tcp not supported (rss_hf_capa 0x%" PRIx64 ")\n",
-			   rss_hf_capa);
+		_ODP_WARN("DPDK: hash_proto.ipv4_tcp not supported (rss_hf_capa 0x%" PRIx64 ")\n",
+			  rss_hf_capa);
 
 	if (p->hash_proto.proto.ipv6 &&
 	    ((rss_hf_capa & RTE_ETH_RSS_IPV6) == 0))
-		_ODP_PRINT("DPDK: hash_proto.ipv6 not supported (rss_hf_capa 0x%" PRIx64 ")\n",
-			   rss_hf_capa);
+		_ODP_WARN("DPDK: hash_proto.ipv6 not supported (rss_hf_capa 0x%" PRIx64 ")\n",
+			  rss_hf_capa);
 
 	if (p->hash_proto.proto.ipv6_udp &&
 	    ((rss_hf_capa & RTE_ETH_RSS_NONFRAG_IPV6_UDP) == 0))
-		_ODP_PRINT("DPDK: hash_proto.ipv6_udp not supported (rss_hf_capa 0x%" PRIx64 ")\n",
-			   rss_hf_capa);
+		_ODP_WARN("DPDK: hash_proto.ipv6_udp not supported (rss_hf_capa 0x%" PRIx64 ")\n",
+			  rss_hf_capa);
 
 	if (p->hash_proto.proto.ipv6_tcp &&
 	    ((rss_hf_capa & RTE_ETH_RSS_NONFRAG_IPV6_TCP) == 0))
-		_ODP_PRINT("DPDK: hash_proto.ipv6_tcp not supported (rss_hf_capa 0x%" PRIx64 ")\n",
-			   rss_hf_capa);
+		_ODP_WARN("DPDK: hash_proto.ipv6_tcp not supported (rss_hf_capa 0x%" PRIx64 ")\n",
+			  rss_hf_capa);
 
 	hash_proto_to_rss_conf(&pkt_dpdk->rss_conf, &p->hash_proto);
 
@@ -1715,18 +1693,16 @@ static int dpdk_init_capability(pktio_entry_t *pktio_entry,
 
 	/* Check if setting MTU is supported */
 	ret = rte_eth_dev_set_mtu(pkt_dpdk->port_id, pkt_dpdk->mtu - _ODP_ETHHDR_LEN);
-	/* From DPDK 21.11 onwards, calling rte_eth_dev_set_mtu() before device is configured with
-	 * rte_eth_dev_configure() will result in failure. The least hacky (unfortunately still
-	 * very hacky) way to continue checking the support is to take into account that the
-	 * function will fail earlier with -ENOTSUP if MTU setting is not supported by device than
-	 * if the device was not yet configured. */
-	if (ret != -ENOTSUP) {
+	if (ret == 0) {
 		capa->set_op.op.maxlen = 1;
 		capa->maxlen.equal = true;
 		capa->maxlen.min_input = DPDK_MTU_MIN;
 		capa->maxlen.max_input = pkt_dpdk->mtu_max;
 		capa->maxlen.min_output = DPDK_MTU_MIN;
 		capa->maxlen.max_output = pkt_dpdk->mtu_max;
+	} else if (ret != -ENOTSUP) {
+		_ODP_ERR("Failed to probe MTU capability: %d\n", ret);
+		return -1;
 	}
 
 	ptype_cnt = rte_eth_dev_get_supported_ptypes(pkt_dpdk->port_id,
@@ -1791,10 +1767,6 @@ static int dpdk_init_capability(pktio_entry_t *pktio_entry,
 	capa->config.pktout.bit.ts_ena = 1;
 
 	if (!_ODP_DPDK_ZERO_COPY) {
-#if ODP_DEPRECATED_API
-		capa->config.pktout.bit.tx_compl_ena = 1;
-		capa->tx_compl.mode_all = 1;
-#endif
 		capa->tx_compl.mode_event = 1;
 		capa->tx_compl.mode_poll = 1;
 		capa->free_ctrl.dont_free = 1;
@@ -1852,6 +1824,7 @@ static int dpdk_open(odp_pktio_t id ODP_UNUSED,
 	int i, ret;
 	pool_t *pool_entry;
 	uint16_t port_id;
+	struct rte_eth_conf eth_conf;
 
 	if (disable_pktio)
 		return -1;
@@ -1859,6 +1832,13 @@ static int dpdk_open(odp_pktio_t id ODP_UNUSED,
 	if (pool == ODP_POOL_INVALID)
 		return -1;
 	pool_entry = _odp_pool_entry(pool);
+
+	/* Initialize DPDK here instead of odp_init_global() to enable running
+	 * 'make check' without root privileges */
+	if (odp_global_rw->dpdk_initialized == 0) {
+		dpdk_pktio_init();
+		odp_global_rw->dpdk_initialized = 1;
+	}
 
 	/* Init pktio entry */
 	memset(pkt_dpdk, 0, sizeof(*pkt_dpdk));
@@ -1870,13 +1850,6 @@ static int dpdk_open(odp_pktio_t id ODP_UNUSED,
 	else {
 		_ODP_ERR("Invalid DPDK interface name: %s\n", netdev);
 		return -1;
-	}
-
-	/* Initialize DPDK here instead of odp_init_global() to enable running
-	 * 'make check' without root privileges */
-	if (odp_global_rw->dpdk_initialized == 0) {
-		dpdk_pktio_init();
-		odp_global_rw->dpdk_initialized = 1;
 	}
 
 	pkt_dpdk->pool = pool;
@@ -1893,6 +1866,16 @@ static int dpdk_open(odp_pktio_t id ODP_UNUSED,
 		return -1;
 	}
 
+	memset(&eth_conf, 0, sizeof(eth_conf));
+	ret = rte_eth_dev_configure(pkt_dpdk->port_id,
+				    _ODP_MIN(1, dev_info.max_rx_queues),
+				    _ODP_MIN(1, dev_info.max_tx_queues),
+				    &eth_conf);
+	if (ret) {
+		_ODP_ERR("Failed to configure device %s: err=%d\n", netdev, ret);
+		return -1;
+	}
+
 	/* Initialize runtime options */
 	if (init_options(pktio_entry, &dev_info)) {
 		_ODP_ERR("Initializing runtime options failed\n");
@@ -1900,14 +1883,13 @@ static int dpdk_open(odp_pktio_t id ODP_UNUSED,
 	}
 	pkt_dpdk->flags.set_flow_hash = pkt_dpdk->opt.set_flow_hash; /* Copy for fast path access */
 
-	mtu = dpdk_mtu_get(pktio_entry);
-	if (mtu == 0) {
-		_ODP_ERR("Failed to read interface MTU\n");
+	ret = rte_eth_dev_get_mtu(pkt_dpdk->port_id, (uint16_t *)&mtu);
+	if (ret) {
+		_ODP_ERR("Failed to read interface MTU: err=%d\n", ret);
 		return -1;
 	}
 	pkt_dpdk->mtu = mtu + _ODP_ETHHDR_LEN;
 	pkt_dpdk->mtu_max = RTE_MAX(pkt_dpdk->mtu, DPDK_MTU_MAX);
-	pkt_dpdk->mtu_set = 0;
 
 	promisc_mode_check(pkt_dpdk);
 
@@ -1920,15 +1902,21 @@ static int dpdk_open(odp_pktio_t id ODP_UNUSED,
 	if (ret)
 		_ODP_DBG("Configuring multicast reception not supported by the PMD\n");
 
-	/* Drivers requiring minimum burst size. Supports also *_vf versions
-	 * of the drivers. */
-	if (!strncmp(dev_info.driver_name, IXGBE_DRV_NAME,
-		     strlen(IXGBE_DRV_NAME)) ||
-	    !strncmp(dev_info.driver_name, I40E_DRV_NAME,
-		     strlen(I40E_DRV_NAME)))
+	/* Use user provided value */
+	if (pkt_dpdk->opt.min_rx_burst > 0) {
+		pkt_dpdk->min_rx_burst = pkt_dpdk->opt.min_rx_burst;
+	} else if (!strncmp(dev_info.driver_name, IXGBE_DRV_NAME, strlen(IXGBE_DRV_NAME)) ||
+		   !strncmp(dev_info.driver_name, I40E_DRV_NAME, strlen(I40E_DRV_NAME)) ||
+		   !strncmp(dev_info.driver_name, IAVF_DRV_NAME, strlen(IAVF_DRV_NAME)) ||
+		   !strncmp(dev_info.driver_name, ICE_DRV_NAME, strlen(ICE_DRV_NAME)) ||
+		   !strncmp(dev_info.driver_name, VIRTIO_DRV_NAME, strlen(VIRTIO_DRV_NAME))) {
+		/* Drivers requiring minimum burst size. Supports also *_vf versions
+		 * of the drivers.
+		 */
 		pkt_dpdk->min_rx_burst = DPDK_MIN_RX_BURST;
-	else
-		pkt_dpdk->min_rx_burst = 0;
+		_ODP_WARN("DPDK PMD %s requires the number of packets to retrieve\n"
+			  "be divisible by %d\n", dev_info.driver_name, DPDK_MIN_RX_BURST);
+	}
 
 	if (_ODP_DPDK_ZERO_COPY) {
 		mem_src_data_t *mem_src_data = mem_src_priv(pool_entry->mem_src_data);
@@ -2093,16 +2081,6 @@ static int dpdk_start(pktio_entry_t *pktio_entry)
 	if (dpdk_setup_eth_rx(pktio_entry, pkt_dpdk, &dev_info))
 		return -1;
 
-	/* Restore MTU value reset by dpdk_setup_eth_rx() */
-	if (pkt_dpdk->mtu_set && pktio_entry->capa.set_op.op.maxlen) {
-		ret = dpdk_maxlen_set(pktio_entry, pkt_dpdk->mtu, 0);
-		if (ret) {
-			_ODP_ERR("Restoring device MTU failed: err=%d, port=%" PRIu8 "\n",
-				 ret, port_id);
-			return -1;
-		}
-	}
-
 	if (_ODP_DPDK_ZERO_COPY) {
 		/* Use simpler function when packet parsing and classifying are not required */
 		if (pktio_entry->parse_layer == ODP_PROTO_LAYER_NONE)
@@ -2249,10 +2227,8 @@ static int dpdk_send(pktio_entry_t *pktio_entry, int index,
 		int i;
 		int first = tx_pkts;
 
-		if (odp_unlikely(tx_pkts < mbufs)) {
-			for (i = tx_pkts; i < mbufs; i++)
-				rte_pktmbuf_free(tx_mbufs[i]);
-		}
+		if (odp_unlikely(tx_pkts < mbufs))
+			rte_pktmbuf_free_bulk(&tx_mbufs[tx_pkts], mbufs - tx_pkts);
 
 		if (odp_unlikely(tx_pkts == 0))
 			return 0;

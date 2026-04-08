@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2014-2018 Linaro Limited
- * Copyright (c) 2020-2024 Nokia
+ * Copyright (c) 2020-2025 Nokia
  * Copyright (c) 2020 Marvell
  */
 
@@ -30,9 +30,10 @@
 #define TX_BATCH_LEN           4
 #define PKTV_TX_BATCH_LEN      32
 #define PKTV_DEFAULT_SIZE      8
+#define EVV_DEFAULT_SIZE       8
 #define MAX_QUEUES             128
 
-#define PKTIO_TS_INTERVAL      (50 * ODP_TIME_MSEC_IN_NS)
+#define PKTIO_TS_INTERVAL      (10 * ODP_TIME_MSEC_IN_NS)
 #define PKTIO_TS_MIN_RES       1000
 #define PKTIO_TS_MAX_RES       10000000000
 
@@ -54,6 +55,15 @@ static bool wait_for_network;
 /* Dummy global variable to avoid compiler optimizing out API calls */
 static volatile uint64_t test_pktio_dummy_u64;
 
+/* Optional test flags that can be or'ed */
+typedef enum {
+	TEST_WITH_DEF_POOL = 1,
+	TEST_WITH_REFS = 2,
+} test_flag_values_t;
+
+#define NUM_TEST_FLAGS 2
+#define NUM_TEST_FLAG_COMBOS (1 << NUM_TEST_FLAGS)
+
 /** local container for pktio attributes */
 typedef struct {
 	const char *name;
@@ -62,6 +72,7 @@ typedef struct {
 	odp_queue_t queue_out;
 	odp_queue_t inq;
 	odp_pktin_mode_t in_mode;
+	uint64_t aggr_tmo;
 } pktio_info_t;
 
 /** magic number and sequence at start of UDP payload */
@@ -98,6 +109,12 @@ typedef enum {
 	ETH_BROADCAST,
 } eth_addr_type_e;
 
+typedef enum vector_mode_t {
+	VECTOR_MODE_DISABLED = 0,
+	VECTOR_MODE_PACKET,
+	VECTOR_MODE_EVENT
+} vector_mode_t;
+
 /** size of transmitted packets */
 static uint32_t packet_len = PKT_LEN_NORMAL;
 
@@ -106,6 +123,9 @@ odp_pool_t default_pkt_pool = ODP_POOL_INVALID;
 
 /** default packet vector pool */
 odp_pool_t default_pktv_pool = ODP_POOL_INVALID;
+
+/** default event vector pool */
+odp_pool_t default_evv_pool = ODP_POOL_INVALID;
 
 /** sequence number of IP packets */
 odp_atomic_u32_t ip_seq;
@@ -116,6 +136,16 @@ pkt_segmented_e pool_segmentation = PKT_POOL_UNSEGMENTED;
 odp_pool_t pool[MAX_NUM_IFACES] = {ODP_POOL_INVALID, ODP_POOL_INVALID};
 
 odp_pool_t pktv_pool[MAX_NUM_IFACES] = {ODP_POOL_INVALID, ODP_POOL_INVALID};
+
+odp_pool_t evv_pool[MAX_NUM_IFACES] = {ODP_POOL_INVALID, ODP_POOL_INVALID};
+
+static odp_pool_t expected_rx_pool(uint32_t test_flags)
+{
+	if (test_flags & TEST_WITH_DEF_POOL)
+		return default_pkt_pool;
+
+	return pool[num_ifaces - 1];
+}
 
 static inline void _pktio_wait_linkup(odp_pktio_t pktio)
 {
@@ -435,7 +465,7 @@ static int default_pktv_pool_create(void)
 	if (odp_pool_capability(&pool_capa) != 0)
 		return -1;
 
-	if (pool_capa.vector.max_num < PKT_BUF_NUM)
+	if (pool_capa.vector.max_num && pool_capa.vector.max_num < PKT_BUF_NUM)
 		return -1;
 
 	if (default_pktv_pool != ODP_POOL_INVALID)
@@ -455,20 +485,54 @@ static int default_pktv_pool_create(void)
 	return 0;
 }
 
-static odp_pktio_t create_pktio(int iface_idx, odp_pktin_mode_t imode,
-				odp_pktout_mode_t omode)
+static int default_evv_pool_create(void)
+{
+	char pool_name[ODP_POOL_NAME_LEN];
+	odp_pool_capability_t pool_capa;
+	odp_pool_param_t params;
+
+	if (odp_pool_capability(&pool_capa) != 0)
+		return -1;
+
+	if (pool_capa.event_vector.max_num && pool_capa.event_vector.max_num < PKT_BUF_NUM)
+		return -1;
+
+	if (default_evv_pool != ODP_POOL_INVALID)
+		return -1;
+
+	odp_pool_param_init(&params);
+	params.type = ODP_POOL_EVENT_VECTOR;
+	params.event_vector.num = PKT_BUF_NUM;
+	params.event_vector.max_size = pool_capa.event_vector.max_size;
+
+	snprintf(pool_name, sizeof(pool_name), "evv_pool_default_%d", pool_segmentation);
+	default_evv_pool = odp_pool_create(pool_name, &params);
+	if (default_evv_pool == ODP_POOL_INVALID)
+		return -1;
+
+	return 0;
+}
+
+static odp_pktio_t create_pktio_with_flags(int iface_idx,
+					   odp_pktin_mode_t imode,
+					   odp_pktout_mode_t omode,
+					   uint32_t test_flags)
 {
 	odp_pktio_t pktio;
 	odp_pktio_param_t pktio_param;
 	odp_pktin_queue_param_t pktin_param;
 	const char *iface = iface_name[iface_idx];
+	odp_pool_t pktio_pool = pool[iface_idx];
+
+	if (test_flags & TEST_WITH_DEF_POOL)
+		pktio_pool = default_pkt_pool;
 
 	odp_pktio_param_init(&pktio_param);
 
 	pktio_param.in_mode = imode;
 	pktio_param.out_mode = omode;
 
-	pktio = odp_pktio_open(iface, pool[iface_idx], &pktio_param);
+	pktio = odp_pktio_open(iface, pktio_pool, &pktio_param);
 	CU_ASSERT_FATAL(pktio != ODP_PKTIO_INVALID);
 	CU_ASSERT(odp_pktio_to_u64(pktio) !=
 		  odp_pktio_to_u64(ODP_PKTIO_INVALID));
@@ -489,8 +553,15 @@ static odp_pktio_t create_pktio(int iface_idx, odp_pktin_mode_t imode,
 	return pktio;
 }
 
+static odp_pktio_t create_pktio(int iface_idx, odp_pktin_mode_t imode,
+				odp_pktout_mode_t omode)
+{
+	return create_pktio_with_flags(iface_idx, imode, omode, 0);
+}
+
 static odp_pktio_t create_pktv_pktio(int iface_idx, odp_pktin_mode_t imode,
-				     odp_pktout_mode_t omode, odp_schedule_sync_t sync_mode)
+				     odp_pktout_mode_t omode, odp_schedule_sync_t sync_mode,
+				     uint32_t test_flags)
 {
 	const char *iface = iface_name[iface_idx];
 	odp_pktout_queue_param_t pktout_param;
@@ -498,13 +569,17 @@ static odp_pktio_t create_pktv_pktio(int iface_idx, odp_pktin_mode_t imode,
 	odp_pktio_param_t pktio_param;
 	odp_pktio_capability_t capa;
 	odp_pktio_t pktio;
+	odp_pool_t pktio_pool = pool[iface_idx];
+
+	if (test_flags & TEST_WITH_DEF_POOL)
+		pktio_pool = default_pkt_pool;
 
 	odp_pktio_param_init(&pktio_param);
 
 	pktio_param.in_mode = imode;
 	pktio_param.out_mode = omode;
 
-	pktio = odp_pktio_open(iface, pool[iface_idx], &pktio_param);
+	pktio = odp_pktio_open(iface, pktio_pool, &pktio_param);
 	CU_ASSERT_FATAL(pktio != ODP_PKTIO_INVALID);
 
 	CU_ASSERT(odp_pktio_capability(pktio, &capa) == 0);
@@ -542,13 +617,88 @@ static odp_pktio_t create_pktv_pktio(int iface_idx, odp_pktin_mode_t imode,
 	return pktio;
 }
 
+static int event_aggr_capability(odp_event_aggr_capability_t *aggr_capa, odp_pktin_mode_t imode)
+{
+	if (imode == ODP_PKTIN_MODE_SCHED) {
+		odp_schedule_capability_t sched_capa;
+
+		if (odp_schedule_capability(&sched_capa)) {
+			ODPH_ERR("Reading schedule capabilities failed\n");
+			return -1;
+		}
+		*aggr_capa = sched_capa.aggr;
+	} else {
+		odp_queue_capability_t queue_capa;
+
+		if (odp_queue_capability(&queue_capa)) {
+			ODPH_ERR("Reading queue capabilities failed\n");
+			return -1;
+		}
+		*aggr_capa = queue_capa.plain.aggr;
+	}
+	return 0;
+}
+
+static odp_pktio_t create_evv_pktio(int iface_idx, odp_pktin_mode_t imode,
+				    odp_pktout_mode_t omode, odp_schedule_sync_t sync_mode,
+				    uint64_t *aggr_tmo)
+{
+	const char *iface = iface_name[iface_idx];
+	odp_pktout_queue_param_t pktout_param;
+	odp_pktin_queue_param_t pktin_param;
+	odp_pktio_param_t pktio_param;
+	odp_event_aggr_capability_t aggr_capa;
+	odp_pktio_t pktio;
+	odp_event_aggr_config_t aggr_config;
+
+	odp_pktio_param_init(&pktio_param);
+
+	pktio_param.in_mode = imode;
+	pktio_param.out_mode = omode;
+
+	pktio = odp_pktio_open(iface, pool[iface_idx], &pktio_param);
+	CU_ASSERT_FATAL(pktio != ODP_PKTIO_INVALID);
+
+	CU_ASSERT_FATAL(event_aggr_capability(&aggr_capa, imode) == 0);
+
+	odp_pktin_queue_param_init(&pktin_param);
+
+	if (imode == ODP_PKTIN_MODE_SCHED)
+		pktin_param.queue_param.sched.sync = sync_mode;
+
+	pktin_param.num_queues = 1;
+	pktin_param.op_mode = ODP_PKTIO_OP_MT_UNSAFE;
+
+	memset(&aggr_config, 0, sizeof(odp_event_aggr_config_t));
+	aggr_config.pool = evv_pool[iface_idx];
+	aggr_config.max_tmo_ns = aggr_capa.min_tmo_ns;
+	aggr_config.max_size = aggr_capa.max_size < EVV_DEFAULT_SIZE ?
+				aggr_capa.max_size : EVV_DEFAULT_SIZE;
+	aggr_config.event_type = ODP_EVENT_ANY;
+	*aggr_tmo = aggr_config.max_tmo_ns;
+
+	pktin_param.queue_param.aggr = &aggr_config;
+	pktin_param.queue_param.num_aggr = 1;
+
+	CU_ASSERT_FATAL(odp_pktin_queue_config(pktio, &pktin_param) == 0);
+
+	odp_pktout_queue_param_init(&pktout_param);
+	pktout_param.op_mode = ODP_PKTIO_OP_MT_UNSAFE;
+	pktout_param.num_queues = 1;
+	CU_ASSERT_FATAL(odp_pktout_queue_config(pktio, &pktout_param) == 0);
+
+	if (wait_for_network)
+		odp_time_wait_ns(ODP_TIME_SEC_IN_NS / 4);
+
+	return pktio;
+}
+
 static int flush_input_queue(odp_pktio_t pktio, odp_pktin_mode_t imode)
 {
 	odp_event_t ev;
 	odp_queue_t queue = ODP_QUEUE_INVALID;
 
 	if (imode == ODP_PKTIN_MODE_QUEUE) {
-		/* Assert breaks else-if without brackets */
 		CU_ASSERT_FATAL(odp_pktin_event_queue(pktio, &queue, 1) == 1);
 	} else if (imode == ODP_PKTIN_MODE_DIRECT) {
 		return 0;
@@ -648,7 +798,7 @@ static int create_packets(odp_packet_t pkt_tbl[], uint32_t pkt_seq[], int num,
 }
 
 static int get_packets(pktio_info_t *pktio_rx, odp_packet_t pkt_tbl[],
-		       int num, txrx_mode_e mode, odp_bool_t vector_mode)
+		       int num, txrx_mode_e mode, vector_mode_t vector_mode)
 {
 	odp_event_t evt_tbl[num];
 	int num_evts = 0;
@@ -691,7 +841,8 @@ static int get_packets(pktio_info_t *pktio_rx, odp_packet_t pkt_tbl[],
 	for (i = 0; i < num_evts; ++i) {
 		if (odp_event_type(evt_tbl[i]) == ODP_EVENT_PACKET) {
 			pkt_tbl[num_pkts++] = odp_packet_from_event(evt_tbl[i]);
-		} else if (vector_mode &&  odp_event_type(evt_tbl[i]) == ODP_EVENT_PACKET_VECTOR &&
+		} else if (vector_mode == VECTOR_MODE_PACKET &&
+			   odp_event_type(evt_tbl[i]) == ODP_EVENT_PACKET_VECTOR &&
 			   num_pkts < num) {
 			odp_packet_vector_t pktv;
 			odp_packet_t *pkts;
@@ -714,6 +865,33 @@ static int get_packets(pktio_info_t *pktio_rx, odp_packet_t pkt_tbl[],
 				num_pkts += pktv_len;
 			}
 			odp_packet_vector_free(pktv);
+		} else if (vector_mode == VECTOR_MODE_EVENT &&
+			   odp_event_type(evt_tbl[i]) == ODP_EVENT_VECTOR &&
+			   num_pkts < num) {
+			odp_event_vector_t evv;
+			odp_event_t *event_tbl;
+			int evv_len;
+
+			evv = odp_event_vector_from_event(evt_tbl[i]);
+			evv_len = odp_event_vector_tbl(evv, &event_tbl);
+			CU_ASSERT(evv_len > 0);
+			CU_ASSERT(odp_event_vector_type(evv) == ODP_EVENT_ANY ||
+				  odp_event_vector_type(evv) == ODP_EVENT_PACKET);
+			CU_ASSERT(odp_event_vector_user_flag(evv) == 0);
+
+			/* Make sure too many packets are not received */
+			if (num_pkts + evv_len > num) {
+				int new_pkts = num - num_pkts;
+
+				odp_packet_from_event_multi(&pkt_tbl[num_pkts], event_tbl,
+							    new_pkts);
+				odp_event_free_multi(&event_tbl[new_pkts], evv_len - new_pkts);
+				num_pkts += new_pkts;
+			} else {
+				odp_packet_from_event_multi(&pkt_tbl[num_pkts], event_tbl, evv_len);
+				num_pkts += evv_len;
+			}
+			odp_event_vector_free(evv);
 		} else {
 			odp_event_free(evt_tbl[i]);
 		}
@@ -724,7 +902,7 @@ static int get_packets(pktio_info_t *pktio_rx, odp_packet_t pkt_tbl[],
 
 static int wait_for_packets_hdr(pktio_info_t *pktio_rx, odp_packet_t pkt_tbl[],
 				uint32_t seq_tbl[], int num, txrx_mode_e mode,
-				uint64_t ns, size_t l4_hdr_len, odp_bool_t vector_mode)
+				uint64_t ns, size_t l4_hdr_len, vector_mode_t vector_mode)
 {
 	odp_time_t wait_time, end, start;
 	int num_rx = 0;
@@ -758,7 +936,7 @@ static int wait_for_packets_hdr(pktio_info_t *pktio_rx, odp_packet_t pkt_tbl[],
 
 static int wait_for_packets(pktio_info_t *pktio_rx, odp_packet_t pkt_tbl[],
 			    uint32_t seq_tbl[], int num, txrx_mode_e mode,
-			    uint64_t ns, odp_bool_t vector_mode)
+			    uint64_t ns, vector_mode_t vector_mode)
 {
 	return wait_for_packets_hdr(pktio_rx, pkt_tbl, seq_tbl, num, mode, ns,
 				    ODPH_UDPHDR_LEN, vector_mode);
@@ -912,19 +1090,43 @@ static void check_parser_capa(odp_pktio_t pktio, int *l2, int *l3, int *l4)
 	}
 }
 
+static void make_refs(odp_packet_t ref[], odp_packet_t pkt[], uint32_t num)
+{
+	for (uint32_t i = 0; i < num; i++) {
+		ref[i] = odp_packet_ref_static(pkt[i]);
+		CU_ASSERT_FATAL(ref[i] != ODP_PACKET_INVALID);
+		CU_ASSERT(odp_packet_has_ref(ref[i]));
+		CU_ASSERT(odp_packet_has_ref(pkt[i]));
+	}
+}
+
+static void free_refs(odp_packet_t ref[], uint32_t num)
+{
+	for (uint32_t i = 0; i < num; i++) {
+		CU_ASSERT(odp_packet_has_ref(ref[i]) == 0);
+		odp_packet_free(ref[i]);
+	}
+}
+
 static void pktio_txrx_multi(pktio_info_t *pktio_info_a,
 			     pktio_info_t *pktio_info_b,
 			     int num_pkts, txrx_mode_e mode,
-			     odp_bool_t vector_mode)
+			     vector_mode_t vector_mode,
+			     uint32_t test_flags)
 {
 	odp_packet_t tx_pkt[num_pkts];
 	odp_packet_t rx_pkt[num_pkts];
+	odp_packet_t ref_tbl[num_pkts];
 	uint32_t tx_seq[num_pkts];
 	int i, ret, num_rx;
 	int parser_l2, parser_l3, parser_l4;
 	odp_pktio_t pktio_a = pktio_info_a->id;
 	odp_pktio_t pktio_b = pktio_info_b->id;
 	int pktio_index_b = odp_pktio_index(pktio_b);
+	/* Use extra flush packets in event vector mode if timeouts are not supported */
+	const odp_bool_t flush_aggr = (vector_mode == VECTOR_MODE_EVENT && !pktio_info_b->aggr_tmo);
+	odp_packet_t tx_pkt_flush[EVV_DEFAULT_SIZE];
+	uint32_t tx_seq_flush[EVV_DEFAULT_SIZE];
 
 	/* Check RX interface parser capability */
 	check_parser_capa(pktio_b, &parser_l2, &parser_l3, &parser_l4);
@@ -955,6 +1157,19 @@ static void pktio_txrx_multi(pktio_info_t *pktio_info_a,
 		return;
 	}
 
+	/* Extra packets for flushing pending packets from aggregation */
+	if (flush_aggr) {
+		ret = create_packets(tx_pkt_flush, tx_seq_flush, EVV_DEFAULT_SIZE, pktio_a,
+				     pktio_b);
+		if (ret != EVV_DEFAULT_SIZE) {
+			CU_FAIL("failed to generate event vector flush packets");
+			return;
+		}
+	}
+
+	if (test_flags & TEST_WITH_REFS)
+		make_refs(ref_tbl, tx_pkt, num_pkts);
+
 	/* send packet(s) out */
 	if (mode == TXRX_MODE_SINGLE) {
 		for (i = 0; i < num_pkts; ++i) {
@@ -972,6 +1187,14 @@ static void pktio_txrx_multi(pktio_info_t *pktio_info_a,
 		send_packet_events(pktio_info_a->queue_out, tx_pkt, num_pkts);
 	}
 
+	/* Send extra aggregation flush packets */
+	if (flush_aggr) {
+		if (mode == TXRX_MODE_MULTI_EVENT)
+			send_packet_events(pktio_info_a->queue_out, tx_pkt_flush, EVV_DEFAULT_SIZE);
+		else
+			send_packets(pktio_info_a->pktout, tx_pkt_flush, EVV_DEFAULT_SIZE);
+	}
+
 	/* and wait for them to arrive back */
 	num_rx = wait_for_packets(pktio_info_b, rx_pkt, tx_seq, num_pkts, mode,
 				  ODP_TIME_SEC_IN_NS, vector_mode);
@@ -979,14 +1202,19 @@ static void pktio_txrx_multi(pktio_info_t *pktio_info_a,
 	if (num_rx != num_pkts)
 		ODPH_ERR("received %i, out of %i packets\n", num_rx, num_pkts);
 
+	if (test_flags & TEST_WITH_REFS)
+		free_refs(ref_tbl, num_pkts);
+
 	for (i = 0; i < num_rx; ++i) {
 		odp_packet_data_range_t range;
 		uint16_t sum;
 		odp_packet_t pkt = rx_pkt[i];
 
 		CU_ASSERT_FATAL(pkt != ODP_PACKET_INVALID);
+		CU_ASSERT(odp_packet_has_ref(pkt) == 0);
 		CU_ASSERT(odp_packet_input(pkt) == pktio_b);
 		CU_ASSERT(odp_packet_input_index(pkt) == pktio_index_b);
+		CU_ASSERT(odp_packet_pool(pkt) == expected_rx_pool(test_flags));
 		CU_ASSERT(odp_packet_has_error(pkt) == 0);
 		if (parser_l2) {
 			CU_ASSERT(odp_packet_has_l2(pkt));
@@ -1026,9 +1254,9 @@ static void pktio_txrx_multi(pktio_info_t *pktio_info_a,
 	}
 }
 
-static void test_txrx(odp_pktin_mode_t in_mode, int num_pkts,
-		      txrx_mode_e mode, odp_schedule_sync_t sync_mode,
-		      odp_bool_t vector_mode)
+static void do_test_txrx(odp_pktin_mode_t in_mode, int num_pkts,
+			 txrx_mode_e mode, odp_schedule_sync_t sync_mode,
+			 vector_mode_t vector_mode, uint32_t test_flags)
 {
 	int ret, i, if_b;
 	pktio_info_t pktios[MAX_NUM_IFACES];
@@ -1039,6 +1267,7 @@ static void test_txrx(odp_pktin_mode_t in_mode, int num_pkts,
 		odp_pktout_queue_t pktout;
 		odp_queue_t queue = ODP_QUEUE_INVALID;
 		odp_pktout_mode_t out_mode = ODP_PKTOUT_MODE_DIRECT;
+		uint64_t aggr_tmo = 0;
 
 		if (mode == TXRX_MODE_MULTI_EVENT)
 			out_mode = ODP_PKTOUT_MODE_QUEUE;
@@ -1046,14 +1275,17 @@ static void test_txrx(odp_pktin_mode_t in_mode, int num_pkts,
 		io = &pktios[i];
 
 		io->name = iface_name[i];
-		if (vector_mode)
-			io->id = create_pktv_pktio(i, in_mode, out_mode, sync_mode);
+		if (vector_mode == VECTOR_MODE_PACKET)
+			io->id = create_pktv_pktio(i, in_mode, out_mode, sync_mode, test_flags);
+		else if (vector_mode == VECTOR_MODE_EVENT)
+			io->id = create_evv_pktio(i, in_mode, out_mode, sync_mode, &aggr_tmo);
 		else
-			io->id = create_pktio(i, in_mode, out_mode);
+			io->id = create_pktio_with_flags(i, in_mode, out_mode, test_flags);
 		if (io->id == ODP_PKTIO_INVALID) {
 			CU_FAIL("failed to open iface");
 			return;
 		}
+		io->aggr_tmo = aggr_tmo;
 
 		if (mode == TXRX_MODE_MULTI_EVENT) {
 			CU_ASSERT_FATAL(odp_pktout_event_queue(io->id,
@@ -1084,7 +1316,7 @@ static void test_txrx(odp_pktin_mode_t in_mode, int num_pkts,
 	/* if we have two interfaces then send through one and receive on
 	 * another but if there's only one assume it's a loopback */
 	if_b = (num_ifaces == 1) ? 0 : 1;
-	pktio_txrx_multi(&pktios[0], &pktios[if_b], num_pkts, mode, vector_mode);
+	pktio_txrx_multi(&pktios[0], &pktios[if_b], num_pkts, mode, vector_mode, test_flags);
 
 	for (i = 0; i < num_ifaces; ++i) {
 		ret = odp_pktio_stop(pktios[i].id);
@@ -1095,56 +1327,67 @@ static void test_txrx(odp_pktin_mode_t in_mode, int num_pkts,
 	}
 }
 
+static void test_txrx(odp_pktin_mode_t in_mode, int num_pkts,
+		      txrx_mode_e mode, odp_schedule_sync_t sync_mode,
+		      odp_bool_t vector_mode)
+{
+	for (uint32_t flags = 0; flags < NUM_TEST_FLAG_COMBOS; flags++)
+		do_test_txrx(in_mode, num_pkts, mode, sync_mode, vector_mode, flags);
+}
+
 static void pktio_test_plain_queue(void)
 {
-	test_txrx(ODP_PKTIN_MODE_QUEUE, 1, TXRX_MODE_SINGLE, 0, false);
-	test_txrx(ODP_PKTIN_MODE_QUEUE, TX_BATCH_LEN, TXRX_MODE_SINGLE, 0, false);
+	test_txrx(ODP_PKTIN_MODE_QUEUE, 1, TXRX_MODE_SINGLE, 0, VECTOR_MODE_DISABLED);
+	test_txrx(ODP_PKTIN_MODE_QUEUE, TX_BATCH_LEN, TXRX_MODE_SINGLE, 0, VECTOR_MODE_DISABLED);
 }
 
 static void pktio_test_plain_multi(void)
 {
-	test_txrx(ODP_PKTIN_MODE_QUEUE, TX_BATCH_LEN, TXRX_MODE_MULTI, 0, false);
-	test_txrx(ODP_PKTIN_MODE_QUEUE, 1, TXRX_MODE_MULTI, 0, false);
+	test_txrx(ODP_PKTIN_MODE_QUEUE, TX_BATCH_LEN, TXRX_MODE_MULTI, 0, VECTOR_MODE_DISABLED);
+	test_txrx(ODP_PKTIN_MODE_QUEUE, 1, TXRX_MODE_MULTI, 0, VECTOR_MODE_DISABLED);
 }
 
 static void pktio_test_plain_multi_event(void)
 {
-	test_txrx(ODP_PKTIN_MODE_QUEUE, 1, TXRX_MODE_MULTI_EVENT, 0, false);
-	test_txrx(ODP_PKTIN_MODE_QUEUE, TX_BATCH_LEN, TXRX_MODE_MULTI_EVENT, 0, false);
+	test_txrx(ODP_PKTIN_MODE_QUEUE, 1, TXRX_MODE_MULTI_EVENT, 0, VECTOR_MODE_DISABLED);
+	test_txrx(ODP_PKTIN_MODE_QUEUE, TX_BATCH_LEN, TXRX_MODE_MULTI_EVENT, 0,
+		  VECTOR_MODE_DISABLED);
 }
 
 static void pktio_test_sched_queue(void)
 {
-	test_txrx(ODP_PKTIN_MODE_SCHED, 1, TXRX_MODE_SINGLE, 0, false);
-	test_txrx(ODP_PKTIN_MODE_SCHED, TX_BATCH_LEN, TXRX_MODE_SINGLE, 0, false);
+	test_txrx(ODP_PKTIN_MODE_SCHED, 1, TXRX_MODE_SINGLE, 0, VECTOR_MODE_DISABLED);
+	test_txrx(ODP_PKTIN_MODE_SCHED, TX_BATCH_LEN, TXRX_MODE_SINGLE, 0, VECTOR_MODE_DISABLED);
 }
 
 static void pktio_test_sched_multi(void)
 {
-	test_txrx(ODP_PKTIN_MODE_SCHED, TX_BATCH_LEN, TXRX_MODE_MULTI, 0, false);
-	test_txrx(ODP_PKTIN_MODE_SCHED, 1, TXRX_MODE_MULTI, 0, false);
+	test_txrx(ODP_PKTIN_MODE_SCHED, TX_BATCH_LEN, TXRX_MODE_MULTI, 0, VECTOR_MODE_DISABLED);
+	test_txrx(ODP_PKTIN_MODE_SCHED, 1, TXRX_MODE_MULTI, 0, VECTOR_MODE_DISABLED);
 }
 
 static void pktio_test_sched_multi_event(void)
 {
-	test_txrx(ODP_PKTIN_MODE_SCHED, 1, TXRX_MODE_MULTI_EVENT, 0, false);
-	test_txrx(ODP_PKTIN_MODE_SCHED, TX_BATCH_LEN, TXRX_MODE_MULTI_EVENT, 0, false);
+	test_txrx(ODP_PKTIN_MODE_SCHED, 1, TXRX_MODE_MULTI_EVENT, 0, VECTOR_MODE_DISABLED);
+	test_txrx(ODP_PKTIN_MODE_SCHED, TX_BATCH_LEN, TXRX_MODE_MULTI_EVENT, 0,
+		  VECTOR_MODE_DISABLED);
 }
 
 static void pktio_test_recv(void)
 {
-	test_txrx(ODP_PKTIN_MODE_DIRECT, 1, TXRX_MODE_SINGLE, 0, false);
+	test_txrx(ODP_PKTIN_MODE_DIRECT, 1, TXRX_MODE_SINGLE, 0, VECTOR_MODE_DISABLED);
 }
 
 static void pktio_test_recv_multi(void)
 {
-	test_txrx(ODP_PKTIN_MODE_DIRECT, TX_BATCH_LEN, TXRX_MODE_MULTI, 0, false);
+	test_txrx(ODP_PKTIN_MODE_DIRECT, TX_BATCH_LEN, TXRX_MODE_MULTI, 0, VECTOR_MODE_DISABLED);
 }
 
 static void pktio_test_recv_multi_event(void)
 {
-	test_txrx(ODP_PKTIN_MODE_DIRECT, 1, TXRX_MODE_MULTI_EVENT, 0, false);
-	test_txrx(ODP_PKTIN_MODE_DIRECT, TX_BATCH_LEN, TXRX_MODE_MULTI_EVENT, 0, false);
+	test_txrx(ODP_PKTIN_MODE_DIRECT, 1, TXRX_MODE_MULTI_EVENT, 0, VECTOR_MODE_DISABLED);
+	test_txrx(ODP_PKTIN_MODE_DIRECT, TX_BATCH_LEN, TXRX_MODE_MULTI_EVENT, 0,
+		  VECTOR_MODE_DISABLED);
 }
 
 static void pktio_test_recv_queue(void)
@@ -2857,7 +3100,7 @@ static void pktio_test_extra_stats(void)
 	int num_info, num_stats, i, ret;
 
 	pktio = create_pktio(0, ODP_PKTIN_MODE_DIRECT, ODP_PKTOUT_MODE_DIRECT);
-	CU_ASSERT_FATAL(pktio != ODP_PKTIO_INVALID)
+	CU_ASSERT_FATAL(pktio != ODP_PKTIO_INVALID);
 	CU_ASSERT_FATAL(odp_pktio_start(pktio) == 0);
 
 	num_info = odp_pktio_extra_stat_info(pktio, NULL, 0);
@@ -3293,7 +3536,7 @@ static int pktio_check_pktin_ts(void)
 	return ODP_TEST_ACTIVE;
 }
 
-static void pktio_test_pktin_ts(void)
+static void test_pktin_ts(uint32_t test_flags)
 {
 	odp_pktio_t pktio_tx, pktio_rx;
 	odp_pktio_t pktio[MAX_NUM_IFACES] = {0};
@@ -3302,6 +3545,7 @@ static void pktio_test_pktin_ts(void)
 	odp_pktio_config_t config;
 	odp_pktout_queue_t pktout_queue;
 	odp_packet_t pkt_tbl[TX_BATCH_LEN];
+	odp_packet_t ref_tbl[TX_BATCH_LEN];
 	uint32_t pkt_seq[TX_BATCH_LEN];
 	uint64_t ns1, ns2;
 	uint64_t res, res_ns, input_delay;
@@ -3315,8 +3559,9 @@ static void pktio_test_pktin_ts(void)
 
 	/* Open and configure interfaces */
 	for (i = 0; i < num_ifaces; ++i) {
-		pktio[i] = create_pktio(i, ODP_PKTIN_MODE_DIRECT,
-					ODP_PKTOUT_MODE_DIRECT);
+		pktio[i] = create_pktio_with_flags(i, ODP_PKTIN_MODE_DIRECT,
+						   ODP_PKTOUT_MODE_DIRECT,
+						   test_flags);
 		CU_ASSERT_FATAL(pktio[i] != ODP_PKTIO_INVALID);
 
 		CU_ASSERT_FATAL(odp_pktio_capability(pktio[i], &capa) == 0);
@@ -3359,12 +3604,16 @@ static void pktio_test_pktin_ts(void)
 	ret = odp_pktout_queue(pktio_tx, &pktout_queue, 1);
 	CU_ASSERT_FATAL(ret > 0);
 
+	if (test_flags & TEST_WITH_REFS)
+		make_refs(ref_tbl, pkt_tbl, TX_BATCH_LEN);
+
 	/* Send packets one at a time and add delay between the packets */
 	for (i = 0; i < TX_BATCH_LEN;  i++) {
 		CU_ASSERT_FATAL(odp_pktout_send(pktout_queue,
 						&pkt_tbl[i], 1) == 1);
 		ret = wait_for_packets(&pktio_rx_info, &pkt_tbl[i], &pkt_seq[i],
-				       1, TXRX_MODE_SINGLE, ODP_TIME_SEC_IN_NS, false);
+				       1, TXRX_MODE_SINGLE, ODP_TIME_SEC_IN_NS,
+				       VECTOR_MODE_DISABLED);
 		if (ret != 1)
 			break;
 
@@ -3378,11 +3627,15 @@ static void pktio_test_pktin_ts(void)
 			printf("    Test packet %d input delay: %" PRIu64 "ns\n", i, input_delay);
 			CU_FAIL("Packet input delay too long");
 		}
+		CU_ASSERT(odp_packet_pool(pkt_tbl[i]) == expected_rx_pool(test_flags));
 
 		odp_time_wait_ns(PKTIO_TS_INTERVAL);
 	}
 	num_rx = i;
 	CU_ASSERT(num_rx == TX_BATCH_LEN);
+
+	if (test_flags & TEST_WITH_REFS)
+		free_refs(ref_tbl, TX_BATCH_LEN);
 
 	ts_prev = ODP_TIME_NULL;
 	for (i = 0; i < num_rx; i++) {
@@ -3398,6 +3651,12 @@ static void pktio_test_pktin_ts(void)
 		CU_ASSERT_FATAL(odp_pktio_stop(pktio[i]) == 0);
 		CU_ASSERT_FATAL(odp_pktio_close(pktio[i]) == 0);
 	}
+}
+
+static void pktio_test_pktin_ts(void)
+{
+	for (uint32_t flags = 0; flags < NUM_TEST_FLAG_COMBOS; flags++)
+		test_pktin_ts(flags);
 }
 
 static int pktio_check_pktout_ts(void)
@@ -3423,7 +3682,7 @@ static int pktio_check_pktout_ts(void)
 	return ODP_TEST_ACTIVE;
 }
 
-static void pktio_test_pktout_ts(void)
+static void test_pktout_ts(uint32_t test_flags)
 {
 	odp_packet_t pkt_tbl[TX_BATCH_LEN];
 	odp_pktio_t pktio[MAX_NUM_IFACES] = {0};
@@ -3443,8 +3702,9 @@ static void pktio_test_pktout_ts(void)
 
 	/* Open and configure interfaces */
 	for (i = 0; i < num_ifaces; ++i) {
-		pktio[i] = create_pktio(i, ODP_PKTIN_MODE_DIRECT,
-					ODP_PKTOUT_MODE_DIRECT);
+		pktio[i] = create_pktio_with_flags(i, ODP_PKTIN_MODE_DIRECT,
+						   ODP_PKTOUT_MODE_DIRECT,
+						   test_flags);
 		CU_ASSERT_FATAL(pktio[i] != ODP_PKTIO_INVALID);
 
 		CU_ASSERT_FATAL(odp_pktio_capability(pktio[i], &capa) == 0);
@@ -3480,14 +3740,23 @@ static void pktio_test_pktout_ts(void)
 
 	/* Send packets one at a time and add delay between the packets */
 	for (i = 0; i < TX_BATCH_LEN;  i++) {
+		odp_packet_t ref_pkt;
+
 		/* Enable ts capture on this pkt */
 		odp_packet_ts_request(pkt_tbl[i], 1);
+
+		if (test_flags & TEST_WITH_REFS)
+			make_refs(&ref_pkt, &pkt_tbl[i], 1);
 
 		CU_ASSERT_FATAL(odp_pktout_send(pktout_queue,
 						&pkt_tbl[i], 1) == 1);
 		ret = wait_for_packets(&pktio_rx_info, &pkt_tbl[i], &pkt_seq[i],
 				       1, TXRX_MODE_SINGLE, ODP_TIME_SEC_IN_NS,
-				       false);
+				       VECTOR_MODE_DISABLED);
+
+		if (test_flags & TEST_WITH_REFS)
+			free_refs(&ref_pkt, 1);
+
 		if (ret != 1)
 			break;
 
@@ -3496,6 +3765,8 @@ static void pktio_test_pktout_ts(void)
 
 		CU_ASSERT(odp_time_cmp(ts, ts_prev) > 0);
 		ts_prev = ts;
+
+		CU_ASSERT(odp_packet_pool(pkt_tbl[i]) == expected_rx_pool(test_flags));
 
 		odp_time_wait_ns(PKTIO_TS_INTERVAL);
 	}
@@ -3511,12 +3782,19 @@ static void pktio_test_pktout_ts(void)
 	}
 }
 
-static void pktio_test_pktout_compl_event(bool use_plain_queue)
+static void pktio_test_pktout_ts(void)
+{
+	for (uint32_t flags = 0; flags < NUM_TEST_FLAG_COMBOS; flags++)
+		test_pktout_ts(flags);
+}
+
+static void pktio_test_pktout_compl_event(bool use_plain_queue, uint32_t test_flags)
 {
 	odp_pktio_t pktio[MAX_NUM_IFACES] = {ODP_PKTIO_INVALID};
 	odp_queue_t compl_queue[TX_BATCH_LEN];
 	odp_schedule_capability_t sched_capa;
 	odp_packet_t pkt_tbl[TX_BATCH_LEN];
+	odp_packet_t ref_tbl[TX_BATCH_LEN];
 	char queuename[ODP_QUEUE_NAME_LEN];
 	odp_pktio_capability_t pktio_capa;
 	odp_queue_capability_t queue_capa;
@@ -3558,8 +3836,9 @@ static void pktio_test_pktout_compl_event(bool use_plain_queue)
 
 	/* Open and configure interfaces */
 	for (i = 0; i < num_ifaces; ++i) {
-		pktio[i] = create_pktio(i, ODP_PKTIN_MODE_DIRECT,
-					ODP_PKTOUT_MODE_DIRECT);
+		pktio[i] = create_pktio_with_flags(i, ODP_PKTIN_MODE_DIRECT,
+						   ODP_PKTOUT_MODE_DIRECT,
+						   test_flags);
 		CU_ASSERT_FATAL(pktio[i] != ODP_PKTIO_INVALID);
 
 		CU_ASSERT_FATAL(odp_pktio_capability(pktio[i], &pktio_capa) == 0);
@@ -3567,12 +3846,8 @@ static void pktio_test_pktout_compl_event(bool use_plain_queue)
 		/* Configure Tx completion offload for PKTIO Tx */
 		if (i == 0) {
 			CU_ASSERT_FATAL(pktio_capa.tx_compl.mode_event == 1);
-#if ODP_DEPRECATED_API
-			CU_ASSERT_FATAL(pktio_capa.tx_compl.mode_all ==
-					pktio_capa.tx_compl.mode_event);
-#endif
+
 			if (use_plain_queue) {
-				/* CU_ASSERT needs these extra braces */
 				CU_ASSERT_FATAL(pktio_capa.tx_compl.queue_type_plain != 0);
 			} else {
 				CU_ASSERT_FATAL(pktio_capa.tx_compl.queue_type_sched != 0);
@@ -3606,13 +3881,10 @@ static void pktio_test_pktout_compl_event(bool use_plain_queue)
 	/* Disabled by default */
 	CU_ASSERT(odp_packet_has_tx_compl_request(pkt_tbl[0]) == 0);
 
-	/* Check that disable works. Also COMPL_ALL should be still supported. */
+	/* Check that disable works */
 	opt.queue = compl_queue[0];
-#if ODP_DEPRECATED_API
-	opt.mode = ODP_PACKET_TX_COMPL_ALL;
-#else
 	opt.mode = ODP_PACKET_TX_COMPL_EVENT;
-#endif
+
 	odp_packet_tx_compl_request(pkt_tbl[0], &opt);
 	CU_ASSERT(odp_packet_has_tx_compl_request(pkt_tbl[0]) != 0);
 	opt.mode = ODP_PACKET_TX_COMPL_DISABLED;
@@ -3637,13 +3909,22 @@ static void pktio_test_pktout_compl_event(bool use_plain_queue)
 		odp_packet_user_ptr_set(pkt_tbl[i], (const void *)&pkt_seq[i]);
 	}
 
+	if (test_flags & TEST_WITH_REFS)
+		make_refs(ref_tbl, pkt_tbl, TX_BATCH_LEN);
+
 	CU_ASSERT_FATAL(odp_pktout_send(pktout_queue, pkt_tbl, TX_BATCH_LEN) == TX_BATCH_LEN);
 
 	num_rx = wait_for_packets(&pktio_rx_info, pkt_tbl, pkt_seq, TX_BATCH_LEN, TXRX_MODE_SINGLE,
-				  ODP_TIME_SEC_IN_NS, false);
+				  ODP_TIME_SEC_IN_NS, VECTOR_MODE_DISABLED);
 	CU_ASSERT(num_rx == TX_BATCH_LEN);
-	for (i = 0; i < num_rx; i++)
+
+	if (test_flags & TEST_WITH_REFS)
+		free_refs(ref_tbl, TX_BATCH_LEN);
+
+	for (i = 0; i < num_rx; i++) {
+		CU_ASSERT(odp_packet_pool(pkt_tbl[i]) == expected_rx_pool(test_flags));
 		odp_packet_free(pkt_tbl[i]);
+	}
 
 	wait = odp_schedule_wait_time(ODP_TIME_SEC_IN_NS);
 	memset(seq_found, 0, sizeof(seq_found));
@@ -3757,10 +4038,11 @@ static void pktio_test_pktout_compl_event(bool use_plain_queue)
 		odp_queue_destroy(compl_queue[i]);
 }
 
-static void pktio_test_pktout_compl_poll(void)
+static void test_pktout_compl_poll(uint32_t test_flags)
 {
 	odp_pktio_t pktio[MAX_NUM_IFACES] = {ODP_PKTIO_INVALID};
 	odp_packet_t pkt_tbl[TX_BATCH_LEN];
+	odp_packet_t ref_tbl[TX_BATCH_LEN];
 	odp_pktio_capability_t pktio_capa;
 	odp_pktout_queue_t pktout_queue;
 	uint32_t pkt_seq[TX_BATCH_LEN];
@@ -3774,8 +4056,9 @@ static void pktio_test_pktout_compl_poll(void)
 
 	/* Open and configure interfaces */
 	for (i = 0; i < num_ifaces; ++i) {
-		pktio[i] = create_pktio(i, ODP_PKTIN_MODE_DIRECT,
-					ODP_PKTOUT_MODE_DIRECT);
+		pktio[i] = create_pktio_with_flags(i, ODP_PKTIN_MODE_DIRECT,
+						   ODP_PKTOUT_MODE_DIRECT,
+						   test_flags);
 		CU_ASSERT_FATAL(pktio[i] != ODP_PKTIO_INVALID);
 
 		CU_ASSERT_FATAL(odp_pktio_capability(pktio[i], &pktio_capa) == 0);
@@ -3842,14 +4125,22 @@ static void pktio_test_pktout_compl_poll(void)
 		CU_ASSERT(odp_packet_tx_compl_done(pktio_tx, i) == 0);
 	}
 
+	if (test_flags & TEST_WITH_REFS)
+		make_refs(ref_tbl, pkt_tbl, TX_BATCH_LEN);
+
 	CU_ASSERT_FATAL(odp_pktout_send(pktout_queue, pkt_tbl, TX_BATCH_LEN) == TX_BATCH_LEN);
 
 	num_rx = wait_for_packets(&pktio_rx_info, pkt_tbl, pkt_seq, TX_BATCH_LEN, TXRX_MODE_SINGLE,
-				  ODP_TIME_SEC_IN_NS, false);
+				  ODP_TIME_SEC_IN_NS, VECTOR_MODE_DISABLED);
 	CU_ASSERT(num_rx == TX_BATCH_LEN);
-	for (i = 0; i < num_rx; i++)
-		odp_packet_free(pkt_tbl[i]);
 
+	if (test_flags & TEST_WITH_REFS)
+		free_refs(ref_tbl, TX_BATCH_LEN);
+
+	for (i = 0; i < num_rx; i++) {
+		CU_ASSERT(odp_packet_pool(pkt_tbl[i]) == expected_rx_pool(test_flags));
+		odp_packet_free(pkt_tbl[i]);
+	}
 	for (i = 0; i < num_rx; i++) {
 		/* Transmits should be complete since we received the packets already */
 		CU_ASSERT(odp_packet_tx_compl_done(pktio_tx, i) > 0);
@@ -3862,6 +4153,12 @@ static void pktio_test_pktout_compl_poll(void)
 		CU_ASSERT_FATAL(odp_pktio_stop(pktio[i]) == 0);
 		CU_ASSERT_FATAL(odp_pktio_close(pktio[i]) == 0);
 	}
+}
+
+static void pktio_test_pktout_compl_poll(void)
+{
+	for (uint32_t flags = 0; flags < NUM_TEST_FLAG_COMBOS; flags++)
+		test_pktout_compl_poll(flags);
 }
 
 static int pktio_check_pktout_compl_event(bool plain)
@@ -3927,15 +4224,17 @@ static int pktio_check_pktout_compl_event_sched_queue(void)
 
 static void pktio_test_pktout_compl_event_plain_queue(void)
 {
-	pktio_test_pktout_compl_event(true);
+	for (uint32_t flags = 0; flags < NUM_TEST_FLAG_COMBOS; flags++)
+		pktio_test_pktout_compl_event(true, flags);
 }
 
 static void pktio_test_pktout_compl_event_sched_queue(void)
 {
-	pktio_test_pktout_compl_event(false);
+	for (uint32_t flags = 0; flags < NUM_TEST_FLAG_COMBOS; flags++)
+		pktio_test_pktout_compl_event(false, flags);
 }
 
-static void pktio_test_pktout_dont_free(void)
+static void test_pktout_dont_free(uint32_t test_flags)
 {
 	odp_pktio_t pktio[MAX_NUM_IFACES] = {ODP_PKTIO_INVALID};
 	odp_packet_t pkt, rx_pkt;
@@ -3948,12 +4247,15 @@ static void pktio_test_pktout_dont_free(void)
 	const int num_pkt = 1;
 	int transmits = 5;
 	int num_rx = 0;
+	odp_packet_t ref_tbl[num_pkt];
 
 	CU_ASSERT_FATAL(num_ifaces >= 1);
 
 	/* Open and configure interfaces */
 	for (i = 0; i < num_ifaces; ++i) {
-		pktio[i] = create_pktio(i, ODP_PKTIN_MODE_DIRECT, ODP_PKTOUT_MODE_DIRECT);
+		pktio[i] = create_pktio_with_flags(i, ODP_PKTIN_MODE_DIRECT,
+						   ODP_PKTOUT_MODE_DIRECT,
+						   test_flags);
 		CU_ASSERT_FATAL(pktio[i] != ODP_PKTIO_INVALID);
 
 		CU_ASSERT_FATAL(odp_pktio_start(pktio[i]) == 0);
@@ -3984,27 +4286,41 @@ static void pktio_test_pktout_dont_free(void)
 	odp_packet_free_ctrl_set(pkt, ODP_PACKET_FREE_CTRL_DONT_FREE);
 	CU_ASSERT_FATAL(odp_packet_free_ctrl(pkt) == ODP_PACKET_FREE_CTRL_DONT_FREE);
 
+	if (test_flags & TEST_WITH_REFS)
+		make_refs(ref_tbl, &pkt, num_pkt);
+
 	while (transmits--) {
 		/* Retransmit the same packet after it has been received from the RX interface */
 		CU_ASSERT_FATAL(odp_pktout_send(pktout_queue, &pkt, num_pkt) == num_pkt);
 
 		num_rx = wait_for_packets(&pktio_rx_info, &rx_pkt, &pkt_seq, num_pkt,
-					  TXRX_MODE_SINGLE, ODP_TIME_SEC_IN_NS, false);
+					  TXRX_MODE_SINGLE, ODP_TIME_SEC_IN_NS,
+					  VECTOR_MODE_DISABLED);
 		CU_ASSERT(num_rx == num_pkt);
 
 		if (num_rx != num_pkt)
 			break;
 
+		CU_ASSERT(odp_packet_pool(rx_pkt) == expected_rx_pool(test_flags));
 		CU_ASSERT(odp_packet_len(pkt) == odp_packet_len(rx_pkt));
 		odp_packet_free(rx_pkt);
 	}
 
 	odp_packet_free(pkt);
 
+	if (test_flags & TEST_WITH_REFS)
+		free_refs(ref_tbl, num_pkt);
+
 	for (i = 0; i < num_ifaces; i++) {
 		CU_ASSERT_FATAL(odp_pktio_stop(pktio[i]) == 0);
 		CU_ASSERT_FATAL(odp_pktio_close(pktio[i]) == 0);
 	}
+}
+
+static void pktio_test_pktout_dont_free(void)
+{
+	for (uint32_t flags = 0; flags < NUM_TEST_FLAG_COMBOS; flags++)
+		test_pktout_dont_free(flags);
 }
 
 static int pktio_check_pktout_dont_free(void)
@@ -4031,15 +4347,17 @@ static int pktio_check_pktout_dont_free(void)
 	return ODP_TEST_INACTIVE;
 }
 
-static void pktio_test_chksum(void (*config_fn)(odp_pktio_t, odp_pktio_t),
-			      void (*prep_fn)(odp_packet_t pkt),
-			      void (*test_fn)(odp_packet_t pkt))
+static void test_chksum(void (*config_fn)(odp_pktio_t, odp_pktio_t),
+			void (*prep_fn)(odp_packet_t pkt),
+			void (*test_fn)(odp_packet_t pkt),
+			uint32_t test_flags)
 {
 	odp_pktio_t pktio_tx, pktio_rx;
 	odp_pktio_t pktio[MAX_NUM_IFACES] = {ODP_PKTIO_INVALID};
 	pktio_info_t pktio_rx_info;
 	odp_pktout_queue_t pktout_queue;
 	odp_packet_t pkt_tbl[TX_BATCH_LEN];
+	odp_packet_t ref_tbl[TX_BATCH_LEN];
 	uint32_t pkt_seq[TX_BATCH_LEN];
 	int ret;
 	int i, num_rx;
@@ -4048,8 +4366,9 @@ static void pktio_test_chksum(void (*config_fn)(odp_pktio_t, odp_pktio_t),
 
 	/* Open and configure interfaces */
 	for (i = 0; i < num_ifaces; ++i) {
-		pktio[i] = create_pktio(i, ODP_PKTIN_MODE_DIRECT,
-					ODP_PKTOUT_MODE_DIRECT);
+		pktio[i] = create_pktio_with_flags(i, ODP_PKTIN_MODE_DIRECT,
+						   ODP_PKTOUT_MODE_DIRECT,
+						   test_flags);
 		CU_ASSERT_FATAL(pktio[i] != ODP_PKTIO_INVALID);
 	}
 
@@ -4090,12 +4409,18 @@ static void pktio_test_chksum(void (*config_fn)(odp_pktio_t, odp_pktio_t),
 		if (prep_fn)
 			prep_fn(pkt_tbl[i]);
 
+	if (test_flags & TEST_WITH_REFS)
+		make_refs(ref_tbl, pkt_tbl, TX_BATCH_LEN);
 	send_packets(pktout_queue, pkt_tbl, TX_BATCH_LEN);
 	num_rx = wait_for_packets(&pktio_rx_info, pkt_tbl, pkt_seq,
 				  TX_BATCH_LEN, TXRX_MODE_MULTI,
-				  ODP_TIME_SEC_IN_NS, false);
+				  ODP_TIME_SEC_IN_NS, VECTOR_MODE_DISABLED);
 	CU_ASSERT(num_rx == TX_BATCH_LEN);
+	if (test_flags & TEST_WITH_REFS)
+		free_refs(ref_tbl, TX_BATCH_LEN);
 	for (i = 0; i < num_rx; i++) {
+		CU_ASSERT(odp_packet_pool(pkt_tbl[i]) == expected_rx_pool(test_flags));
+		CU_ASSERT(odp_packet_has_ref(pkt_tbl[i]) == 0);
 		test_fn(pkt_tbl[i]);
 		odp_packet_free(pkt_tbl[i]);
 	}
@@ -4106,15 +4431,25 @@ static void pktio_test_chksum(void (*config_fn)(odp_pktio_t, odp_pktio_t),
 	}
 }
 
-static void pktio_test_chksum_sctp(void (*config_fn)(odp_pktio_t, odp_pktio_t),
-				   void (*prep_fn)(odp_packet_t pkt),
-				   void (*test_fn)(odp_packet_t pkt))
+static void pktio_test_chksum(void (*config_fn)(odp_pktio_t, odp_pktio_t),
+			      void (*prep_fn)(odp_packet_t pkt),
+			      void (*test_fn)(odp_packet_t pkt))
+{
+	for (uint32_t flags = 0; flags < NUM_TEST_FLAG_COMBOS; flags++)
+		test_chksum(config_fn, prep_fn, test_fn, flags);
+}
+
+static void test_chksum_sctp(void (*config_fn)(odp_pktio_t, odp_pktio_t),
+			     void (*prep_fn)(odp_packet_t pkt),
+			     void (*test_fn)(odp_packet_t pkt),
+			     uint32_t test_flags)
 {
 	odp_pktio_t pktio_tx, pktio_rx;
 	odp_pktio_t pktio[MAX_NUM_IFACES] = {ODP_PKTIO_INVALID};
 	pktio_info_t pktio_rx_info;
 	odp_pktout_queue_t pktout_queue;
 	odp_packet_t pkt_tbl[TX_BATCH_LEN];
+	odp_packet_t ref_tbl[TX_BATCH_LEN];
 	uint32_t pkt_seq[TX_BATCH_LEN];
 	int ret;
 	int i, num_rx;
@@ -4123,8 +4458,9 @@ static void pktio_test_chksum_sctp(void (*config_fn)(odp_pktio_t, odp_pktio_t),
 
 	/* Open and configure interfaces */
 	for (i = 0; i < num_ifaces; ++i) {
-		pktio[i] = create_pktio(i, ODP_PKTIN_MODE_DIRECT,
-					ODP_PKTOUT_MODE_DIRECT);
+		pktio[i] = create_pktio_with_flags(i, ODP_PKTIN_MODE_DIRECT,
+						   ODP_PKTOUT_MODE_DIRECT,
+						   test_flags);
 		CU_ASSERT_FATAL(pktio[i] != ODP_PKTIO_INVALID);
 	}
 
@@ -4165,12 +4501,18 @@ static void pktio_test_chksum_sctp(void (*config_fn)(odp_pktio_t, odp_pktio_t),
 		if (prep_fn)
 			prep_fn(pkt_tbl[i]);
 
+	if (test_flags & TEST_WITH_REFS)
+		make_refs(ref_tbl, pkt_tbl, TX_BATCH_LEN);
 	send_packets(pktout_queue, pkt_tbl, TX_BATCH_LEN);
 	num_rx = wait_for_packets_hdr(&pktio_rx_info, pkt_tbl, pkt_seq,
 				      TX_BATCH_LEN, TXRX_MODE_MULTI,
-				      ODP_TIME_SEC_IN_NS, ODPH_SCTPHDR_LEN, false);
+				      ODP_TIME_SEC_IN_NS, ODPH_SCTPHDR_LEN, VECTOR_MODE_DISABLED);
 	CU_ASSERT(num_rx == TX_BATCH_LEN);
+	if (test_flags & TEST_WITH_REFS)
+		free_refs(ref_tbl, TX_BATCH_LEN);
 	for (i = 0; i < num_rx; i++) {
+		CU_ASSERT(odp_packet_pool(pkt_tbl[i]) == expected_rx_pool(test_flags));
+		CU_ASSERT(odp_packet_has_ref(pkt_tbl[i]) == 0);
 		test_fn(pkt_tbl[i]);
 		odp_packet_free(pkt_tbl[i]);
 	}
@@ -4179,6 +4521,14 @@ static void pktio_test_chksum_sctp(void (*config_fn)(odp_pktio_t, odp_pktio_t),
 		CU_ASSERT_FATAL(odp_pktio_stop(pktio[i]) == 0);
 		CU_ASSERT_FATAL(odp_pktio_close(pktio[i]) == 0);
 	}
+}
+
+static void pktio_test_chksum_sctp(void (*config_fn)(odp_pktio_t, odp_pktio_t),
+				   void (*prep_fn)(odp_packet_t pkt),
+				   void (*test_fn)(odp_packet_t pkt))
+{
+	for (uint32_t flags = 0; flags < NUM_TEST_FLAG_COMBOS; flags++)
+		test_chksum_sctp(config_fn, prep_fn, test_fn, flags);
 }
 
 static int pktio_check_chksum_in_ipv4(void)
@@ -4747,7 +5097,7 @@ static int create_pktv_pool(const char *iface, int num)
 	if (odp_pool_capability(&pool_capa) != 0)
 		return -1;
 
-	if (pool_capa.vector.max_num < PKT_BUF_NUM)
+	if (pool_capa.vector.max_num && pool_capa.vector.max_num < PKT_BUF_NUM)
 		return -1;
 
 	odp_pool_param_init(&params);
@@ -4761,6 +5111,34 @@ static int create_pktv_pool(const char *iface, int num)
 
 	pktv_pool[num] = odp_pool_create(pool_name, &params);
 	if (ODP_POOL_INVALID == pktv_pool[num]) {
+		ODPH_ERR("failed to create pool: %s\n", pool_name);
+		return -1;
+	}
+
+	return 0;
+}
+
+static int create_evv_pool(const char *iface, int num)
+{
+	char pool_name[ODP_POOL_NAME_LEN];
+	odp_pool_capability_t pool_capa;
+	odp_pool_param_t params;
+
+	if (odp_pool_capability(&pool_capa) != 0)
+		return -1;
+
+	if (pool_capa.event_vector.max_num && pool_capa.event_vector.max_num < PKT_BUF_NUM)
+		return -1;
+
+	odp_pool_param_init(&params);
+	params.type = ODP_POOL_EVENT_VECTOR;
+	params.event_vector.num = PKT_BUF_NUM;
+	params.event_vector.max_size = pool_capa.event_vector.max_size;
+
+	snprintf(pool_name, sizeof(pool_name), "evv_pool_%s_%d", iface, pool_segmentation);
+
+	evv_pool[num] = odp_pool_create(pool_name, &params);
+	if (evv_pool[num] == ODP_POOL_INVALID) {
 		ODPH_ERR("failed to create pool: %s\n", pool_name);
 		return -1;
 	}
@@ -4803,25 +5181,70 @@ static int pktio_check_pktv_sched(void)
 
 static void pktio_test_pktv_recv_plain(void)
 {
-	test_txrx(ODP_PKTIN_MODE_QUEUE, PKTV_TX_BATCH_LEN, TXRX_MODE_MULTI_EVENT, 0, true);
+	test_txrx(ODP_PKTIN_MODE_QUEUE, PKTV_TX_BATCH_LEN, TXRX_MODE_MULTI_EVENT,
+		  0, VECTOR_MODE_PACKET);
 }
 
 static void pktio_test_pktv_recv_parallel(void)
 {
 	test_txrx(ODP_PKTIN_MODE_SCHED, PKTV_TX_BATCH_LEN, TXRX_MODE_MULTI_EVENT,
-		  ODP_SCHED_SYNC_PARALLEL, true);
+		  ODP_SCHED_SYNC_PARALLEL, VECTOR_MODE_PACKET);
 }
 
 static void pktio_test_pktv_recv_ordered(void)
 {
 	test_txrx(ODP_PKTIN_MODE_SCHED, PKTV_TX_BATCH_LEN, TXRX_MODE_MULTI_EVENT,
-		  ODP_SCHED_SYNC_ORDERED, true);
+		  ODP_SCHED_SYNC_ORDERED, VECTOR_MODE_PACKET);
 }
 
 static void pktio_test_pktv_recv_atomic(void)
 {
 	test_txrx(ODP_PKTIN_MODE_SCHED, PKTV_TX_BATCH_LEN, TXRX_MODE_MULTI_EVENT,
-		  ODP_SCHED_SYNC_ATOMIC, true);
+		  ODP_SCHED_SYNC_ATOMIC, VECTOR_MODE_PACKET);
+}
+
+static int pktio_check_evv(odp_pktin_mode_t in_mode)
+{
+	odp_event_aggr_capability_t aggr_capa;
+
+	if (event_aggr_capability(&aggr_capa, in_mode) || aggr_capa.max_num < 1)
+		return ODP_TEST_INACTIVE;
+
+	return ODP_TEST_ACTIVE;
+}
+
+static int pktio_check_evv_queue(void)
+{
+	return pktio_check_evv(ODP_PKTIN_MODE_QUEUE);
+}
+
+static int pktio_check_evv_sched(void)
+{
+	return pktio_check_evv(ODP_PKTIN_MODE_SCHED);
+}
+
+static void pktio_test_evv_recv_plain(void)
+{
+	test_txrx(ODP_PKTIN_MODE_QUEUE, PKTV_TX_BATCH_LEN, TXRX_MODE_MULTI_EVENT,
+		  0, VECTOR_MODE_EVENT);
+}
+
+static void pktio_test_evv_recv_parallel(void)
+{
+	test_txrx(ODP_PKTIN_MODE_SCHED, PKTV_TX_BATCH_LEN, TXRX_MODE_MULTI_EVENT,
+		  ODP_SCHED_SYNC_PARALLEL, VECTOR_MODE_EVENT);
+}
+
+static void pktio_test_evv_recv_ordered(void)
+{
+	test_txrx(ODP_PKTIN_MODE_SCHED, PKTV_TX_BATCH_LEN, TXRX_MODE_MULTI_EVENT,
+		  ODP_SCHED_SYNC_ORDERED, VECTOR_MODE_EVENT);
+}
+
+static void pktio_test_evv_recv_atomic(void)
+{
+	test_txrx(ODP_PKTIN_MODE_SCHED, PKTV_TX_BATCH_LEN, TXRX_MODE_MULTI_EVENT,
+		  ODP_SCHED_SYNC_ATOMIC, VECTOR_MODE_EVENT);
 }
 
 static void pktio_test_pktv_pktin_queue_config(odp_pktin_mode_t in_mode)
@@ -4909,6 +5332,94 @@ static void pktio_test_pktv_pktin_queue_config_sched(void)
 	pktio_test_pktv_pktin_queue_config(ODP_PKTIN_MODE_SCHED);
 }
 
+static void pktio_test_evv_pktin_queue_config(odp_pktin_mode_t in_mode)
+{
+	odp_pktin_queue_param_t pktin_param;
+	odp_pktio_capability_t pktio_capa;
+	odp_event_aggr_capability_t aggr_capa;
+	odp_queue_t pktin_queue;
+	odp_queue_info_t queue_info;
+	odp_queue_type_t queue_type = in_mode == ODP_PKTIN_MODE_SCHED ?
+					ODP_QUEUE_TYPE_SCHED : ODP_QUEUE_TYPE_PLAIN;
+	odp_pktio_t pktio;
+	uint32_t num_queues, max_aggr_per_queue;
+	odp_event_type_t event_types[] = {ODP_EVENT_BUFFER, ODP_EVENT_PACKET, ODP_EVENT_TIMEOUT,
+					  ODP_EVENT_IPSEC_STATUS, ODP_EVENT_PACKET_TX_COMPL,
+					  ODP_EVENT_DMA_COMPL, ODP_EVENT_ML_COMPL};
+
+	CU_ASSERT_FATAL(event_aggr_capability(&aggr_capa, in_mode) == 0);
+
+	pktio = create_pktio(0, in_mode, ODP_PKTOUT_MODE_DIRECT);
+	CU_ASSERT_FATAL(pktio != ODP_PKTIO_INVALID);
+
+	CU_ASSERT_FATAL(odp_pktio_capability(pktio, &pktio_capa) == 0 &&
+			pktio_capa.max_input_queues > 0);
+	num_queues = pktio_capa.max_input_queues;
+
+	if (num_queues > aggr_capa.max_num)
+		num_queues = aggr_capa.max_num;
+
+	max_aggr_per_queue = aggr_capa.max_num_per_queue;
+	if (num_queues * max_aggr_per_queue > aggr_capa.max_num)
+		max_aggr_per_queue = aggr_capa.max_num / num_queues;
+
+	CU_ASSERT_FATAL(max_aggr_per_queue > 0);
+
+	odp_event_aggr_config_t aggr_config[max_aggr_per_queue];
+
+	odp_pktin_queue_param_init(&pktin_param);
+	pktin_param.hash_enable = num_queues > 1 ? 1 : 0;
+	pktin_param.hash_proto.proto.ipv4_udp = 1;
+	pktin_param.num_queues = num_queues;
+	pktin_param.queue_param.aggr = aggr_config;
+	pktin_param.queue_param.num_aggr = max_aggr_per_queue;
+
+	memset(aggr_config, 0, max_aggr_per_queue * sizeof(odp_event_aggr_config_t));
+	aggr_config[0].pool = default_evv_pool;
+	aggr_config[0].event_type = ODP_EVENT_ANY;
+	aggr_config[0].max_tmo_ns = aggr_capa.min_tmo_ns;
+	aggr_config[0].max_size = aggr_capa.min_size;
+
+	for (uint32_t i = 1; i < max_aggr_per_queue; i++)
+		aggr_config[i] = aggr_config[0];
+
+	CU_ASSERT(odp_pktin_queue_config(pktio, &pktin_param) == 0);
+
+	CU_ASSERT_FATAL(odp_pktin_event_queue(pktio, &pktin_queue, 1) == (int)num_queues);
+	CU_ASSERT_FATAL(odp_queue_info(pktin_queue, &queue_info) == 0);
+	CU_ASSERT(queue_info.type == queue_type);
+
+	aggr_config[0].max_size = aggr_capa.max_size;
+	CU_ASSERT(odp_pktin_queue_config(pktio, &pktin_param) == 0);
+
+	aggr_config[0].max_size = aggr_capa.min_size + aggr_capa.max_size - aggr_capa.min_size;
+	CU_ASSERT(odp_pktin_queue_config(pktio, &pktin_param) == 0);
+
+	aggr_config[0].max_tmo_ns = aggr_capa.max_tmo_ns;
+	CU_ASSERT(odp_pktin_queue_config(pktio, &pktin_param) == 0);
+
+	aggr_config[0].max_tmo_ns = aggr_capa.min_tmo_ns + aggr_capa.max_tmo_ns -
+					aggr_capa.min_tmo_ns;
+	CU_ASSERT(odp_pktin_queue_config(pktio, &pktin_param) == 0);
+
+	for (uint32_t i = 0; i < ODPH_ARRAY_SIZE(event_types); i++) {
+		aggr_config[0].event_type = event_types[i];
+		CU_ASSERT(odp_pktin_queue_config(pktio, &pktin_param) == 0);
+	}
+
+	CU_ASSERT(odp_pktio_close(pktio) == 0);
+}
+
+static void pktio_test_evv_pktin_queue_config_queue(void)
+{
+	pktio_test_evv_pktin_queue_config(ODP_PKTIN_MODE_QUEUE);
+}
+
+static void pktio_test_evv_pktin_queue_config_sched(void)
+{
+	pktio_test_evv_pktin_queue_config(ODP_PKTIN_MODE_SCHED);
+}
+
 static void pktio_test_recv_maxlen_set(void)
 {
 	odp_pktio_t pktio_tx, pktio_rx;
@@ -4979,12 +5490,17 @@ static void pktio_test_recv_maxlen_set(void)
 		CU_ASSERT_FATAL(odp_pktout_send(pktout_queue,
 						&pkt_tbl[i], 1) == 1);
 		ret = wait_for_packets(&pktio_rx_info, &pkt_tbl[i], &pkt_seq[i],
-				       1, TXRX_MODE_SINGLE, ODP_TIME_SEC_IN_NS, false);
+				       1, TXRX_MODE_SINGLE, ODP_TIME_SEC_IN_NS,
+				       VECTOR_MODE_DISABLED);
 		if (ret != 1)
 			break;
 	}
 	num_rx = i;
 	CU_ASSERT(num_rx == TX_BATCH_LEN);
+
+	for (i = 0; i < num_rx; i++) {
+		CU_ASSERT(odp_packet_pool(pkt_tbl[i]) == expected_rx_pool(0));
+	}
 
 	if (num_rx)
 		odp_packet_free_multi(pkt_tbl, num_rx);
@@ -5022,10 +5538,11 @@ static int pktio_check_pktout_aging_tmo(void)
 	return ODP_TEST_ACTIVE;
 }
 
-static void pktio_test_pktout_aging_tmo(void)
+static void test_pktout_aging_tmo(uint32_t test_flags)
 {
 	odp_pktio_t pktio[MAX_NUM_IFACES] = {ODP_PKTIO_INVALID};
 	odp_packet_t pkt_tbl[TX_BATCH_LEN];
+	odp_packet_t ref_tbl[TX_BATCH_LEN];
 	odp_pktio_capability_t pktio_capa;
 	odp_pktout_queue_t pktout_queue;
 	uint32_t pkt_seq[TX_BATCH_LEN];
@@ -5037,8 +5554,9 @@ static void pktio_test_pktout_aging_tmo(void)
 
 	/* Open and configure interfaces */
 	for (i = 0; i < num_ifaces; ++i) {
-		pktio[i] = create_pktio(i, ODP_PKTIN_MODE_DIRECT,
-					ODP_PKTOUT_MODE_DIRECT);
+		pktio[i] = create_pktio_with_flags(i, ODP_PKTIN_MODE_DIRECT,
+						   ODP_PKTOUT_MODE_DIRECT,
+						   test_flags);
 		CU_ASSERT_FATAL(pktio[i] != ODP_PKTIO_INVALID);
 
 		CU_ASSERT_FATAL(odp_pktio_capability(pktio[i], &pktio_capa) == 0);
@@ -5089,18 +5607,32 @@ static void pktio_test_pktout_aging_tmo(void)
 		CU_ASSERT(odp_packet_aging_tmo(pkt_tbl[i]) != 0);
 	}
 
+	if (test_flags & TEST_WITH_REFS)
+		make_refs(ref_tbl, pkt_tbl, TX_BATCH_LEN);
+
 	CU_ASSERT_FATAL(odp_pktout_send(pktout_queue, pkt_tbl, TX_BATCH_LEN) == TX_BATCH_LEN);
 
 	num_rx = wait_for_packets(&pktio_rx_info, pkt_tbl, pkt_seq, TX_BATCH_LEN, TXRX_MODE_SINGLE,
-				  ODP_TIME_SEC_IN_NS, false);
+				  ODP_TIME_SEC_IN_NS, VECTOR_MODE_DISABLED);
 	CU_ASSERT(num_rx == TX_BATCH_LEN);
-	for (i = 0; i < num_rx; i++)
+	if (test_flags & TEST_WITH_REFS)
+		free_refs(ref_tbl, TX_BATCH_LEN);
+
+	for (i = 0; i < num_rx; i++) {
+		CU_ASSERT(odp_packet_pool(pkt_tbl[i]) == expected_rx_pool(test_flags));
 		odp_packet_free(pkt_tbl[i]);
+	}
 
 	for (i = 0; i < num_ifaces; i++) {
 		CU_ASSERT_FATAL(odp_pktio_stop(pktio[i]) == 0);
 		CU_ASSERT_FATAL(odp_pktio_close(pktio[i]) == 0);
 	}
+}
+
+static void pktio_test_pktout_aging_tmo(void)
+{
+	for (uint32_t flags = 0; flags < NUM_TEST_FLAG_COMBOS; flags++)
+		test_pktout_aging_tmo(flags);
 }
 
 static void pktio_test_pktin_event_queue(odp_pktin_mode_t pktin_mode)
@@ -5297,6 +5829,9 @@ static int pktio_suite_init(void)
 
 		if (create_pktv_pool(iface_name[i], i) != 0)
 			return -1;
+
+		if (create_evv_pool(iface_name[i], i) != 0)
+			return -1;
 	}
 
 	if (default_pool_create() != 0) {
@@ -5306,6 +5841,11 @@ static int pktio_suite_init(void)
 
 	if (default_pktv_pool_create() != 0) {
 		ODPH_ERR("failed to create default pktv pool\n");
+		return -1;
+	}
+
+	if (default_evv_pool_create() != 0) {
+		ODPH_ERR("failed to create default event vector pool\n");
 		return -1;
 	}
 
@@ -5325,6 +5865,12 @@ static int pktio_suite_init_segmented(void)
 }
 
 static int pktv_suite_init(void)
+{
+	pool_segmentation = PKT_POOL_UNSEGMENTED;
+	return pktio_suite_init();
+}
+
+static int evv_suite_init(void)
 {
 	pool_segmentation = PKT_POOL_UNSEGMENTED;
 	return pktio_suite_init();
@@ -5363,6 +5909,19 @@ static int pktio_suite_term(void)
 		}
 	}
 
+	for (i = 0; i < num_ifaces; ++i) {
+		snprintf(pool_name, sizeof(pool_name),
+			 "evv_pool_%s_%d", iface_name[i], pool_segmentation);
+		pool = odp_pool_lookup(pool_name);
+		if (pool == ODP_POOL_INVALID)
+			continue;
+
+		if (odp_pool_destroy(pool) != 0) {
+			ODPH_ERR("failed to destroy pool %s\n", pool_name);
+			ret = -1;
+		}
+	}
+
 	if (odp_pool_destroy(default_pkt_pool) != 0) {
 		ODPH_ERR("failed to destroy default pool\n");
 		ret = -1;
@@ -5375,6 +5934,12 @@ static int pktio_suite_term(void)
 	}
 	default_pktv_pool = ODP_POOL_INVALID;
 
+	if (odp_pool_destroy(default_evv_pool) != 0) {
+		ODPH_ERR("failed to destroy default event vector pool\n");
+		ret = -1;
+	}
+	default_evv_pool = ODP_POOL_INVALID;
+
 	if (odp_cunit_print_inactive())
 		ret = -1;
 
@@ -5382,6 +5947,12 @@ static int pktio_suite_term(void)
 }
 
 static int pktv_suite_term(void)
+{
+	pool_segmentation = PKT_POOL_UNSEGMENTED;
+	return pktio_suite_term();
+}
+
+static int evv_suite_term(void)
 {
 	pool_segmentation = PKT_POOL_UNSEGMENTED;
 	return pktio_suite_term();
@@ -5504,6 +6075,16 @@ odp_testinfo_t pktv_suite[] = {
 	ODP_TEST_INFO_NULL
 };
 
+odp_testinfo_t evv_suite[] = {
+	ODP_TEST_INFO_CONDITIONAL(pktio_test_evv_pktin_queue_config_queue, pktio_check_evv_queue),
+	ODP_TEST_INFO_CONDITIONAL(pktio_test_evv_pktin_queue_config_sched, pktio_check_evv_sched),
+	ODP_TEST_INFO_CONDITIONAL(pktio_test_evv_recv_plain, pktio_check_evv_queue),
+	ODP_TEST_INFO_CONDITIONAL(pktio_test_evv_recv_parallel, pktio_check_evv_sched),
+	ODP_TEST_INFO_CONDITIONAL(pktio_test_evv_recv_ordered, pktio_check_evv_sched),
+	ODP_TEST_INFO_CONDITIONAL(pktio_test_evv_recv_atomic, pktio_check_evv_sched),
+	ODP_TEST_INFO_NULL
+};
+
 odp_suiteinfo_t pktio_suites[] = {
 	{"Packet I/O Unsegmented", pktio_suite_init_unsegmented,
 	 pktio_suite_term, pktio_suite_unsegmented},
@@ -5511,6 +6092,7 @@ odp_suiteinfo_t pktio_suites[] = {
 	 pktio_suite_term, pktio_suite_segmented},
 	{"Packet parser", parser_suite_init, parser_suite_term, parser_suite},
 	{"Packet vector", pktv_suite_init, pktv_suite_term, pktv_suite},
+	{"Event vector", evv_suite_init, evv_suite_term, evv_suite},
 	{"Large Segment Offload", lso_suite_init, lso_suite_term, lso_suite},
 	ODP_SUITE_INFO_NULL
 };

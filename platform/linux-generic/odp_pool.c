@@ -497,7 +497,6 @@ static void init_event_hdr(pool_t *pool, _odp_event_hdr_t *event_hdr, uint32_t e
 	/* Initialize common event metadata */
 	event_hdr->index.pool   = pool->pool_idx;
 	event_hdr->index.event  = event_index;
-	event_hdr->type         = type;
 	event_hdr->event_type   = type;
 	event_hdr->subtype      = ODP_EVENT_NO_SUBTYPE;
 	event_hdr->pool         = _odp_pool_handle(pool);
@@ -804,11 +803,6 @@ odp_pool_t _odp_pool_create(const char *name, const odp_pool_param_t *params,
 		break;
 
 	case ODP_POOL_PACKET:
-		if (params->pkt.headroom > CONFIG_PACKET_HEADROOM) {
-			_ODP_ERR("Packet headroom size not supported\n");
-			return ODP_POOL_INVALID;
-		}
-
 		num = params->pkt.num;
 		seg_len = CONFIG_PACKET_MAX_SEG_LEN;
 		max_len = _odp_pool_glb->config.pkt_max_len;
@@ -1935,6 +1929,9 @@ int _odp_event_is_valid(odp_event_t event)
 
 int odp_buffer_is_valid(odp_buffer_t buf)
 {
+	if (odp_unlikely(buf == ODP_BUFFER_INVALID))
+		return 0;
+
 	if (_odp_event_is_valid(odp_buffer_to_event(buf)) == 0)
 		return 0;
 

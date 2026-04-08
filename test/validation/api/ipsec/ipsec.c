@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2017-2018 Linaro Limited
- * Copyright (c) 2018-2022 Nokia
+ * Copyright (c) 2018-2025 Nokia
  * Copyright (c) 2020-2021 Marvell
  */
 
@@ -527,9 +527,51 @@ void ipsec_sa_destroy(odp_ipsec_sa_t sa)
 	CU_ASSERT(ODP_IPSEC_OK == odp_ipsec_sa_destroy(sa));
 }
 
-odp_packet_t ipsec_packet(const ipsec_test_packet *itp)
+static odp_packet_t alloc_segmented_packet(uint32_t len, uint32_t first_seg_len)
 {
-	odp_packet_t pkt = odp_packet_alloc(suite_context.pool, itp->len);
+	odp_packet_t pkt, seg;
+
+	pkt = odp_packet_alloc(suite_context.pool, first_seg_len);
+	if (pkt == ODP_PACKET_INVALID)
+		return ODP_PACKET_INVALID;
+
+	seg = odp_packet_alloc(suite_context.pool, len - first_seg_len);
+	if (seg == ODP_PACKET_INVALID) {
+		odp_packet_free(pkt);
+		return ODP_PACKET_INVALID;
+	}
+
+	if (odp_packet_concat(&pkt, seg) < 0) {
+		CU_FAIL("odp_packet_concat() failed\n");
+		odp_packet_free(pkt);
+		odp_packet_free(seg);
+		return ODP_PACKET_INVALID;
+	}
+
+	/*
+	 * odp_packet_concat() is not guaranteed to return the kind of
+	 * segmented packet we expect here, but we rely on it anyway
+	 * since it appears to work with current implementations and
+	 * there is no API-sanctioned way to force certain packet layout.
+	 *
+	 * Fail the test if the assumption does not hold so it gets noticed.
+	 */
+	CU_ASSERT(odp_packet_is_segmented(pkt));
+	CU_ASSERT(odp_packet_num_segs(pkt) == 2);
+	CU_ASSERT(odp_packet_seg_len(pkt) == first_seg_len);
+	CU_ASSERT(odp_packet_len(pkt) == len);
+
+	return pkt;
+}
+
+odp_packet_t ipsec_packet(const ipsec_test_packet *itp, uint32_t first_seg_len)
+{
+	odp_packet_t pkt;
+
+	if (first_seg_len == 0 || first_seg_len >= itp->len)
+		pkt = odp_packet_alloc(suite_context.pool, itp->len);
+	else
+		pkt = alloc_segmented_packet(itp->len, first_seg_len);
 
 	CU_ASSERT_FATAL(ODP_PACKET_INVALID != pkt);
 	if (ODP_PACKET_INVALID == pkt)
@@ -648,7 +690,7 @@ static int send_pkts(const ipsec_test_part part[], int num_part)
 	}
 
 	for (i = 0; i < num_part; i++)
-		pkt[i] = ipsec_packet(part[i].pkt_in);
+		pkt[i] = ipsec_packet(part[i].pkt_in, 0);
 
 	CU_ASSERT(num_part == odp_pktout_send(pktout, pkt, num_part));
 
@@ -771,7 +813,7 @@ static int ipsec_process_in(const ipsec_test_part *part,
 	}
 
 	if (ODP_IPSEC_OP_MODE_SYNC == suite_context.inbound_op_mode) {
-		pkt = ipsec_packet(part->pkt_in);
+		pkt = ipsec_packet(part->pkt_in, part->first_seg_len);
 		CU_ASSERT(part->num_pkt == odp_ipsec_in(&pkt, 1, pkto, &num_out, &param));
 		CU_ASSERT(num_out == part->num_pkt);
 		CU_ASSERT_FATAL(*pkto != ODP_PACKET_INVALID);
@@ -779,7 +821,7 @@ static int ipsec_process_in(const ipsec_test_part *part,
 	} else if (ODP_IPSEC_OP_MODE_ASYNC == suite_context.inbound_op_mode) {
 		int consumed;
 
-		pkt = ipsec_packet(part->pkt_in);
+		pkt = ipsec_packet(part->pkt_in, part->first_seg_len);
 		consumed = odp_ipsec_in_enq(&pkt, 1, &param);
 		CU_ASSERT(1 == consumed);
 		if (consumed <= 0)
@@ -856,7 +898,7 @@ static int ipsec_send_out_one(const ipsec_test_part *part,
 	odp_packet_t pkt;
 	int i;
 
-	pkt = ipsec_packet(part->pkt_in);
+	pkt = ipsec_packet(part->pkt_in, part->first_seg_len);
 
 	memset(&param, 0, sizeof(param));
 	param.num_sa = 1;
@@ -1026,28 +1068,50 @@ static void ipsec_pkt_seq_num_check(odp_packet_t pkt, uint32_t seq_num)
 	uint32_t l3_off = odp_packet_l3_offset(pkt);
 	uint32_t l4_off;
 	odph_ipv4hdr_t ip;
+	uint8_t proto;
 
 	CU_ASSERT_FATAL(ODP_PACKET_OFFSET_INVALID != l3_off);
 	CU_ASSERT_FATAL(0 == odp_packet_copy_to_mem(pkt, l3_off, sizeof(ip), &ip));
 
 	if (ODPH_IPV4HDR_VER(ip.ver_ihl) == ODPH_IPV4) {
 		l4_off = l3_off + (ODPH_IPV4HDR_IHL(ip.ver_ihl) * 4);
+		proto = ip.proto;
+	} else if (ODPH_IPV4HDR_VER(ip.ver_ihl) == ODPH_IPV6) {
+		odph_ipv6hdr_t ip6 = {.next_hdr = 0};
 
-		if (ip.proto == ODPH_IPPROTO_ESP) {
-			odph_esphdr_t esp;
+		l4_off = l3_off + sizeof(ip6);
+		CU_ASSERT(odp_packet_copy_to_mem(pkt, l3_off, sizeof(ip6), &ip6) == 0);
+		proto = ip6.next_hdr;
 
-			odp_packet_copy_to_mem(pkt, l4_off, sizeof(esp), &esp);
-			CU_ASSERT(odp_be_to_cpu_32(esp.seq_no) == seq_num);
-		} else if (ip.proto == ODPH_IPPROTO_AH) {
-			odph_ahhdr_t ah;
+		if (proto == ODPH_IPPROTO_HOPOPTS) {
+			odph_ipv6hdr_ext_t ext = {.next_hdr = 0};
 
-			odp_packet_copy_to_mem(pkt, l4_off, sizeof(ah), &ah);
-			CU_ASSERT(odp_be_to_cpu_32(ah.seq_no) == seq_num);
-		} else {
-			CU_FAIL("Unexpected IP Proto");
+			CU_ASSERT(odp_packet_copy_to_mem(pkt, l4_off, sizeof(ext), &ext) == 0);
+			l4_off += sizeof(ext);
+			proto = ext.next_hdr;
 		}
 	} else {
 		CU_FAIL("Unexpected IP Version");
+		return;
+	}
+
+	if (proto == ODPH_IPPROTO_UDP) {
+		l4_off += sizeof(odph_udphdr_t);
+		proto = ODPH_IPPROTO_ESP; /* The packet must be UDP encapsulated ESP */
+	}
+
+	if (proto == ODPH_IPPROTO_ESP) {
+		odph_esphdr_t esp = {.seq_no = 0};
+
+		CU_ASSERT(odp_packet_copy_to_mem(pkt, l4_off, sizeof(esp), &esp) == 0);
+		CU_ASSERT(odp_be_to_cpu_32(esp.seq_no) == seq_num);
+	} else if (proto == ODPH_IPPROTO_AH) {
+		odph_ahhdr_t ah = {.seq_no = 0};
+
+		CU_ASSERT(odp_packet_copy_to_mem(pkt, l4_off, sizeof(ah), &ah) == 0);
+		CU_ASSERT(odp_be_to_cpu_32(ah.seq_no) == seq_num);
+	} else {
+		CU_FAIL("Unexpected IP Proto");
 	}
 }
 
@@ -1169,7 +1233,7 @@ int ipsec_check_out(const ipsec_test_part *part, odp_ipsec_sa_t sa,
 			parse_ip(pkto[i]);
 		}
 
-		if (part->flags.test_sa_seq_num)
+		if (part->out[i].status.error.all == 0)
 			ipsec_pkt_seq_num_check(pkto[i], part->out[i].seq_num);
 
 		ipsec_check_packet(part->out[i].pkt_res,
@@ -1242,6 +1306,46 @@ void ipsec_test_packet_from_pkt(ipsec_test_packet *test_pkt, odp_packet_t *pkt)
 	test_pkt->l4_offset = odp_packet_l4_offset(*pkt);
 	odp_packet_copy_to_mem(*pkt, 0, test_pkt->len, test_pkt->data);
 	odp_packet_free(*pkt);
+}
+
+void rebuild_ethernet_header(ipsec_test_packet *pkt)
+{
+	odph_ethhdr_t eth = {
+		.dst.addr = {0x02, 0x00, 0x00, 0x00, 0x00, 0x01},
+		.src.addr = {0x02, 0x00, 0x00, 0x00, 0x00, 0x02},
+	};
+	uint32_t l3_len;
+
+	CU_ASSERT_FATAL(pkt->l3_offset != ODP_PACKET_OFFSET_INVALID);
+	CU_ASSERT_FATAL(pkt->len > pkt->l3_offset);
+	l3_len = pkt->len - pkt->l3_offset;
+	CU_ASSERT_FATAL(ODPH_ETHHDR_LEN + l3_len < sizeof(pkt->data));
+
+	if (pkt->l3_offset != ODPH_ETHHDR_LEN)
+		memmove(&pkt->data[ODPH_ETHHDR_LEN], &pkt->data[pkt->l3_offset], l3_len);
+
+	switch (ODPH_IPV4HDR_VER(pkt->data[ODPH_ETHHDR_LEN])) {
+	case ODPH_IPV4:
+		eth.type = odp_cpu_to_be_16(ODPH_ETHTYPE_IPV4);
+		break;
+	case ODPH_IPV6:
+		eth.type = odp_cpu_to_be_16(ODPH_ETHTYPE_IPV6);
+		break;
+	default:
+		CU_FAIL("Unexpected IP version\n");
+		break;
+	}
+	memcpy(pkt->data, &eth, sizeof(eth));
+
+	if (pkt->l4_offset != ODP_PACKET_OFFSET_INVALID) {
+		if (pkt->l4_offset < pkt->l3_offset)
+			pkt->l4_offset = ODP_PACKET_OFFSET_INVALID;
+		else
+			pkt->l4_offset += ODPH_ETHHDR_LEN - pkt->l3_offset;
+	}
+	pkt->l2_offset = 0;
+	pkt->l3_offset = ODPH_ETHHDR_LEN;
+	pkt->len = ODPH_ETHHDR_LEN + l3_len;
 }
 
 int ipsec_suite_term(void)

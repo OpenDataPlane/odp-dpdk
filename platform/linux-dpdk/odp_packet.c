@@ -88,24 +88,6 @@ ODP_STATIC_ASSERT(sizeof(_odp_dummy_mbuf.hash.rss) == sizeof(uint32_t),
 ODP_STATIC_ASSERT(sizeof(_odp_dummy_mbuf.ol_flags) == sizeof(uint64_t),
 		  "ol_flags should be uint64_t");
 
-/* Check that invalid values are the same. Some versions of Clang  and pedantic
- * build have trouble with the strong type casting, and complain that these
- * invalid values are not integral constants.
- *
- * Invalid values are required to be equal for _odp_buffer_is_valid() to work
- * properly. */
-#ifndef __clang__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wpedantic"
-ODP_STATIC_ASSERT(ODP_PACKET_INVALID == 0, "Packet invalid not 0");
-ODP_STATIC_ASSERT(ODP_BUFFER_INVALID == 0, "Buffer invalid not 0");
-ODP_STATIC_ASSERT(ODP_EVENT_INVALID  == 0, "Event invalid not 0");
-ODP_STATIC_ASSERT(ODP_PACKET_VECTOR_INVALID == 0, "Packet vector invalid not 0");
-ODP_STATIC_ASSERT(ODP_PACKET_TX_COMPL_INVALID == 0, "Packet TX completion invalid not 0");
-ODP_STATIC_ASSERT(ODP_TIMEOUT_INVALID == 0, "Timeout invalid not 0");
-#pragma GCC diagnostic pop
-#endif
-
 /* Calculate the number of segments */
 static inline int num_segments(uint32_t len, uint32_t seg_len)
 {
@@ -351,21 +333,6 @@ int odp_event_filter_packet(const odp_event_t event[],
 	return num_pkt;
 }
 
-void *odp_packet_tail(odp_packet_t pkt)
-{
-	struct rte_mbuf *mb = &(packet_hdr(pkt)->mb);
-
-	mb = rte_pktmbuf_lastseg(mb);
-	return (void *)(rte_pktmbuf_mtod(mb, char *) + mb->data_len);
-}
-
-void *odp_packet_push_head(odp_packet_t pkt, uint32_t len)
-{
-	struct rte_mbuf *mb = &(packet_hdr(pkt)->mb);
-
-	return (void *)rte_pktmbuf_prepend(mb, len);
-}
-
 static void _copy_head_metadata(struct rte_mbuf *newhead,
 				struct rte_mbuf *oldhead)
 {
@@ -428,16 +395,6 @@ int odp_packet_extend_head(odp_packet_t *pkt, uint32_t len, void **data_ptr,
 	return 0;
 }
 
-void *odp_packet_pull_head(odp_packet_t pkt, uint32_t len)
-{
-	struct rte_mbuf *mb = pkt_to_mbuf(pkt);
-
-	if (odp_unlikely(len >= mb->data_len))
-		return NULL;
-
-	return (void *)rte_pktmbuf_adj(mb, len);
-}
-
 int odp_packet_trunc_head(odp_packet_t *pkt, uint32_t len, void **data_ptr,
 			  uint32_t *seg_len)
 {
@@ -477,13 +434,6 @@ int odp_packet_trunc_head(odp_packet_t *pkt, uint32_t len, void **data_ptr,
 		*seg_len = mb->data_len;
 
 	return 0;
-}
-
-void *odp_packet_push_tail(odp_packet_t pkt, uint32_t len)
-{
-	struct rte_mbuf *mb = &(packet_hdr(pkt)->mb);
-
-	return (void *)rte_pktmbuf_append(mb, len);
 }
 
 int odp_packet_extend_tail(odp_packet_t *pkt, uint32_t len, void **data_ptr,
@@ -542,20 +492,6 @@ int odp_packet_extend_tail(odp_packet_t *pkt, uint32_t len, void **data_ptr,
 		odp_packet_offset(*pkt, old_pkt_len, seg_len, NULL);
 
 	return 0;
-}
-
-void *odp_packet_pull_tail(odp_packet_t pkt, uint32_t len)
-{
-	struct rte_mbuf *mb = pkt_to_mbuf(pkt);
-	struct rte_mbuf *mb_last = rte_pktmbuf_lastseg(mb);
-
-	if (odp_unlikely(len >= mb_last->data_len))
-		return NULL;
-
-	if (rte_pktmbuf_trim(mb, len))
-		return NULL;
-	else
-		return odp_packet_tail(pkt);
 }
 
 int odp_packet_trunc_tail(odp_packet_t *pkt, uint32_t len, void **tail_ptr,

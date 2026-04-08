@@ -295,9 +295,12 @@ static int parse_options(int argc, char *argv[], test_opt_t *test_opt)
 			test_opt->mode = atoi(optarg);
 			break;
 		case 'P':
-			sscanf(optarg, "%" SCNu64 ":%" SCNu64 ":%" SCNu64 ":%llu",
-			       &test_opt->freq.integer, &test_opt->freq.numer,
-			       &test_opt->freq.denom, &test_opt->max_multiplier);
+			if (sscanf(optarg, "%" SCNu64 ":%" SCNu64 ":%" SCNu64 ":%llu",
+				   &test_opt->freq.integer, &test_opt->freq.numer,
+				   &test_opt->freq.denom, &test_opt->max_multiplier) != 4) {
+				ODPH_ERR("Invalid periodic timer pool parameters\n");
+				return -1;
+			}
 			break;
 		case 'M':
 			test_opt->multiplier = strtoull(optarg, NULL, 0);
@@ -1271,7 +1274,7 @@ static int run_test(void *arg)
 	uint64_t tmo_ns;
 	timer_ctx_t *ctx;
 	odp_thrmask_t mask;
-	uint64_t wait = odp_schedule_wait_time(10 * ODP_TIME_MSEC_IN_NS);
+	const uint64_t wait = odp_schedule_wait_time(4 * test_global->opt.period_ns);
 	odp_schedule_group_t group = ODP_SCHED_GROUP_INVALID;
 	test_log_t *log = test_global->log;
 	enum mode_e mode = test_global->opt.mode;

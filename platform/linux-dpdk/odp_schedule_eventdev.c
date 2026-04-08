@@ -313,6 +313,13 @@ int _odp_rx_adapter_close(void)
 	return ret;
 }
 
+int _odp_rx_adapter_initialized(void)
+{
+	if (_odp_eventdev_gbl && _odp_eventdev_gbl->rx_adapter.status != RX_ADAPTER_INIT)
+		return 1;
+	return 0;
+}
+
 void _odp_rx_adapter_port_stop(uint16_t port_id)
 {
 	uint8_t rx_adapter_id = _odp_eventdev_gbl->rx_adapter.id;
@@ -466,76 +473,6 @@ static void schedule_pktio_start(int pktio_index, int num_pktin,
 	odp_ticketlock_unlock(&_odp_eventdev_gbl->rx_adapter.lock);
 }
 
-static inline int classify_pkts(odp_packet_t packets[], int num)
-{
-	odp_packet_t pkt;
-	odp_packet_hdr_t *pkt_hdr;
-	int i, num_rx, num_ev, num_dst;
-	odp_queue_t cur_queue;
-	odp_event_t ev[num];
-	odp_queue_t dst[num];
-	int dst_idx[num];
-
-	num_rx = 0;
-	num_dst = 0;
-	num_ev = 0;
-
-	/* Some compilers need this dummy initialization */
-	cur_queue = ODP_QUEUE_INVALID;
-
-	for (i = 0; i < num; i++) {
-		pkt = packets[i];
-		pkt_hdr = packet_hdr(pkt);
-
-		if (odp_unlikely(pkt_hdr->p.input_flags.dst_queue)) {
-			/* Sort events for enqueue multi operation(s) */
-			if (odp_unlikely(num_dst == 0)) {
-				num_dst = 1;
-				cur_queue = pkt_hdr->dst_queue;
-				dst[0] = cur_queue;
-				dst_idx[0] = 0;
-			}
-
-			ev[num_ev] = odp_packet_to_event(pkt);
-
-			if (cur_queue != pkt_hdr->dst_queue) {
-				cur_queue = pkt_hdr->dst_queue;
-				dst[num_dst] = cur_queue;
-				dst_idx[num_dst] = num_ev;
-				num_dst++;
-			}
-
-			num_ev++;
-			continue;
-		}
-		packets[num_rx++] = pkt;
-	}
-
-	/* Optimization for the common case */
-	if (odp_likely(num_dst == 0))
-		return num_rx;
-
-	for (i = 0; i < num_dst; i++) {
-		int num_enq, ret;
-		int idx = dst_idx[i];
-
-		if (i == (num_dst - 1))
-			num_enq = num_ev - idx;
-		else
-			num_enq = dst_idx[i + 1] - idx;
-
-		ret = odp_queue_enq_multi(dst[i], &ev[idx], num_enq);
-
-		if (ret < 0)
-			ret = 0;
-
-		if (ret < num_enq)
-			odp_event_free_multi(&ev[idx + ret], num_enq - ret);
-	}
-
-	return num_rx;
-}
-
 static inline uint16_t event_input(struct rte_event ev[], odp_event_t out_ev[],
 				   uint16_t nb_events, odp_queue_t *out_queue)
 {
@@ -578,10 +515,6 @@ static inline uint16_t event_input(struct rte_event ev[], odp_event_t out_ev[],
 		pktio_entry_t *entry = _odp_eventdev_gbl->pktio[pkt_table[0]->port];
 
 		num_pkts = _odp_input_pkts(entry, (odp_packet_t *)pkt_table, num_pkts);
-
-		if (!odp_global_ro.init_param.not_used.feat.cls)
-			num_pkts = classify_pkts((odp_packet_t *)pkt_table,
-						 num_pkts);
 
 		for (i = 0; i < num_pkts; i++)
 			out_ev[num_events++] = mbuf_to_event(pkt_table[i]);
@@ -1012,6 +945,11 @@ static void schedule_order_lock_wait(uint32_t lock_index)
 	(void)lock_index;
 }
 
+static void ord_stash_release(odp_queue_t queue ODP_UNUSED)
+{
+	/* Nothing to do */
+}
+
 static void order_lock(void)
 {
 	/* Nothing to do */
@@ -1092,6 +1030,7 @@ const schedule_fn_t _odp_schedule_eventdev_fn = {
 	.destroy_queue = schedule_destroy_queue,
 	.sched_queue = NULL,
 	.ord_enq_multi = NULL,
+	.ord_stash_release = ord_stash_release,
 	.init_global = schedule_init_global,
 	.term_global = schedule_term_global,
 	.init_local  = schedule_init_local,

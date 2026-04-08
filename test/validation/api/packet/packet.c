@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2014-2018 Linaro Limited
- * Copyright (c) 2019-2024 Nokia
+ * Copyright (c) 2019-2025 Nokia
  * Copyright (c) 2020 Marvell
  */
 
@@ -1299,7 +1299,7 @@ static void _verify_tailroom_shift(odp_packet_t *pkt,
 	odp_packet_seg_t seg;
 	uint32_t room;
 	uint32_t seg_data_len, pkt_data_len, seg_len;
-	void *tail;
+	void *tail = NULL;
 	char *tail_orig;
 	int extended, rc;
 
@@ -2261,6 +2261,65 @@ static void packet_test_concat_extend_trunc(void)
 	CU_ASSERT(odp_pool_destroy(pool) == 0);
 }
 
+static void packet_test_trunc_3_seg(void)
+{
+	odp_pool_param_t param;
+	odp_pool_t pool;
+	odp_packet_t pkt1, pkt2, pkt3;
+	const uint32_t len1 = 50;
+	const uint32_t len2 = len1 + 1;
+	const uint32_t len3 = len1 + 2;
+	const uint32_t extra_trunc_len = 1;
+	int ret, layout_changed = 0;
+	uint32_t tailroom_before, tailroom_after;
+
+	odp_pool_param_init(&param);
+	param.type    = ODP_POOL_PACKET;
+	param.pkt.len = len3;
+	param.pkt.num = PACKET_POOL_NUM;
+	pool = odp_pool_create("packet_pool_trunc_3_seg", &param);
+	CU_ASSERT_FATAL(pool != ODP_POOL_INVALID);
+
+	pkt1 = odp_packet_alloc(pool, len1);
+	pkt2 = odp_packet_alloc(pool, len2);
+	pkt3 = odp_packet_alloc(pool, len3);
+	CU_ASSERT_FATAL(pkt1 != ODP_PACKET_INVALID);
+	CU_ASSERT_FATAL(pkt2 != ODP_PACKET_INVALID);
+	CU_ASSERT_FATAL(pkt3 != ODP_PACKET_INVALID);
+
+	/* Create a (hopefully) 2-segment packet and record tailroom */
+	ret = odp_packet_concat(&pkt1, pkt2);
+	CU_ASSERT(ret >= 0);
+	if (!odp_packet_is_segmented(pkt1))
+		printf("Could not create segmented packet, test coverage reduced\n");
+	tailroom_before = odp_packet_tailroom(pkt1);
+
+	/*
+	 * Concatenate another packet to the tail and truncate its length
+	 * plus extra_trunc_len. If packet layout does not change, the tail
+	 * segment remains the same and packet tailroom changes only by
+	 * extra_trunc_len.
+	 */
+	ret = odp_packet_concat(&pkt1, pkt3);
+	CU_ASSERT(ret >= 0);
+	if (ret > 0)
+		layout_changed = 1;
+	ret = odp_packet_trunc_tail(&pkt1, len3 + extra_trunc_len, NULL, NULL);
+	CU_ASSERT(ret >= 0);
+	if (ret > 0)
+		layout_changed = 1;
+
+	if (!layout_changed) {
+		tailroom_after = odp_packet_tailroom(pkt1);
+		CU_ASSERT(tailroom_after == tailroom_before + extra_trunc_len);
+	} else {
+		printf("Packet layout changed, test coverage reduced\n");
+	}
+
+	odp_packet_free(pkt1);
+	CU_ASSERT(odp_pool_destroy(pool) == 0);
+}
+
 static void packet_test_extend_small(void)
 {
 	odp_pool_t pool;
@@ -2312,7 +2371,6 @@ static void packet_test_extend_small(void)
 				break;
 
 			if (tail) {
-				/* assert needs brackets */
 				CU_ASSERT(seg_len == 1);
 			} else {
 				CU_ASSERT(seg_len > 0);
@@ -2419,7 +2477,6 @@ static void packet_test_extend_large(void)
 				break;
 
 			if (tail) {
-				/* assert needs brackets */
 				CU_ASSERT((seg_len > 0) &&
 					  (seg_len <= ext_len));
 				ret = fill_data_forward(pkt, cur_len, ext_len,
@@ -2781,34 +2838,34 @@ static void packet_test_ref(void)
 	pool = odp_packet_pool(test_packet);
 
 	pkt = odp_packet_copy(test_packet, pool);
-	CU_ASSERT_FATAL(pkt != ODP_PACKET_INVALID)
+	CU_ASSERT_FATAL(pkt != ODP_PACKET_INVALID);
 	ref = odp_packet_ref_static(pkt);
-	CU_ASSERT_FATAL(ref != ODP_PACKET_INVALID)
+	CU_ASSERT_FATAL(ref != ODP_PACKET_INVALID);
 	packet_compare_data(pkt, ref);
 	odp_packet_free(ref);
 	odp_packet_free(pkt);
 
 	pkt = odp_packet_copy(test_packet, pool);
-	CU_ASSERT_FATAL(pkt != ODP_PACKET_INVALID)
+	CU_ASSERT_FATAL(pkt != ODP_PACKET_INVALID);
 	ref = odp_packet_ref(pkt, 0);
-	CU_ASSERT_FATAL(ref != ODP_PACKET_INVALID)
+	CU_ASSERT_FATAL(ref != ODP_PACKET_INVALID);
 	packet_compare_data(pkt, ref);
 	odp_packet_free(ref);
 	odp_packet_free(pkt);
 
 	pkt  = odp_packet_copy(test_packet, pool);
 	pkt3 = odp_packet_copy(test_packet, pool);
-	CU_ASSERT_FATAL(pkt  != ODP_PACKET_INVALID)
-	CU_ASSERT_FATAL(pkt3 != ODP_PACKET_INVALID)
+	CU_ASSERT_FATAL(pkt  != ODP_PACKET_INVALID);
+	CU_ASSERT_FATAL(pkt3 != ODP_PACKET_INVALID);
 	ret = odp_packet_concat(&pkt3, pkt);
 	CU_ASSERT_FATAL(ret >= 0);
 
 	pkt  = odp_packet_copy(test_packet, pool);
 	pkt2 = odp_packet_copy(test_packet, pool);
-	CU_ASSERT_FATAL(pkt  != ODP_PACKET_INVALID)
-	CU_ASSERT_FATAL(pkt2 != ODP_PACKET_INVALID)
+	CU_ASSERT_FATAL(pkt  != ODP_PACKET_INVALID);
+	CU_ASSERT_FATAL(pkt2 != ODP_PACKET_INVALID);
 	ref = odp_packet_ref_pkt(pkt, 0, pkt2);
-	CU_ASSERT_FATAL(ref != ODP_PACKET_INVALID)
+	CU_ASSERT_FATAL(ref != ODP_PACKET_INVALID);
 	packet_compare_data(pkt3, ref);
 	odp_packet_free(ref);
 	odp_packet_free(pkt);
@@ -2818,17 +2875,17 @@ static void packet_test_ref(void)
 	pool = odp_packet_pool(segmented_test_packet);
 
 	pkt = odp_packet_copy(segmented_test_packet, pool);
-	CU_ASSERT_FATAL(pkt != ODP_PACKET_INVALID)
+	CU_ASSERT_FATAL(pkt != ODP_PACKET_INVALID);
 	ref = odp_packet_ref_static(pkt);
-	CU_ASSERT_FATAL(ref != ODP_PACKET_INVALID)
+	CU_ASSERT_FATAL(ref != ODP_PACKET_INVALID);
 	packet_compare_data(pkt, ref);
 	odp_packet_free(ref);
 	odp_packet_free(pkt);
 
 	pkt = odp_packet_copy(segmented_test_packet, pool);
-	CU_ASSERT_FATAL(pkt != ODP_PACKET_INVALID)
+	CU_ASSERT_FATAL(pkt != ODP_PACKET_INVALID);
 	ref = odp_packet_ref(pkt, 0);
-	CU_ASSERT_FATAL(ref != ODP_PACKET_INVALID)
+	CU_ASSERT_FATAL(ref != ODP_PACKET_INVALID);
 	packet_compare_data(pkt, ref);
 	odp_packet_free(ref);
 	odp_packet_free(pkt);
@@ -2839,9 +2896,9 @@ static void packet_test_ref(void)
 	pkt  = odp_packet_copy(test_packet, pool);
 	pkt2 = odp_packet_copy(test_packet, pool);
 	pkt3 = odp_packet_copy(test_packet, pool);
-	CU_ASSERT_FATAL(pkt  != ODP_PACKET_INVALID)
-	CU_ASSERT_FATAL(pkt2 != ODP_PACKET_INVALID)
-	CU_ASSERT_FATAL(pkt3 != ODP_PACKET_INVALID)
+	CU_ASSERT_FATAL(pkt  != ODP_PACKET_INVALID);
+	CU_ASSERT_FATAL(pkt2 != ODP_PACKET_INVALID);
+	CU_ASSERT_FATAL(pkt3 != ODP_PACKET_INVALID);
 	ret = odp_packet_concat(&pkt3, pkt2);
 	CU_ASSERT_FATAL(ret >= 0);
 	ret = odp_packet_concat(&pkt3, pkt);
@@ -2849,14 +2906,14 @@ static void packet_test_ref(void)
 
 	pkt  = odp_packet_copy(test_packet, pool);
 	pkt2 = odp_packet_copy(test_packet, pool);
-	CU_ASSERT_FATAL(pkt  != ODP_PACKET_INVALID)
-	CU_ASSERT_FATAL(pkt2 != ODP_PACKET_INVALID)
+	CU_ASSERT_FATAL(pkt  != ODP_PACKET_INVALID);
+	CU_ASSERT_FATAL(pkt2 != ODP_PACKET_INVALID);
 	ref = odp_packet_ref_pkt(pkt, 0, pkt2);
-	CU_ASSERT_FATAL(ref != ODP_PACKET_INVALID)
+	CU_ASSERT_FATAL(ref != ODP_PACKET_INVALID);
 	pkt2 = odp_packet_copy(test_packet, pool);
-	CU_ASSERT_FATAL(pkt2 != ODP_PACKET_INVALID)
+	CU_ASSERT_FATAL(pkt2 != ODP_PACKET_INVALID);
 	ref2 = odp_packet_ref_pkt(ref, 0, pkt2);
-	CU_ASSERT_FATAL(ref2 != ODP_PACKET_INVALID)
+	CU_ASSERT_FATAL(ref2 != ODP_PACKET_INVALID);
 	packet_compare_data(pkt3, ref2);
 
 	/* Try print function on a reference */
@@ -3013,7 +3070,6 @@ static void packet_test_ref(void)
 	CU_ASSERT_FATAL(ref_pkt[0] != ODP_PACKET_INVALID);
 
 	if (odp_packet_has_ref(ref_pkt[0]) == 1) {
-		/* CU_ASSERT needs braces */
 		CU_ASSERT(odp_packet_has_ref(segmented_base_pkt) == 1);
 	}
 
@@ -3021,7 +3077,6 @@ static void packet_test_ref(void)
 	CU_ASSERT_FATAL(ref_pkt[1] != ODP_PACKET_INVALID);
 
 	if (odp_packet_has_ref(ref_pkt[1]) == 1) {
-		/* CU_ASSERT needs braces */
 		CU_ASSERT(odp_packet_has_ref(segmented_base_pkt) == 1);
 	}
 
@@ -3155,7 +3210,7 @@ static void packet_vector_test_tbl(void)
 	/* Allocate the only vector from the pool */
 	pktv = odp_packet_vector_alloc(pool);
 	/* Check if vector packet is valid */
-	CU_ASSERT_FATAL(odp_packet_vector_valid(pktv) == 1)
+	CU_ASSERT_FATAL(odp_packet_vector_valid(pktv) == 1);
 	CU_ASSERT(odp_packet_vector_to_u64(pktv) !=
 		  odp_packet_vector_to_u64(ODP_PACKET_VECTOR_INVALID));
 
@@ -3262,7 +3317,7 @@ static void packet_vector_test_alloc_free(void)
 	/* Allocate the only vector from the pool */
 	pktv = odp_packet_vector_alloc(pool);
 	/* Check if vector packet is valid */
-	CU_ASSERT_FATAL(odp_packet_vector_valid(pktv) == 1)
+	CU_ASSERT_FATAL(odp_packet_vector_valid(pktv) == 1);
 	CU_ASSERT(odp_packet_vector_to_u64(pktv) !=
 		  odp_packet_vector_to_u64(ODP_PACKET_VECTOR_INVALID));
 
@@ -3329,10 +3384,10 @@ static void packet_vector_basic_test(void)
 		max_size = capa.vector.max_size;
 
 	/* Checking if default vector packet is valid */
-	CU_ASSERT(odp_packet_vector_valid(pktv_default) == 1)
+	CU_ASSERT(odp_packet_vector_valid(pktv_default) == 1);
 
 	/* Making sure default vector packet is from default vector pool */
-	CU_ASSERT(odp_packet_vector_pool(pktv_default) == vector_default_pool)
+	CU_ASSERT(odp_packet_vector_pool(pktv_default) == vector_default_pool);
 	ev = odp_packet_vector_to_event(pktv_default);
 	CU_ASSERT_FATAL(ev != ODP_EVENT_INVALID);
 	CU_ASSERT(odp_event_pool(ev) == vector_default_pool);
@@ -3593,7 +3648,6 @@ static void packet_test_user_area(void)
 	CU_ASSERT_FATAL(pkt != ODP_PACKET_INVALID);
 	CU_ASSERT(odp_packet_user_area_size(pkt) <= pool_capa.pkt.max_uarea_size);
 	if (odp_packet_user_area_size(pkt)) {
-		/* CU_ASSERT needs these extra bracets */
 		CU_ASSERT(odp_packet_user_area(pkt) != NULL);
 	} else {
 		CU_ASSERT(odp_packet_user_area(pkt) == NULL);
@@ -4623,6 +4677,7 @@ odp_testinfo_t packet_suite[] = {
 	ODP_TEST_INFO(packet_test_concatsplit),
 	ODP_TEST_INFO(packet_test_concat_small),
 	ODP_TEST_INFO(packet_test_concat_extend_trunc),
+	ODP_TEST_INFO(packet_test_trunc_3_seg),
 	ODP_TEST_INFO(packet_test_extend_small),
 	ODP_TEST_INFO(packet_test_extend_large),
 	ODP_TEST_INFO(packet_test_extend_mix),
