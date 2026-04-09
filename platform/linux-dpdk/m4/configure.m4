@@ -5,7 +5,7 @@
 ODP_IMPLEMENTATION_NAME="odp-dpdk"
 ODP_LIB_NAME="odp-dpdk"
 
-dpdk_min_version="22.11.0"
+dpdk_min_version="23.11.0"
 
 ODP_VISIBILITY
 ODP_ATOMIC
