@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2013-2018 Linaro Limited
- * Copyright (c) 2019-2025 Nokia
+ * Copyright (c) 2019-2026 Nokia
  */
 
 #include <odp/api/align.h>
@@ -117,6 +117,21 @@ static inline uint32_t cache_pop(pool_cache_t *cache,
 	return num_ch;
 }
 
+static inline _odp_event_hdr_t *cache_pop_single(pool_cache_t *cache)
+{
+	const uint32_t cache_num = odp_atomic_load_u32(&cache->cache_num);
+	_odp_event_hdr_t *event_hdr;
+
+	if (odp_unlikely(cache_num == 0))
+		return NULL;
+
+	event_hdr = cache->event_hdr[cache_num - 1];
+
+	odp_atomic_store_u32(&cache->cache_num, cache_num - 1);
+
+	return event_hdr;
+}
+
 static inline void cache_push(pool_cache_t *cache, _odp_event_hdr_t *event_hdr[],
 			      uint32_t num)
 {
@@ -127,6 +142,15 @@ static inline void cache_push(pool_cache_t *cache, _odp_event_hdr_t *event_hdr[]
 		cache->event_hdr[cache_num + i] = event_hdr[i];
 
 	odp_atomic_store_u32(&cache->cache_num, cache_num + num);
+}
+
+static inline void cache_push_single(pool_cache_t *cache, _odp_event_hdr_t *event_hdr)
+{
+	const uint32_t cache_num = odp_atomic_load_u32(&cache->cache_num);
+
+	cache->event_hdr[cache_num] = event_hdr;
+
+	odp_atomic_store_u32(&cache->cache_num, cache_num + 1);
 }
 
 static void cache_flush(pool_cache_t *cache, pool_t *pool)
@@ -1327,6 +1351,50 @@ int odp_pool_info(odp_pool_t pool_hdl, odp_pool_info_t *info)
 	return 0;
 }
 
+odp_event_t _odp_event_alloc(pool_t *pool)
+{
+	pool_cache_t *cache = local.cache[pool->pool_idx];
+	_odp_event_hdr_t *hdr;
+
+	/* First pull packets from local cache */
+	hdr = cache_pop_single(cache);
+
+	if (CONFIG_POOL_STATISTICS && pool->params.stats.bit.cache_alloc_ops && hdr)
+		odp_atomic_inc_u64(&pool->stats.cache_alloc_ops);
+
+	if (odp_likely(hdr))
+		return _odp_event_from_hdr(hdr);
+
+	/* If needed, get more from the global pool */
+	uint32_t burst = pool->burst_size;
+	uint32_t mask = pool->ring_mask;
+	_odp_event_hdr_t *hdr_tmp[burst];
+	ring_mpmc_rst_ptr_t *ring = &pool->ring->hdr;
+
+	burst = ring_mpmc_rst_ptr_deq_multi(ring, mask, (void **)hdr_tmp, burst);
+
+	if (CONFIG_POOL_STATISTICS) {
+		if (pool->params.stats.bit.alloc_ops)
+			odp_atomic_inc_u64(&pool->stats.alloc_ops);
+		if (odp_unlikely(pool->params.stats.bit.alloc_fails && burst == 0))
+			odp_atomic_inc_u64(&pool->stats.alloc_fails);
+	}
+
+	if (odp_unlikely(burst == 0))
+		return ODP_EVENT_INVALID;
+
+	hdr = hdr_tmp[0];
+	burst--;
+
+	odp_prefetch(hdr);
+
+	/* Cache possible extra buffers. Cache is currently empty. */
+	if (burst)
+		cache_push(cache, &hdr_tmp[1], burst);
+
+	return _odp_event_from_hdr(hdr);
+}
+
 int _odp_event_alloc_multi(pool_t *pool, _odp_event_hdr_t *event_hdr[], int max_num)
 {
 	uint32_t pool_idx = pool->pool_idx;
@@ -1441,6 +1509,45 @@ static inline void event_free_to_pool(pool_t *pool,
 		odp_atomic_inc_u64(&pool->stats.cache_free_ops);
 }
 
+void _odp_event_free(odp_event_t event)
+{
+	_odp_event_hdr_t *event_hdr = _odp_event_hdr(event);
+	pool_t *pool = _odp_pool_entry(event_hdr->pool);
+	pool_cache_t *cache = local.cache[pool->pool_idx];
+	const uint32_t cache_size = pool->cache_size;
+	uint32_t cache_num;
+
+	if (odp_unlikely(cache_size == 0)) {
+		ring_mpmc_rst_ptr_t *ring = &pool->ring->hdr;
+		uint32_t mask = pool->ring_mask;
+
+		ring_mpmc_rst_ptr_enq(ring, mask, (void *)event_hdr);
+
+		if (CONFIG_POOL_STATISTICS && pool->params.stats.bit.free_ops)
+			odp_atomic_inc_u64(&pool->stats.free_ops);
+		return;
+	}
+
+	cache_num = odp_atomic_load_u32(&cache->cache_num);
+
+	if (odp_unlikely(cache_size == cache_num)) {
+		const uint32_t burst = pool->burst_size;
+		_odp_event_hdr_t *ev_hdr[burst];
+		ring_mpmc_rst_ptr_t *ring = &pool->ring->hdr;
+		uint32_t mask = pool->ring_mask;
+
+		cache_pop(cache, ev_hdr, burst);
+
+		ring_mpmc_rst_ptr_enq_multi(ring, mask, (void **)ev_hdr, burst);
+		if (CONFIG_POOL_STATISTICS && pool->params.stats.bit.free_ops)
+			odp_atomic_inc_u64(&pool->stats.free_ops);
+	}
+
+	cache_push_single(cache, event_hdr);
+	if (CONFIG_POOL_STATISTICS && pool->params.stats.bit.cache_free_ops)
+		odp_atomic_inc_u64(&pool->stats.cache_free_ops);
+}
+
 void _odp_event_free_multi(_odp_event_hdr_t *event_hdr[], int num_total)
 {
 	pool_t *pool;
@@ -1480,35 +1587,19 @@ void _odp_event_free_sp(_odp_event_hdr_t *event_hdr[], int num)
 
 odp_buffer_t odp_buffer_alloc(odp_pool_t pool_hdl)
 {
-	odp_buffer_t buf;
 	pool_t *pool;
-	int ret;
 
 	_ODP_ASSERT(ODP_POOL_INVALID != pool_hdl);
 
 	pool = _odp_pool_entry(pool_hdl);
 
-	_ODP_ASSERT(pool->type == ODP_POOL_BUFFER);
+	/* Buffer pools are also used by other pool implementations so check both types */
+	_ODP_ASSERT(pool->type == ODP_POOL_BUFFER && pool->type_2 == ODP_POOL_BUFFER);
 
-	ret  = _odp_event_alloc_multi(pool, (_odp_event_hdr_t **)&buf, 1);
+	/* Check that ODP_BUFFER_INVALID and ODP_EVENT_INVALID match for the cast */
+	_ODP_ASSERT((uintptr_t)ODP_BUFFER_INVALID == (uintptr_t)ODP_EVENT_INVALID);
 
-	if (odp_likely(ret == 1))
-		return buf;
-
-	return ODP_BUFFER_INVALID;
-}
-
-odp_event_t _odp_event_alloc(pool_t *pool)
-{
-	odp_event_t event;
-	int ret;
-
-	ret  = _odp_event_alloc_multi(pool, (_odp_event_hdr_t **)&event, 1);
-
-	if (odp_likely(ret == 1))
-		return event;
-
-	return ODP_EVENT_INVALID;
+	return (odp_buffer_t)_odp_event_alloc(pool);
 }
 
 int odp_buffer_alloc_multi(odp_pool_t pool_hdl, odp_buffer_t buf[], int num)
@@ -1519,7 +1610,8 @@ int odp_buffer_alloc_multi(odp_pool_t pool_hdl, odp_buffer_t buf[], int num)
 
 	pool = _odp_pool_entry(pool_hdl);
 
-	_ODP_ASSERT(pool->type == ODP_POOL_BUFFER);
+	/* Buffer pools are also used by other pool implementations so check both types */
+	_ODP_ASSERT(pool->type == ODP_POOL_BUFFER && pool->type_2 == ODP_POOL_BUFFER);
 
 	return _odp_event_alloc_multi(pool, (_odp_event_hdr_t **)buf, num);
 }

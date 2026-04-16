@@ -2,7 +2,7 @@
  * Copyright (c) 2015 EZchip Semiconductor Ltd.
  * Copyright (c) 2015-2018 Linaro Limited
  * Copyright (c) 2022-2025 Marvell
- * Copyright (c) 2022 Nokia
+ * Copyright (c) 2022-2026 Nokia
  */
 
 #include <odp_posix_extensions.h>
@@ -2039,6 +2039,11 @@ static int tm_enqueue(tm_system_t *tm_system,
 			return -2;
 	}
 
+	if (odp_unlikely(odp_packet_is_referencing(pkt) ||
+			 odp_packet_has_ref(pkt)))
+		if (odp_unlikely(_odp_packet_unshare(&pkt)))
+			return -1;
+
 	work_item.queue_num = tm_queue_obj->queue_num;
 	work_item.pkt = pkt;
 	if (tm_queue_obj->ordered_enqueue)
@@ -2649,6 +2654,10 @@ static int tm_capabilities(odp_tm_capabilities_t capabilities[],
 	cap_ptr->queue_stats.counter.discards = 1;
 	cap_ptr->queue_stats.counter.errors = 1;
 	cap_ptr->queue_stats.counter.packets = 1;
+
+	cap_ptr->packet_ref.static_ref = 1;
+	cap_ptr->packet_ref.referencing_pkt = 1;
+	cap_ptr->packet_ref.referenced_pkt = 1;
 
 	return 1;
 }

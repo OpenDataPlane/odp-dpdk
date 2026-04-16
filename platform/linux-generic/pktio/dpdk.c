@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2016-2018 Linaro Limited
- * Copyright (c) 2019-2025 Nokia
+ * Copyright (c) 2019-2026 Nokia
  */
 
 #include <odp/autoheader_internal.h>
@@ -107,7 +107,7 @@ ODP_STATIC_ASSERT(DPDK_MIN_RX_BURST <= UINT8_MAX, "DPDK_MIN_RX_BURST too large")
 typedef struct {
 	int num_rx_desc_default;
 	int num_tx_desc_default;
-	int min_rx_burst;
+	uint8_t min_rx_burst;
 	uint8_t multicast_en;
 	uint8_t rx_drop_en;
 	uint8_t set_flow_hash;
@@ -243,29 +243,31 @@ static int init_options(pktio_entry_t *pktio_entry,
 		return -1;
 	opt->rx_drop_en = !!val;
 
-	if (!lookup_opt("set_flow_hash", NULL, &val))
+	if (!lookup_opt("set_flow_hash", dev_info->driver_name, &val))
 		return -1;
 	opt->set_flow_hash = !!val;
 
-	if (!lookup_opt("multicast_en", NULL, &val))
+	if (!lookup_opt("multicast_en", dev_info->driver_name, &val))
 		return -1;
 	opt->multicast_en = !!val;
 
 	if (!lookup_opt("min_rx_burst", dev_info->driver_name, &val))
 		return -1;
 
-	if (val < 0) {
-		_ODP_ERR("min_rx_burst value %d must be non-negative\n", val);
+	if (val < 0 || val > UINT8_MAX) {
+		_ODP_ERR("Invalid min_rx_burst value %d (0-%d valid)\n", val, UINT8_MAX);
 		return -1;
 	}
+	opt->min_rx_burst = (uint8_t)val;
 
 	_ODP_DBG("DPDK interface (%s): %" PRIu16 "\n", dev_info->driver_name,
 		 pkt_priv(pktio_entry)->port_id);
-	_ODP_DBG("  multicast_en: %d\n", opt->multicast_en);
-	_ODP_DBG("  num_rx_desc: %d\n", opt->num_rx_desc_default);
-	_ODP_DBG("  num_tx_desc: %d\n", opt->num_tx_desc_default);
-	_ODP_DBG("  rx_drop_en: %d\n", opt->rx_drop_en);
-	_ODP_DBG("  min_rx_burst: %d\n", opt->min_rx_burst);
+	_ODP_DBG("  num_rx_desc:   %d\n", opt->num_rx_desc_default);
+	_ODP_DBG("  num_tx_desc:   %d\n", opt->num_tx_desc_default);
+	_ODP_DBG("  rx_drop_en:    %d\n", opt->rx_drop_en);
+	_ODP_DBG("  set_flow_hash: %d\n", opt->set_flow_hash);
+	_ODP_DBG("  multicast_en:  %d\n", opt->multicast_en);
+	_ODP_DBG("  min_rx_burst:  %d\n", opt->min_rx_burst);
 
 	return 0;
 }
@@ -1104,6 +1106,7 @@ static inline int pkt_to_mbuf_zero(pktio_entry_t *pktio_entry,
 			goto fail;
 
 		if (odp_likely(pkt_hdr->seg_count == 1 &&
+			       !pkt_hdr->seg_indirect &&
 			       odp_atomic_load_u32(&pkt_hdr->ref_cnt) <= 1)) {
 			mbuf_update(mbuf, pkt_hdr, pkt_len);
 
