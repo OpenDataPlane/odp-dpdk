@@ -143,8 +143,10 @@ typedef struct ODP_ALIGNED_CACHE odp_packet_hdr_t {
 	/* Classifier mark */
 	uint16_t cls_mark;
 
+	uint8_t unused_padding;
+
 	/* Classifier handle index */
-	uint16_t cos;
+	uint8_t cos;
 
 	/* Offset to payload start */
 	uint16_t payload_offset;
