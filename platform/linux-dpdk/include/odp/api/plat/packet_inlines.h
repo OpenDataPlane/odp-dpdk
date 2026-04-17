@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2016-2018 Linaro Limited
- * Copyright (c) 2019-2024 Nokia
+ * Copyright (c) 2019-2026 Nokia
  */
 
 /**
@@ -120,6 +120,7 @@ extern "C" {
 	#define odp_packet_seg_data_len __odp_packet_seg_data_len
 	#define odp_packet_ref_static __odp_packet_ref_static
 	#define odp_packet_has_ref __odp_packet_has_ref
+	#define odp_packet_is_referencing __odp_packet_is_referencing
 	#define odp_packet_color __odp_packet_color
 	#define odp_packet_drop_eligible __odp_packet_drop_eligible
 	#define odp_packet_shaper_len_adjust __odp_packet_shaper_len_adjust
@@ -204,14 +205,22 @@ _ODP_INLINE void *odp_packet_data_seg_len(odp_packet_t pkt,
 
 _ODP_INLINE uint32_t odp_packet_headroom(odp_packet_t pkt)
 {
-	return rte_pktmbuf_headroom((struct rte_mbuf *)pkt);
+	struct rte_mbuf *mb = (struct rte_mbuf *)pkt;
+
+	if (odp_unlikely(RTE_MBUF_CLONED(mb)))
+		return 0;
+
+	return rte_pktmbuf_headroom(mb);
 }
 
 _ODP_INLINE uint32_t odp_packet_tailroom(odp_packet_t pkt)
 {
-	struct rte_mbuf *mb = (struct rte_mbuf *)pkt;
+	struct rte_mbuf *mb = rte_pktmbuf_lastseg((struct rte_mbuf *)pkt);
 
-	return rte_pktmbuf_tailroom(rte_pktmbuf_lastseg(mb));
+	if (odp_unlikely(RTE_MBUF_CLONED(mb)))
+		return 0;
+
+	return rte_pktmbuf_tailroom(mb);
 }
 
 _ODP_INLINE odp_pool_t odp_packet_pool(odp_packet_t pkt)
@@ -513,6 +522,8 @@ _ODP_INLINE void *odp_packet_pull_head(odp_packet_t pkt, uint32_t len)
 {
 	struct rte_mbuf *mb = (struct rte_mbuf *)pkt;
 
+	_ODP_ASSERT(rte_mbuf_refcnt_read(mb) == 1);
+
 	if (odp_unlikely(len >= mb->data_len))
 		return NULL;
 
@@ -522,6 +533,11 @@ _ODP_INLINE void *odp_packet_pull_head(odp_packet_t pkt, uint32_t len)
 _ODP_INLINE void *odp_packet_push_head(odp_packet_t pkt, uint32_t len)
 {
 	struct rte_mbuf *mb = (struct rte_mbuf *)pkt;
+
+	_ODP_ASSERT(rte_mbuf_refcnt_read(mb) == 1);
+
+	if (odp_unlikely(RTE_MBUF_CLONED(mb) && len))
+		return NULL;
 
 	return (void *)rte_pktmbuf_prepend(mb, (uint16_t)len);
 }
@@ -539,6 +555,8 @@ _ODP_INLINE void *odp_packet_pull_tail(odp_packet_t pkt, uint32_t len)
 	struct rte_mbuf *mb = (struct rte_mbuf *)pkt;
 	struct rte_mbuf *mb_last = rte_pktmbuf_lastseg(mb);
 
+	_ODP_ASSERT(rte_mbuf_refcnt_read(mb_last) == 1);
+
 	if (odp_unlikely(len >= mb_last->data_len))
 		return NULL;
 
@@ -551,6 +569,12 @@ _ODP_INLINE void *odp_packet_pull_tail(odp_packet_t pkt, uint32_t len)
 _ODP_INLINE void *odp_packet_push_tail(odp_packet_t pkt, uint32_t len)
 {
 	struct rte_mbuf *mb = (struct rte_mbuf *)pkt;
+	struct rte_mbuf *mb_last = rte_pktmbuf_lastseg(mb);
+
+	_ODP_ASSERT(rte_mbuf_refcnt_read(mb_last) == 1);
+
+	if (odp_unlikely(RTE_MBUF_CLONED(mb_last) && len))
+		return NULL;
 
 	return (void *)rte_pktmbuf_append(mb, (uint16_t)len);
 }
@@ -760,7 +784,26 @@ _ODP_INLINE odp_packet_t odp_packet_ref_static(odp_packet_t pkt)
 
 _ODP_INLINE int odp_packet_has_ref(odp_packet_t pkt)
 {
-	return (rte_mbuf_refcnt_read((struct rte_mbuf *)(pkt)) > 1);
+	struct rte_mbuf *mb = (struct rte_mbuf *)pkt;
+
+	while (mb) {
+		if (rte_mbuf_refcnt_read(mb) > 1)
+			return 1;
+		mb = mb->next;
+	}
+	return 0;
+}
+
+_ODP_INLINE int odp_packet_is_referencing(odp_packet_t pkt)
+{
+	struct rte_mbuf *mb = (struct rte_mbuf *)pkt;
+
+	while (mb) {
+		if (RTE_MBUF_CLONED(mb))
+			return 1;
+		mb = mb->next;
+	}
+	return 0;
 }
 
 _ODP_INLINE odp_packet_color_t odp_packet_color(odp_packet_t pkt)
