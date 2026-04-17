@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2014-2018 Linaro Limited
- * Copyright (c) 2021-2024 Nokia
+ * Copyright (c) 2021-2026 Nokia
  */
 
 /**
@@ -299,7 +299,9 @@ static inline void _odp_packet_copy_md(odp_packet_hdr_t *dst_hdr,
 	dst_hdr->user_ptr = src_hdr->user_ptr;
 
 	dst_hdr->mb.port = src_hdr->mb.port;
-	dst_hdr->mb.ol_flags = src_hdr->mb.ol_flags;
+	/* RTE_MBUF_F_INDIRECT is used to indicate referencing packets */
+	dst_hdr->mb.ol_flags = (dst_hdr->mb.ol_flags & RTE_MBUF_F_INDIRECT) |
+			       (src_hdr->mb.ol_flags & ~RTE_MBUF_F_INDIRECT);
 	dst_hdr->mb.packet_type = src_hdr->mb.packet_type;
 	dst_hdr->mb.vlan_tci = src_hdr->mb.vlan_tci;
 	dst_hdr->mb.hash.rss = src_hdr->mb.hash.rss;

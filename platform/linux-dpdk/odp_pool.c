@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2013-2018 Linaro Limited
- * Copyright (c) 2019-2025 Nokia
+ * Copyright (c) 2019-2026 Nokia
  */
 
 #include <odp/api/align.h>
@@ -817,6 +817,22 @@ odp_pool_t _odp_pool_create(const char *name, const odp_pool_param_t *params,
 		odp_ticketlock_unlock(&pool->lock);
 		_ODP_ERR("Cannot init DPDK mbuf pool: %s\n", rte_strerror(rte_errno));
 		return ODP_POOL_INVALID;
+	}
+
+	/* Reduce DPDK pktmbuf pool 'mbuf_data_room_size', so that rte_pktmbuf_detach() restores
+	 * 'buf_len' to a value that excludes possible endmark trailer. Without this, an indirect
+	 * mbuf detached during free has its 'buf_len' reset to the full data_size, which corrupts
+	 * the endmark validation when the mbuf is reused. */
+	if ((params->type == ODP_POOL_PACKET || params->type == ODP_POOL_BUFFER) && trailer > 0) {
+		struct rte_pktmbuf_pool_private *mbp_priv = rte_mempool_get_priv(mp);
+
+		if (mbp_priv->mbuf_data_room_size <= trailer) {
+			odp_ticketlock_unlock(&pool->lock);
+			_ODP_ERR("Not enough room for endmark\n");
+			rte_mempool_free(mp);
+			return ODP_POOL_INVALID;
+		}
+		mbp_priv->mbuf_data_room_size -= trailer;
 	}
 
 	if (reserve_uarea(pool, uarea_size, num)) {
