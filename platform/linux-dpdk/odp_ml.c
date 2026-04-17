@@ -2103,7 +2103,7 @@ int _odp_ml_init_global(void)
 		goto error;
 	}
 
-	if (_ODP_ROUNDUP_POWER2_U32(info->align_size) != info->align_size) {
+	if (!_ODP_CHECK_IS_POWER2(info->align_size)) {
 		_ODP_ERR("ML device alignment size is not a power of two\n");
 		goto error;
 	}
