@@ -1661,6 +1661,18 @@ odp_packet_t odp_packet_ref_pkt(odp_packet_t pkt, uint32_t offset,
 	return hdr;
 }
 
+int _odp_packet_unshare(odp_packet_t *pkt)
+{
+	odp_packet_t unshared;
+
+	unshared = odp_packet_copy(*pkt, odp_packet_pool(*pkt));
+	if (odp_unlikely(unshared == ODP_PACKET_INVALID))
+		return -1;
+	odp_packet_free(*pkt);
+	*pkt = unshared;
+	return 0;
+}
+
 void odp_packet_lso_request_clr(odp_packet_t pkt)
 {
 	odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt);
