@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: BSD-3-Clause
- * Copyright (c) 2023 Nokia
+ * Copyright (c) 2023-2026 Nokia
  */
 
 #include <odp/api/dma.h>
@@ -965,20 +965,23 @@ void odp_dma_transfer_id_free(odp_dma_t dma, odp_dma_transfer_id_t transfer_id)
 		_ODP_ABORT("Stash put failed\n");
 }
 
-odp_dma_compl_t odp_dma_compl_alloc(odp_pool_t pool)
+odp_dma_compl_t odp_dma_compl_alloc(odp_pool_t pool_hdl)
 {
 	odp_buffer_t buf;
 	odp_event_t ev;
 	odp_dma_result_t *result;
+	pool_t *pool = _odp_pool_entry(pool_hdl);
 
-	buf = odp_buffer_alloc(pool);
-	if (odp_unlikely(buf == ODP_BUFFER_INVALID))
+	_ODP_ASSERT(pool->type_2 == ODP_POOL_DMA_COMPL);
+
+	ev = _odp_event_alloc(pool);
+	if (odp_unlikely(ev == ODP_EVENT_INVALID))
 		return ODP_DMA_COMPL_INVALID;
 
+	buf = odp_buffer_from_event(ev);
 	result = (odp_dma_result_t *)odp_buffer_addr(buf);
 	memset(result, 0, sizeof(odp_dma_result_t));
 
-	ev = odp_buffer_to_event(buf);
 	_odp_event_type_set(ev, ODP_EVENT_DMA_COMPL);
 
 	return (odp_dma_compl_t)(uintptr_t)buf;
