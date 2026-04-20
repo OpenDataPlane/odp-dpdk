@@ -126,14 +126,32 @@ typedef struct timer_pool_s {
 
 	} free_timer;
 
+	int used;
+
+	/* All fields below are memset to zero in odp_timer_pool_create() */
 	odp_timer_pool_param_t param;
 	char name[ODP_TIMER_POOL_NAME_LEN];
-	int used;
 	odp_ticketlock_t lock;
 	uint32_t cur_timers;
 	uint32_t hwm_timers;
-	double base_freq;
-	uint64_t max_multiplier;
+
+	/* Periodic timer period related configuration */
+	struct {
+		odp_timer_type_t type;
+
+		union {
+			struct {
+				double base_freq;
+				uint64_t max_multiplier;
+			};
+
+			struct {
+				double min_freq;
+				double max_freq;
+			};
+		};
+	} p;
+
 	odp_pool_t tmo_pool;
 	uint8_t periodic;
 
@@ -494,6 +512,7 @@ int odp_timer_capability(odp_timer_clk_src_t clk_src,
 	capa->max_pools = MAX_TIMER_POOLS;
 	capa->max_timers = MAX_TIMERS;
 	capa->periodic.support.base_mul = 1;
+	capa->periodic.support.freq = 1;
 	capa->periodic.max_pools  = MAX_TIMER_POOLS;
 	capa->periodic.max_timers = MAX_PERIODIC_TIMERS;
 	capa->highest_res_ns = MAX_RES_NS;
@@ -510,8 +529,27 @@ int odp_timer_capability(odp_timer_clk_src_t clk_src,
 
 	capa->periodic.min_base_freq_hz.integer = MIN_BASE_HZ;
 	capa->periodic.max_base_freq_hz.integer = MAX_BASE_HZ;
+	capa->periodic.min_freq_hz.integer = MIN_BASE_HZ;
+	capa->periodic.max_freq_hz.integer = MAX_RES_HZ;
 
 	return 0;
+}
+
+static odp_bool_t check_freq_range(odp_fract_u64_t *freq_hz, uint32_t num, double min_freq,
+				   double max_freq)
+{
+	double prev = -1.0, freq;
+
+	for (uint32_t i = 0; i < num; i++) {
+		freq = odp_fract_u64_to_dbl(&freq_hz[i]);
+
+		if (freq < prev || freq < min_freq || freq > max_freq)
+			return false;
+
+		prev = freq;
+	}
+
+	return true;
 }
 
 int odp_timer_res_capability(odp_timer_clk_src_t clk_src,
@@ -564,28 +602,46 @@ int odp_timer_periodic_capability(odp_timer_clk_src_t clk_src,
 		return -1;
 	}
 
-	if (capa->type != ODP_TIMER_TYPE_PERIODIC_BASE_MUL) {
-		_ODP_ERR("Only ODP_TIMER_TYPE_PERIODIC_BASE_MUL supported\n");
+	if (capa->type == ODP_TIMER_TYPE_PERIODIC_BASE_MUL) {
+		freq = odp_fract_u64_to_dbl(&capa->base_mul.base_freq_hz);
+
+		if (freq < MIN_BASE_HZ || freq > MAX_BASE_HZ) {
+			_ODP_ERR("Base frequency not supported (min: %f, max %f)\n",
+				 (double)MIN_BASE_HZ, (double)MAX_BASE_HZ);
+			return -1;
+		}
+
+		multiplier = max_multiplier_capa(freq);
+
+		if (capa->base_mul.max_multiplier > multiplier)
+			return -1;
+
+		/* Update capa with supported values */
+		capa->base_mul.max_multiplier = multiplier;
+	} else if (capa->type == ODP_TIMER_TYPE_PERIODIC_FREQ) {
+		if (capa->freq.freq_hz == NULL) {
+			_ODP_ERR("Frequency array NULL\n");
+			return -1;
+		}
+
+		if (capa->freq.num == 0) {
+			_ODP_ERR("Bad frequency array count\n");
+			return -1;
+		}
+
+		if (!check_freq_range(capa->freq.freq_hz, capa->freq.num, MIN_BASE_HZ,
+				      MAX_RES_HZ)) {
+			_ODP_ERR("Bad frequency range\n");
+			return -1;
+		}
+	} else {
+		_ODP_ERR("Disallowed type: %d\n", capa->type);
 		return -1;
 	}
-
-	freq = odp_fract_u64_to_dbl(&capa->base_mul.base_freq_hz);
-	if (freq < MIN_BASE_HZ || freq > MAX_BASE_HZ) {
-		_ODP_ERR("Base frequency not supported (min: %f, max %f)\n",
-			 (double)MIN_BASE_HZ, (double)MAX_BASE_HZ);
-		return -1;
-	}
-
-	multiplier = max_multiplier_capa(freq);
-
-	if (capa->base_mul.max_multiplier > multiplier)
-		return -1;
 
 	if (capa->res_ns && capa->res_ns < MAX_RES_NS)
 		return -1;
 
-	/* Update capa with supported values */
-	capa->base_mul.max_multiplier = multiplier;
 	capa->res_ns = MAX_RES_NS;
 
 	/* All base frequencies within the range are supported */
@@ -608,10 +664,11 @@ odp_timer_pool_t odp_timer_pool_create(const char *name,
 	uint32_t i, num_timers;
 	uint64_t res_ns, nsec_per_scan;
 	uint64_t max_multiplier = 0;
-	double base_freq = 0.0;
+	double base_freq = 0.0, min_freq = 0.0, max_freq = 0.0;
 	odp_pool_param_t tmo_pool_param;
 	odp_pool_t tmo_pool = ODP_POOL_INVALID;
-	odp_bool_t periodic = param->timer_type == ODP_TIMER_TYPE_PERIODIC_BASE_MUL ? 1 : 0;
+	odp_bool_t periodic = (param->timer_type == ODP_TIMER_TYPE_PERIODIC_BASE_MUL ||
+			       param->timer_type == ODP_TIMER_TYPE_PERIODIC_FREQ) ? 1 : 0;
 
 	if (odp_global_ro.init_param.not_used.feat.timer) {
 		_ODP_ERR("Trying to use disabled ODP feature.\n");
@@ -624,7 +681,8 @@ odp_timer_pool_t odp_timer_pool_create(const char *name,
 	}
 
 	if (param->timer_type != ODP_TIMER_TYPE_SINGLE &&
-	    param->timer_type != ODP_TIMER_TYPE_PERIODIC_BASE_MUL) {
+	    param->timer_type != ODP_TIMER_TYPE_PERIODIC_BASE_MUL &&
+	    param->timer_type != ODP_TIMER_TYPE_PERIODIC_FREQ) {
 		_ODP_ERR("Bad timer type %i\n", param->timer_type);
 		return ODP_TIMER_POOL_INVALID;
 	}
@@ -663,24 +721,50 @@ odp_timer_pool_t odp_timer_pool_create(const char *name,
 		res_ns = GIGA_HZ / param->res_hz;
 
 	if (periodic) {
-		uint64_t max_capa, min_period_ns;
+		uint64_t min_period_ns;
 
-		base_freq = odp_fract_u64_to_dbl(&param->periodic.base_mul.base_freq_hz);
-		max_multiplier = param->periodic.base_mul.max_multiplier;
+		if (param->timer_type == ODP_TIMER_TYPE_PERIODIC_BASE_MUL) {
+			uint64_t max_capa;
 
-		if (base_freq < MIN_BASE_HZ || base_freq > MAX_BASE_HZ) {
-			_ODP_ERR("Bad base frequency: %f\n", base_freq);
-			return ODP_TIMER_POOL_INVALID;
+			base_freq = odp_fract_u64_to_dbl(&param->periodic.base_mul.base_freq_hz);
+			max_multiplier = param->periodic.base_mul.max_multiplier;
+
+			if (base_freq < MIN_BASE_HZ || base_freq > MAX_BASE_HZ) {
+				_ODP_ERR("Bad base frequency: %f\n", base_freq);
+				return ODP_TIMER_POOL_INVALID;
+			}
+
+			max_capa = max_multiplier_capa(base_freq);
+
+			if (max_multiplier == 0 || max_multiplier > max_capa) {
+				_ODP_ERR("Bad max multiplier: %" PRIu64 "\n", max_multiplier);
+				return ODP_TIMER_POOL_INVALID;
+			}
+
+			min_period_ns = GIGA_HZ / (base_freq * max_multiplier);
+		} else {
+			const uint32_t num = param->periodic.freq.num;
+
+			if (param->periodic.freq.freq_hz == NULL) {
+				_ODP_ERR("Frequency array NULL\n");
+				return ODP_TIMER_POOL_INVALID;
+			}
+
+			if (num == 0) {
+				_ODP_ERR("Bad frequency array count\n");
+				return ODP_TIMER_POOL_INVALID;
+			}
+
+			if (!check_freq_range(param->periodic.freq.freq_hz, num, MIN_BASE_HZ,
+					      MAX_RES_HZ)) {
+				_ODP_ERR("Bad frequency range\n");
+				return ODP_TIMER_POOL_INVALID;
+			}
+
+			min_freq = odp_fract_u64_to_dbl(&param->periodic.freq.freq_hz[0]);
+			max_freq = odp_fract_u64_to_dbl(&param->periodic.freq.freq_hz[num - 1]);
+			min_period_ns = GIGA_HZ / max_freq;
 		}
-
-		max_capa = max_multiplier_capa(base_freq);
-
-		if (max_multiplier == 0 || max_multiplier > max_capa) {
-			_ODP_ERR("Bad max multiplier: %" PRIu64 "\n", max_multiplier);
-			return ODP_TIMER_POOL_INVALID;
-		}
-
-		min_period_ns = GIGA_HZ / (base_freq * max_multiplier);
 
 		if (res_ns > min_period_ns)
 			res_ns = min_period_ns;
@@ -743,6 +827,9 @@ odp_timer_pool_t odp_timer_pool_create(const char *name,
 	}
 
 	odp_ticketlock_unlock(&timer_global->lock);
+
+	memset(&timer_pool->param, 0, sizeof(timer_pool_t) - offsetof(timer_pool_t, param));
+
 	if (name)
 		_odp_strcpy(timer_pool->name, name, ODP_TIMER_POOL_NAME_LEN);
 
@@ -750,16 +837,24 @@ odp_timer_pool_t odp_timer_pool_create(const char *name,
 	timer_pool->param.res_ns = res_ns;
 
 	timer_pool->periodic = periodic;
-	timer_pool->base_freq = base_freq;
-	timer_pool->max_multiplier = max_multiplier;
 	timer_pool->tmo_pool = tmo_pool;
+
+	if (periodic) {
+		timer_pool->p.type = param->timer_type;
+
+		if (timer_pool->p.type == ODP_TIMER_TYPE_PERIODIC_BASE_MUL) {
+			timer_pool->p.base_freq = base_freq;
+			timer_pool->p.max_multiplier = max_multiplier;
+		} else {
+			timer_pool->p.min_freq = min_freq;
+			timer_pool->p.max_freq = max_freq;
+		}
+	}
 
 	ring_mpmc_rst_u32_init(&timer_pool->free_timer.ring_hdr);
 	timer_pool->free_timer.ring_mask = num_timers - 1;
 
 	odp_ticketlock_init(&timer_pool->lock);
-	timer_pool->cur_timers = 0;
-	timer_pool->hwm_timers = 0;
 
 	for (i = 0; i < timer_pool->free_timer.ring_mask; i++) {
 		timer = &timer_pool->timer[i];
@@ -1145,13 +1240,24 @@ odp_timer_t odp_timer_periodic_alloc(odp_timer_pool_t timer_pool,
 		return ODP_TIMER_INVALID;
 	}
 
-	if (odp_unlikely(params->base_mul.multiplier == 0 ||
-			 params->base_mul.multiplier > tp->max_multiplier)) {
-		_ODP_ERR("Bad frequency multiplier: %" PRIu64 "\n", params->base_mul.multiplier);
-		return ODP_TIMER_INVALID;
+	if (tp->p.type == ODP_TIMER_TYPE_PERIODIC_BASE_MUL) {
+		if (odp_unlikely(params->base_mul.multiplier == 0 ||
+				 params->base_mul.multiplier > tp->p.max_multiplier)) {
+			_ODP_ERR("Bad frequency multiplier: %" PRIu64 "\n",
+				 params->base_mul.multiplier);
+			return ODP_TIMER_INVALID;
+		}
+
+		freq = params->base_mul.multiplier * tp->p.base_freq;
+	} else {
+		freq = odp_fract_u64_to_dbl(&params->freq.freq_hz);
+
+		if (odp_unlikely(freq < tp->p.min_freq || freq > tp->p.max_freq)) {
+			_ODP_ERR("Bad frequency: %f\n", freq);
+			return ODP_TIMER_INVALID;
+		}
 	}
 
-	freq = params->base_mul.multiplier * tp->base_freq;
 	period_ns_dbl = (double)ODP_TIME_SEC_IN_NS / freq;
 	period_ns = period_ns_dbl;
 
