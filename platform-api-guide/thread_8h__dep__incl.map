@@ -1,0 +1,17 @@
+<map id="thread.h" name="thread.h">
+<area shape="rect" id="Node000001" title="ODP thread API." alt="" coords="409,5,485,31"/>
+<area shape="rect" id="Node000002" href="$cpu_8h.html" title="ODP CPU." alt="" coords="197,86,255,111"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="397,37,268,81,251,88,249,83,266,76,395,32"/>
+<area shape="rect" id="Node000006" href="$abi-default_2rwlock__recursive_8h.html" title="ODP recursive read/write lock." alt="" coords="279,86,423,111"/>
+<area shape="poly" id="edge5_Node000001_Node000006" title=" " alt="" coords="424,41,367,88,364,84,421,37"/>
+<area shape="rect" id="Node000007" href="$rwlock__recursive__inlines_8h_source.html" title=" " alt="" coords="447,86,642,111"/>
+<area shape="poly" id="edge6_Node000001_Node000007" title=" " alt="" coords="474,37,532,84,529,88,471,41"/>
+<area shape="rect" id="Node000008" href="$spinlock__recursive__inlines_8h_source.html" title=" " alt="" coords="667,79,809,119"/>
+<area shape="poly" id="edge7_Node000001_Node000008" title=" " alt="" coords="500,31,669,76,667,81,498,36"/>
+<area shape="rect" id="Node000003" href="$rwlock__inlines_8h_source.html" title=" " alt="" coords="5,167,132,192"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="192,120,93,169,90,164,190,115"/>
+<area shape="rect" id="Node000004" href="$spinlock__inlines_8h_source.html" title=" " alt="" coords="157,167,295,192"/>
+<area shape="poly" id="edge3_Node000002_Node000004" title=" " alt="" coords="229,125,229,166,223,166,223,125"/>
+<area shape="rect" id="Node000005" href="$ticketlock__inlines_8h_source.html" title=" " alt="" coords="319,167,466,192"/>
+<area shape="poly" id="edge4_Node000002_Node000005" title=" " alt="" coords="264,115,370,164,367,169,262,120"/>
+</map>
