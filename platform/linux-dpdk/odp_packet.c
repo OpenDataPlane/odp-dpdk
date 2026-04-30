@@ -349,25 +349,27 @@ int odp_packet_extend_head(odp_packet_t *pkt, uint32_t len, void **data_ptr,
 
 	if (addheadsize > 0) {
 		struct rte_mbuf *newhead, *t;
-		int i;
+		int i, newhead_size;
 
 		newhead = rte_pktmbuf_alloc(mb->pool);
 		if (newhead == NULL)
 			return -1;
 
-		newhead->data_len = addheadsize % newhead->buf_len;
+		newhead_size = addheadsize % newhead->buf_len;
+		newhead->data_len = newhead_size ? newhead_size : newhead->buf_len;
 		newhead->pkt_len = addheadsize;
 		newhead->data_off = newhead->buf_len - newhead->data_len;
-		newhead->nb_segs = addheadsize / newhead->buf_len + 1;
+		newhead->nb_segs = (addheadsize + newhead->buf_len - 1) / (newhead->buf_len);
 		t = newhead;
 
-		for (i = 0; i < newhead->nb_segs - 1; --i) {
+		for (i = 0; i < newhead->nb_segs - 1; i++) {
 			t->next = rte_pktmbuf_alloc(mb->pool);
 
 			if (t->next == NULL) {
 				rte_pktmbuf_free(newhead);
 				return -1;
 			}
+			t = t->next;
 			/* The intermediate segments are fully used */
 			t->data_len = t->buf_len;
 			t->data_off = 0;
