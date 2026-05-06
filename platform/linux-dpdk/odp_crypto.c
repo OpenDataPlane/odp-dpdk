@@ -1856,7 +1856,7 @@ static int op_alloc(crypto_op_t *op[],
 	for (n = 0; n < num_pkts; n++) {
 		odp_packet_t pkt = pkt_in[n];
 
-		if (odp_unlikely(odp_packet_has_ref(pkt))) {
+		if (odp_unlikely(odp_packet_is_referencing(pkt) || odp_packet_has_ref(pkt))) {
 			if (odp_unlikely(_odp_packet_unshare(&pkt))) {
 				for (int i = n; i < num_pkts; i++)
 					rte_crypto_op_free((struct rte_crypto_op *)op[i]);
