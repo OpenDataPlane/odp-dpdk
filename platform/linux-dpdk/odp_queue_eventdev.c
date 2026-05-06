@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: BSD-3-Clause
- * Copyright (c) 2019-2021 Nokia
+ * Copyright (c) 2019-2026 Nokia
  */
 
 #include <odp_eventdev_internal.h>
@@ -132,6 +132,7 @@ static int queue_capa(odp_queue_capability_t *capa, int sched ODP_UNUSED)
 	capa->max_queues        = CONFIG_MAX_QUEUES;
 	capa->plain.max_num     = CONFIG_MAX_PLAIN_QUEUES;
 	capa->plain.max_size    = _odp_eventdev_gbl->plain_config.max_queue_size - 1;
+	capa->plain.stats.bit.len     = 1;
 	capa->plain.lockfree.max_num  = 0;
 	capa->plain.lockfree.max_size = 0;
 
@@ -842,6 +843,13 @@ static inline int _plain_queue_deq_multi(odp_queue_t handle,
 	return num_deq;
 }
 
+static inline uint32_t plain_queue_len(odp_queue_t handle)
+{
+	queue_entry_t *queue = qentry_from_handle(handle);
+
+	return ring_mpmc_length(queue->ring_mpmc);
+}
+
 static int plain_queue_enq_multi(odp_queue_t handle,
 				 _odp_event_hdr_t *event_hdr[], int num)
 {
@@ -916,6 +924,13 @@ static int error_dequeue_multi(odp_queue_t handle,
 	_ODP_ERR("Dequeue multi not supported (0x%" PRIx64 ")\n", odp_queue_to_u64(handle));
 
 	return -1;
+}
+
+static uint32_t unsupported_len(odp_queue_t handle)
+{
+	_ODP_DBG("Reading queue length not supported (0x%" PRIx64 ")\n", odp_queue_to_u64(handle));
+
+	return 0;
 }
 
 static void queue_param_init(odp_queue_param_t *params)
@@ -1178,6 +1193,7 @@ static int queue_init(queue_entry_t *queue, const char *name,
 	queue->enqueue_multi      = error_enqueue_multi;
 	queue->dequeue            = error_dequeue;
 	queue->dequeue_multi      = error_dequeue_multi;
+	queue->len                = unsupported_len;
 	queue->orig_dequeue_multi = error_dequeue_multi;
 
 	if (queue_type == ODP_QUEUE_TYPE_PLAIN) {
@@ -1185,6 +1201,7 @@ static int queue_init(queue_entry_t *queue, const char *name,
 		queue->enqueue_multi      = plain_queue_enq_multi;
 		queue->dequeue            = plain_queue_deq;
 		queue->dequeue_multi      = plain_queue_deq_multi;
+		queue->len                = plain_queue_len;
 		queue->orig_dequeue_multi = plain_queue_deq_multi;
 
 		queue->ring_mpmc = ring_mpmc_create(queue->name, queue_size);
@@ -1321,6 +1338,17 @@ static int queue_api_deq_multi(odp_queue_t handle, odp_event_t ev[], int num)
 	return ret;
 }
 
+static uint32_t queue_len(odp_queue_t handle)
+{
+	queue_entry_t *queue;
+
+	_ODP_ASSERT(handle != ODP_QUEUE_INVALID);
+
+	queue = qentry_from_handle(handle);
+
+	return queue->len(handle);
+}
+
 static odp_event_t queue_api_deq(odp_queue_t handle)
 {
 	queue_entry_t *queue = qentry_from_handle(handle);
@@ -1346,6 +1374,7 @@ _odp_queue_api_fn_t _odp_queue_eventdev_api = {
 	.queue_enq_aggr = queue_api_enq_aggr,
 	.queue_deq = queue_api_deq,
 	.queue_deq_multi = queue_api_deq_multi,
+	.queue_len = queue_len,
 	.queue_type = queue_type,
 	.queue_sched_type = queue_sched_type,
 	.queue_sched_prio = queue_sched_prio,
