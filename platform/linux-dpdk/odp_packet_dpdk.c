@@ -211,11 +211,11 @@ static int init_options(pktio_entry_t *pktio_entry,
 
 	_ODP_DBG("DPDK interface (%s): %" PRIu16 "\n", dev_info->driver_name,
 		 pkt_priv(pktio_entry)->port_id);
-	_ODP_DBG("  multicast:   %d\n", opt->multicast_enable);
-	_ODP_DBG("  num_rx_desc: %d\n", opt->num_rx_desc_default);
-	_ODP_DBG("  num_tx_desc: %d\n", opt->num_tx_desc_default);
-	_ODP_DBG("  rx_drop_en:  %d\n", opt->rx_drop_en);
-	_ODP_DBG("  min_rx_burst: %d\n", opt->min_rx_burst);
+	_ODP_DBG("  num_rx_desc:           %d\n", opt->num_rx_desc_default);
+	_ODP_DBG("  num_tx_desc:           %d\n", opt->num_tx_desc_default);
+	_ODP_DBG("  rx_drop_en:            %d\n", opt->rx_drop_en);
+	_ODP_DBG("  multicast_en:          %d\n", opt->multicast_enable);
+	_ODP_DBG("  min_rx_burst:          %d\n", opt->min_rx_burst);
 	_ODP_DBG("  tx_offload_multi_segs: %d\n", opt->tx_offload_multi_segs);
 
 	return 0;
