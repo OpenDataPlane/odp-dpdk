@@ -195,6 +195,11 @@ static inline odp_packet_hdr_t *packet_hdr(odp_packet_t pkt)
 	return (odp_packet_hdr_t *)(uintptr_t)pkt;
 }
 
+static inline odp_packet_hdr_t *_odp_packet_hdr_from_mbuf(struct rte_mbuf *mb)
+{
+	return (odp_packet_hdr_t *)(uintptr_t)mb;
+}
+
 static inline odp_packet_t packet_handle(odp_packet_hdr_t *pkt_hdr)
 {
 	return (odp_packet_t)pkt_hdr;

@@ -682,7 +682,7 @@ static void init_obj_priv_data(struct rte_mempool *mp ODP_UNUSED, void *arg, voi
 		obj_uarea = &((odp_buffer_hdr_t *)mbuf)->uarea_addr;
 		break;
 	case ODP_POOL_PACKET:
-		obj_uarea = &((odp_packet_hdr_t *)mbuf)->uarea_addr;
+		obj_uarea = &_odp_packet_hdr_from_mbuf(mbuf)->uarea_addr;
 		break;
 	case ODP_POOL_TIMEOUT:
 		obj_uarea = &((odp_timeout_hdr_t *)mbuf)->uarea_addr;
@@ -1441,7 +1441,7 @@ static void init_ext_obj(struct rte_mempool *mp, void *arg, void *mbuf, unsigned
 		obj_uarea = &((odp_buffer_hdr_t *)mbuf)->uarea_addr;
 		break;
 	case ODP_POOL_PACKET:
-		obj_uarea = &((odp_packet_hdr_t *)mbuf)->uarea_addr;
+		obj_uarea = &_odp_packet_hdr_from_mbuf(mbuf)->uarea_addr;
 		break;
 	case ODP_POOL_TIMEOUT:
 		obj_uarea = &((odp_timeout_hdr_t *)mbuf)->uarea_addr;

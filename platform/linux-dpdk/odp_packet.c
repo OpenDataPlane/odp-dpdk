@@ -186,7 +186,7 @@ static odp_packet_t packet_alloc(pool_t *pool, uint32_t len)
 		if (odp_unlikely(mbuf == NULL))
 			return ODP_PACKET_INVALID;
 
-		pkt_hdr = (odp_packet_hdr_t *)mbuf;
+		pkt_hdr = _odp_packet_hdr_from_mbuf(mbuf);
 		odp_prefetch((uint8_t *)mbuf + sizeof(struct rte_mbuf));
 		odp_prefetch((uint8_t *)mbuf + sizeof(struct rte_mbuf) +
 			     ODP_CACHE_LINE_SIZE);
@@ -219,7 +219,7 @@ static odp_packet_t packet_alloc(pool_t *pool, uint32_t len)
 	}
 
 	head = mbufs[0];
-	pkt_hdr = (odp_packet_hdr_t *)head;
+	pkt_hdr = _odp_packet_hdr_from_mbuf(head);
 	odp_prefetch((uint8_t *)head + sizeof(struct rte_mbuf));
 	odp_prefetch((uint8_t *)head + sizeof(struct rte_mbuf) +
 			ODP_CACHE_LINE_SIZE);
