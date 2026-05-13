@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: BSD-3-Clause
- * Copyright (c) 2025 Nokia
+ * Copyright (c) 2025-2026 Nokia
  */
 
 /**
@@ -84,10 +84,7 @@ typedef struct ODP_ALIGNED_CACHE {
 		odp_queue_t q;
 	} scd;
 
-	struct {
-		tmr_hdls_t *tmrs;
-	} cancel;
-
+	tmr_hdls_t *tmrs;
 	prog_config_t *prog_config;
 	uint32_t num_boot_tmr;
 } worker_config_t;
@@ -117,7 +114,7 @@ typedef struct prog_config_s {
 	odp_pool_t tmo_pool;
 	odp_timer_pool_t tmr_pool;
 	odp_spinlock_t lock;
-	odp_shm_t cancel_shm;
+	odp_shm_t tmrs_shm;
 } prog_config_t;
 
 static prog_config_t *prog_conf;
@@ -164,7 +161,7 @@ static void init_config(prog_config_t *config)
 	config->tmo_pool = ODP_POOL_INVALID;
 	config->tmr_pool = ODP_TIMER_POOL_INVALID;
 	odp_spinlock_init(&config->lock);
-	config->cancel_shm = ODP_SHM_INVALID;
+	config->tmrs_shm = ODP_SHM_INVALID;
 }
 
 static void print_usage(const opts_t *opts)
@@ -327,8 +324,9 @@ static parse_result_t check_options(prog_config_t *config)
 			}
 		}
 	} else {
-		if (tmr_capa.periodic.max_pools == 0U) {
-			ODPH_ERR("Periodic timers not supported\n");
+		if (tmr_capa.periodic.support.base_mul == 0U) {
+			ODPH_ERR("Periodic timers not supported "
+				 "(ODP_TIMER_TYPE_PERIODIC_BASE_MUL)\n");
 			return PRS_NOK;
 		}
 
@@ -350,8 +348,9 @@ static parse_result_t check_options(prog_config_t *config)
 			return PRS_NOK;
 		}
 
-		config->per_capa.base_freq_hz = hz;
-		config->per_capa.max_multiplier = MULTIPLIER;
+		config->per_capa.type = ODP_TIMER_TYPE_PERIODIC_BASE_MUL;
+		config->per_capa.base_mul.base_freq_hz = hz;
+		config->per_capa.base_mul.max_multiplier = MULTIPLIER;
 		config->per_capa.res_ns = opts->res_ns;
 
 		if (odp_timer_periodic_capability(opts->clk_src, &config->per_capa) < 0) {
@@ -359,8 +358,8 @@ static parse_result_t check_options(prog_config_t *config)
 			return PRS_NOK;
 		}
 
-		if (config->per_capa.max_multiplier > MULTIPLIER)
-			config->per_capa.max_multiplier = MULTIPLIER;
+		if (config->per_capa.base_mul.max_multiplier > MULTIPLIER)
+			config->per_capa.base_mul.max_multiplier = MULTIPLIER;
 	}
 
 	if (odp_pool_capability(&pool_capa) < 0) {
@@ -486,7 +485,7 @@ static odp_bool_t setup_config(prog_config_t *config)
 	odp_timer_pool_param_t tmr_param;
 	odp_queue_param_t q_param;
 	odp_thrmask_t zero;
-	void *cancel_addr = NULL;
+	void *tmrs_addr = NULL;
 	uint32_t num_tmr_p_w = ODPH_DIV_ROUNDUP(opts->num_tmr, opts->num_workers),
 	num_tmr = opts->num_tmr;
 	worker_config_t *worker;
@@ -519,9 +518,10 @@ static odp_bool_t setup_config(prog_config_t *config)
 		tmr_param.min_tmo = config->res_capa.min_tmo;
 		tmr_param.max_tmo = config->res_capa.max_tmo;
 	} else {
-		tmr_param.timer_type = ODP_TIMER_TYPE_PERIODIC;
-		tmr_param.periodic.base_freq_hz = config->per_capa.base_freq_hz;
-		tmr_param.periodic.max_multiplier = config->per_capa.max_multiplier;
+		tmr_param.timer_type = ODP_TIMER_TYPE_PERIODIC_BASE_MUL;
+		tmr_param.periodic.base_mul.base_freq_hz = config->per_capa.base_mul.base_freq_hz;
+		tmr_param.periodic.base_mul.max_multiplier =
+			config->per_capa.base_mul.max_multiplier;
 	}
 
 	config->tmr_pool = create_timer_pool(&tmr_param);
@@ -533,22 +533,18 @@ static odp_bool_t setup_config(prog_config_t *config)
 	q_param.type = ODP_QUEUE_TYPE_SCHED;
 	q_param.sched.prio = odp_schedule_default_prio();
 	odp_thrmask_zero(&zero);
+	config->tmrs_shm = odp_shm_reserve(PROG_NAME, tmr_size * max_tmr, ODP_CACHE_LINE_SIZE, 0U);
 
-	if (is_priv && opts->mode == CANCEL) {
-		config->cancel_shm = odp_shm_reserve(PROG_NAME, tmr_size * max_tmr,
-						     ODP_CACHE_LINE_SIZE, 0U);
+	if (config->tmrs_shm == ODP_SHM_INVALID) {
+		ODPH_ERR("Error reserving shared memory for timer handles\n");
+		return false;
+	}
 
-		if (config->cancel_shm == ODP_SHM_INVALID) {
-			ODPH_ERR("Error reserving SHM for cancel mode\n");
-			return false;
-		}
+	tmrs_addr = odp_shm_addr(config->tmrs_shm);
 
-		cancel_addr = odp_shm_addr(config->cancel_shm);
-
-		if (cancel_addr == NULL) {
-			ODPH_ERR("Error resolving SHM address for cancel mode\n");
-			return false;
-		}
+	if (tmrs_addr == NULL) {
+		ODPH_ERR("Error resolving shared memory address for timer handles\n");
+		return false;
 	}
 
 	for (uint32_t i = 0U; i < opts->num_workers; ++i) {
@@ -561,12 +557,6 @@ static odp_bool_t setup_config(prog_config_t *config)
 
 		if (is_priv) {
 			worker->num_boot_tmr = opts->num_tmr;
-
-			if (opts->mode == CANCEL)
-				worker->cancel.tmrs =
-				  (tmr_hdls_t *)(uintptr_t)((uint8_t *)(uintptr_t)cancel_addr + i *
-				  worker->num_boot_tmr * tmr_size);
-
 			worker->scd.grp = odp_schedule_group_create(PROG_NAME, &zero);
 
 			if (worker->scd.grp == ODP_SCHED_GROUP_INVALID) {
@@ -577,6 +567,8 @@ static odp_bool_t setup_config(prog_config_t *config)
 			q_param.sched.group = worker->scd.grp;
 		}
 
+		worker->tmrs = (tmr_hdls_t *)(uintptr_t)((uint8_t *)(uintptr_t)tmrs_addr + i *
+			       worker->num_boot_tmr * tmr_size);
 		worker->scd.q = odp_queue_create(PROG_NAME, &q_param);
 
 		if (worker->scd.q == ODP_QUEUE_INVALID) {
@@ -590,31 +582,26 @@ static odp_bool_t setup_config(prog_config_t *config)
 	return true;
 }
 
-static tmr_hdls_t get_time_handles(odp_timer_pool_t tmr_pool, odp_pool_t tmo_pool, odp_queue_t q)
+static void get_time_handles(odp_timer_pool_t tmr_pool, odp_pool_t tmo_pool, odp_queue_t q,
+			     tmr_hdls_t *time)
 {
-	tmr_hdls_t time;
+	time->tmr = odp_timer_alloc(tmr_pool, q, time);
 
-	time.tmr = odp_timer_alloc(tmr_pool, q, NULL);
-
-	if (time.tmr == ODP_TIMER_INVALID)
+	if (time->tmr == ODP_TIMER_INVALID)
 		/* We should have enough timers available, if still somehow there is a failure,
 		 * abort. */
-		ODPH_ABORT("Error allocating timers, aborting (tmr: %" PRIx64 ", "
-			   "tmr pool: %" PRIx64 ")\n", odp_timer_to_u64(time.tmr),
+		ODPH_ABORT("Error allocating timers, aborting (tmr pool: %" PRIx64 ")\n",
 			   odp_timer_pool_to_u64(tmr_pool));
 
-	time.tmo = odp_timeout_alloc(tmo_pool);
+	time->tmo = odp_timeout_alloc(tmo_pool);
 
-	if (time.tmo == ODP_TIMEOUT_INVALID)
+	if (time->tmo == ODP_TIMEOUT_INVALID)
 		/* We should have enough timeouts available, if still somehow there is a failure,
 		 * abort. */
-		ODPH_ABORT("Error allocating timeouts, aborting (tmo: %" PRIx64 ", "
-			   "tmo pool: %" PRIx64 ")\n", odp_timeout_to_u64(time.tmo),
+		ODPH_ABORT("Error allocating timeouts, aborting (tmo pool: %" PRIx64 ")\n",
 			   odp_pool_to_u64(tmo_pool));
 
-	time.is_running = true;
-
-	return time;
+	time->is_running = true;
 }
 
 static inline void start_single_shot(odp_timer_pool_t tmr_pool, odp_timer_t tmr, odp_event_t tmo,
@@ -633,10 +620,18 @@ static inline void start_single_shot(odp_timer_pool_t tmr_pool, odp_timer_t tmr,
 
 		--retry;
 
-		if (retry > 0U && ret == ODP_TIMER_TOO_NEAR) {
-			++mul;
-			++stats->num_retry;
-			continue;
+		if (retry > 0U) {
+			if (ret == ODP_TIMER_BUSY) {
+				/* Resources busy, don't increment multiplier, just retry. */
+				++stats->num_retry;
+				continue;
+			}
+
+			if (ret == ODP_TIMER_TOO_NEAR) {
+				++mul;
+				++stats->num_retry;
+				continue;
+			}
 		}
 
 		/* Arming the timer apparently not possible, abort. */
@@ -651,11 +646,12 @@ static inline void start_single_shot(odp_timer_pool_t tmr_pool, odp_timer_t tmr,
 static void boot_single_shot(worker_config_t *worker, odp_timer_pool_t tmr_pool,
 			     odp_pool_t tmo_pool, uint64_t res_ns)
 {
-	tmr_hdls_t time;
+	tmr_hdls_t *time;
 
 	for (uint32_t i = 0U; i < worker->num_boot_tmr; ++i) {
-		time = get_time_handles(tmr_pool, tmo_pool, worker->scd.q);
-		start_single_shot(tmr_pool, time.tmr, odp_timeout_to_event(time.tmo), res_ns,
+		time = &worker->tmrs[i];
+		get_time_handles(tmr_pool, tmo_pool, worker->scd.q, time);
+		start_single_shot(tmr_pool, time->tmr, odp_timeout_to_event(time->tmo), res_ns,
 				  &worker->stats);
 	}
 }
@@ -715,28 +711,60 @@ static int process_single_shot(void *args)
 	return 0;
 }
 
-static void start_periodic(odp_timer_pool_t tmr_pool, odp_timer_t tmr, odp_event_t tmo,
-			   uint64_t mul)
+static void get_periodic_time_handles(odp_timer_pool_t tmr_pool, odp_queue_t q, uint64_t mul,
+				      tmr_hdls_t *time)
 {
-	const odp_timer_periodic_start_t start = { .first_tick = 0U, .freq_multiplier = mul,
-						   .tmo_ev = tmo };
-	const int ret = odp_timer_periodic_start(tmr, &start);
+	odp_timer_periodic_param_t param;
 
-	if (ret != ODP_TIMER_SUCCESS)
-		/* Even with implementation-set first tick, arming not possible, abort. */
+	odp_timer_periodic_param_init(&param);
+	param.queue = q;
+	param.user_ptr = time;
+	param.base_mul.multiplier = mul;
+	time->tmr = odp_timer_periodic_alloc(tmr_pool, &param);
+
+	if (time->tmr == ODP_TIMER_INVALID)
+		/* We should have enough timers available, if still somehow there is a failure,
+		 * abort. */
+		ODPH_ABORT("Error allocating timers, aborting (tmr pool: %" PRIx64 ")\n",
+			   odp_timer_pool_to_u64(tmr_pool));
+
+	time->is_running = true;
+}
+
+static void start_periodic(odp_timer_pool_t tmr_pool, odp_timer_t tmr, stats_t *stats)
+{
+	const odp_timer_periodic_start_t start = { .first_tick = 0U };
+	uint32_t retry = MAX_RETRY;
+	int ret;
+
+	while (retry) {
+		ret = odp_timer_periodic_start(tmr, &start);
+
+		if (ret == ODP_TIMER_SUCCESS)
+			break;
+
+		--retry;
+
+		if (retry > 0U && ret == ODP_TIMER_BUSY) {
+			++stats->num_retry;
+			continue;
+		}
+
+		/* Arming the timer apparently not possible, abort. */
 		ODPH_ABORT("Error starting timer, aborting (tmr: %" PRIx64 ", tmr pool: "
 			   "%" PRIx64 ")\n", odp_timer_to_u64(tmr),
 			   odp_timer_pool_to_u64(tmr_pool));
+	}
 }
 
-static void boot_periodic(worker_config_t *worker, odp_timer_pool_t tmr_pool, odp_pool_t tmo_pool,
-			  uint64_t mul)
+static void boot_periodic(worker_config_t *worker, odp_timer_pool_t tmr_pool, uint64_t mul)
 {
-	tmr_hdls_t time;
+	tmr_hdls_t *time;
 
 	for (uint32_t i = 0U; i < worker->num_boot_tmr; ++i) {
-		time = get_time_handles(tmr_pool, tmo_pool, worker->scd.q);
-		start_periodic(tmr_pool, time.tmr, odp_timeout_to_event(time.tmo), mul);
+		time = &worker->tmrs[i];
+		get_periodic_time_handles(tmr_pool, worker->scd.q, mul, time);
+		start_periodic(tmr_pool, time->tmr, &worker->stats);
 	}
 }
 
@@ -748,10 +776,12 @@ static int process_periodic(void *args)
 	odp_time_t tm;
 	odp_atomic_u32_t *is_running = &config->is_running;
 	odp_event_t ev;
+	odp_timeout_t tmo;
 	odp_timer_t tmr;
 	stats_t *stats = &worker->stats;
 	const uint64_t res_ns = prog_conf->opts.res_ns;
 	int ret;
+	tmr_hdls_t *time;
 
 	if (worker->scd.grp != ODP_SCHED_GROUP_INVALID) {
 		odp_thrmask_zero(&mask);
@@ -762,7 +792,7 @@ static int process_periodic(void *args)
 				   "\n", odp_schedule_group_to_u64(worker->scd.grp));
 	}
 
-	boot_periodic(worker, config->tmr_pool, config->tmo_pool, config->per_capa.max_multiplier);
+	boot_periodic(worker, config->tmr_pool, config->per_capa.base_mul.max_multiplier);
 	odp_barrier_wait(&config->init_barrier);
 	tm = odp_time_local_strict();
 
@@ -786,15 +816,17 @@ static int process_periodic(void *args)
 
 	while (true) {
 		ev = odp_schedule(NULL, odp_schedule_wait_time(res_ns *
-							       config->per_capa.max_multiplier *
-							       WAIT_MULTIPLIER));
+							config->per_capa.base_mul.max_multiplier *
+							WAIT_MULTIPLIER));
 
 		if (ev == ODP_EVENT_INVALID)
 			break;
 
 		/* Many workers might be trying to cancel the timer, do it exclusively. */
 		odp_spinlock_lock(&config->lock);
-		tmr = odp_timeout_timer(odp_timeout_from_event(ev));
+		tmo = odp_timeout_from_event(ev);
+		tmr = odp_timeout_timer(tmo);
+		time = odp_timeout_user_ptr(tmo);
 		ret = odp_timer_periodic_ack(tmr, ev);
 
 		if (ret < 0)
@@ -802,38 +834,23 @@ static int process_periodic(void *args)
 				   odp_timer_to_u64(tmr));
 
 		if (ret == 1) {
-			odp_spinlock_unlock(&config->lock);
-			continue;
-		}
-
-		if (ret == 2) {
-			odp_event_free(ev);
 			(void)odp_timer_free(tmr);
 			odp_spinlock_unlock(&config->lock);
 			continue;
 		}
 
-		if (odp_timer_periodic_cancel(tmr) < 0)
-			ODPH_ABORT("Error cancelling periodic timer, aborting "
-				   "(tmr: %" PRIx64 ")\n", odp_timer_to_u64(tmr));
+		if (time->is_running) {
+			time->is_running = false;
+
+			if (odp_timer_periodic_cancel(tmr) < 0)
+				ODPH_ABORT("Error cancelling periodic timer, aborting "
+					   "(tmr: %" PRIx64 ")\n", odp_timer_to_u64(tmr));
+		}
 
 		odp_spinlock_unlock(&config->lock);
 	}
 
 	return 0;
-}
-
-static void boot_cancel(worker_config_t *worker, odp_timer_pool_t tmr_pool, odp_pool_t tmo_pool,
-			uint64_t res_ns)
-{
-	tmr_hdls_t time;
-
-	for (uint32_t i = 0U; i < worker->num_boot_tmr; ++i) {
-		time = get_time_handles(tmr_pool, tmo_pool, worker->scd.q);
-		start_single_shot(tmr_pool, time.tmr, odp_timeout_to_event(time.tmo), res_ns,
-				  &worker->stats);
-		worker->cancel.tmrs[i] = time;
-	}
 }
 
 static int process_cancel(void *args)
@@ -859,7 +876,7 @@ static int process_cancel(void *args)
 		ODPH_ABORT("Error joining scheduler group, aborting (group: %" PRIu64 ")\n",
 			   odp_schedule_group_to_u64(worker->scd.grp));
 
-	boot_cancel(worker, tmr_pool, config->tmo_pool, res_ns);
+	boot_single_shot(worker, tmr_pool, config->tmo_pool, res_ns);
 	odp_barrier_wait(&config->init_barrier);
 	tm = odp_time_local_strict();
 
@@ -874,7 +891,7 @@ static int process_cancel(void *args)
 		}
 
 		for (uint32_t i = 0U; i < num_boot_tmr; ++i) {
-			time = &worker->cancel.tmrs[i];
+			time = &worker->tmrs[i];
 			ret = odp_timer_cancel(time->tmr, &ev);
 
 			if (odp_unlikely(ret == ODP_TIMER_TOO_NEAR))
@@ -889,7 +906,7 @@ static int process_cancel(void *args)
 		}
 
 		for (uint32_t i = 0U; i < num_boot_tmr; ++i) {
-			time = &worker->cancel.tmrs[i];
+			time = &worker->tmrs[i];
 
 			if (time->is_running)
 				continue;
@@ -1012,18 +1029,17 @@ static void print_stats(const prog_config_t *config)
 		tot_rate += rate;
 
 		printf("  worker %u:\n"
-		       "    %s%" PRIu64 "\n", i,
+		       "    %s%" PRIu64 "\n"
+		       "    number of retries:  %" PRIu64 "\n", i,
 		       opts->mode == SINGLE_SHOT || opts->mode == PERIODIC ?
 			"number of timeouts: " : "number of cancels:  ",
-		       stats->num_tmo);
+		       stats->num_tmo, stats->num_retry);
 
 		if (opts->mode == SINGLE_SHOT || opts->mode == CANCEL) {
 			if (opts->mode == CANCEL)
 				printf("    number of misses:   %" PRIu64 "\n", stats->num_miss);
 
-			printf("    number of retries:  %" PRIu64 "\n"
-			       "    max start mul:      %" PRIu64 "\n", stats->num_retry,
-			       stats->max_mul);
+			printf("    max start mul:      %" PRIu64 "\n", stats->max_mul);
 		}
 
 		printf("    runtime:            %" PRIu64 " ns\n"
@@ -1065,8 +1081,8 @@ static void teardown(const prog_config_t *config)
 			(void)odp_schedule_group_destroy(worker->scd.grp);
 	}
 
-	if (config->cancel_shm != ODP_SHM_INVALID)
-		(void)odp_shm_free(config->cancel_shm);
+	if (config->tmrs_shm != ODP_SHM_INVALID)
+		(void)odp_shm_free(config->tmrs_shm);
 
 	if (config->tmr_pool != ODP_TIMER_POOL_INVALID)
 		(void)odp_timer_pool_destroy(config->tmr_pool);
@@ -1102,7 +1118,7 @@ int main(int argc, char **argv)
 				  0U);
 
 	if (shm_cfg == ODP_SHM_INVALID) {
-		ODPH_ERR("Error reserving shared memory\n");
+		ODPH_ERR("Error reserving shared memory for global config\n");
 		ret = EXIT_FAILURE;
 		goto out;
 	}
@@ -1110,7 +1126,7 @@ int main(int argc, char **argv)
 	prog_conf = odp_shm_addr(shm_cfg);
 
 	if (prog_conf == NULL) {
-		ODPH_ERR("Error resolving shared memory address\n");
+		ODPH_ERR("Error resolving shared memory address for global config\n");
 		ret = EXIT_FAILURE;
 		goto out;
 	}

@@ -682,7 +682,7 @@ static void init_obj_priv_data(struct rte_mempool *mp ODP_UNUSED, void *arg, voi
 		obj_uarea = &((odp_buffer_hdr_t *)mbuf)->uarea_addr;
 		break;
 	case ODP_POOL_PACKET:
-		obj_uarea = &((odp_packet_hdr_t *)mbuf)->uarea_addr;
+		obj_uarea = &_odp_packet_hdr_from_mbuf(mbuf)->uarea_addr;
 		break;
 	case ODP_POOL_TIMEOUT:
 		obj_uarea = &((odp_timeout_hdr_t *)mbuf)->uarea_addr;
@@ -819,6 +819,22 @@ odp_pool_t _odp_pool_create(const char *name, const odp_pool_param_t *params,
 		return ODP_POOL_INVALID;
 	}
 
+	/* Reduce DPDK pktmbuf pool 'mbuf_data_room_size', so that rte_pktmbuf_detach() restores
+	 * 'buf_len' to a value that excludes possible endmark trailer. Without this, an indirect
+	 * mbuf detached during free has its 'buf_len' reset to the full data_size, which corrupts
+	 * the endmark validation when the mbuf is reused. */
+	if ((params->type == ODP_POOL_PACKET || params->type == ODP_POOL_BUFFER) && trailer > 0) {
+		struct rte_pktmbuf_pool_private *mbp_priv = rte_mempool_get_priv(mp);
+
+		if (mbp_priv->mbuf_data_room_size <= trailer) {
+			odp_ticketlock_unlock(&pool->lock);
+			_ODP_ERR("Not enough room for endmark\n");
+			rte_mempool_free(mp);
+			return ODP_POOL_INVALID;
+		}
+		mbp_priv->mbuf_data_room_size -= trailer;
+	}
+
 	if (reserve_uarea(pool, uarea_size, num)) {
 		odp_ticketlock_unlock(&pool->lock);
 		_ODP_ERR("User area SHM reserve failed\n");
@@ -872,20 +888,19 @@ odp_pool_t odp_pool_lookup(const char *name)
 
 odp_buffer_t odp_buffer_alloc(odp_pool_t pool_hdl)
 {
-	odp_event_t event;
 	pool_t *pool;
 
 	_ODP_ASSERT(ODP_POOL_INVALID != pool_hdl);
 
 	pool = _odp_pool_entry(pool_hdl);
 
-	_ODP_ASSERT(pool->type == ODP_POOL_BUFFER);
+	/* Buffer pools are also used by other pool implementations so check both types */
+	_ODP_ASSERT(pool->type == ODP_POOL_BUFFER && pool->type_2 == ODP_POOL_BUFFER);
 
-	event = _odp_event_alloc(pool);
-	if (odp_likely(event != ODP_EVENT_INVALID))
-		return odp_buffer_from_event(event);
+	/* Check that ODP_BUFFER_INVALID and ODP_EVENT_INVALID match for the cast */
+	_ODP_ASSERT((uintptr_t)ODP_BUFFER_INVALID == (uintptr_t)ODP_EVENT_INVALID);
 
-	return ODP_BUFFER_INVALID;
+	return (odp_buffer_t)_odp_event_alloc(pool);
 }
 
 int odp_buffer_alloc_multi(odp_pool_t pool_hdl, odp_buffer_t buf[], int num)
@@ -896,7 +911,8 @@ int odp_buffer_alloc_multi(odp_pool_t pool_hdl, odp_buffer_t buf[], int num)
 
 	pool = _odp_pool_entry(pool_hdl);
 
-	_ODP_ASSERT(pool->type == ODP_POOL_BUFFER);
+	/* Buffer pools are also used by other pool implementations so check both types */
+	_ODP_ASSERT(pool->type == ODP_POOL_BUFFER && pool->type_2 == ODP_POOL_BUFFER);
 
 	return _odp_event_alloc_multi(pool, (_odp_event_hdr_t **)buf, num);
 }
@@ -1490,7 +1506,7 @@ static void init_ext_obj(struct rte_mempool *mp, void *arg, void *mbuf, unsigned
 		obj_uarea = &((odp_buffer_hdr_t *)mbuf)->uarea_addr;
 		break;
 	case ODP_POOL_PACKET:
-		obj_uarea = &((odp_packet_hdr_t *)mbuf)->uarea_addr;
+		obj_uarea = &_odp_packet_hdr_from_mbuf(mbuf)->uarea_addr;
 		break;
 	case ODP_POOL_TIMEOUT:
 		obj_uarea = &((odp_timeout_hdr_t *)mbuf)->uarea_addr;

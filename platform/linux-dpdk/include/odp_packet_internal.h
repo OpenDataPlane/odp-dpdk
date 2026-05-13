@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2014-2018 Linaro Limited
- * Copyright (c) 2021-2024 Nokia
+ * Copyright (c) 2021-2026 Nokia
  */
 
 /**
@@ -143,8 +143,10 @@ typedef struct ODP_ALIGNED_CACHE odp_packet_hdr_t {
 	/* Classifier mark */
 	uint16_t cls_mark;
 
+	uint8_t unused_padding;
+
 	/* Classifier handle index */
-	uint16_t cos;
+	uint8_t cos;
 
 	/* Offset to payload start */
 	uint16_t payload_offset;
@@ -193,6 +195,11 @@ static inline odp_packet_hdr_t *packet_hdr(odp_packet_t pkt)
 	return (odp_packet_hdr_t *)(uintptr_t)pkt;
 }
 
+static inline odp_packet_hdr_t *_odp_packet_hdr_from_mbuf(struct rte_mbuf *mb)
+{
+	return (odp_packet_hdr_t *)(uintptr_t)mb;
+}
+
 static inline odp_packet_t packet_handle(odp_packet_hdr_t *pkt_hdr)
 {
 	return (odp_packet_t)pkt_hdr;
@@ -232,7 +239,7 @@ static inline void packet_init(odp_packet_hdr_t *pkt_hdr, odp_pktio_t input)
 	pkt_hdr->p.input_flags.all = 0;
 	pkt_hdr->p.flags.all_flags = 0;
 
-	pkt_hdr->p.l2_offset        = 0;
+	pkt_hdr->p.l2_offset        = ODP_PACKET_OFFSET_INVALID;
 	pkt_hdr->p.l3_offset        = ODP_PACKET_OFFSET_INVALID;
 	pkt_hdr->p.l4_offset        = ODP_PACKET_OFFSET_INVALID;
 
@@ -292,7 +299,9 @@ static inline void _odp_packet_copy_md(odp_packet_hdr_t *dst_hdr,
 	dst_hdr->user_ptr = src_hdr->user_ptr;
 
 	dst_hdr->mb.port = src_hdr->mb.port;
-	dst_hdr->mb.ol_flags = src_hdr->mb.ol_flags;
+	/* RTE_MBUF_F_INDIRECT is used to indicate referencing packets */
+	dst_hdr->mb.ol_flags = (dst_hdr->mb.ol_flags & RTE_MBUF_F_INDIRECT) |
+			       (src_hdr->mb.ol_flags & ~RTE_MBUF_F_INDIRECT);
 	dst_hdr->mb.packet_type = src_hdr->mb.packet_type;
 	dst_hdr->mb.vlan_tci = src_hdr->mb.vlan_tci;
 	dst_hdr->mb.hash.rss = src_hdr->mb.hash.rss;
@@ -416,6 +425,8 @@ int _odp_packet_sctp_chksum_insert(odp_packet_t pkt);
 
 int _odp_packet_l4_chksum(odp_packet_hdr_t *pkt_hdr,
 			  odp_pktin_config_opt_t opt, uint64_t l4_part_sum);
+
+int _odp_packet_unshare(odp_packet_t *pkt);
 
 #ifdef __cplusplus
 }

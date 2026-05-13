@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2018 Linaro Limited
- * Copyright (c) 2019-2025 Nokia
+ * Copyright (c) 2019-2026 Nokia
  */
 
 /**
@@ -103,7 +103,7 @@ typedef struct ODP_ALIGNED_CACHE {
 	uint64_t num_exact;
 	uint64_t num_after;
 
-	uint64_t num_too_near;
+	uint64_t num_retry;
 
 } test_stat_t;
 
@@ -521,8 +521,9 @@ static int periodic_params(test_global_t *test_global, odp_timer_pool_param_t *t
 	min_freq = odp_fract_u64_to_dbl(&timer_capa->periodic.min_base_freq_hz);
 	max_freq = odp_fract_u64_to_dbl(&timer_capa->periodic.max_base_freq_hz);
 
-	capa.base_freq_hz = freq;
-	capa.max_multiplier = max_multiplier;
+	capa.type = ODP_TIMER_TYPE_PERIODIC_BASE_MUL;
+	capa.base_mul.base_freq_hz = freq;
+	capa.base_mul.max_multiplier = max_multiplier;
 	capa.res_ns = res_ns;
 
 	ret = odp_timer_periodic_capability(test_global->opt.clk_src, &capa);
@@ -537,9 +538,9 @@ static int periodic_params(test_global_t *test_global, odp_timer_pool_param_t *t
 
 	if (ret == 0) {
 		printf("Requested base frequency is not met. Using %.2f Hz instead of %.2f Hz.\n",
-		       odp_fract_u64_to_dbl(&capa.base_freq_hz), opt_freq);
+		       odp_fract_u64_to_dbl(&capa.base_mul.base_freq_hz), opt_freq);
 
-		freq = capa.base_freq_hz;
+		freq = capa.base_mul.base_freq_hz;
 	}
 
 	if (res_ns == 0)
@@ -550,9 +551,9 @@ static int periodic_params(test_global_t *test_global, odp_timer_pool_param_t *t
 	test_global->period_dbl = ODP_TIME_SEC_IN_NS / (multiplier * freq_dbl);
 
 	/* Min/max tmo are ignored, leave those to default values */
-	timer_param->timer_type = ODP_TIMER_TYPE_PERIODIC;
-	timer_param->periodic.base_freq_hz = freq;
-	timer_param->periodic.max_multiplier = max_multiplier;
+	timer_param->timer_type = ODP_TIMER_TYPE_PERIODIC_BASE_MUL;
+	timer_param->periodic.base_mul.base_freq_hz = freq;
+	timer_param->periodic.base_mul.max_multiplier = max_multiplier;
 
 	if (res_hz)
 		timer_param->res_hz = res_hz;
@@ -583,9 +584,10 @@ static int create_timers(test_global_t *test_global)
 	odp_timer_pool_param_t timer_param;
 	odp_timer_capability_t timer_capa;
 	odp_timer_t timer;
-	odp_queue_t *queue;
+	odp_queue_t *queue, q;
 	odp_schedule_group_t *group;
 	odp_queue_param_t queue_param;
+	odp_timer_periodic_param_t tmr_param;
 	uint64_t offset_ns;
 	uint32_t max_timers;
 	odp_event_t event;
@@ -674,8 +676,9 @@ static int create_timers(test_global_t *test_global)
 	max_timers = timer_capa.max_timers;
 
 	if (mode == MODE_PERIODIC) {
-		if (timer_capa.periodic.max_pools < 1) {
-			ODPH_ERR("Periodic timers not supported.\n");
+		if (timer_capa.periodic.support.base_mul == 0) {
+			ODPH_ERR("Periodic timers not supported "
+				 "(ODP_TIMER_TYPE_PERIODIC_BASE_MUL).\n");
 			return -1;
 		}
 		max_timers = timer_capa.periodic.max_timers;
@@ -756,10 +759,30 @@ static int create_timers(test_global_t *test_global)
 
 	test_global->timer_pool = timer_pool;
 
+	if (mode == MODE_PERIODIC) {
+		odp_timer_periodic_param_init(&tmr_param);
+		tmr_param.base_mul.multiplier = test_global->opt.multiplier;
+	}
+
 	for (i = 0; i < alloc_timers; i++) {
+		q = queue[i % test_global->opt.num_queue];
 		timer_ctx_t *ctx = &test_global->timer_ctx[i];
 
-		timer = odp_timer_alloc(timer_pool, queue[i % test_global->opt.num_queue], ctx);
+		if (mode == MODE_PERIODIC) {
+			tmr_param.queue = q;
+			tmr_param.user_ptr = ctx;
+			timer = odp_timer_periodic_alloc(timer_pool, &tmr_param);
+		} else {
+			timeout = odp_timeout_alloc(pool);
+
+			if (timeout == ODP_TIMEOUT_INVALID) {
+				ODPH_ERR("Timeout alloc failed\n");
+				return -1;
+			}
+
+			ctx->event = odp_timeout_to_event(timeout);
+			timer = odp_timer_alloc(timer_pool, q, ctx);
+		}
 
 		if (timer == ODP_TIMER_INVALID) {
 			ODPH_ERR("Timer alloc failed.\n");
@@ -767,15 +790,6 @@ static int create_timers(test_global_t *test_global)
 		}
 
 		ctx->timer = timer;
-
-		timeout = odp_timeout_alloc(pool);
-		if (timeout == ODP_TIMEOUT_INVALID) {
-			ODPH_ERR("Timeout alloc failed\n");
-			return -1;
-		}
-
-		ctx->event = odp_timeout_to_event(timeout);
-
 		odp_ticketlock_init(&ctx->lock);
 	}
 
@@ -849,12 +863,10 @@ static int start_timers(test_global_t *test_global)
 				ctx->first_period = start_tick +
 					odp_timer_ns_to_tick(timer_pool,
 							     test_global->period_dbl + 0.5);
-				periodic_start.freq_multiplier = test_global->opt.multiplier;
 				periodic_start.first_tick = 0;
 				if (nsec)
 					periodic_start.first_tick =
 						start_tick + odp_timer_ns_to_tick(timer_pool, nsec);
-				periodic_start.tmo_ev = ctx->event;
 				retval = odp_timer_periodic_start(ctx->timer, &periodic_start);
 			} else if (mode == MODE_CONCURRENCY) {
 				ctx->nsec = start_ns + test_global->opt.period_ns;
@@ -973,7 +985,7 @@ static int print_stat(test_global_t *test_global)
 		stat->num_before += s[i].num_before;
 		stat->num_exact += s[i].num_exact;
 		stat->num_after += s[i].num_after;
-		stat->num_too_near += s[i].num_too_near;
+		stat->num_retry += s[i].num_retry;
 
 		if (s[i].nsec_before_min < stat->nsec_before_min) {
 			stat->nsec_before_min = s[i].nsec_before_min;
@@ -1033,7 +1045,7 @@ static int print_stat(test_global_t *test_global)
 	printf("  num exact:  %12" PRIu64 "  /  %.2f%%\n",
 	       stat->num_exact, 100.0 * stat->num_exact / tot_timers);
 	printf("  num retry:  %12" PRIu64 "  /  %.2f%%\n",
-	       stat->num_too_near, 100.0 * stat->num_too_near / tot_timers);
+	       stat->num_retry, 100.0 * stat->num_retry / tot_timers);
 	printf("  error after (nsec):\n");
 	print_nsec_error("min", stat->nsec_after_min, res_ns, nsec_after_min_tid,
 			 stat->nsec_after_min_idx);
@@ -1100,7 +1112,7 @@ static int print_stat(test_global_t *test_global)
 				      "%f,%" PRIu64 ",%f,%" PRIu64 ",%f,%" PRIu64 ",%f,%" PRIu64 ","
 				      "%f,%" PRIu64 ",%f,%" PRId64 ",%f\n",
 				      stat->num_after, stat->num_before,
-				      stat->num_exact, stat->num_too_near,
+				      stat->num_exact, stat->num_retry,
 				      stat->nsec_after_min, (double)stat->nsec_after_min / res_ns,
 				      stat->nsec_after_max, (double)stat->nsec_after_max / res_ns,
 				      ave_after, (double)ave_after / res_ns,
@@ -1470,9 +1482,9 @@ static int run_test(void *arg)
 				start_param.tick = tick;
 
 				ret = odp_timer_start(tim, &start_param);
-				if (ret == ODP_TIMER_TOO_NEAR) {
+				if (ret == ODP_TIMER_TOO_NEAR || ret == ODP_TIMER_BUSY) {
 					if (events >= test_global->opt.warmup_timers)
-						stat->num_too_near++;
+						stat->num_retry++;
 				} else {
 					break;
 				}
@@ -1488,13 +1500,10 @@ static int run_test(void *arg)
 			int ret = odp_timer_periodic_ack(ctx->timer, ev);
 
 			if (ret < 0)
-				ODPH_ERR("Failed to ack a periodic timer.\n");
+				ODPH_ABORT("Failed to ack a periodic timer.\n");
 
-			if (ret == 2)
+			if (ret == 1)
 				odp_atomic_inc_u64(&test_global->last_events);
-
-			if (ret == 2 || ret < 0)
-				odp_event_free(ev);
 		} else if (mode == MODE_CONCURRENCY && events < tot_timers - 1) {
 			process_event_concurrency(events, test_global, ctx, time_ns, ev);
 		} else {
