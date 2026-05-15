@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2018 Linaro Limited
- * Copyright (c) 2020-2024 Nokia
+ * Copyright (c) 2020-2026 Nokia
  */
 
 #ifndef ODP_PLAT_TIME_INLINES_H_
@@ -22,10 +22,16 @@ extern "C" {
 
 /** @cond _ODP_HIDE_FROM_DOXYGEN_ */
 
+#define _ODP_TIME_GIGA_HZ  1000000000ULL
+
 typedef struct _odp_time_global_t {
-	uint64_t        freq_hz;
-	uint64_t        start_cycles;
-	uint64_t        start_ns;
+	uint64_t freq_hz;
+	uint64_t start_cycles;
+	uint64_t start_ns;
+	uint64_t mult_to_ns;
+	uint64_t mult_from_ns;
+	uint8_t shift_to_ns;
+	uint8_t shift_from_ns;
 
 } _odp_time_global_t;
 
@@ -52,28 +58,38 @@ static inline odp_time_t _odp_time_cur_strict(void)
 
 static inline uint64_t _odp_time_to_ns(odp_time_t time)
 {
-	uint64_t nsec;
 	uint64_t count = time.count;
-	uint64_t sec = 0;
+
+#ifdef __SIZEOF_INT128__
+	return (uint64_t)(((__uint128_t)count * _odp_time_glob.mult_to_ns) >>
+			  _odp_time_glob.shift_to_ns);
+#else
+	uint64_t nsec;
 	const uint64_t freq_hz = _odp_time_glob.freq_hz;
-	const uint64_t giga_hz = 1000000000;
+	uint64_t sec = 0;
 
 	if (count >= freq_hz) {
 		sec   = count / freq_hz;
 		count = count - sec * freq_hz;
 	}
 
-	nsec = (giga_hz * count) / freq_hz;
+	nsec = (_ODP_TIME_GIGA_HZ * count) / freq_hz;
 
-	return (sec * giga_hz) + nsec;
+	return (sec * _ODP_TIME_GIGA_HZ) + nsec;
+#endif
 }
 
 static inline odp_time_t _odp_time_from_ns(uint64_t ns)
 {
 	odp_time_t time;
 	uint64_t count;
-	uint64_t sec = 0;
+
+#ifdef __SIZEOF_INT128__
+	count = (uint64_t)(((__uint128_t)ns * _odp_time_glob.mult_from_ns) >>
+			   _odp_time_glob.shift_from_ns);
+#else
 	const uint64_t freq_hz = _odp_time_glob.freq_hz;
+	uint64_t sec = 0;
 
 	if (ns >= ODP_TIME_SEC_IN_NS) {
 		sec = ns / ODP_TIME_SEC_IN_NS;
@@ -82,7 +98,7 @@ static inline odp_time_t _odp_time_from_ns(uint64_t ns)
 
 	count  = sec * freq_hz;
 	count += (ns * freq_hz) / ODP_TIME_SEC_IN_NS;
-
+#endif
 	time.count = count;
 
 	return time;

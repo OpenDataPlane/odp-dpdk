@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2013-2018 Linaro Limited
- * Copyright (c) 2021-2024 Nokia
+ * Copyright (c) 2021-2026 Nokia
  */
 
 #include <odp/api/plat/time_inlines.h>
@@ -35,6 +35,34 @@ int _odp_time_init_global(void)
 #endif
 
 	_odp_time_glob.freq_hz = rte_get_timer_hz();
+	if (_odp_time_glob.freq_hz == 0) {
+		_ODP_ERR("Reading default time counter frequency failed\n");
+		return -1;
+	}
+
+#ifdef __SIZEOF_INT128__
+	/* Find the maximum shift for which the multiplier fits into 64 bits */
+	for (_odp_time_glob.shift_to_ns = 63; _odp_time_glob.shift_to_ns > 0;
+	     _odp_time_glob.shift_to_ns--) {
+		__uint128_t cur = ((__uint128_t)_ODP_TIME_GIGA_HZ << _odp_time_glob.shift_to_ns) /
+					_odp_time_glob.freq_hz;
+		if (cur <= UINT64_MAX) {
+			_odp_time_glob.mult_to_ns = (uint64_t)cur;
+			break;
+		}
+	}
+
+	for (_odp_time_glob.shift_from_ns = 63; _odp_time_glob.shift_from_ns > 0;
+	     _odp_time_glob.shift_from_ns--) {
+		__uint128_t cur = ((__uint128_t)_odp_time_glob.freq_hz <<
+				   _odp_time_glob.shift_from_ns) / ODP_TIME_SEC_IN_NS;
+		if (cur <= UINT64_MAX) {
+			_odp_time_glob.mult_from_ns = (uint64_t)cur;
+			break;
+		}
+	}
+#endif
+
 	_odp_time_glob.start_cycles = rte_get_timer_cycles();
 	if (_odp_time_glob.start_cycles == 0) {
 		_ODP_ERR("Initializing start cycles failed.\n");
