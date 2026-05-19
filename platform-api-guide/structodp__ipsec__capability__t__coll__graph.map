@@ -1,0 +1,15 @@
+<map id="odp_ipsec_capability_t" name="odp_ipsec_capability_t">
+<area shape="rect" id="Node000001" title="IPSEC capability." alt="" coords="352,129,523,155"/>
+<area shape="rect" id="Node000002" href="$unionodp__proto__chksums__t.html" title="Flags to control packet data checksum checking." alt="" coords="32,5,196,31"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="210,31,270,46,329,68,381,97,422,127,419,131,379,102,327,72,268,51,209,36"/>
+<area shape="rect" id="Node000003" href="$structodp__pktin__vector__capability__t.html" title="Packet input vector capabilities." alt="" coords="5,55,223,80"/>
+<area shape="poly" id="edge2_Node000001_Node000003" title=" " alt="" coords="210,80,329,105,401,127,400,132,327,110,209,85"/>
+<area shape="rect" id="Node000004" href="$unionodp__crypto__cipher__algos__t.html" title="Cipher algorithms in a bit field structure." alt="" coords="17,104,211,129"/>
+<area shape="poly" id="edge3_Node000001_Node000004" title=" " alt="" coords="226,123,352,133,352,138,225,128"/>
+<area shape="rect" id="Node000005" href="$unionodp__crypto__auth__algos__t.html" title="Authentication algorithms in a bit field structure." alt="" coords="22,153,206,179"/>
+<area shape="poly" id="edge4_Node000001_Node000005" title=" " alt="" coords="219,164,328,158,371,152,372,157,328,163,220,169"/>
+<area shape="rect" id="Node000006" href="$structodp__ipsec__test__capability__t.html" title="IPSEC TEST capability." alt="" coords="13,203,215,228"/>
+<area shape="poly" id="edge5_Node000001_Node000006" title=" " alt="" coords="228,202,327,183,371,169,409,152,411,157,373,174,329,189,229,208"/>
+<area shape="rect" id="Node000007" href="$structodp__reass__capability__t.html" title="Reassembly capabilities." alt="" coords="29,252,199,277"/>
+<area shape="poly" id="edge6_Node000001_Node000007" title=" " alt="" coords="213,253,270,240,327,221,355,206,381,187,422,153,425,157,385,192,358,210,329,226,272,246,214,258"/>
+</map>

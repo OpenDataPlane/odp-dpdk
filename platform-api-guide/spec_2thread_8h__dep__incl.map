@@ -1,0 +1,19 @@
+<map id="thread.h" name="thread.h">
+<area shape="rect" id="Node000001" title="ODP thread API." alt="" coords="409,5,485,31"/>
+<area shape="rect" id="Node000002" href="$thread_8h.html" title="ODP thread API." alt="" coords="409,79,485,104"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="450,44,450,79,445,79,445,44"/>
+<area shape="rect" id="Node000003" href="$cpu_8h.html" title="ODP CPU." alt="" coords="197,159,255,185"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="397,111,268,154,251,162,249,157,266,150,395,106"/>
+<area shape="rect" id="Node000007" href="$abi-default_2rwlock__recursive_8h.html" title="ODP recursive read/write lock." alt="" coords="279,159,423,185"/>
+<area shape="poly" id="edge6_Node000002_Node000007" title=" " alt="" coords="424,115,367,161,364,157,421,111"/>
+<area shape="rect" id="Node000008" href="$rwlock__recursive__inlines_8h_source.html" title=" " alt="" coords="447,159,642,185"/>
+<area shape="poly" id="edge7_Node000002_Node000008" title=" " alt="" coords="474,111,532,157,529,161,471,115"/>
+<area shape="rect" id="Node000009" href="$spinlock__recursive__inlines_8h_source.html" title=" " alt="" coords="667,152,809,192"/>
+<area shape="poly" id="edge8_Node000002_Node000009" title=" " alt="" coords="500,104,669,149,667,154,498,109"/>
+<area shape="rect" id="Node000004" href="$rwlock__inlines_8h_source.html" title=" " alt="" coords="5,240,132,265"/>
+<area shape="poly" id="edge3_Node000003_Node000004" title=" " alt="" coords="192,193,93,242,90,238,190,188"/>
+<area shape="rect" id="Node000005" href="$spinlock__inlines_8h_source.html" title=" " alt="" coords="157,240,295,265"/>
+<area shape="poly" id="edge4_Node000003_Node000005" title=" " alt="" coords="229,198,229,240,223,240,223,198"/>
+<area shape="rect" id="Node000006" href="$ticketlock__inlines_8h_source.html" title=" " alt="" coords="319,240,466,265"/>
+<area shape="poly" id="edge5_Node000003_Node000006" title=" " alt="" coords="264,188,370,238,367,242,262,193"/>
+</map>
