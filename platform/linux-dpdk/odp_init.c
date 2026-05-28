@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2013-2018 Linaro Limited
- * Copyright (c) 2019-2024 Nokia
+ * Copyright (c) 2019-2026 Nokia
  */
 
 #include <odp_posix_extensions.h>
@@ -402,6 +402,13 @@ static int term_global(enum init_stage stage)
 		}
 		/* Fall through */
 
+	case RANDOM_INIT:
+		if (_odp_random_term_global()) {
+			_ODP_ERR("ODP random term failed.\n");
+			rc = -1;
+		}
+		/* Fall through */
+
 	case TIMER_INIT:
 		if (_odp_timer_term_global()) {
 			_ODP_ERR("ODP timer term failed.\n");
@@ -642,6 +649,12 @@ int odp_init_global(odp_instance_t *instance,
 		goto init_failed;
 	}
 	stage = TIMER_INIT;
+
+	if (_odp_random_init_global()) {
+		_ODP_ERR("ODP random init failed.\n");
+		goto init_failed;
+	}
+	stage = RANDOM_INIT;
 
 	if (_odp_crypto_init_global()) {
 		_ODP_ERR("ODP crypto init failed.\n");
