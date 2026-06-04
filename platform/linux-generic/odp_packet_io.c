@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2013-2018 Linaro Limited
- * Copyright (c) 2019-2025 Nokia
+ * Copyright (c) 2019-2026 Nokia
  */
 
 #include <odp_posix_extensions.h>
@@ -465,34 +465,6 @@ static void destroy_out_queues(pktio_entry_t *entry, int num)
 	}
 }
 
-static void flush_in_queues(pktio_entry_t *entry)
-{
-	odp_pktin_mode_t mode;
-	int num, i;
-	int max_pkts = 16;
-	odp_packet_t packets[max_pkts];
-
-	mode = entry->param.in_mode;
-	num  = entry->num_in_queue;
-
-	if (mode == ODP_PKTIN_MODE_DIRECT) {
-		for (i = 0; i < num; i++) {
-			int ret;
-			odp_pktin_queue_t pktin = entry->in_queue[i].pktin;
-
-			while ((ret = odp_pktin_recv(pktin, packets,
-						     max_pkts))) {
-				if (ret < 0) {
-					_ODP_ERR("Queue flush failed\n");
-					return;
-				}
-
-				odp_packet_free_multi(packets, ret);
-			}
-		}
-	}
-}
-
 int odp_pktio_close(odp_pktio_t hdl)
 {
 	pktio_entry_t *entry;
@@ -508,9 +480,6 @@ int odp_pktio_close(odp_pktio_t hdl)
 		_ODP_DBG("Missing odp_pktio_stop() before close.\n");
 		return -1;
 	}
-
-	if (entry->state == PKTIO_STATE_STOPPED)
-		flush_in_queues(entry);
 
 	lock_entry(entry);
 
@@ -1609,6 +1578,11 @@ int odp_pktio_capability(odp_pktio_t pktio, odp_pktio_capability_t *capa)
 	capa->lso.proto.custom           = 1;
 	capa->lso.mod_op.add_segment_num = 1;
 	capa->lso.mod_op.write_bits      = 1;
+
+	/* all pktios support packet references (by copying if necessary) */
+	capa->packet_ref.static_ref = 1;
+	capa->packet_ref.referencing_pkt = 1;
+	capa->packet_ref.referenced_pkt = 1;
 
 	capa->tx_compl.queue_type_sched = 1;
 	capa->tx_compl.queue_type_plain = 1;

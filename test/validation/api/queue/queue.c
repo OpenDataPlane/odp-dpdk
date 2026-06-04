@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2014-2018 Linaro Limited
- * Copyright (c) 2021-2025 Nokia
+ * Copyright (c) 2021-2026 Nokia
  */
 
 #include <odp_api.h>
@@ -20,10 +20,14 @@
 #define MAX_NUM_AGGR_PER_QUEUE 100 /* max number tested if more supported */
 
 typedef struct {
+	odp_shm_t        shm;
 	int              num_workers;
+	int              queue_context;
 	odp_barrier_t    barrier;
+	odp_pool_t       pool;
 	odp_queue_t      queue;
 	odp_atomic_u32_t num_event;
+	odp_queue_capability_t capa;
 
 	struct {
 		odp_queue_t queue_a;
@@ -42,8 +46,7 @@ typedef struct {
 
 } test_globals_t;
 
-static int queue_context = 0xff;
-static odp_pool_t pool;
+static test_globals_t *global_mem;
 
 static void generate_name(char *name, uint32_t index)
 {
@@ -59,7 +62,6 @@ static void generate_name(char *name, uint32_t index)
 static int queue_suite_init(void)
 {
 	odp_shm_t shm;
-	test_globals_t *globals;
 	odp_pool_param_t params;
 	int num_workers;
 
@@ -71,16 +73,25 @@ static int queue_suite_init(void)
 		return -1;
 	}
 
-	globals = odp_shm_addr(shm);
-	memset(globals, 0, sizeof(test_globals_t));
+	global_mem = odp_shm_addr(shm);
+	memset(global_mem, 0, sizeof(test_globals_t));
+	global_mem->shm = shm;
 
 	num_workers = odp_cpumask_default_worker(NULL, 0);
 
 	if (num_workers > MAX_WORKERS)
 		num_workers = MAX_WORKERS;
 
-	globals->num_workers = num_workers;
-	odp_barrier_init(&globals->barrier, num_workers);
+	global_mem->num_workers = num_workers;
+	global_mem->queue_context = 0xff;
+
+	odp_barrier_init(&global_mem->barrier, num_workers);
+
+	if (odp_queue_capability(&global_mem->capa)) {
+		ODPH_ERR("Queue capability failed\n");
+		odp_shm_free(shm);
+		return -1;
+	}
 
 	odp_pool_param_init(&params);
 
@@ -90,10 +101,11 @@ static int queue_suite_init(void)
 	params.buf.num   = MAX_NUM_EVENT + params.buf.cache_size;
 	params.type      = ODP_POOL_BUFFER;
 
-	pool = odp_pool_create("msg_pool", &params);
+	global_mem->pool = odp_pool_create("msg_pool", &params);
 
-	if (ODP_POOL_INVALID == pool) {
+	if (ODP_POOL_INVALID == global_mem->pool) {
 		ODPH_ERR("Pool create failed\n");
+		odp_shm_free(shm);
 		return -1;
 	}
 	return 0;
@@ -101,25 +113,17 @@ static int queue_suite_init(void)
 
 static int queue_suite_term(void)
 {
-	odp_shm_t shm;
-
-	shm = odp_shm_lookup(GLOBALS_NAME);
-	if (shm == ODP_SHM_INVALID) {
-		ODPH_ERR("SHM lookup failed\n");
-		return -1;
-	}
-
-	if (odp_shm_free(shm)) {
-		ODPH_ERR("SHM free failed\n");
-		return -1;
-	}
-
-	if (odp_pool_destroy(pool)) {
+	if (odp_pool_destroy(global_mem->pool)) {
 		ODPH_ERR("Pool destroy failed\n");
 		return -1;
 	}
 
-	return 0;
+	if (odp_shm_free(global_mem->shm)) {
+		ODPH_ERR("SHM free failed\n");
+		return -1;
+	}
+
+	return odp_cunit_print_inactive();
 }
 
 static void queue_test_capa(void)
@@ -354,24 +358,23 @@ static void test_burst(odp_nonblocking_t nonblocking,
 {
 	odp_queue_param_t param;
 	odp_queue_t queue;
-	odp_queue_capability_t capa;
+	odp_queue_capability_t *capa = &global_mem->capa;
 	uint32_t max_burst, burst, i, j;
 	odp_pool_t pool;
 	odp_buffer_t buf;
 	odp_event_t ev;
 	uint32_t *data;
-
-	CU_ASSERT_FATAL(odp_queue_capability(&capa) == 0);
-
-	max_burst = capa.plain.max_size;
+	odp_bool_t queue_len_supported;
 
 	if (nonblocking == ODP_NONBLOCKING_LF) {
-		if (capa.plain.lockfree.max_num == 0) {
-			printf("  NO LOCKFREE QUEUES. Test skipped.\n");
-			return;
-		}
-
-		max_burst = capa.plain.lockfree.max_size;
+		max_burst = capa->plain.lockfree.max_size;
+		queue_len_supported = capa->plain.lockfree.stats.bit.len;
+	} else if (nonblocking == ODP_NONBLOCKING_WF) {
+		max_burst = capa->plain.waitfree.max_size;
+		queue_len_supported = capa->plain.waitfree.stats.bit.len;
+	} else {
+		max_burst = capa->plain.max_size;
+		queue_len_supported = capa->plain.stats.bit.len;
 	}
 
 	if (max_burst == 0 || max_burst > MAX_NUM_EVENT)
@@ -389,6 +392,7 @@ static void test_burst(odp_nonblocking_t nonblocking,
 
 	queue = odp_queue_create("burst test", &param);
 	CU_ASSERT_FATAL(queue != ODP_QUEUE_INVALID);
+	CU_ASSERT(odp_queue_len(queue) == 0);
 
 	CU_ASSERT(odp_queue_deq(queue) == ODP_EVENT_INVALID);
 
@@ -402,6 +406,8 @@ static void test_burst(odp_nonblocking_t nonblocking,
 		odp_event_free(ev);
 
 	for (j = 0; j < 2; j++) {
+		uint32_t len, prev_len = 0;
+
 		if (j == 0)
 			burst = max_burst / 4;
 		else
@@ -414,6 +420,15 @@ static void test_burst(odp_nonblocking_t nonblocking,
 			*data = i;
 			ev = odp_buffer_to_event(buf);
 			CU_ASSERT(odp_queue_enq(queue, ev) == 0);
+
+			len = odp_queue_len(queue);
+			if (queue_len_supported) {
+				CU_ASSERT(len <= i + 1);
+				CU_ASSERT(len >= prev_len);
+				prev_len = len;
+			} else {
+				CU_ASSERT(len == 0);
+			}
 		}
 
 		for (i = 0; i < burst; i++) {
@@ -424,6 +439,15 @@ static void test_burst(odp_nonblocking_t nonblocking,
 				data = odp_buffer_addr(buf);
 				CU_ASSERT(*data == i);
 				odp_event_free(ev);
+			}
+
+			len = odp_queue_len(queue);
+			if (queue_len_supported) {
+				CU_ASSERT(len <= burst);
+				CU_ASSERT(len <= prev_len);
+				prev_len = len;
+			} else {
+				CU_ASSERT(len == 0);
 			}
 		}
 	}
@@ -452,6 +476,11 @@ static void queue_test_burst_spsc(void)
 		   ODP_QUEUE_OP_MT_UNSAFE);
 }
 
+static int check_nonblocking_lf(void)
+{
+	return global_mem->capa.plain.lockfree.max_num ? ODP_TEST_ACTIVE : ODP_TEST_INACTIVE;
+}
+
 static void queue_test_burst_lf(void)
 {
 	test_burst(ODP_NONBLOCKING_LF, ODP_QUEUE_OP_MT, ODP_QUEUE_OP_MT);
@@ -471,6 +500,31 @@ static void queue_test_burst_lf_spsc(void)
 {
 	test_burst(ODP_NONBLOCKING_LF, ODP_QUEUE_OP_MT_UNSAFE,
 		   ODP_QUEUE_OP_MT_UNSAFE);
+}
+
+static int check_nonblocking_wf(void)
+{
+	return global_mem->capa.plain.waitfree.max_num ? ODP_TEST_ACTIVE : ODP_TEST_INACTIVE;
+}
+
+static void queue_test_burst_wf(void)
+{
+	test_burst(ODP_NONBLOCKING_WF, ODP_QUEUE_OP_MT, ODP_QUEUE_OP_MT);
+}
+
+static void queue_test_burst_wf_spmc(void)
+{
+	test_burst(ODP_NONBLOCKING_WF, ODP_QUEUE_OP_MT_UNSAFE, ODP_QUEUE_OP_MT);
+}
+
+static void queue_test_burst_wf_mpsc(void)
+{
+	test_burst(ODP_NONBLOCKING_WF, ODP_QUEUE_OP_MT, ODP_QUEUE_OP_MT_UNSAFE);
+}
+
+static void queue_test_burst_wf_spsc(void)
+{
+	test_burst(ODP_NONBLOCKING_WF, ODP_QUEUE_OP_MT_UNSAFE, ODP_QUEUE_OP_MT_UNSAFE);
 }
 
 static int queue_pair_work_loop(void *arg)
@@ -591,11 +645,6 @@ static void test_pair(odp_nonblocking_t nonblocking,
 	max_burst = 2 * BURST_SIZE;
 
 	if (nonblocking == ODP_NONBLOCKING_LF) {
-		if (capa.plain.lockfree.max_num == 0) {
-			printf("  NO LOCKFREE QUEUES. Test skipped.\n");
-			return;
-		}
-
 		if (capa.plain.lockfree.max_size &&
 		    capa.plain.lockfree.max_size < max_burst)
 			max_burst = capa.plain.lockfree.max_size;
@@ -719,6 +768,7 @@ static void queue_test_param(void)
 	int max_iteration = MAX_ITERATION;
 	odp_queue_param_t qparams;
 	odp_buffer_t enbuf;
+	int *queue_context = &global_mem->queue_context;
 
 	odp_queue_param_init(&qparams);
 
@@ -739,10 +789,10 @@ static void queue_test_param(void)
 	CU_ASSERT(ODP_SCHED_GROUP_WORKER  == odp_queue_sched_group(queue));
 
 	CU_ASSERT(odp_queue_context(queue) == NULL);
-	CU_ASSERT(0 == odp_queue_context_set(queue, &queue_context,
-					     sizeof(queue_context)));
+	CU_ASSERT(0 == odp_queue_context_set(queue, queue_context,
+					     sizeof(*queue_context)));
 
-	CU_ASSERT(&queue_context == odp_queue_context(queue));
+	CU_ASSERT(queue_context == odp_queue_context(queue));
 	CU_ASSERT(odp_queue_destroy(queue) == 0);
 
 	/* Create queue with no name */
@@ -754,14 +804,14 @@ static void queue_test_param(void)
 	/* Plain type queue */
 	odp_queue_param_init(&qparams);
 	qparams.type        = ODP_QUEUE_TYPE_PLAIN;
-	qparams.context     = &queue_context;
-	qparams.context_len = sizeof(queue_context);
+	qparams.context     = queue_context;
+	qparams.context_len = sizeof(*queue_context);
 
 	queue = odp_queue_create("test_queue", &qparams);
 	CU_ASSERT_FATAL(ODP_QUEUE_INVALID != queue);
 	CU_ASSERT(queue == odp_queue_lookup("test_queue"));
 	CU_ASSERT(ODP_QUEUE_TYPE_PLAIN == odp_queue_type(queue));
-	CU_ASSERT(&queue_context == odp_queue_context(queue));
+	CU_ASSERT(queue_context == odp_queue_context(queue));
 
 	/* Destroy queue with no name */
 	CU_ASSERT(odp_queue_destroy(null_queue) == 0);
@@ -1101,14 +1151,8 @@ static void multithread_test(odp_nonblocking_t nonblocking)
 
 	max_size = capa.plain.max_size;
 
-	if (nonblocking == ODP_NONBLOCKING_LF) {
-		if (capa.plain.lockfree.max_num == 0) {
-			printf("  NO LOCKFREE QUEUES. Test skipped.\n");
-			return;
-		}
-
+	if (nonblocking == ODP_NONBLOCKING_LF)
 		max_size = capa.plain.lockfree.max_size;
-	}
 
 	if (max_size && queue_size > max_size)
 		queue_size = max_size;
@@ -1135,7 +1179,7 @@ static void multithread_test(odp_nonblocking_t nonblocking)
 	globals->queue = queue;
 	reset_thread_stat(globals);
 
-	CU_ASSERT(alloc_and_enqueue(queue, pool, num) == num);
+	CU_ASSERT(alloc_and_enqueue(queue, global_mem->pool, num) == num);
 
 	arg = globals;
 	odp_cunit_thread_create(num_workers, queue_test_worker, &arg, 0, 0);
@@ -1163,6 +1207,113 @@ static void queue_test_mt_plain_block(void)
 static void queue_test_mt_plain_nonblock_lf(void)
 {
 	multithread_test(ODP_NONBLOCKING_LF);
+}
+
+static void test_queue_len(odp_nonblocking_t nonblocking)
+{
+	odp_queue_param_t param;
+	odp_queue_t queue;
+	odp_queue_capability_t *capa = &global_mem->capa;
+	odp_pool_t pool = global_mem->pool;
+	odp_buffer_t buf;
+	odp_event_t ev;
+	uint32_t num_enq = MAX_NUM_EVENT, prev_len = 0, len = 0;
+	odp_bool_t queue_len_supported;
+	odp_time_t t1;
+
+	if (nonblocking == ODP_NONBLOCKING_LF) {
+		queue_len_supported = capa->plain.lockfree.stats.bit.len;
+		if (capa->plain.lockfree.max_size && capa->plain.lockfree.max_size < num_enq)
+			num_enq = capa->plain.lockfree.max_size;
+	} else if (nonblocking == ODP_NONBLOCKING_WF) {
+		queue_len_supported = capa->plain.waitfree.stats.bit.len;
+		if (capa->plain.waitfree.max_size && capa->plain.waitfree.max_size < num_enq)
+			num_enq = capa->plain.waitfree.max_size;
+	} else {
+		queue_len_supported = capa->plain.stats.bit.len;
+		if (capa->plain.max_size && capa->plain.max_size < num_enq)
+			num_enq = capa->plain.max_size;
+	}
+
+	odp_queue_param_init(&param);
+	param.type = ODP_QUEUE_TYPE_PLAIN;
+	param.nonblocking = nonblocking;
+	param.size = num_enq;
+
+	queue = odp_queue_create("queue_len_test", &param);
+	CU_ASSERT_FATAL(queue != ODP_QUEUE_INVALID);
+	CU_ASSERT(odp_queue_len(queue) == 0);
+
+	for (uint32_t i = 0; i < num_enq; i++) {
+		buf = odp_buffer_alloc(pool);
+		CU_ASSERT_FATAL(buf != ODP_BUFFER_INVALID);
+		CU_ASSERT_FATAL(odp_queue_enq(queue, odp_buffer_to_event(buf)) == 0);
+
+		len = odp_queue_len(queue);
+		if (queue_len_supported) {
+			CU_ASSERT(len <= i + 1);
+			CU_ASSERT(len >= prev_len);
+			prev_len = len;
+		} else {
+			CU_ASSERT(len == 0);
+		}
+	}
+
+	/* Assume that odp_queue_len() returns !0 at some point with extra wait time */
+	t1 = odp_time_local();
+	while (queue_len_supported) {
+		len = odp_queue_len(queue);
+		if (len || odp_time_diff_ns(odp_time_local(), t1) > ODP_TIME_SEC_IN_NS)
+			break;
+	}
+	if (queue_len_supported)
+		CU_ASSERT(len > 0);
+
+	for (uint32_t i = 0; i < num_enq; i++) {
+		ev = dequeue_event(queue);
+		CU_ASSERT(ev != ODP_EVENT_INVALID);
+		if (ev != ODP_EVENT_INVALID)
+			odp_event_free(ev);
+
+		len = odp_queue_len(queue);
+		if (queue_len_supported) {
+			CU_ASSERT(len <= num_enq);
+			CU_ASSERT(len <= prev_len);
+			prev_len = len;
+		} else {
+			CU_ASSERT(len == 0);
+		}
+	}
+
+	/* Extra dequeue rounds to allow implementations to update queue length */
+	for (uint32_t i = 0; i < MAX_ITERATION; i++) {
+		ev = odp_queue_deq(queue);
+		if (ev != ODP_EVENT_INVALID)
+			odp_event_free(ev);
+
+		if (odp_queue_len(queue) == 0)
+			break;
+
+		odp_time_wait_ns(ODP_TIME_USEC_IN_NS);
+	}
+
+	CU_ASSERT(odp_queue_len(queue) == 0);
+	CU_ASSERT(odp_queue_destroy(queue) == 0);
+}
+
+static void queue_test_len(void)
+{
+	test_queue_len(ODP_BLOCKING);
+}
+
+static void queue_test_len_lf(void)
+{
+	test_queue_len(ODP_NONBLOCKING_LF);
+}
+
+static void queue_test_len_wf(void)
+{
+	test_queue_len(ODP_NONBLOCKING_WF);
 }
 
 static void queue_test_aggr_capa(const odp_event_aggr_capability_t *capa)
@@ -1424,12 +1575,14 @@ static void aggr_queue_test(const odp_event_aggr_capability_t *capa, odp_queue_t
 	aggr_queue = odp_queue_aggr(queue, 0);
 	CU_ASSERT_FATAL(aggr_queue != ODP_QUEUE_INVALID);
 	CU_ASSERT(odp_queue_type(aggr_queue) == ODP_QUEUE_TYPE_AGGR);
+	CU_ASSERT(odp_queue_len(aggr_queue) == 0);
 
 	for (uint32_t i = 0; i < num_events; i++) {
 		aggr_test_event_t *test_event;
 		const odp_bool_t use_aggr = i % 2;
 		odp_queue_t dst_queue = use_aggr ? aggr_queue : queue;
 		odp_buffer_t buf = odp_buffer_alloc(buf_pool);
+		uint32_t len;
 
 		CU_ASSERT_FATAL(buf != ODP_BUFFER_INVALID);
 
@@ -1442,6 +1595,12 @@ static void aggr_queue_test(const odp_event_aggr_capability_t *capa, odp_queue_t
 			seq_num++;
 
 		CU_ASSERT_FATAL(odp_queue_enq(dst_queue, odp_buffer_to_event(buf)) == 0);
+
+		len = odp_queue_len(aggr_queue);
+		if (capa->stats.bit.len)
+			CU_ASSERT(len <= num_events);
+		else
+			CU_ASSERT(len == 0);
 	}
 
 	odp_time_wait_ns(timeout);
@@ -1497,6 +1656,7 @@ static void aggr_queue_test(const odp_event_aggr_capability_t *capa, odp_queue_t
 	CU_ASSERT(num_from_queue + num_from_aggr <= num_events);
 
 	/* Assuming the queue can be destroyed regardless of possibly pending events */
+	CU_ASSERT(odp_queue_len(queue) < vector_size);
 	CU_ASSERT(odp_queue_destroy(queue) == 0);
 	CU_ASSERT(odp_pool_destroy(evv_pool) == 0);
 	CU_ASSERT(odp_pool_destroy(buf_pool) == 0);
@@ -1528,18 +1688,22 @@ odp_testinfo_t queue_suite[] = {
 	ODP_TEST_INFO(queue_test_burst_spmc),
 	ODP_TEST_INFO(queue_test_burst_mpsc),
 	ODP_TEST_INFO(queue_test_burst_spsc),
-	ODP_TEST_INFO(queue_test_burst_lf),
-	ODP_TEST_INFO(queue_test_burst_lf_spmc),
-	ODP_TEST_INFO(queue_test_burst_lf_mpsc),
-	ODP_TEST_INFO(queue_test_burst_lf_spsc),
+	ODP_TEST_INFO_CONDITIONAL(queue_test_burst_lf, check_nonblocking_lf),
+	ODP_TEST_INFO_CONDITIONAL(queue_test_burst_lf_spmc, check_nonblocking_lf),
+	ODP_TEST_INFO_CONDITIONAL(queue_test_burst_lf_mpsc, check_nonblocking_lf),
+	ODP_TEST_INFO_CONDITIONAL(queue_test_burst_lf_spsc, check_nonblocking_lf),
+	ODP_TEST_INFO_CONDITIONAL(queue_test_burst_wf, check_nonblocking_wf),
+	ODP_TEST_INFO_CONDITIONAL(queue_test_burst_wf_spmc, check_nonblocking_wf),
+	ODP_TEST_INFO_CONDITIONAL(queue_test_burst_wf_mpsc, check_nonblocking_wf),
+	ODP_TEST_INFO_CONDITIONAL(queue_test_burst_wf_spsc, check_nonblocking_wf),
 	ODP_TEST_INFO(queue_test_pair),
 	ODP_TEST_INFO(queue_test_pair_spmc),
 	ODP_TEST_INFO(queue_test_pair_mpsc),
 	ODP_TEST_INFO(queue_test_pair_spsc),
-	ODP_TEST_INFO(queue_test_pair_lf),
-	ODP_TEST_INFO(queue_test_pair_lf_spmc),
-	ODP_TEST_INFO(queue_test_pair_lf_mpsc),
-	ODP_TEST_INFO(queue_test_pair_lf_spsc),
+	ODP_TEST_INFO_CONDITIONAL(queue_test_pair_lf, check_nonblocking_lf),
+	ODP_TEST_INFO_CONDITIONAL(queue_test_pair_lf_spmc, check_nonblocking_lf),
+	ODP_TEST_INFO_CONDITIONAL(queue_test_pair_lf_mpsc, check_nonblocking_lf),
+	ODP_TEST_INFO_CONDITIONAL(queue_test_pair_lf_spsc, check_nonblocking_lf),
 	ODP_TEST_INFO(queue_test_param),
 	ODP_TEST_INFO(queue_test_same_name_plain),
 	ODP_TEST_INFO(queue_test_same_name_sched),
@@ -1547,7 +1711,10 @@ odp_testinfo_t queue_suite[] = {
 	ODP_TEST_INFO(queue_test_long_name_sched),
 	ODP_TEST_INFO(queue_test_info),
 	ODP_TEST_INFO(queue_test_mt_plain_block),
-	ODP_TEST_INFO(queue_test_mt_plain_nonblock_lf),
+	ODP_TEST_INFO_CONDITIONAL(queue_test_mt_plain_nonblock_lf, check_nonblocking_lf),
+	ODP_TEST_INFO(queue_test_len),
+	ODP_TEST_INFO_CONDITIONAL(queue_test_len_lf, check_nonblocking_lf),
+	ODP_TEST_INFO_CONDITIONAL(queue_test_len_wf, check_nonblocking_wf),
 	ODP_TEST_INFO(queue_test_aggr_capa_plain),
 	ODP_TEST_INFO(queue_test_aggr_capa_sched),
 	ODP_TEST_INFO(queue_test_aggr_cfg_none_plain),

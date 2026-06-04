@@ -105,8 +105,11 @@ typedef struct ODP_ALIGNED_CACHE odp_packet_hdr_t {
 
 	uint16_t tailroom;
 
+	/* 1 if segment is indirect, 0 otherwise */
+	uint8_t seg_indirect;
+
 	/* Classifier handle index */
-	uint16_t cos;
+	uint8_t cos;
 
 	/* Used as classifier destination queue, in IPsec inline input processing and as Tx
 	 * completion event queue. */
@@ -125,6 +128,9 @@ typedef struct ODP_ALIGNED_CACHE odp_packet_hdr_t {
 	const void *user_ptr;
 
 	/* --- 64-byte cache line boundary --- */
+
+	/* Segment that is referenced by this segment if this is an indirect segment */
+	struct odp_packet_hdr_t *seg_referenced;
 
 	/* Timestamp value */
 	odp_time_t timestamp;
@@ -225,7 +231,7 @@ static inline void _odp_packet_reset_md(odp_packet_hdr_t *pkt_hdr)
 	pkt_hdr->p.input_flags.all = 0;
 	pkt_hdr->p.flags.all_flags = 0;
 
-	pkt_hdr->p.l2_offset = 0;
+	pkt_hdr->p.l2_offset = ODP_PACKET_OFFSET_INVALID;
 	pkt_hdr->p.l3_offset = ODP_PACKET_OFFSET_INVALID;
 	pkt_hdr->p.l4_offset = ODP_PACKET_OFFSET_INVALID;
 
@@ -319,6 +325,8 @@ static inline void _odp_packet_copy_md(odp_packet_hdr_t *dst_hdr,
 	 *   .seg_next
 	 *   .seg_len
 	 *   .seg_count
+	 *   .seg_indirect
+	 *   .seg_referenced
 	 */
 	dst_hdr->input = src_hdr->input;
 	dst_hdr->event_hdr.subtype = subtype;
@@ -400,7 +408,9 @@ static inline void push_head(odp_packet_hdr_t *pkt_hdr, uint32_t len)
 
 static inline void pull_head(odp_packet_hdr_t *pkt_hdr, uint32_t len)
 {
-	pkt_hdr->headroom  += len;
+	if (odp_likely(!pkt_hdr->seg_indirect))
+		pkt_hdr->headroom += len;
+
 	pkt_hdr->frame_len -= len;
 	pkt_hdr->seg_data  += len;
 	pkt_hdr->seg_len   -= len;
@@ -410,7 +420,9 @@ static inline void pull_tail(odp_packet_hdr_t *pkt_hdr, uint32_t len)
 {
 	odp_packet_hdr_t *last = packet_last_seg(pkt_hdr);
 
-	pkt_hdr->tailroom  += len;
+	if (odp_likely(!last->seg_indirect))
+		pkt_hdr->tailroom += len;
+
 	pkt_hdr->frame_len -= len;
 	last->seg_len      -= len;
 }
@@ -486,6 +498,8 @@ int _odp_packet_sctp_chksum_insert(odp_packet_t pkt);
 
 int _odp_packet_l4_chksum(odp_packet_hdr_t *pkt_hdr,
 			  odp_pktin_config_opt_t opt, uint64_t l4_part_sum);
+
+int _odp_packet_unshare(odp_packet_t *pkt);
 
 #ifdef __cplusplus
 }
