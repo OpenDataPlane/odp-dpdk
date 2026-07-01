@@ -125,7 +125,9 @@ typedef enum op_status_t {
 typedef struct crypto_op_state_t {
 	uint8_t cipher_iv[MAX_IV_LENGTH] ODP_ALIGNED(8);
 	uint8_t auth_iv[MAX_IV_LENGTH] ODP_ALIGNED(8);
-	odp_packet_t pkt;
+	odp_packet_t pkt;	/* Working packet processed in place */
+	odp_packet_t pkt_in;	/* Original input packet */
+	odp_packet_t pkt_out;	/* OOP output packet, ODP_PACKET_INVALID if basic */
 	op_status_t status;
 	crypto_session_entry_t *session;
 	uint32_t hash_result_offset;
@@ -1496,12 +1498,6 @@ int odp_crypto_session_create(const odp_crypto_session_param_t *param,
 		return -1;
 	}
 
-	if (param->op_type != ODP_CRYPTO_OP_TYPE_BASIC) {
-		*status = ODP_CRYPTO_SES_ERR_PARAMS;
-		*session_out = ODP_CRYPTO_SESSION_INVALID;
-		return -1;
-	}
-
 	/* Allocate memory for this session */
 	session = alloc_session();
 	if (session == NULL) {
@@ -1835,16 +1831,22 @@ static int linearize_pkt(const crypto_session_entry_t *session, odp_packet_t pkt
 	return rte_pktmbuf_linearize(mbuf);
 }
 
+static inline int op_is_oop(const crypto_session_entry_t *session,
+			    const odp_packet_t pkt_out[], int n)
+{
+	return session->p.op_type != ODP_CRYPTO_OP_TYPE_BASIC &&
+	       pkt_out[n] != ODP_PACKET_INVALID;
+}
+
 /*
  * Return number of ops allocated and packets consumed.
  */
 static int op_alloc(crypto_op_t *op[],
 		    const odp_packet_t pkt_in[],
-		    odp_packet_t pkt_out[] ODP_UNUSED,
+		    const odp_packet_t pkt_out[],
 		    const odp_crypto_packet_op_param_t param[],
 		    int num_pkts)
 {
-	crypto_session_entry_t *session;
 	int n;
 
 	if (odp_unlikely(rte_crypto_op_bulk_alloc(global->crypto_op_pool,
@@ -1863,20 +1865,31 @@ static int op_alloc(crypto_op_t *op[],
 	}
 
 	for (n = 0; n < num_pkts; n++) {
-		odp_packet_t pkt = pkt_in[n];
+		crypto_session_entry_t *session = session_from_handle(param[n].session);
 
-		if (odp_unlikely(odp_packet_is_referencing(pkt) || odp_packet_has_ref(pkt))) {
-			if (odp_unlikely(_odp_packet_unshare(&pkt))) {
-				for (int i = n; i < num_pkts; i++)
-					rte_crypto_op_free((struct rte_crypto_op *)op[i]);
-				return n;
-			}
-		}
-
-		session = session_from_handle(param[n].session);
 		_ODP_ASSERT(session != NULL);
 
-		op[n]->state.pkt = pkt;
+		if (op_is_oop(session, pkt_out, n)) {
+			op[n]->state.pkt_in = pkt_in[n];
+			op[n]->state.pkt_out = pkt_out[n];
+
+			_ODP_ASSERT(!odp_packet_has_ref(pkt_out[n]));
+		} else {
+			odp_packet_t pkt = pkt_in[n];
+
+			if (odp_unlikely(odp_packet_is_referencing(pkt) ||
+					 odp_packet_has_ref(pkt))) {
+				if (odp_unlikely(_odp_packet_unshare(&pkt))) {
+					for (int i = n; i < num_pkts; i++)
+						rte_crypto_op_free((struct rte_crypto_op *)op[i]);
+					return n;
+				}
+			}
+
+			op[n]->state.pkt_in = pkt;
+			op[n]->state.pkt_out = ODP_PACKET_INVALID;
+		}
+		op[n]->state.pkt = ODP_PACKET_INVALID;
 	}
 	return n;
 }
@@ -1899,8 +1912,64 @@ static int is_op_supported(const crypto_session_entry_t *session,
 	return 0;
 }
 
+static int copy_range(odp_packet_t dst,
+		      odp_packet_t src,
+		      int32_t shift,
+		      uint32_t offset,
+		      uint32_t length)
+{
+	int rc = odp_packet_copy_from_pkt(dst, offset + shift, src, offset, length);
+
+	if (odp_unlikely(rc))
+		_ODP_ERR("range copying failed\n");
+
+	return rc;
+}
+
+/*
+ * Copy cipher range and auth range from src to dst, with shifting by
+ * param->dst_offset_shift.
+ */
+static int copy_ranges(odp_packet_t dst,
+		       odp_packet_t src,
+		       const crypto_session_entry_t *session,
+		       const odp_crypto_packet_op_param_t *param)
+{
+	const odp_packet_data_range_t *c_range = &param->cipher_range;
+	const odp_packet_data_range_t *a_range = &param->auth_range;
+	int32_t shift = param->dst_offset_shift;
+
+	/* For AEAD only the cipher range is copied. */
+	if (session->flags.aead || a_range->length == 0) {
+		if (c_range->length > 0)
+			return copy_range(dst, src, shift, c_range->offset, c_range->length);
+		return 0;
+	}
+
+	if (c_range->length == 0)
+		return copy_range(dst, src, shift, a_range->offset, a_range->length);
+
+	uint32_t c_start = c_range->offset;
+	uint32_t c_end = c_range->offset + c_range->length;
+	uint32_t a_start = a_range->offset;
+	uint32_t a_end = a_range->offset + a_range->length;
+
+	if (_ODP_MAX(c_start, a_start) <= _ODP_MIN(c_end, a_end)) {
+		/* Overlapping or adjacent ranges: single copy of the union. */
+		uint32_t start = _ODP_MIN(c_start, a_start);
+		uint32_t end = _ODP_MAX(c_end, a_end);
+
+		return copy_range(dst, src, shift, start, end - start);
+	}
+
+	/* Disjoint ranges: two separate copies. */
+	if (copy_range(dst, src, shift, c_start, c_range->length))
+		return -1;
+	return copy_range(dst, src, shift, a_start, a_range->length);
+}
+
 static void op_prepare(crypto_op_t *ops[],
-		       const odp_crypto_packet_op_param_t param[],
+		       const odp_crypto_packet_op_param_t op_param[],
 		       int num_op)
 {
 	for (int n = 0; n < num_op; n++) {
@@ -1908,20 +1977,63 @@ static void op_prepare(crypto_op_t *ops[],
 		struct rte_crypto_op *rte_op = (struct rte_crypto_op *)op;
 		crypto_session_entry_t *session;
 		struct rte_cryptodev_sym_session *rte_session;
+		const odp_crypto_packet_op_param_t *param = &op_param[n];
+		odp_crypto_packet_op_param_t oop_param;
 
-		session = session_from_handle(param[n].session);
+		session = session_from_handle(param->session);
 		rte_session = session->rte_session;
 
 		op->state.status = S_OK;
 		op->state.session = session;
-		op->state.hash_result_offset = param[n].hash_result_offset;
+		op->state.hash_result_offset = param->hash_result_offset;
+
+		/*
+		 * Select the working packet that is processed in place. Out-of-
+		 * place operations work on a separate packet to leave the input
+		 * packet unmodified.
+		 */
+		if (op->state.pkt_out == ODP_PACKET_INVALID) {
+			/* Basic: process the input packet in place. */
+			op->state.pkt = op->state.pkt_in;
+		} else if (session->p.op == ODP_CRYPTO_OP_ENCODE) {
+			/*
+			 * Copy the input ranges into the output packet and
+			 * process it in place at the shifted offsets.
+			 */
+			if (odp_unlikely(copy_ranges(op->state.pkt_out,
+						     op->state.pkt_in,
+						     session, param))) {
+				op->state.status = S_ERROR;
+				continue;
+			}
+			oop_param = *param;
+			oop_param.cipher_range.offset += param->dst_offset_shift;
+			oop_param.auth_range.offset += param->dst_offset_shift;
+			param = &oop_param;
+			op->state.pkt = op->state.pkt_out;
+		} else {
+			/*
+			 * Decode: process a temporary copy of the input packet.
+			 * The processed ranges are copied to the output packet
+			 * in op_finish(). We do this to avoid having to (yet)
+			 * touch the auth MAC/hash/digest handling code.
+			 */
+			odp_packet_t copy = odp_packet_copy(op->state.pkt_in,
+				odp_packet_pool(op->state.pkt_in));
+
+			if (odp_unlikely(copy == ODP_PACKET_INVALID)) {
+				op->state.status = S_ERROR;
+				continue;
+			}
+			op->state.pkt = copy;
+		}
 
 		/* NULL rte_session means that it is a NULL-NULL operation. */
 		if (odp_unlikely(rte_session == NULL)) {
 			op->state.status = S_NOP;
 			continue;
 		}
-		if (odp_unlikely(session->p.null_crypto_enable && param[n].null_crypto)) {
+		if (odp_unlikely(session->p.null_crypto_enable && param->null_crypto)) {
 			op->state.status = S_NOP;
 			continue;
 		}
@@ -1932,13 +2044,13 @@ static void op_prepare(crypto_op_t *ops[],
 		}
 
 		if (session->flags.aead) {
-			crypto_fill_aead_param(session, op->state.pkt, &param[n], rte_op);
+			crypto_fill_aead_param(session, op->state.pkt, param, rte_op);
 		} else {
-			if (odp_unlikely(!is_op_supported(session, &param[n]))) {
+			if (odp_unlikely(!is_op_supported(session, param))) {
 				op->state.status = S_ERROR_HASH_OFFSET;
 				continue;
 			}
-			crypto_fill_sym_param(session, op->state.pkt, &param[n], rte_op);
+			crypto_fill_sym_param(session, op->state.pkt, param, rte_op);
 		}
 
 		rte_crypto_op_attach_sym_session(rte_op, rte_session);
@@ -2065,10 +2177,13 @@ static void op_enq_deq(crypto_op_t *op[], int num_op)
 	}
 }
 
-static void op_finish(crypto_op_t *op)
+static void op_finish(crypto_op_t *op, const odp_crypto_packet_op_param_t *param)
 {
 	crypto_session_entry_t *session = op->state.session;
 	odp_packet_t pkt = op->state.pkt;
+	odp_packet_t pkt_out = op->state.pkt_out;
+	odp_packet_t out;
+	int oop = pkt_out != ODP_PACKET_INVALID;
 	struct rte_crypto_op *rte_op = (struct rte_crypto_op *)op;
 	odp_crypto_alg_err_t rc_cipher;
 	odp_crypto_alg_err_t rc_auth;
@@ -2115,17 +2230,38 @@ static void op_finish(crypto_op_t *op)
 		rc_auth = ODP_CRYPTO_ALG_ERR_OTHER;
 	}
 
+	if (!oop) {
+		out = pkt;
+	} else if (session->p.op == ODP_CRYPTO_OP_ENCODE) {
+		out = pkt_out;
+	} else {
+		if (odp_likely(pkt != ODP_PACKET_INVALID)) {
+			if (odp_unlikely(copy_ranges(pkt_out, pkt, session, param))) {
+				rc_cipher = ODP_CRYPTO_ALG_ERR_OTHER;
+				rc_auth = ODP_CRYPTO_ALG_ERR_OTHER;
+			}
+			odp_packet_free(pkt);
+		}
+		out = pkt_out;
+	}
+
 	/* Fill in result */
-	packet_subtype_set(pkt, ODP_EVENT_PACKET_CRYPTO);
-	op_result = &packet_hdr(pkt)->crypto_op_result;
+	packet_subtype_set(out, ODP_EVENT_PACKET_CRYPTO);
+	op_result = &packet_hdr(out)->crypto_op_result;
 	op_result->cipher_status.alg_err = rc_cipher;
 	op_result->auth_status.alg_err = rc_auth;
+	if (oop && session->p.op_mode == ODP_CRYPTO_ASYNC)
+		op_result->pkt_in = op->state.pkt_in;
+
+	/* The result handle is delivered through state.pkt. */
+	op->state.pkt = out;
 }
 
 static
 int odp_crypto_int(const odp_packet_t pkt_in[],
-		   odp_packet_t pkt_out[],
+		   const odp_packet_t pkt_out[],
 		   const odp_crypto_packet_op_param_t param[],
+		   odp_packet_t out_pkt[],
 		   int num_pkt)
 {
 	crypto_op_t *op[MAX_BURST];
@@ -2139,8 +2275,8 @@ int odp_crypto_int(const odp_packet_t pkt_in[],
 	op_enq_deq(op, num_pkt);
 
 	for (int n = 0; n < num_pkt; n++) {
-		op_finish(op[n]);
-		pkt_out[n] = op[n]->state.pkt;
+		op_finish(op[n], &param[n]);
+		out_pkt[n] = op[n]->state.pkt;
 		rte_crypto_op_free((struct rte_crypto_op *)op[n]);
 	}
 	return num_pkt;
@@ -2161,11 +2297,12 @@ int odp_crypto_op(const odp_packet_t pkt_in[],
 		session = session_from_handle(param[i].session);
 		_ODP_ASSERT(ODP_CRYPTO_SYNC == session->p.op_mode);
 	}
-	return odp_crypto_int(pkt_in, pkt_out, param, num_pkt);
+
+	return odp_crypto_int(pkt_in, pkt_out, param, pkt_out, num_pkt);
 }
 
 int odp_crypto_op_enq(const odp_packet_t pkt_in[],
-		      const odp_packet_t pkt_out[] ODP_UNUSED,
+		      const odp_packet_t pkt_out[],
 		      const odp_crypto_packet_op_param_t param[],
 		      int num_pkt)
 {
@@ -2183,7 +2320,7 @@ int odp_crypto_op_enq(const odp_packet_t pkt_in[],
 		_ODP_ASSERT(ODP_QUEUE_INVALID != session->p.compl_queue);
 	}
 
-	num_pkt = odp_crypto_int(pkt_in, out_pkts, param, num_pkt);
+	num_pkt = odp_crypto_int(pkt_in, pkt_out, param, out_pkts, num_pkt);
 
 	for (i = 0; i < num_pkt; i++) {
 		session = session_from_handle(param[i].session);
