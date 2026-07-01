@@ -144,6 +144,16 @@ typedef struct crypto_op_t {
 
 static crypto_global_t *global;
 
+static inline crypto_session_entry_t *session_from_handle(odp_crypto_session_t hdl)
+{
+	return (crypto_session_entry_t *)(uintptr_t)hdl;
+}
+
+static inline odp_crypto_session_t session_to_handle(crypto_session_entry_t *session)
+{
+	return (odp_crypto_session_t)(uintptr_t)session;
+}
+
 static inline int is_valid_size(uint16_t length,
 				const struct rte_crypto_param_range *range)
 {
@@ -1582,7 +1592,7 @@ out_null:
 	session->cdev_id = cdev_id;
 
 	/* We're happy */
-	*session_out = (intptr_t)session;
+	*session_out = session_to_handle(session);
 	*status = ODP_CRYPTO_SES_ERR_NONE;
 
 	return 0;
@@ -1602,8 +1612,7 @@ int odp_crypto_session_destroy(odp_crypto_session_t _session)
 	struct rte_cryptodev_sym_session *rte_session = NULL;
 	crypto_session_entry_t *session;
 
-	session = (crypto_session_entry_t *)(intptr_t)_session;
-
+	session = session_from_handle(_session);
 	rte_session = session->rte_session;
 
 	if (rte_session != NULL) {
@@ -1686,7 +1695,7 @@ void odp_crypto_session_print(odp_crypto_session_t hdl)
 		return;
 	}
 
-	session = (crypto_session_entry_t *)(uintptr_t)hdl;
+	session = session_from_handle(hdl);
 
 	_odp_crypto_session_print("DPDK", session->cdev_id, &session->p);
 }
@@ -1864,7 +1873,7 @@ static int op_alloc(crypto_op_t *op[],
 			}
 		}
 
-		session = (crypto_session_entry_t *)(intptr_t)param[n].session;
+		session = session_from_handle(param[n].session);
 		_ODP_ASSERT(session != NULL);
 
 		op[n]->state.pkt = pkt;
@@ -1900,7 +1909,7 @@ static void op_prepare(crypto_op_t *ops[],
 		crypto_session_entry_t *session;
 		struct rte_cryptodev_sym_session *rte_session;
 
-		session = (crypto_session_entry_t *)(intptr_t)param[n].session;
+		session = session_from_handle(param[n].session);
 		rte_session = session->rte_session;
 
 		op->state.status = S_OK;
@@ -2149,7 +2158,7 @@ int odp_crypto_op(const odp_packet_t pkt_in[],
 		num_pkt = MAX_BURST;
 
 	for (i = 0; i < num_pkt; i++) {
-		session = (crypto_session_entry_t *)(intptr_t)param[i].session;
+		session = session_from_handle(param[i].session);
 		_ODP_ASSERT(ODP_CRYPTO_SYNC == session->p.op_mode);
 	}
 	return odp_crypto_int(pkt_in, pkt_out, param, num_pkt);
@@ -2169,7 +2178,7 @@ int odp_crypto_op_enq(const odp_packet_t pkt_in[],
 		num_pkt = MAX_BURST;
 
 	for (i = 0; i < num_pkt; i++) {
-		session = (crypto_session_entry_t *)(intptr_t)param[i].session;
+		session = session_from_handle(param[i].session);
 		_ODP_ASSERT(ODP_CRYPTO_ASYNC == session->p.op_mode);
 		_ODP_ASSERT(ODP_QUEUE_INVALID != session->p.compl_queue);
 	}
@@ -2177,7 +2186,7 @@ int odp_crypto_op_enq(const odp_packet_t pkt_in[],
 	num_pkt = odp_crypto_int(pkt_in, out_pkts, param, num_pkt);
 
 	for (i = 0; i < num_pkt; i++) {
-		session = (crypto_session_entry_t *)(intptr_t)param[i].session;
+		session = session_from_handle(param[i].session);
 		event = odp_packet_to_event(out_pkts[i]);
 		if (odp_queue_enq(session->p.compl_queue, event)) {
 			odp_event_free(event);
