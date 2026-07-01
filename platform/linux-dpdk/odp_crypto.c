@@ -1912,7 +1912,7 @@ static void op_prepare(crypto_op_t *ops[],
 			op->state.status = S_NOP;
 			continue;
 		}
-		if (odp_unlikely(session->p.null_crypto_enable && param->null_crypto)) {
+		if (odp_unlikely(session->p.null_crypto_enable && param[n].null_crypto)) {
 			op->state.status = S_NOP;
 			continue;
 		}
