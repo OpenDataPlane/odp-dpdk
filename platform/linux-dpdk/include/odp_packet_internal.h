@@ -320,6 +320,12 @@ static inline void _odp_packet_copy_md(odp_packet_hdr_t *dst_hdr,
 	if (src_hdr->p.flags.payload_off)
 		dst_hdr->payload_offset = src_hdr->payload_offset;
 
+	if (src_hdr->p.flags.tx_aging)
+		dst_hdr->tx_aging_ns = src_hdr->tx_aging_ns;
+
+	if (src_hdr->p.flags.tx_compl_poll)
+		dst_hdr->tx_compl_id = src_hdr->tx_compl_id;
+
 	dst_hdr->p = src_hdr->p;
 
 	if (src_hdr->uarea_addr) {
