@@ -867,6 +867,7 @@ odp_timer_pool_t odp_timer_pool_create(const char *name,
 		timer->timer_idx  = i;
 
 		ring_mpmc_rst_u32_enq(&timer_pool->free_timer.ring_hdr,
+				      timer_pool->free_timer.ring_data,
 				      timer_pool->free_timer.ring_mask, i);
 	}
 
@@ -977,8 +978,8 @@ static timer_entry_t *timer_alloc(timer_pool_t *tp, odp_queue_t queue, const voi
 	uint32_t timer_idx;
 	timer_entry_t *timer;
 
-	if (ring_mpmc_rst_u32_deq(&tp->free_timer.ring_hdr, tp->free_timer.ring_mask,
-				  &timer_idx) == 0)
+	if (ring_mpmc_rst_u32_deq(&tp->free_timer.ring_hdr, tp->free_timer.ring_data,
+				  tp->free_timer.ring_mask, &timer_idx) == 0)
 		return NULL;
 
 	timer = &tp->timer[timer_idx];
@@ -1059,7 +1060,7 @@ int odp_timer_free(odp_timer_t timer_hdl)
 
 	odp_ticketlock_unlock(&timer_pool->lock);
 
-	ring_mpmc_rst_u32_enq(&timer_pool->free_timer.ring_hdr,
+	ring_mpmc_rst_u32_enq(&timer_pool->free_timer.ring_hdr, timer_pool->free_timer.ring_data,
 			      timer_pool->free_timer.ring_mask, timer_idx);
 
 	return 0;
