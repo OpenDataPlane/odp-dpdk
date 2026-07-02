@@ -136,6 +136,7 @@ noinst_HEADERS = \
 		  include/odp_config_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_crypto_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_debug_internal.h \
+		  ${top_srcdir}/platform/linux-generic/include/odp_dpdk_common.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_classification_datamodel.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_classification_internal.h \
 		  include/odp_eventdev_internal.h \
@@ -153,7 +154,6 @@ noinst_HEADERS = \
 		  include/odp_errno_define.h \
 		  include/odp_event_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_event_validation_internal.h \
-		  ${top_srcdir}/platform/linux-generic/include/odp_packet_dpdk.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_pcapng.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_pkt_queue_internal.h \
 		  include/odp_pool_internal.h \
