@@ -168,6 +168,12 @@ noinst_HEADERS = \
 		  ${top_srcdir}/platform/linux-generic/include/ring/odp_ring_mpmc_ptr_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/ring/odp_ring_mpmc_u32_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/ring/odp_ring_mpmc_u64_internal.h \
+		  ${top_srcdir}/platform/linux-generic/include/ring/odp_ring_mpsc_ptr_internal.h \
+		  ${top_srcdir}/platform/linux-generic/include/ring/odp_ring_mpsc_u32_internal.h \
+		  ${top_srcdir}/platform/linux-generic/include/ring/odp_ring_mpsc_u64_internal.h \
+		  ${top_srcdir}/platform/linux-generic/include/ring/odp_ring_spmc_ptr_internal.h \
+		  ${top_srcdir}/platform/linux-generic/include/ring/odp_ring_spmc_u32_internal.h \
+		  ${top_srcdir}/platform/linux-generic/include/ring/odp_ring_spmc_u64_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/ring/odp_ring_mpmc_rst_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/ring/odp_ring_mpmc_rst_ptr_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/ring/odp_ring_mpmc_rst_u32_internal.h \
