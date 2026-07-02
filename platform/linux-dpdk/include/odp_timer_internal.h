@@ -16,6 +16,7 @@
 #include <odp/api/debug.h>
 #include <odp/api/timer.h>
 
+#include <odp_debug_internal.h>
 #include <odp_event_internal.h>
 #include <odp_global_data.h>
 #include <odp_pool_internal.h>
@@ -73,6 +74,8 @@ static inline uint64_t timer_run(int dec)
 
 static inline void _odp_timeout_free_sp(odp_timeout_t tmo[], int num)
 {
+	_ODP_ASSERT(num > 0);
+
 	_odp_event_free_sp((_odp_event_hdr_t **)(uintptr_t)tmo, num);
 }
 

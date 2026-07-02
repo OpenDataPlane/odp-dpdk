@@ -165,13 +165,12 @@ static inline void _odp_event_free_sp(_odp_event_hdr_t *event_hdr[], int num)
 {
 	struct rte_mempool *mp;
 
-	if (odp_unlikely(num <= 0))
-		return;
+	_ODP_ASSERT(num > 0);
 
 	mp = event_hdr[0]->mb.pool;
 
 	if (ODP_DEBUG) {
-		for (int i = 0; i < num; i++) {
+		for (int i = 1; i < num; i++) {
 			_ODP_ASSERT(event_hdr[i] != NULL);
 			_ODP_ASSERT(event_hdr[i]->mb.pool == mp);
 		}
