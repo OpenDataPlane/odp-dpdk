@@ -3,6 +3,8 @@
  * Copyright (c) 2021-2026 Nokia
  */
 
+#include <odp/autoheader_external.h>
+
 #include <odp/api/plat/time_inlines.h>
 
 #include <odp_debug_internal.h>
@@ -40,7 +42,13 @@ int _odp_time_init_global(void)
 		return -1;
 	}
 
-#ifdef __SIZEOF_INT128__
+#ifdef _ODP_TIME_FREQ_1GHZ
+	if (_odp_time_glob.freq_hz != _ODP_TIME_GIGA_HZ) {
+		_ODP_ERR("_ODP_TIME_FREQ_1GHZ defined, but actual frequency is %" PRIu64 " Hz\n",
+			 _odp_time_glob.freq_hz);
+		return -1;
+	}
+#elif defined(__SIZEOF_INT128__)
 	/* Find the maximum shift for which the multiplier fits into 64 bits */
 	for (_odp_time_glob.shift_to_ns = 63; _odp_time_glob.shift_to_ns > 0;
 	     _odp_time_glob.shift_to_ns--) {

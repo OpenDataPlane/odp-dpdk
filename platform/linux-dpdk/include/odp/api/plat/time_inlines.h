@@ -6,6 +6,8 @@
 #ifndef ODP_PLAT_TIME_INLINES_H_
 #define ODP_PLAT_TIME_INLINES_H_
 
+#include <odp/autoheader_external.h>
+
 #include <odp/api/align.h>
 #include <odp/api/hints.h>
 #include <odp/api/time_types.h>
@@ -60,7 +62,9 @@ static inline uint64_t _odp_time_to_ns(odp_time_t time)
 {
 	uint64_t count = time.count;
 
-#ifdef __SIZEOF_INT128__
+#ifdef _ODP_TIME_FREQ_1GHZ
+	return count;
+#elif defined(__SIZEOF_INT128__)
 	return (uint64_t)(((__uint128_t)count * _odp_time_glob.mult_to_ns) >>
 			  _odp_time_glob.shift_to_ns);
 #else
@@ -84,7 +88,9 @@ static inline odp_time_t _odp_time_from_ns(uint64_t ns)
 	odp_time_t time;
 	uint64_t count;
 
-#ifdef __SIZEOF_INT128__
+#ifdef _ODP_TIME_FREQ_1GHZ
+	count = ns;
+#elif defined(__SIZEOF_INT128__)
 	count = (uint64_t)(((__uint128_t)ns * _odp_time_glob.mult_from_ns) >>
 			   _odp_time_glob.shift_from_ns);
 #else
