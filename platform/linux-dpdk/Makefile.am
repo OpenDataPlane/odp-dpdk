@@ -238,6 +238,7 @@ __LIB__libodp_dpdk_la_SOURCES = \
 			   ../linux-generic/odp_packet_flags.c \
 			   ../linux-generic/odp_packet_io.c \
 			   ../linux-generic/odp_parse.c \
+			   ../linux-generic/pktio/dpdk_common.c \
 			   ../linux-generic/pktio/loop.c \
 			   ../linux-generic/pktio/null.c \
 			   ../linux-generic/odp_pkt_queue.c \
