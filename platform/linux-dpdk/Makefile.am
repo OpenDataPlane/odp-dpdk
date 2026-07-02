@@ -163,19 +163,21 @@ noinst_HEADERS = \
 		  ${top_srcdir}/platform/linux-generic/include/odp_queue_lf.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_random_std_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/odp_random_openssl_internal.h \
-		  ${top_srcdir}/platform/linux-generic/include/odp_ring_common.h \
-		  ${top_srcdir}/platform/linux-generic/include/odp_ring_mpmc_internal.h \
-		  ${top_srcdir}/platform/linux-generic/include/odp_ring_mpmc_ptr_internal.h \
-		  ${top_srcdir}/platform/linux-generic/include/odp_ring_mpmc_u32_internal.h \
-		  ${top_srcdir}/platform/linux-generic/include/odp_ring_mpmc_u64_internal.h \
-		  ${top_srcdir}/platform/linux-generic/include/odp_ring_mpmc_rst_internal.h \
-		  ${top_srcdir}/platform/linux-generic/include/odp_ring_mpmc_rst_ptr_internal.h \
-		  ${top_srcdir}/platform/linux-generic/include/odp_ring_mpmc_rst_u32_internal.h \
-		  ${top_srcdir}/platform/linux-generic/include/odp_ring_mpmc_rst_u64_internal.h \
-		  ${top_srcdir}/platform/linux-generic/include/odp_ring_spsc_ptr_internal.h \
-		  ${top_srcdir}/platform/linux-generic/include/odp_ring_spsc_u32_internal.h \
-		  ${top_srcdir}/platform/linux-generic/include/odp_ring_st_ptr_internal.h \
-		  ${top_srcdir}/platform/linux-generic/include/odp_ring_st_u32_internal.h \
+		  ${top_srcdir}/platform/linux-generic/include/ring/odp_ring_common.h \
+		  ${top_srcdir}/platform/linux-generic/include/ring/odp_ring_mpmc_internal.h \
+		  ${top_srcdir}/platform/linux-generic/include/ring/odp_ring_mpmc_ptr_internal.h \
+		  ${top_srcdir}/platform/linux-generic/include/ring/odp_ring_mpmc_u32_internal.h \
+		  ${top_srcdir}/platform/linux-generic/include/ring/odp_ring_mpmc_u64_internal.h \
+		  ${top_srcdir}/platform/linux-generic/include/ring/odp_ring_mpmc_rst_internal.h \
+		  ${top_srcdir}/platform/linux-generic/include/ring/odp_ring_mpmc_rst_ptr_internal.h \
+		  ${top_srcdir}/platform/linux-generic/include/ring/odp_ring_mpmc_rst_u32_internal.h \
+		  ${top_srcdir}/platform/linux-generic/include/ring/odp_ring_mpmc_rst_u64_internal.h \
+		  ${top_srcdir}/platform/linux-generic/include/ring/odp_ring_spsc_internal.h \
+		  ${top_srcdir}/platform/linux-generic/include/ring/odp_ring_spsc_ptr_internal.h \
+		  ${top_srcdir}/platform/linux-generic/include/ring/odp_ring_spsc_u32_internal.h \
+		  ${top_srcdir}/platform/linux-generic/include/ring/odp_ring_st_internal.h \
+		  ${top_srcdir}/platform/linux-generic/include/ring/odp_ring_st_ptr_internal.h \
+		  ${top_srcdir}/platform/linux-generic/include/ring/odp_ring_st_u32_internal.h \
 		  include/odp_rx_adapter_internal.h \
 		  include/odp_ptr_ring_mpmc_internal.h \
 		  include/odp_ptr_ring_spsc_internal.h \
