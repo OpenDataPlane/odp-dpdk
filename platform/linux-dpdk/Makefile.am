@@ -187,6 +187,7 @@ noinst_HEADERS = \
 		  ${top_srcdir}/platform/linux-generic/include/ring/odp_ring_spsc_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/ring/odp_ring_spsc_ptr_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/ring/odp_ring_spsc_u32_internal.h \
+		  ${top_srcdir}/platform/linux-generic/include/ring/odp_ring_spsc_u64_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/ring/odp_ring_st_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/ring/odp_ring_st_ptr_internal.h \
 		  ${top_srcdir}/platform/linux-generic/include/ring/odp_ring_st_u32_internal.h \
