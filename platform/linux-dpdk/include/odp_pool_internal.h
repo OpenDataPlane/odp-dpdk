@@ -144,8 +144,7 @@ static inline void _odp_event_free_multi(_odp_event_hdr_t *event_hdr[], int num)
 	struct rte_mempool *mp_pending;
 	uint32_t i, num_pending;
 
-	if (odp_unlikely(num <= 0))
-		return;
+	_ODP_ASSERT(num > 0);
 
 	mp_pending = event_hdr[0]->mb.pool;
 	num_pending = 1;
