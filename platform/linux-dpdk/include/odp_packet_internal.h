@@ -285,11 +285,13 @@ static inline int _odp_packet_copy_md_possible(odp_pool_t dst_pool,
  *                         are swapped between the packet headers (allowed
  *                         only when packets are from the same pool).
  */
-static inline void _odp_packet_copy_md(odp_packet_hdr_t *dst_hdr,
-				       odp_packet_hdr_t *src_hdr,
+static inline void _odp_packet_copy_md(odp_packet_hdr_t *restrict dst_hdr,
+				       odp_packet_hdr_t *restrict src_hdr,
 				       odp_bool_t uarea_copy)
 {
 	const int8_t subtype = src_hdr->event_hdr.subtype;
+
+	_ODP_ASSERT(dst_hdr != src_hdr);
 
 	dst_hdr->input = src_hdr->input;
 	dst_hdr->event_hdr.subtype = subtype;
