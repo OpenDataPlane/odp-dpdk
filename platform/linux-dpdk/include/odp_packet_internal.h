@@ -295,7 +295,6 @@ static inline void _odp_packet_copy_md(odp_packet_hdr_t *dst_hdr,
 	dst_hdr->event_hdr.subtype = subtype;
 	dst_hdr->dst_queue = src_hdr->dst_queue;
 	dst_hdr->cos = src_hdr->cos;
-	dst_hdr->cls_mark = src_hdr->cls_mark;
 	dst_hdr->user_ptr = src_hdr->user_ptr;
 
 	dst_hdr->mb.port = src_hdr->mb.port;
@@ -309,22 +308,20 @@ static inline void _odp_packet_copy_md(odp_packet_hdr_t *dst_hdr,
 	dst_hdr->mb.vlan_tci_outer = src_hdr->mb.vlan_tci_outer;
 	dst_hdr->mb.tx_offload = src_hdr->mb.tx_offload;
 
-	if (src_hdr->p.input_flags.timestamp)
+	if (src_hdr->p.input_flags.timestamp ||
+	    src_hdr->p.input_flags.cls_mark ||
+	    src_hdr->p.flags.payload_off ||
+	    src_hdr->p.flags.lso ||
+	    src_hdr->p.flags.tx_aging ||
+	    src_hdr->p.flags.tx_compl_poll) {
 		dst_hdr->timestamp = src_hdr->timestamp;
-
-	if (src_hdr->p.flags.lso) {
+		dst_hdr->cls_mark = src_hdr->cls_mark;
+		dst_hdr->payload_offset = src_hdr->payload_offset;
 		dst_hdr->lso_max_payload = src_hdr->lso_max_payload;
+		dst_hdr->tx_aging_ns = src_hdr->tx_aging_ns;
+		dst_hdr->tx_compl_id = src_hdr->tx_compl_id;
 		dst_hdr->lso_profile_idx = src_hdr->lso_profile_idx;
 	}
-
-	if (src_hdr->p.flags.payload_off)
-		dst_hdr->payload_offset = src_hdr->payload_offset;
-
-	if (src_hdr->p.flags.tx_aging)
-		dst_hdr->tx_aging_ns = src_hdr->tx_aging_ns;
-
-	if (src_hdr->p.flags.tx_compl_poll)
-		dst_hdr->tx_compl_id = src_hdr->tx_compl_id;
 
 	dst_hdr->p = src_hdr->p;
 
