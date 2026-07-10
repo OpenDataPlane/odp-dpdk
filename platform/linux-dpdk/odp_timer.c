@@ -535,7 +535,7 @@ int odp_timer_capability(odp_timer_clk_src_t clk_src,
 	return 0;
 }
 
-static odp_bool_t check_freq_range(odp_fract_u64_t *freq_hz, uint32_t num, double min_freq,
+static odp_bool_t check_freq_range(const odp_fract_u64_t *freq_hz, uint32_t num, double min_freq,
 				   double max_freq)
 {
 	double prev = -1.0, freq;
