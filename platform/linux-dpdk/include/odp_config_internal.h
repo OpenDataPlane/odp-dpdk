@@ -43,6 +43,11 @@ extern "C" {
 #define CONFIG_POOLS 256
 
 /*
+ * Maximum number of timer pools
+ */
+#define CONFIG_MAX_TIMER_POOLS 8
+
+/*
  * Queues reserved for ODP internal use
  */
 #define CONFIG_INTERNAL_QUEUES 64
@@ -144,11 +149,12 @@ extern "C" {
 /*
  * Number of shared memory blocks reserved for implementation internal use.
  *
- * Each packet pool requires one SHM block, 20 blocks are reserved for ODP
- * module global data, and one block per packet I/O is reserved for TX
- * completion usage.
+ * Each packet pool requires one SHM block, periodic timer pools need extra
+ * block for freq array, 20 blocks are reserved for ODP module global data, and
+ * one block per packet I/O is reserved for TX completion usage.
  */
-#define CONFIG_INTERNAL_SHM_BLOCKS (CONFIG_POOLS + 20 + CONFIG_PKTIO_ENTRIES)
+#define CONFIG_INTERNAL_SHM_BLOCKS (CONFIG_POOLS + CONFIG_MAX_TIMER_POOLS + \
+				    20 + CONFIG_PKTIO_ENTRIES)
 
 /*
  * Maximum number of shared memory blocks.
