@@ -2252,6 +2252,8 @@ static void op_finish(crypto_op_t *op, const odp_crypto_packet_op_param_t *param
 	op_result->auth_status.alg_err = rc_auth;
 	if (oop && session->p.op_mode == ODP_CRYPTO_ASYNC)
 		op_result->pkt_in = op->state.pkt_in;
+	else
+		op_result->pkt_in = ODP_PACKET_INVALID;
 
 	/* The result handle is delivered through state.pkt. */
 	op->state.pkt = out;
@@ -2301,6 +2303,24 @@ int odp_crypto_op(const odp_packet_t pkt_in[],
 	return odp_crypto_int(pkt_in, pkt_out, param, pkt_out, num_pkt);
 }
 
+static void handle_enqueue_failure(odp_packet_t pkt_out)
+{
+	odp_packet_t pkt_in = packet_hdr(pkt_out)->crypto_op_result.pkt_in;
+
+	/*
+	 * Enqueuing failed, so this crypto operation does not complete.
+	 * We cannot anymore indicate the input packet as not consumed
+	 * and the crypto operation as not done. Free the output packet
+	 * so that it is not leaked. Free also the OOP input packet as the
+	 * application cannot access it without the completion happening.
+	 * With this, applications that do not rely on all operations to
+	 * properly complete may still work, with some packet loss in crypto.
+	 */
+	odp_packet_free(pkt_out);
+	if (pkt_in != ODP_PACKET_INVALID)
+		odp_packet_free(pkt_in);
+}
+
 int odp_crypto_op_enq(const odp_packet_t pkt_in[],
 		      const odp_packet_t pkt_out[],
 		      const odp_crypto_packet_op_param_t param[],
@@ -2325,11 +2345,9 @@ int odp_crypto_op_enq(const odp_packet_t pkt_in[],
 	for (i = 0; i < num_pkt; i++) {
 		session = session_from_handle(param[i].session);
 		event = odp_packet_to_event(out_pkts[i]);
-		if (odp_queue_enq(session->p.compl_queue, event)) {
-			odp_event_free(event);
-			break;
-		}
+		if (odp_unlikely(odp_queue_enq(session->p.compl_queue, event)))
+			handle_enqueue_failure(out_pkts[i]);
 	}
 
-	return i;
+	return num_pkt;
 }
