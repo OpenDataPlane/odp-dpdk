@@ -536,7 +536,7 @@ _ODP_INLINE void *odp_packet_push_head(odp_packet_t pkt, uint32_t len)
 
 	_ODP_ASSERT(rte_mbuf_refcnt_read(mb) == 1);
 
-	if (odp_unlikely(RTE_MBUF_CLONED(mb) && len))
+	if (odp_unlikely((RTE_MBUF_CLONED(mb) && len) || len > UINT16_MAX))
 		return NULL;
 
 	return (void *)rte_pktmbuf_prepend(mb, (uint16_t)len);
@@ -573,7 +573,7 @@ _ODP_INLINE void *odp_packet_push_tail(odp_packet_t pkt, uint32_t len)
 
 	_ODP_ASSERT(rte_mbuf_refcnt_read(mb_last) == 1);
 
-	if (odp_unlikely(RTE_MBUF_CLONED(mb_last) && len))
+	if (odp_unlikely((RTE_MBUF_CLONED(mb_last) && len) || len > UINT16_MAX))
 		return NULL;
 
 	return (void *)rte_pktmbuf_append(mb, (uint16_t)len);
