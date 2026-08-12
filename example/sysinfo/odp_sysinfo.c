@@ -197,6 +197,8 @@ static const char *cipher_alg_name(odp_cipher_alg_t cipher)
 		return "aes_eea2";
 	case ODP_CIPHER_ALG_ZUC_EEA3:
 		return "zuc_eea3";
+	case ODP_CIPHER_ALG_ZUC_NEA6:
+		return "zuc_nea6";
 	case ODP_CIPHER_ALG_SNOW_V:
 		return "snow_v";
 	case ODP_CIPHER_ALG_SNOW_V_GCM:
@@ -263,6 +265,8 @@ static const char *auth_alg_name(odp_auth_alg_t auth)
 		return "aes_eia2";
 	case ODP_AUTH_ALG_ZUC_EIA3:
 		return "zuc_eia3";
+	case ODP_AUTH_ALG_ZUC_NIA6:
+		return "zuc_nia6";
 	case ODP_AUTH_ALG_SNOW_V_GCM:
 		return "snow_v_gcm";
 	case ODP_AUTH_ALG_SNOW_V_GMAC:
@@ -341,6 +345,8 @@ static void foreach_cipher(odp_crypto_cipher_algos_t ciphers, cipher_op_t op)
 		op(ODP_CIPHER_ALG_AES_EEA2);
 	if (ciphers.bit.zuc_eea3)
 		op(ODP_CIPHER_ALG_ZUC_EEA3);
+	if (ciphers.bit.zuc_nea6)
+		op(ODP_CIPHER_ALG_ZUC_NEA6);
 	if (ciphers.bit.snow_v)
 		op(ODP_CIPHER_ALG_SNOW_V);
 	if (ciphers.bit.snow_v_gcm)
@@ -403,6 +409,8 @@ static void foreach_auth(odp_crypto_auth_algos_t auths, auth_op_t op)
 		op(ODP_AUTH_ALG_AES_EIA2);
 	if (auths.bit.zuc_eia3)
 		op(ODP_AUTH_ALG_ZUC_EIA3);
+	if (auths.bit.zuc_nia6)
+		op(ODP_AUTH_ALG_ZUC_NIA6);
 	if (auths.bit.snow_v_gcm)
 		op(ODP_AUTH_ALG_SNOW_V_GCM);
 	if (auths.bit.snow_v_gmac)
@@ -1360,6 +1368,15 @@ int main(int argc, char **argv)
 		       support_level(ipsec_capa.pipeline_cls));
 		printf("    retaining outer headers:      %s\n",
 		       support_level(ipsec_capa.retain_header));
+		printf("    outbound operation options:\n");
+		printf("      frag_mode:                  %i\n",
+		       ipsec_capa.out_op.opt.frag_mode);
+		printf("      tfc_pad:                    %i\n",
+		       ipsec_capa.out_op.opt.tfc_pad);
+		printf("      tfc_dummy:                  %i\n",
+		       ipsec_capa.out_op.opt.tfc_dummy);
+		printf("      ip_param:                   %i\n",
+		       ipsec_capa.out_op.opt.ip_param);
 		printf("    inbound checksum offload support:\n");
 		printf("      IPv4 header checksum:       %s\n",
 		       support_level(ipsec_capa.chksums_in.chksum.ipv4));

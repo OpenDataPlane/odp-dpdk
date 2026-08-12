@@ -9,12 +9,15 @@
 extern "C" {
 #endif
 
-#include <odp_ring_common.h>
+#include <ring/odp_ring_common.h>
 
 #undef _ODP_RING_TYPE
 #define _ODP_RING_TYPE _ODP_RING_TYPE_U64
 
-#include <odp_ring_mpmc_internal.h>
+#undef _ODP_RING_SYNC
+#define _ODP_RING_SYNC _ODP_RING_SYNC_MPMC
+
+#include <ring/odp_ring_mpmc_internal.h>
 
 #ifdef __cplusplus
 }

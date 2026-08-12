@@ -101,25 +101,6 @@ typedef struct pkt_adj_param_t {
 	pkt_adj_func_t func;
 } pkt_adj_param_t;
 
-static uint32_t minstd_rand(void)
-{
-	static uint64_t s = 1;
-	uint64_t prime = 0x7fffffff;
-
-	s = (48271 * s) % prime;
-	return s;
-}
-
-static uint32_t random_u32(void)
-{
-	return minstd_rand();
-}
-
-static uint8_t random_u8(void)
-{
-	return minstd_rand();
-}
-
 static void check_metadata_equal(const test_packet_md_t *md_1,
 				 const test_packet_md_t *md_2)
 {
@@ -279,6 +260,7 @@ static void save_pkt_state(odp_packet_t pkt, pkt_state_t *state)
 	state->uarea    = odp_packet_user_area(pkt);
 
 	test_packet_get_md(pkt, &state->metadata);
+	CU_ASSERT(odp_packet_user_area_size(pkt) == uarea_size);
 
 	save_seg_info(pkt, &state->seg_info);
 	CU_ASSERT(state->seg_info.num_segs == (uint32_t)odp_packet_num_segs(pkt));
@@ -397,51 +379,17 @@ static odp_packet_t alloc_packet(uint32_t len, uint32_t num_segs)
 	return pkt;
 }
 
-static void write_uarea(odp_packet_t pkt)
-{
-	uint8_t *uarea = odp_packet_user_area(pkt);
-
-	CU_ASSERT(uarea_size == odp_packet_user_area_size(pkt));
-	if (uarea_size == 0) {
-		CU_ASSERT(uarea == NULL);
-		return;
-	}
-	CU_ASSERT_FATAL(uarea != NULL);
-
-	for (uint32_t n = 0; n < uarea_size; n++)
-		uarea[n] = random_u8();
-}
-
-/* set some metadata to random values to better see changes and equality */
-static void set_random_md(odp_packet_t pkt)
-{
-	uint32_t len = odp_packet_len(pkt);
-	uintptr_t addr = random_u32();
-
-	odp_packet_user_ptr_set(pkt, (const void *)addr);
-	odp_packet_l2_offset_set(pkt, random_u8() % len);
-	odp_packet_l3_offset_set(pkt, random_u8() % len);
-	odp_packet_l4_offset_set(pkt, random_u8() % len);
-	odp_packet_flow_hash_set(pkt, random_u32());
-	odp_packet_payload_offset_set(pkt, random_u8() % len);
-}
-
 static odp_packet_t make_packet(uint32_t len, uint32_t num_segs)
 {
 	odp_packet_t pkt;
-	uint8_t data[len];
 	int rc;
 
 	pkt = alloc_packet(len, num_segs);
 
-	for (uint32_t n = 0; n < len; n++)
-		data[n] = random_u8();
-	rc = odp_packet_copy_from_mem(pkt, 0, len, data);
+	rc = test_packet_write_data(pkt, 0, len);
 	CU_ASSERT(rc == 0);
 
 	test_packet_set_md(pkt);
-	set_random_md(pkt);
-	write_uarea(pkt);
 
 	return pkt;
 }
@@ -465,20 +413,10 @@ static void check_packet_data(odp_packet_t ref, const pkt_state_t *base_state, u
 
 static void write_pkt_data(odp_packet_t pkt, uint32_t offset, uint32_t len)
 {
-	uint8_t w_data[len + 1]; /* +1 to avoid zero length array */
-	uint8_t r_data[len + 1];
 	int rc;
 
-	if (len == 0)
-		return;
-
-	for (uint32_t n = 0; n < len; n++)
-		w_data[n] = random_u8();
-	rc = odp_packet_copy_from_mem(pkt, offset, len, w_data);
+	rc = test_packet_write_data(pkt, offset, len);
 	CU_ASSERT(rc == 0);
-	rc = odp_packet_copy_to_mem(pkt, offset, len, r_data);
-	CU_ASSERT(rc == 0);
-	CU_ASSERT(memcmp(w_data, r_data, len) == 0);
 }
 
 static uint32_t iterate_pkt_layout(pkt_layout_t *layout, uint32_t *iterator)
@@ -532,8 +470,7 @@ static odp_packet_t create_ref(odp_packet_t base, const pkt_state_t *base_state,
 	CU_ASSERT(odp_packet_tailroom(ref) == 0);
 
 	check_metadata_default(ref);
-	set_random_md(ref);
-	write_uarea(ref);
+	test_packet_set_md(ref);
 
 	save_pkt_state(base, &after);
 	check_pkt_state_equal(base_state, &after);
@@ -583,7 +520,7 @@ static void pkt_extend_head(odp_packet_t *pkt, uint32_t push_len)
 	check_pkt_data(&before, 0, &after, push_len, before.len);
 	CU_ASSERT(data_ptr == after.seg_info.segs[0].data);
 	CU_ASSERT(seg_len  == after.seg_info.segs[0].len);
-	CU_ASSERT(after.len = before.len + push_len);
+	CU_ASSERT(after.len == before.len + push_len);
 
 	if (before.headroom >= push_len) {
 		CU_ASSERT(rc == 0);
@@ -620,7 +557,7 @@ static void pkt_push_head(odp_packet_t *pkt, uint32_t push_len)
 	check_metadata_equal(&before.metadata, &after.metadata);
 	check_pkt_data(&before, 0, &after, push_len, before.len);
 	CU_ASSERT(data_ptr == after.seg_info.segs[0].data);
-	CU_ASSERT(after.len = before.len + push_len);
+	CU_ASSERT(after.len == before.len + push_len);
 	CU_ASSERT(after.head == before.head);
 	CU_ASSERT(after.data == before.data - push_len);
 	CU_ASSERT(after.tail  == before.tail);
@@ -652,7 +589,7 @@ static void pkt_trunc_head(odp_packet_t *pkt, uint32_t pull_len)
 	check_pkt_data(&before, pull_len, &after, 0, after.len);
 	CU_ASSERT(data_ptr == after.seg_info.segs[0].data);
 	CU_ASSERT(seg_len  == after.seg_info.segs[0].len);
-	CU_ASSERT(after.len = before.len - pull_len);
+	CU_ASSERT(after.len == before.len - pull_len);
 
 	if (before.seg_info.segs[0].len > pull_len) {
 		bool head_data_maybe_shared = (odp_packet_is_referencing(*pkt) &&
@@ -691,7 +628,7 @@ static void pkt_pull_head(odp_packet_t *pkt, uint32_t pull_len)
 	check_metadata_equal(&before.metadata, &after.metadata);
 	check_pkt_data(&before, pull_len, &after, 0, after.len);
 	CU_ASSERT(data_ptr == after.seg_info.segs[0].data);
-	CU_ASSERT(after.len = before.len - pull_len);
+	CU_ASSERT(after.len == before.len - pull_len);
 	CU_ASSERT(after.data == before.data + pull_len);
 	CU_ASSERT(after.tail  == before.tail);
 	CU_ASSERT(after.uarea == before.uarea);
@@ -720,7 +657,7 @@ static void pkt_extend_tail(odp_packet_t *pkt, uint32_t push_len)
 	check_metadata_equal(&before.metadata, &after.metadata);
 	check_pkt_data(&before, 0, &after, 0, before.len);
 
-	CU_ASSERT(after.len = before.len + push_len);
+	CU_ASSERT(after.len == before.len + push_len);
 
 	if (before.tailroom >= push_len) {
 		CU_ASSERT(rc == 0);
@@ -759,7 +696,7 @@ static void pkt_push_tail(odp_packet_t *pkt, uint32_t push_len)
 	check_metadata_equal(&before.metadata, &after.metadata);
 	check_pkt_data(&before, 0, &after, 0, before.len);
 
-	CU_ASSERT(after.len = before.len + push_len);
+	CU_ASSERT(after.len == before.len + push_len);
 	CU_ASSERT(after.head == before.head);
 	CU_ASSERT(after.data == before.data);
 	CU_ASSERT(after.tail  == before.tail + push_len);
@@ -792,7 +729,7 @@ static void pkt_trunc_tail(odp_packet_t *pkt, uint32_t pull_len)
 
 	CU_ASSERT(tail == after.tail);
 	CU_ASSERT(tailroom  == after.tailroom);
-	CU_ASSERT(after.len = before.len - pull_len);
+	CU_ASSERT(after.len == before.len - pull_len);
 
 	if (last_seg(&before.seg_info)->len > pull_len) {
 		bool tail_data_maybe_shared = (odp_packet_is_referencing(*pkt) &&
@@ -832,7 +769,7 @@ static void pkt_pull_tail(odp_packet_t *pkt, uint32_t pull_len)
 	check_metadata_equal(&before.metadata, &after.metadata);
 	check_pkt_data(&before, 0, &after, 0, after.len);
 
-	CU_ASSERT(after.len = before.len - pull_len);
+	CU_ASSERT(after.len == before.len - pull_len);
 	CU_ASSERT(after.head == before.head);
 	CU_ASSERT(after.data == before.data);
 	CU_ASSERT(after.tail  == before.tail - pull_len);
@@ -1158,8 +1095,7 @@ static void pkt_copy(odp_packet_t pkt)
 	check_pkt_state_equal(&before, &after);
 	check_metadata_equal(&before.metadata, &state_copy.metadata);
 	check_pkt_data_equal(&before, &state_copy);
-	set_random_md(copy);
-	write_uarea(copy);
+	test_packet_set_md(copy);
 	CU_ASSERT(odp_packet_has_ref(copy) == 0);
 	CU_ASSERT(odp_packet_is_referencing(copy) == 0);
 
@@ -1200,8 +1136,7 @@ static void pkt_copy_part(odp_packet_t pkt, uint32_t offset, uint32_t len)
 	CU_ASSERT(state_copy.len == len);
 	check_metadata_default(copy);
 	check_pkt_data(&before, offset, &state_copy, 0, len);
-	set_random_md(copy);
-	write_uarea(copy);
+	test_packet_set_md(copy);
 	CU_ASSERT(odp_packet_has_ref(copy) == 0);
 	CU_ASSERT(odp_packet_is_referencing(copy) == 0);
 

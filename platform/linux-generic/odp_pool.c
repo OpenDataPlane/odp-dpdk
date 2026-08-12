@@ -23,7 +23,7 @@
 #include <odp_event_internal.h>
 #include <odp_event_validation_internal.h>
 #include <odp_macros_internal.h>
-#include <odp_ring_mpmc_rst_ptr_internal.h>
+#include <ring/odp_ring_mpmc_rst_ptr_internal.h>
 #include <odp_global_data.h>
 #include <odp_libconfig_internal.h>
 #include <odp_shm_internal.h>
@@ -101,7 +101,6 @@ static inline uint32_t cache_pop(pool_cache_t *cache,
 	uint32_t cache_num = odp_atomic_load_u32(&cache->cache_num);
 	uint32_t num_ch = max_num;
 	uint32_t cache_begin;
-	uint32_t i;
 
 	/* Cache does not have enough buffers */
 	if (odp_unlikely(cache_num < (uint32_t)max_num))
@@ -109,10 +108,10 @@ static inline uint32_t cache_pop(pool_cache_t *cache,
 
 	/* Get buffers from the cache */
 	cache_begin = cache_num - num_ch;
-	for (i = 0; i < num_ch; i++)
-		event_hdr[i] = cache->event_hdr[cache_begin + i];
+	memcpy(event_hdr, &cache->event_hdr[cache_begin],
+	       num_ch * sizeof(_odp_event_hdr_t *));
 
-	odp_atomic_store_u32(&cache->cache_num, cache_num - num_ch);
+	odp_atomic_store_u32(&cache->cache_num, cache_begin);
 
 	return num_ch;
 }
@@ -132,41 +131,72 @@ static inline _odp_event_hdr_t *cache_pop_single(pool_cache_t *cache)
 	return event_hdr;
 }
 
+static inline void cache_pop_to_ring(pool_cache_t *cache,
+				     ring_mpmc_rst_ptr_t *ring,
+				     _odp_event_hdr_t **ring_data, uint32_t mask,
+				     uint32_t cache_num, uint32_t num)
+{
+	const uint32_t cache_begin = cache_num - num;
+
+	_ODP_ASSERT(num <= cache_num);
+
+	ring_mpmc_rst_ptr_enq_multi(ring, (void **)ring_data, mask,
+				    (void **)&cache->event_hdr[cache_begin], num);
+	odp_atomic_store_u32(&cache->cache_num, cache_begin);
+}
+
 static inline void cache_push(pool_cache_t *cache, _odp_event_hdr_t *event_hdr[],
 			      uint32_t num)
 {
 	uint32_t cache_num = odp_atomic_load_u32(&cache->cache_num);
-	uint32_t i;
 
-	for (i = 0; i < num; i++)
-		cache->event_hdr[cache_num + i] = event_hdr[i];
+	memcpy(&cache->event_hdr[cache_num], event_hdr,
+	       num * sizeof(_odp_event_hdr_t *));
 
 	odp_atomic_store_u32(&cache->cache_num, cache_num + num);
 }
 
-static inline void cache_push_single(pool_cache_t *cache, _odp_event_hdr_t *event_hdr)
+static inline void cache_push_single(pool_cache_t *cache, _odp_event_hdr_t *event_hdr,
+				     uint32_t cache_num)
 {
-	const uint32_t cache_num = odp_atomic_load_u32(&cache->cache_num);
-
 	cache->event_hdr[cache_num] = event_hdr;
 
 	odp_atomic_store_u32(&cache->cache_num, cache_num + 1);
+}
+
+static inline uint32_t cache_push_from_ring(pool_cache_t *cache,
+					    ring_mpmc_rst_ptr_t *ring,
+					    _odp_event_hdr_t **ring_data, uint32_t mask,
+					    uint32_t cache_num, uint32_t num)
+{
+	uint32_t cached;
+
+	_ODP_ASSERT(cache_num + num <= CONFIG_POOL_CACHE_MAX_SIZE);
+
+	cached = ring_mpmc_rst_ptr_deq_multi(ring, (void **)ring_data, mask,
+					     (void **)&cache->event_hdr[cache_num], num);
+
+	odp_atomic_store_u32(&cache->cache_num, cache_num + cached);
+
+	return cached;
 }
 
 static void cache_flush(pool_cache_t *cache, pool_t *pool)
 {
 	_odp_event_hdr_t *event_hdr;
 	ring_mpmc_rst_ptr_t *ring;
+	_odp_event_hdr_t **ring_data;
 	uint32_t mask;
 
 	if (!pool->ring)
 		return;
 
 	ring = &pool->ring->hdr;
+	ring_data = pool->ring->event_hdr;
 	mask = pool->ring_mask;
 
 	while (cache_pop(cache, &event_hdr, 1))
-		ring_mpmc_rst_ptr_enq(ring, mask, event_hdr);
+		ring_mpmc_rst_ptr_enq(ring, (void **)ring_data, mask, event_hdr);
 }
 
 static inline int cache_available(pool_t *pool, odp_pool_stats_t *stats)
@@ -589,6 +619,7 @@ static void init_buffers(pool_t *pool)
 	uint8_t *data_ptr = NULL;
 	uint32_t offset;
 	ring_mpmc_rst_ptr_t *ring;
+	_odp_event_hdr_t **ring_data;
 	uint32_t mask;
 	odp_pool_type_t type;
 	uint64_t page_size;
@@ -599,6 +630,7 @@ static void init_buffers(pool_t *pool)
 
 	page_size = shm_info.page_size;
 	ring = &pool->ring->hdr;
+	ring_data = pool->ring->event_hdr;
 	mask = pool->ring_mask;
 	type = pool->type;
 
@@ -650,7 +682,7 @@ static void init_buffers(pool_t *pool)
 		init_event_hdr(pool, event_hdr, i, data_ptr, uarea);
 
 		/* Store buffer into the global pool */
-		ring_mpmc_rst_ptr_enq(ring, mask, event_hdr);
+		ring_mpmc_rst_ptr_enq(ring, (void **)ring_data, mask, event_hdr);
 	}
 	pool->skipped_blocks = skipped_blocks;
 
@@ -1355,42 +1387,33 @@ odp_event_t _odp_event_alloc(pool_t *pool)
 {
 	pool_cache_t *cache = local.cache[pool->pool_idx];
 	_odp_event_hdr_t *hdr;
+	uint32_t cached;
 
 	/* First pull packets from local cache */
 	hdr = cache_pop_single(cache);
 
-	if (CONFIG_POOL_STATISTICS && pool->params.stats.bit.cache_alloc_ops && hdr)
-		odp_atomic_inc_u64(&pool->stats.cache_alloc_ops);
-
-	if (odp_likely(hdr))
+	if (odp_likely(hdr)) {
+		if (CONFIG_POOL_STATISTICS && pool->params.stats.bit.cache_alloc_ops)
+			odp_atomic_inc_u64(&pool->stats.cache_alloc_ops);
 		return _odp_event_from_hdr(hdr);
+	}
 
-	/* If needed, get more from the global pool */
-	uint32_t burst = pool->burst_size;
-	uint32_t mask = pool->ring_mask;
-	_odp_event_hdr_t *hdr_tmp[burst];
-	ring_mpmc_rst_ptr_t *ring = &pool->ring->hdr;
-
-	burst = ring_mpmc_rst_ptr_deq_multi(ring, mask, (void **)hdr_tmp, burst);
+	/* Cache is empty. Refill from the global pool directly into the local cache. */
+	cached = cache_push_from_ring(cache, &pool->ring->hdr, pool->ring->event_hdr,
+				      pool->ring_mask, 0, pool->burst_size);
 
 	if (CONFIG_POOL_STATISTICS) {
 		if (pool->params.stats.bit.alloc_ops)
 			odp_atomic_inc_u64(&pool->stats.alloc_ops);
-		if (odp_unlikely(pool->params.stats.bit.alloc_fails && burst == 0))
+		if (odp_unlikely(pool->params.stats.bit.alloc_fails && cached == 0))
 			odp_atomic_inc_u64(&pool->stats.alloc_fails);
 	}
 
-	if (odp_unlikely(burst == 0))
+	if (odp_unlikely(cached == 0))
 		return ODP_EVENT_INVALID;
 
-	hdr = hdr_tmp[0];
-	burst--;
-
+	hdr = cache_pop_single(cache);
 	odp_prefetch(hdr);
-
-	/* Cache possible extra buffers. Cache is currently empty. */
-	if (burst)
-		cache_push(cache, &hdr_tmp[1], burst);
 
 	return _odp_event_from_hdr(hdr);
 }
@@ -1400,6 +1423,7 @@ int _odp_event_alloc_multi(pool_t *pool, _odp_event_hdr_t *event_hdr[], int max_
 	uint32_t pool_idx = pool->pool_idx;
 	pool_cache_t *cache = local.cache[pool_idx];
 	ring_mpmc_rst_ptr_t *ring;
+	_odp_event_hdr_t **ring_data;
 	_odp_event_hdr_t *hdr;
 	uint32_t mask, num_ch, num_alloc, i;
 	uint32_t num_deq = 0;
@@ -1423,8 +1447,10 @@ int _odp_event_alloc_multi(pool_t *pool, _odp_event_hdr_t *event_hdr[], int max_
 		_odp_event_hdr_t *hdr_tmp[burst];
 
 		ring      = &pool->ring->hdr;
+		ring_data = pool->ring->event_hdr;
 		mask      = pool->ring_mask;
-		burst     = ring_mpmc_rst_ptr_deq_multi(ring, mask, (void **)hdr_tmp, burst);
+		burst     = ring_mpmc_rst_ptr_deq_multi(ring, (void **)ring_data, mask,
+							(void **)hdr_tmp, burst);
 		cache_num = burst - num_deq;
 
 		if (CONFIG_POOL_STATISTICS) {
@@ -1463,6 +1489,7 @@ static inline void event_free_to_pool(pool_t *pool,
 	uint32_t pool_idx = pool->pool_idx;
 	pool_cache_t *cache = local.cache[pool_idx];
 	ring_mpmc_rst_ptr_t *ring;
+	_odp_event_hdr_t **ring_data;
 	uint32_t cache_num, mask;
 	uint32_t cache_size = pool->cache_size;
 
@@ -1470,9 +1497,11 @@ static inline void event_free_to_pool(pool_t *pool,
 	 * the global pool. */
 	if (odp_unlikely(num > (int)cache_size)) {
 		ring  = &pool->ring->hdr;
+		ring_data = pool->ring->event_hdr;
 		mask  = pool->ring_mask;
 
-		ring_mpmc_rst_ptr_enq_multi(ring, mask, (void **)event_hdr, num);
+		ring_mpmc_rst_ptr_enq_multi(ring, (void **)ring_data, mask,
+					    (void **)event_hdr, num);
 
 		if (CONFIG_POOL_STATISTICS && pool->params.stats.bit.free_ops)
 			odp_atomic_inc_u64(&pool->stats.free_ops);
@@ -1488,6 +1517,7 @@ static inline void event_free_to_pool(pool_t *pool,
 		int burst = pool->burst_size;
 
 		ring  = &pool->ring->hdr;
+		ring_data = pool->ring->event_hdr;
 		mask  = pool->ring_mask;
 
 		if (odp_unlikely(num > burst))
@@ -1495,11 +1525,8 @@ static inline void event_free_to_pool(pool_t *pool,
 		if (odp_unlikely((uint32_t)num > cache_num))
 			burst = cache_num;
 
-		_odp_event_hdr_t *ev_hdr[burst];
+		cache_pop_to_ring(cache, ring, ring_data, mask, cache_num, burst);
 
-		cache_pop(cache, ev_hdr, burst);
-
-		ring_mpmc_rst_ptr_enq_multi(ring, mask, (void **)ev_hdr, burst);
 		if (CONFIG_POOL_STATISTICS && pool->params.stats.bit.free_ops)
 			odp_atomic_inc_u64(&pool->stats.free_ops);
 	}
@@ -1519,9 +1546,10 @@ void _odp_event_free(odp_event_t event)
 
 	if (odp_unlikely(cache_size == 0)) {
 		ring_mpmc_rst_ptr_t *ring = &pool->ring->hdr;
+		_odp_event_hdr_t **ring_data = pool->ring->event_hdr;
 		uint32_t mask = pool->ring_mask;
 
-		ring_mpmc_rst_ptr_enq(ring, mask, (void *)event_hdr);
+		ring_mpmc_rst_ptr_enq(ring, (void **)ring_data, mask, (void *)event_hdr);
 
 		if (CONFIG_POOL_STATISTICS && pool->params.stats.bit.free_ops)
 			odp_atomic_inc_u64(&pool->stats.free_ops);
@@ -1532,18 +1560,20 @@ void _odp_event_free(odp_event_t event)
 
 	if (odp_unlikely(cache_size == cache_num)) {
 		const uint32_t burst = pool->burst_size;
-		_odp_event_hdr_t *ev_hdr[burst];
 		ring_mpmc_rst_ptr_t *ring = &pool->ring->hdr;
+		_odp_event_hdr_t **ring_data = pool->ring->event_hdr;
 		uint32_t mask = pool->ring_mask;
 
-		cache_pop(cache, ev_hdr, burst);
+		cache_pop_to_ring(cache, ring, ring_data, mask, cache_num, burst);
 
-		ring_mpmc_rst_ptr_enq_multi(ring, mask, (void **)ev_hdr, burst);
 		if (CONFIG_POOL_STATISTICS && pool->params.stats.bit.free_ops)
 			odp_atomic_inc_u64(&pool->stats.free_ops);
+
+		cache_num = odp_atomic_load_u32(&cache->cache_num);
 	}
 
-	cache_push_single(cache, event_hdr);
+	cache_push_single(cache, event_hdr, cache_num);
+
 	if (CONFIG_POOL_STATISTICS && pool->params.stats.bit.cache_free_ops)
 		odp_atomic_inc_u64(&pool->stats.cache_free_ops);
 }
@@ -1556,18 +1586,14 @@ void _odp_event_free_multi(_odp_event_hdr_t *event_hdr[], int num_total)
 	int first = 0;
 
 	while (1) {
-		num  = 1;
-		i    = 1;
 		pool = _odp_pool_entry(event_hdr[first]->pool);
 
 		/* 'num' buffers are from the same pool */
-		if (num_total > 1) {
-			for (i = first; i < num_total; i++)
-				if (pool != _odp_pool_entry(event_hdr[i]->pool))
-					break;
+		for (i = first + 1; i < num_total; i++)
+			if (pool != _odp_pool_entry(event_hdr[i]->pool))
+				break;
 
-			num = i - first;
-		}
+		num = i - first;
 
 		event_free_to_pool(pool, &event_hdr[first], num);
 
@@ -2232,6 +2258,7 @@ int odp_pool_ext_populate(odp_pool_t pool_hdl, void *buf[], uint32_t buf_size, u
 	pool_t *pool;
 	_odp_event_hdr_t *event_hdr;
 	ring_mpmc_rst_ptr_t *ring;
+	_odp_event_hdr_t **ring_data;
 	uint32_t i, ring_mask, buf_index, head_offset;
 	uint32_t num_populated;
 	uint8_t *data_ptr, *min_addr, *max_addr;
@@ -2275,6 +2302,7 @@ int odp_pool_ext_populate(odp_pool_t pool_hdl, void *buf[], uint32_t buf_size, u
 	}
 
 	ring = &pool->ring->hdr;
+	ring_data = pool->ring->event_hdr;
 	ring_mask = pool->ring_mask;
 	buf_index = pool->num_populated;
 	head_offset = pool->ext_head_offset;
@@ -2306,7 +2334,7 @@ int odp_pool_ext_populate(odp_pool_t pool_hdl, void *buf[], uint32_t buf_size, u
 		pool->ring->event_hdr_by_index[buf_index] = event_hdr;
 		buf_index++;
 
-		ring_mpmc_rst_ptr_enq(ring, ring_mask, event_hdr);
+		ring_mpmc_rst_ptr_enq(ring, (void **)ring_data, ring_mask, event_hdr);
 	}
 
 	pool->num_populated += num;

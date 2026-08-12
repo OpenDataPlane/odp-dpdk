@@ -140,6 +140,7 @@ noinst_HEADERS = \
 		  include/odp_config_internal.h \
 		  include/odp_crypto_internal.h \
 		  include/odp_debug_internal.h \
+		  include/odp_dpdk_common.h \
 		  include/odp_errno_define.h \
 		  include/odp_event_internal.h \
 		  include/odp_event_validation_internal.h \
@@ -153,7 +154,6 @@ noinst_HEADERS = \
 		  include/odp_libconfig_internal.h \
 		  include/odp_macros_internal.h \
 		  include/odp_name_table_internal.h \
-		  include/odp_packet_dpdk.h \
 		  include/odp_packet_internal.h \
 		  include/odp_packet_io_internal.h \
 		  include/odp_parse_internal.h \
@@ -173,21 +173,35 @@ noinst_HEADERS = \
 		  include/odp_queue_lf.h \
 		  include/odp_random_std_internal.h \
 		  include/odp_random_openssl_internal.h \
-		  include/odp_ring_common.h \
-		  include/odp_ring_mpmc_internal.h \
-		  include/odp_ring_mpmc_ptr_internal.h \
-		  include/odp_ring_mpmc_u32_internal.h \
-		  include/odp_ring_mpmc_u64_internal.h \
-		  include/odp_ring_mpmc_rst_internal.h \
-		  include/odp_ring_mpmc_rst_ptr_internal.h \
-		  include/odp_ring_mpmc_rst_u32_internal.h \
-		  include/odp_ring_mpmc_rst_u64_internal.h \
-		  include/odp_ring_spsc_internal.h \
-		  include/odp_ring_spsc_ptr_internal.h \
-		  include/odp_ring_spsc_u32_internal.h \
-		  include/odp_ring_st_internal.h \
-		  include/odp_ring_st_ptr_internal.h \
-		  include/odp_ring_st_u32_internal.h \
+		  include/ring/odp_ring_common.h \
+		  include/ring/odp_ring_mpmc_internal.h \
+		  include/ring/odp_ring_mpmc_ptr_internal.h \
+		  include/ring/odp_ring_mpmc_u32_internal.h \
+		  include/ring/odp_ring_mpmc_u64_internal.h \
+		  include/ring/odp_ring_mpsc_ptr_internal.h \
+		  include/ring/odp_ring_mpsc_u32_internal.h \
+		  include/ring/odp_ring_mpsc_u64_internal.h \
+		  include/ring/odp_ring_spmc_ptr_internal.h \
+		  include/ring/odp_ring_spmc_u32_internal.h \
+		  include/ring/odp_ring_spmc_u64_internal.h \
+		  include/ring/odp_ring_mpmc_rst_internal.h \
+		  include/ring/odp_ring_mpmc_rst_ptr_internal.h \
+		  include/ring/odp_ring_mpmc_rst_u32_internal.h \
+		  include/ring/odp_ring_mpmc_rst_u64_internal.h \
+		  include/ring/odp_ring_mpsc_rst_ptr_internal.h \
+		  include/ring/odp_ring_mpsc_rst_u32_internal.h \
+		  include/ring/odp_ring_mpsc_rst_u64_internal.h \
+		  include/ring/odp_ring_spmc_rst_ptr_internal.h \
+		  include/ring/odp_ring_spmc_rst_u32_internal.h \
+		  include/ring/odp_ring_spmc_rst_u64_internal.h \
+		  include/ring/odp_ring_spsc_internal.h \
+		  include/ring/odp_ring_spsc_ptr_internal.h \
+		  include/ring/odp_ring_spsc_u32_internal.h \
+		  include/ring/odp_ring_spsc_u64_internal.h \
+		  include/ring/odp_ring_st_internal.h \
+		  include/ring/odp_ring_st_ptr_internal.h \
+		  include/ring/odp_ring_st_u32_internal.h \
+		  include/ring/odp_ring_st_u64_internal.h \
 		  include/odp_schedule_if.h \
 		  include/odp_shm_internal.h \
 		  include/odp_sorted_list_internal.h \
@@ -274,6 +288,7 @@ __LIB__libodp_linux_la_SOURCES = \
 			   pktio/stats/sysfs_stats.c \
 			   pktio/stats/packet_io_stats.c \
 			   pktio/dpdk.c \
+			   pktio/dpdk_common.c \
 			   pktio/socket_common.c \
 			   pktio/ethtool_rss.c \
 			   pktio/io_ops.c \
