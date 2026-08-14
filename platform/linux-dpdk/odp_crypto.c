@@ -6,6 +6,7 @@
 #include <odp_posix_extensions.h>
 
 #include <odp/api/align.h>
+#include <odp/api/atomic.h>
 #include <odp/api/buffer.h>
 #include <odp/api/crypto.h>
 #include <odp/api/debug.h>
@@ -38,6 +39,8 @@
 
 #include <string.h>
 #include <math.h>
+#include <inttypes.h>
+#include <stdalign.h>
 
 #define MAX_BURST 32
 /*
@@ -101,6 +104,25 @@ typedef struct crypto_config_s {
 	odp_bool_t openssl_disable_aes_cmac;
 } crypto_config_t;
 
+typedef struct pending_completion_s {
+	odp_packet_t pkt;
+	odp_queue_t queue;
+} pending_completion_t;
+
+/*
+ * FIFO of completion events that could not be enqueued to their completion
+ * queue because it was full.
+ */
+typedef struct pending_queue_s {
+	odp_spinlock_t lock;
+	odp_atomic_u32_t num;		/* Number of pending completions */
+	uint32_t head;			/* Ring index of the first pending completion */
+	uint32_t size;			/* Ring size */
+	pending_completion_t *ring;	/* Ring buffer of pending completions */
+} pending_queue_t;
+
+#define PENDING_RING_ALIGNMENT alignof(pending_completion_t)
+
 typedef struct crypto_global_s {
 	odp_spinlock_t                lock;
 	uint8_t num_devs;
@@ -109,6 +131,7 @@ typedef struct crypto_global_s {
 	struct rte_mempool *session_mempool[RTE_MAX_NUMA_NODES];
 	odp_shm_t shm;
 	crypto_config_t config;
+	pending_queue_t pending;
 	crypto_session_entry_t *free;
 	crypto_session_entry_t sessions[];
 } crypto_global_t;
@@ -386,6 +409,30 @@ static int read_config(crypto_config_t *config)
 	return 0;
 }
 
+static uint32_t pending_ring_size(void)
+{
+	/*
+	 * Reserving space for one burst per thread guarantees that all deferred
+	 * events fit in the queue as long as no thread tries to defer events
+	 * after it has seen that the queue is not empty.
+	 */
+	return odp_thread_count_max() * MAX_BURST;
+}
+
+static uint32_t pending_ring_mem_size(void)
+{
+	return pending_ring_size() * sizeof(pending_completion_t);
+}
+
+static void pending_queue_init(pending_queue_t *pending, void *ring_addr)
+{
+	odp_spinlock_init(&pending->lock);
+	odp_atomic_init_u32(&pending->num, 0);
+	pending->head = 0;
+	pending->size = pending_ring_size();
+	pending->ring = ring_addr;
+}
+
 int _odp_crypto_init_global(void)
 {
 	crypto_config_t config;
@@ -414,6 +461,7 @@ int _odp_crypto_init_global(void)
 	/* Calculate the memory size we need */
 	mem_size  = sizeof(*global);
 	mem_size += (config.max_sessions * sizeof(crypto_session_entry_t));
+	mem_size += pending_ring_mem_size();
 
 	/* Allocate our globally shared memory */
 	shm = odp_shm_reserve("_odp_crypto_global", mem_size,
@@ -432,6 +480,11 @@ int _odp_crypto_init_global(void)
 	memset(global, 0, mem_size);
 	global->shm = shm;
 	global->config = config;
+
+	ODP_STATIC_ASSERT(((offsetof(crypto_global_t, sessions) % PENDING_RING_ALIGNMENT) == 0) &&
+			  ((sizeof(crypto_session_entry_t)      % PENDING_RING_ALIGNMENT) == 0),
+			  "pending completion ring may be misaligned");
+	pending_queue_init(&global->pending, &global->sessions[config.max_sessions]);
 
 	/* Initialize free list and lock */
 	for (uint32_t idx = 0; idx < config.max_sessions; idx++) {
@@ -1623,6 +1676,28 @@ int odp_crypto_session_destroy(odp_crypto_session_t _session)
 	return 0;
 }
 
+static void free_pending_completions(void)
+{
+	pending_queue_t *pending = &global->pending;
+	uint32_t num = odp_atomic_load_u32(&pending->num);
+	uint32_t head = pending->head;
+
+	while (num > 0) {
+		odp_packet_t pkt = pending->ring[head].pkt;
+		odp_packet_t pkt_in = packet_hdr(pkt)->crypto_op_result.pkt_in;
+
+		odp_packet_free(pkt);
+		if (pkt_in != ODP_PACKET_INVALID)
+			odp_packet_free(pkt_in);
+
+		if (++head >= pending->size)
+			head = 0;
+		num--;
+	}
+	pending->head = head;
+	odp_atomic_store_u32(&pending->num, 0);
+}
+
 int _odp_crypto_term_global(void)
 {
 	int rc = 0;
@@ -1632,6 +1707,11 @@ int _odp_crypto_term_global(void)
 
 	if (global == NULL)
 		return 0;
+
+	if (odp_atomic_load_u32(&global->pending.num) != 0) {
+		_ODP_ERR("Freeing crypto completion events not delivered before termination\n");
+		free_pending_completions();
+	}
 
 	for (session = global->free; session != NULL; session = session->next)
 		count++;
@@ -2303,22 +2383,59 @@ int odp_crypto_op(const odp_packet_t pkt_in[],
 	return odp_crypto_int(pkt_in, pkt_out, param, pkt_out, num_pkt);
 }
 
-static void handle_enqueue_failure(odp_packet_t pkt_out)
+static void defer_completions(const odp_packet_t pkts[],
+			      const odp_crypto_packet_op_param_t param[],
+			      int num_pkt)
 {
-	odp_packet_t pkt_in = packet_hdr(pkt_out)->crypto_op_result.pkt_in;
+	pending_queue_t *pending = &global->pending;
+	uint32_t num;
 
-	/*
-	 * Enqueuing failed, so this crypto operation does not complete.
-	 * We cannot anymore indicate the input packet as not consumed
-	 * and the crypto operation as not done. Free the output packet
-	 * so that it is not leaked. Free also the OOP input packet as the
-	 * application cannot access it without the completion happening.
-	 * With this, applications that do not rely on all operations to
-	 * properly complete may still work, with some packet loss in crypto.
-	 */
-	odp_packet_free(pkt_out);
-	if (pkt_in != ODP_PACKET_INVALID)
-		odp_packet_free(pkt_in);
+	odp_spinlock_lock(&pending->lock);
+	num = odp_atomic_load_u32(&pending->num);
+
+	_ODP_DBG("Deferring %i completion events\n", num_pkt);
+
+	for (int i = 0; i < num_pkt; i++) {
+		crypto_session_entry_t *session = session_from_handle(param[i].session);
+		uint32_t tail = pending->head + num;
+
+		if (tail >= pending->size)
+			tail -= pending->size;
+
+		_ODP_ASSERT(num < pending->size);
+		pending->ring[tail].pkt = pkts[i];
+		pending->ring[tail].queue = session->p.compl_queue;
+		num++;
+	}
+	odp_atomic_store_u32(&pending->num, num);
+	odp_spinlock_unlock(&pending->lock);
+}
+
+static uint32_t retry_pending_completions(void)
+{
+	pending_queue_t *pending = &global->pending;
+	uint32_t num, head;
+
+	odp_spinlock_lock(&pending->lock);
+	num = odp_atomic_load_u32(&pending->num);
+	head = pending->head;
+	_ODP_DBG("Retrying sending %" PRIu32 " pending completions\n", num);
+
+	while (num > 0) {
+		odp_event_t event = odp_packet_to_event(pending->ring[head].pkt);
+
+		if (odp_unlikely(odp_queue_enq(pending->ring[head].queue, event)))
+			break;
+		if (++head >= pending->size)
+			head = 0;
+		num--;
+	}
+	pending->head = head;
+	_ODP_DBG("%" PRIu32 " completions still pending\n", num);
+	odp_atomic_store_u32(&pending->num, num);
+	odp_spinlock_unlock(&pending->lock);
+
+	return num;
 }
 
 int odp_crypto_op_enq(const odp_packet_t pkt_in[],
@@ -2340,13 +2457,21 @@ int odp_crypto_op_enq(const odp_packet_t pkt_in[],
 		_ODP_ASSERT(ODP_QUEUE_INVALID != session->p.compl_queue);
 	}
 
+	if (odp_unlikely(odp_atomic_load_u32(&global->pending.num) != 0)) {
+		if (retry_pending_completions())
+			return 0;
+	}
+
 	num_pkt = odp_crypto_int(pkt_in, pkt_out, param, out_pkts, num_pkt);
 
 	for (i = 0; i < num_pkt; i++) {
 		session = session_from_handle(param[i].session);
 		event = odp_packet_to_event(out_pkts[i]);
-		if (odp_unlikely(odp_queue_enq(session->p.compl_queue, event)))
-			handle_enqueue_failure(out_pkts[i]);
+		if (odp_unlikely(odp_queue_enq(session->p.compl_queue, event))) {
+			/* Completion queue is full. Retry enqueuing later. */
+			defer_completions(&out_pkts[i], &param[i], num_pkt - i);
+			break;
+		}
 	}
 
 	return num_pkt;
