@@ -1,0 +1,22 @@
+<map id="buffer_types.h" name="buffer_types.h">
+<area shape="rect" id="Node000001" title="ODP buffer types." alt="" coords="127,5,242,31"/>
+<area shape="rect" id="Node000002" href="$buffer__types_8h.html" title="ODP buffer types." alt="" coords="127,79,242,104"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="187,44,187,79,182,79,182,44"/>
+<area shape="rect" id="Node000003" href="$spec_2buffer_8h.html" title="ODP buffer." alt="" coords="27,152,97,177"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="155,113,83,154,81,149,152,108"/>
+<area shape="rect" id="Node000006" href="$buffer__inlines_8h_source.html" title=" " alt="" coords="166,225,289,251"/>
+<area shape="poly" id="edge5_Node000002_Node000006" title=" " alt="" coords="172,117,161,147,160,162,163,176,183,203,208,223,205,227,179,207,158,178,154,162,156,145,167,115"/>
+<area shape="rect" id="Node000007" href="$event__inlines_8h_source.html" title=" " alt="" coords="173,152,295,177"/>
+<area shape="poly" id="edge6_Node000002_Node000007" title=" " alt="" coords="203,114,228,150,224,153,198,117"/>
+<area shape="rect" id="Node000008" href="$event__validation__external_8h.html" title="ODP event validation." alt="" coords="319,152,523,177"/>
+<area shape="poly" id="edge7_Node000002_Node000008" title=" " alt="" coords="236,105,383,149,382,154,235,110"/>
+<area shape="rect" id="Node000004" href="$buffer_8h.html" title="ODP buffer descriptor." alt="" coords="27,225,97,251"/>
+<area shape="poly" id="edge3_Node000003_Node000004" title=" " alt="" coords="65,191,65,225,59,225,59,191"/>
+<area shape="rect" id="Node000005" href="$dma__inlines_8h_source.html" title=" " alt="" coords="5,299,119,324"/>
+<area shape="poly" id="edge4_Node000004_Node000005" title=" " alt="" coords="65,264,65,299,59,299,59,264"/>
+<area shape="poly" id="edge8_Node000008_Node000006" title=" " alt="" coords="378,184,260,228,258,223,376,179"/>
+<area shape="rect" id="Node000009" href="$packet__inlines_8h.html" title="ODP packet inline functions." alt="" coords="335,225,461,251"/>
+<area shape="poly" id="edge9_Node000008_Node000009" title=" " alt="" coords="415,192,404,226,399,224,410,190"/>
+<area shape="rect" id="Node000010" href="$queue__inlines_8h_source.html" title=" " alt="" coords="485,225,609,251"/>
+<area shape="poly" id="edge10_Node000008_Node000010" title=" " alt="" coords="454,182,528,223,525,227,452,186"/>
+</map>
