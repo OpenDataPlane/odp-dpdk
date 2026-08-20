@@ -18,13 +18,14 @@
 
 #include <odp/api/plat/timer_inline_types.h>
 
+#include <odp_config_internal.h>
 #include <odp_debug_internal.h>
 #include <odp_init_internal.h>
 #include <odp_libconfig_internal.h>
 #include <odp_macros_internal.h>
 #include <odp_pool_internal.h>
 #include <odp_queue_if.h>
-#include <odp_ring_mpmc_rst_u32_internal.h>
+#include <ring/odp_ring_mpmc_rst_u32_internal.h>
 #include <odp_string_internal.h>
 #include <odp_thread_internal.h>
 #include <odp_timer_internal.h>
@@ -43,9 +44,6 @@
 #define NOT_TICKING 0
 #define EXPIRED     1
 #define TICKING     2
-
-/* Maximum number of timer pools */
-#define MAX_TIMER_POOLS  8
 
 /* Maximum ring size for storing timer pool timers. Must be a power of two. */
 #define MAX_TIMER_RING_SIZE (32 * 1024)
@@ -113,8 +111,6 @@ typedef struct {
 
 } timer_entry_t;
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wpedantic"
 typedef struct timer_pool_s {
 	timer_entry_t timer[MAX_TIMER_RING_SIZE];
 
@@ -153,10 +149,10 @@ typedef struct timer_pool_s {
 	} p;
 
 	odp_pool_t tmo_pool;
+	odp_shm_t freq_hz_shm;
 	uint8_t periodic;
 
 } timer_pool_t;
-#pragma GCC diagnostic pop
 
 /* Wrappers for alternative DPDK timer implementation */
 typedef int (*timer_stop_fn)(struct rte_timer *tim);
@@ -172,7 +168,7 @@ typedef struct timer_ops_t {
 } timer_ops_t;
 
 typedef struct {
-	timer_pool_t timer_pool[MAX_TIMER_POOLS];
+	timer_pool_t timer_pool[CONFIG_MAX_TIMER_POOLS];
 	odp_shm_t shm;
 	odp_ticketlock_t lock;
 	volatile uint64_t wait_counter;
@@ -508,12 +504,12 @@ int odp_timer_capability(odp_timer_clk_src_t clk_src,
 
 	memset(capa, 0, sizeof(odp_timer_capability_t));
 
-	capa->max_pools_combined = MAX_TIMER_POOLS;
-	capa->max_pools = MAX_TIMER_POOLS;
+	capa->max_pools_combined = CONFIG_MAX_TIMER_POOLS;
+	capa->max_pools = CONFIG_MAX_TIMER_POOLS;
 	capa->max_timers = MAX_TIMERS;
 	capa->periodic.support.base_mul = 1;
 	capa->periodic.support.freq = 1;
-	capa->periodic.max_pools  = MAX_TIMER_POOLS;
+	capa->periodic.max_pools  = CONFIG_MAX_TIMER_POOLS;
 	capa->periodic.max_timers = MAX_PERIODIC_TIMERS;
 	capa->highest_res_ns = MAX_RES_NS;
 	capa->max_res.res_ns  = MAX_RES_NS;
@@ -535,7 +531,7 @@ int odp_timer_capability(odp_timer_clk_src_t clk_src,
 	return 0;
 }
 
-static odp_bool_t check_freq_range(odp_fract_u64_t *freq_hz, uint32_t num, double min_freq,
+static odp_bool_t check_freq_range(const odp_fract_u64_t *freq_hz, uint32_t num, double min_freq,
 				   double max_freq)
 {
 	double prev = -1.0, freq;
@@ -667,6 +663,7 @@ odp_timer_pool_t odp_timer_pool_create(const char *name,
 	double base_freq = 0.0, min_freq = 0.0, max_freq = 0.0;
 	odp_pool_param_t tmo_pool_param;
 	odp_pool_t tmo_pool = ODP_POOL_INVALID;
+	odp_shm_t freq_hz_shm = ODP_SHM_INVALID;
 	odp_bool_t periodic = (param->timer_type == ODP_TIMER_TYPE_PERIODIC_BASE_MUL ||
 			       param->timer_type == ODP_TIMER_TYPE_PERIODIC_FREQ) ? 1 : 0;
 
@@ -793,19 +790,37 @@ odp_timer_pool_t odp_timer_pool_create(const char *name,
 			_ODP_ERR("Timeout pool creation failed\n");
 			return ODP_TIMER_POOL_INVALID;
 		}
+
+		if (param->timer_type == ODP_TIMER_TYPE_PERIODIC_FREQ) {
+			char shm_name[ODP_SHM_NAME_LEN];
+			uint64_t size = _ODP_ROUNDUP_CACHE_LINE(sizeof(odp_fract_u64_t) *
+								param->periodic.freq.num);
+
+			snprintf(shm_name, ODP_SHM_NAME_LEN, "%s_freq_hz",
+				 name ? name : "timer_pool");
+
+			freq_hz_shm = odp_shm_reserve(shm_name, size, ODP_CACHE_LINE_SIZE, 0);
+			if (freq_hz_shm == ODP_SHM_INVALID) {
+				_ODP_ERR("Reserving freq_hz array memory failed\n");
+				(void)odp_pool_destroy(tmo_pool);
+				return ODP_TIMER_POOL_INVALID;
+			}
+		}
 	}
 
 	odp_ticketlock_lock(&timer_global->lock);
 
-	if (timer_global->num_timer_pools >= MAX_TIMER_POOLS) {
+	if (timer_global->num_timer_pools >= CONFIG_MAX_TIMER_POOLS) {
 		odp_ticketlock_unlock(&timer_global->lock);
 		_ODP_DBG("No more free timer pools\n");
 		if (tmo_pool != ODP_POOL_INVALID)
 			(void)odp_pool_destroy(tmo_pool);
+		if (freq_hz_shm != ODP_SHM_INVALID)
+			(void)odp_shm_free(freq_hz_shm);
 		return ODP_TIMER_POOL_INVALID;
 	}
 
-	for (i = 0; i < MAX_TIMER_POOLS; i++) {
+	for (i = 0; i < CONFIG_MAX_TIMER_POOLS; i++) {
 		timer_pool = &timer_global->timer_pool[i];
 
 		if (timer_pool->used == 0) {
@@ -838,6 +853,7 @@ odp_timer_pool_t odp_timer_pool_create(const char *name,
 
 	timer_pool->periodic = periodic;
 	timer_pool->tmo_pool = tmo_pool;
+	timer_pool->freq_hz_shm = freq_hz_shm;
 
 	if (periodic) {
 		timer_pool->p.type = param->timer_type;
@@ -846,8 +862,14 @@ odp_timer_pool_t odp_timer_pool_create(const char *name,
 			timer_pool->p.base_freq = base_freq;
 			timer_pool->p.max_multiplier = max_multiplier;
 		} else {
+			odp_fract_u64_t *freq_copy = odp_shm_addr(freq_hz_shm);
+
 			timer_pool->p.min_freq = min_freq;
 			timer_pool->p.max_freq = max_freq;
+
+			memcpy(freq_copy, param->periodic.freq.freq_hz,
+			       sizeof(odp_fract_u64_t) * param->periodic.freq.num);
+			timer_pool->param.periodic.freq.freq_hz = freq_copy;
 		}
 	}
 
@@ -867,6 +889,7 @@ odp_timer_pool_t odp_timer_pool_create(const char *name,
 		timer->timer_idx  = i;
 
 		ring_mpmc_rst_u32_enq(&timer_pool->free_timer.ring_hdr,
+				      timer_pool->free_timer.ring_data,
 				      timer_pool->free_timer.ring_mask, i);
 	}
 
@@ -902,6 +925,9 @@ void odp_timer_pool_destroy(odp_timer_pool_t tp)
 	if (timer_pool->tmo_pool != ODP_POOL_INVALID)
 		(void)odp_pool_destroy(timer_pool->tmo_pool);
 
+	if (timer_pool->freq_hz_shm != ODP_SHM_INVALID)
+		(void)odp_shm_free(timer_pool->freq_hz_shm);
+
 	odp_ticketlock_unlock(&timer_global->lock);
 }
 
@@ -910,7 +936,7 @@ int odp_timer_sample_ticks(odp_timer_pool_t tp[], uint64_t tick[], uint64_t clk_
 	uint64_t now;
 	int i;
 
-	if (num <= 0 || num > MAX_TIMER_POOLS) {
+	if (num <= 0 || num > CONFIG_MAX_TIMER_POOLS) {
 		_ODP_ERR("Bad number of timer pools: %i\n", num);
 		return -1;
 	}
@@ -977,8 +1003,8 @@ static timer_entry_t *timer_alloc(timer_pool_t *tp, odp_queue_t queue, const voi
 	uint32_t timer_idx;
 	timer_entry_t *timer;
 
-	if (ring_mpmc_rst_u32_deq(&tp->free_timer.ring_hdr, tp->free_timer.ring_mask,
-				  &timer_idx) == 0)
+	if (ring_mpmc_rst_u32_deq(&tp->free_timer.ring_hdr, tp->free_timer.ring_data,
+				  tp->free_timer.ring_mask, &timer_idx) == 0)
 		return NULL;
 
 	timer = &tp->timer[timer_idx];
@@ -1059,7 +1085,7 @@ int odp_timer_free(odp_timer_t timer_hdl)
 
 	odp_ticketlock_unlock(&timer_pool->lock);
 
-	ring_mpmc_rst_u32_enq(&timer_pool->free_timer.ring_hdr,
+	ring_mpmc_rst_u32_enq(&timer_pool->free_timer.ring_hdr, timer_pool->free_timer.ring_data,
 			      timer_pool->free_timer.ring_mask, timer_idx);
 
 	return 0;
@@ -1550,7 +1576,9 @@ void odp_timeout_free(odp_timeout_t tmo)
 void odp_timeout_free_multi(odp_timeout_t tmo[], int num)
 {
 	_ODP_ASSERT(tmo != NULL);
-	_ODP_ASSERT(num > 0);
+
+	if (odp_unlikely(num < 1))
+		return;
 
 	_odp_event_free_multi((_odp_event_hdr_t **)(uintptr_t)tmo, num);
 }

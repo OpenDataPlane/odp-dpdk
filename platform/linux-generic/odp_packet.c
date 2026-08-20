@@ -511,6 +511,14 @@ static inline int skip_references(odp_packet_hdr_t *hdr[], int num)
 	return num_ref;
 }
 
+static inline void packet_free(odp_packet_hdr_t *hdr)
+{
+	if (odp_unlikely(skip_references(&hdr, 1)))
+		return;
+
+	_odp_event_free(_odp_event_from_hdr(&hdr->event_hdr));
+}
+
 static inline void packet_free_multi(odp_packet_hdr_t *hdr[], int num)
 {
 	num -= skip_references(hdr, num);
@@ -538,7 +546,7 @@ static inline void free_all_segments(odp_packet_hdr_t *pkt_hdr, int num)
 		seg_hdr = seg_hdr->seg_next;
 	}
 
-	packet_free_multi(pkt_hdrs, num);
+	packet_free_sp(pkt_hdrs, num);
 }
 
 static inline odp_packet_hdr_t *free_segments(odp_packet_hdr_t *pkt_hdr,
@@ -581,7 +589,7 @@ static inline odp_packet_hdr_t *free_segments(odp_packet_hdr_t *pkt_hdr,
 
 		pkt_hdr = new_hdr;
 
-		packet_free_multi(pkt_hdrs, num);
+		packet_free_sp(pkt_hdrs, num);
 	} else {
 		/* Free last 'num' bufs.
 		 * First, find the last remaining header. */
@@ -595,7 +603,7 @@ static inline odp_packet_hdr_t *free_segments(odp_packet_hdr_t *pkt_hdr,
 			pkt_hdrs[i] = seg_hdr;
 		}
 
-		packet_free_multi(pkt_hdrs, num);
+		packet_free_sp(pkt_hdrs, num);
 
 		/* Head segment remains, no need to copy or update majority
 		 * of the metadata. */
@@ -668,6 +676,43 @@ static inline int packet_alloc(pool_t *pool, uint32_t len, int max_pkt,
 	return num;
 }
 
+static inline odp_packet_t packet_alloc_single(pool_t *pool, uint32_t len, int num_seg)
+{
+	odp_packet_hdr_t *hdr;
+
+	if (odp_likely(num_seg == 1)) {
+		odp_event_t event = _odp_event_alloc(pool);
+
+		if (odp_unlikely(event == ODP_EVENT_INVALID))
+			return ODP_PACKET_INVALID;
+
+		hdr = (odp_packet_hdr_t *)(uintptr_t)event;
+		odp_prefetch(hdr);
+		odp_prefetch((uint8_t *)hdr + ODP_CACHE_LINE_SIZE);
+
+		init_segments(&hdr, 1);
+		packet_init(hdr, len);
+		return packet_handle(hdr);
+	}
+	/* Multi-segment packet */
+	odp_packet_hdr_t *pkt_hdr[PKT_MAX_SEGS];
+	int num_buf = _odp_event_alloc_multi(pool, (_odp_event_hdr_t **)pkt_hdr, num_seg);
+
+	if (odp_unlikely(num_buf != num_seg)) {
+		if (num_buf)
+			_odp_event_free_sp((_odp_event_hdr_t **)pkt_hdr, num_buf);
+		return ODP_PACKET_INVALID;
+	}
+
+	hdr = pkt_hdr[0];
+	odp_prefetch(hdr);
+	odp_prefetch((uint8_t *)hdr + ODP_CACHE_LINE_SIZE);
+
+	init_segments(pkt_hdr, num_seg);
+	packet_init(hdr, len);
+	return packet_handle(hdr);
+}
+
 int _odp_packet_alloc_multi(odp_pool_t pool_hdl, uint32_t len,
 			    odp_packet_t pkt[], int max_num)
 {
@@ -683,21 +728,13 @@ int _odp_packet_alloc_multi(odp_pool_t pool_hdl, uint32_t len,
 odp_packet_t odp_packet_alloc(odp_pool_t pool_hdl, uint32_t len)
 {
 	pool_t *pool = _odp_pool_entry(pool_hdl);
-	odp_packet_t pkt;
-	int num, num_seg;
 
 	_ODP_ASSERT(pool->type == ODP_POOL_PACKET);
 
 	if (odp_unlikely(len > pool->max_len || len == 0))
 		return ODP_PACKET_INVALID;
 
-	num_seg = num_segments(len, pool->seg_len);
-	num     = packet_alloc(pool, len, 1, num_seg, &pkt);
-
-	if (odp_unlikely(num == 0))
-		return ODP_PACKET_INVALID;
-
-	return pkt;
+	return packet_alloc_single(pool, len, num_segments(len, pool->seg_len));
 }
 
 int odp_packet_alloc_multi(odp_pool_t pool_hdl, uint32_t len,
@@ -727,7 +764,7 @@ void odp_packet_free(odp_packet_t pkt)
 	_ODP_ASSERT(segment_ref(pkt_hdr) > 0);
 
 	if (odp_likely(num_seg == 1))
-		packet_free_sp(&pkt_hdr, 1);
+		packet_free(pkt_hdr);
 	else
 		free_all_segments(pkt_hdr, num_seg);
 }
@@ -2028,10 +2065,13 @@ int _odp_packet_sctp_chksum_insert(odp_packet_t pkt)
 int _odp_packet_l4_chksum(odp_packet_hdr_t *pkt_hdr,
 			  odp_pktin_config_opt_t opt, uint64_t l4_part_sum)
 {
+	/* Skip fragmented packets */
+	if (pkt_hdr->p.input_flags.ipfrag)
+		return pkt_hdr->p.flags.all.error != 0;
+
 	/* UDP chksum == 0 case is covered in parse_udp() */
 	if (opt.bit.udp_chksum &&
 	    pkt_hdr->p.input_flags.udp &&
-	    !pkt_hdr->p.input_flags.ipfrag &&
 	    !pkt_hdr->p.input_flags.udp_chksum_zero) {
 		uint16_t sum = ~packet_sum(pkt_hdr,
 					   pkt_hdr->p.l3_offset,
@@ -2048,11 +2088,7 @@ int _odp_packet_l4_chksum(odp_packet_hdr_t *pkt_hdr,
 			if (opt.bit.drop_udp_err)
 				return -1;
 		}
-	}
-
-	if (opt.bit.tcp_chksum &&
-	    pkt_hdr->p.input_flags.tcp &&
-	    !pkt_hdr->p.input_flags.ipfrag) {
+	} else if (opt.bit.tcp_chksum && pkt_hdr->p.input_flags.tcp) {
 		uint16_t sum = ~packet_sum(pkt_hdr,
 					   pkt_hdr->p.l3_offset,
 					   pkt_hdr->p.l4_offset,
@@ -2068,11 +2104,7 @@ int _odp_packet_l4_chksum(odp_packet_hdr_t *pkt_hdr,
 			if (opt.bit.drop_tcp_err)
 				return -1;
 		}
-	}
-
-	if (opt.bit.sctp_chksum &&
-	    pkt_hdr->p.input_flags.sctp &&
-	    !pkt_hdr->p.input_flags.ipfrag) {
+	} else if (opt.bit.sctp_chksum && pkt_hdr->p.input_flags.sctp) {
 		uint32_t seg_len = 0;
 		_odp_sctphdr_t hdr_copy;
 		uint32_t sum = ~packet_sum_crc32c(pkt_hdr,

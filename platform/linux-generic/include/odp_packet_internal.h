@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2013-2018 Linaro Limited
- * Copyright (c) 2019-2022 Nokia
+ * Copyright (c) 2019-2026 Nokia
  */
 
 /**
@@ -144,15 +144,18 @@ typedef struct ODP_ALIGNED_CACHE odp_packet_hdr_t {
 	/* Max payload size in a LSO segment */
 	uint16_t lso_max_payload;
 
+	/* LSO profile index */
+	uint8_t lso_profile_idx;
+
+	/* Unused field. Used only for optimizing metadata copying */
+	uint8_t unused;
+
 	/* Packet aging drop timeout before enqueue. Once enqueued holds the maximum age (time of
 	 * request + requested drop timeout). */
 	uint64_t tx_aging_ns;
 
 	/* Tx completion poll completion identifier */
 	uint32_t tx_compl_id;
-
-	/* LSO profile index */
-	uint8_t lso_profile_idx;
 
 	/* Pktio where packet is used as a memory source */
 	uint8_t ms_pktio_idx;
@@ -311,8 +314,8 @@ static inline int _odp_packet_copy_md_possible(odp_pool_t dst_pool,
  *                         are swapped between the packet headers (allowed
  *                         only when packets are from the same pool).
  */
-static inline void _odp_packet_copy_md(odp_packet_hdr_t *dst_hdr,
-				       odp_packet_hdr_t *src_hdr,
+static inline void _odp_packet_copy_md(odp_packet_hdr_t *restrict dst_hdr,
+				       odp_packet_hdr_t *restrict src_hdr,
 				       odp_bool_t uarea_copy)
 {
 	int8_t subtype = src_hdr->event_hdr.subtype;
@@ -328,26 +331,46 @@ static inline void _odp_packet_copy_md(odp_packet_hdr_t *dst_hdr,
 	 *   .seg_indirect
 	 *   .seg_referenced
 	 */
+
+	_ODP_ASSERT(dst_hdr != src_hdr);
+
+	_ODP_STATIC_ASSERT_64B_BLOCK(2, odp_packet_hdr_t, input);
+	_ODP_STATIC_ASSERT_64B_BLOCK(1, odp_packet_hdr_t, event_hdr.subtype);
+	_ODP_STATIC_ASSERT_64B_BLOCK(2, odp_packet_hdr_t, dst_queue);
+	_ODP_STATIC_ASSERT_64B_BLOCK(2, odp_packet_hdr_t, cos);
+	_ODP_STATIC_ASSERT_64B_BLOCK(2, odp_packet_hdr_t, flow_hash);
+	_ODP_STATIC_ASSERT_64B_BLOCK(2, odp_packet_hdr_t, user_ptr);
+
 	dst_hdr->input = src_hdr->input;
 	dst_hdr->event_hdr.subtype = subtype;
 	dst_hdr->dst_queue = src_hdr->dst_queue;
 	dst_hdr->cos = src_hdr->cos;
-	dst_hdr->cls_mark = src_hdr->cls_mark;
+	dst_hdr->flow_hash = src_hdr->flow_hash;
 	dst_hdr->user_ptr = src_hdr->user_ptr;
 
-	if (src_hdr->p.input_flags.flow_hash)
-		dst_hdr->flow_hash = src_hdr->flow_hash;
+	/* Avoid accessing the third 64 B block of the headers if not necessary */
+	if (src_hdr->p.input_flags.timestamp ||
+	    src_hdr->p.input_flags.cls_mark ||
+	    src_hdr->p.flags.payload_off ||
+	    src_hdr->p.flags.lso ||
+	    src_hdr->p.flags.tx_aging ||
+	    src_hdr->p.flags.tx_compl_poll) {
+		_ODP_STATIC_ASSERT_64B_BLOCK(3, odp_packet_hdr_t, cls_mark);
+		_ODP_STATIC_ASSERT_64B_BLOCK(3, odp_packet_hdr_t, payload_offset);
+		_ODP_STATIC_ASSERT_64B_BLOCK(3, odp_packet_hdr_t, lso_max_payload);
+		_ODP_STATIC_ASSERT_64B_BLOCK(3, odp_packet_hdr_t, tx_aging_ns);
+		_ODP_STATIC_ASSERT_64B_BLOCK(3, odp_packet_hdr_t, tx_compl_id);
+		_ODP_STATIC_ASSERT_64B_BLOCK(3, odp_packet_hdr_t, lso_profile_idx);
 
-	if (src_hdr->p.input_flags.timestamp)
-		dst_hdr->timestamp = src_hdr->timestamp;
-
-	if (src_hdr->p.flags.lso) {
+		dst_hdr->timestamp       = src_hdr->timestamp;
+		dst_hdr->cls_mark        = src_hdr->cls_mark;
+		dst_hdr->payload_offset  = src_hdr->payload_offset;
 		dst_hdr->lso_max_payload = src_hdr->lso_max_payload;
+		dst_hdr->tx_aging_ns     = src_hdr->tx_aging_ns;
+		dst_hdr->tx_compl_id     = src_hdr->tx_compl_id;
 		dst_hdr->lso_profile_idx = src_hdr->lso_profile_idx;
+		dst_hdr->unused          = src_hdr->unused; /* not copying this is slower */
 	}
-
-	if (src_hdr->p.flags.payload_off)
-		dst_hdr->payload_offset = src_hdr->payload_offset;
 
 	dst_hdr->p = src_hdr->p;
 

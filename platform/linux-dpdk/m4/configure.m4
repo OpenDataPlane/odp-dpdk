@@ -19,9 +19,15 @@ m4_include([platform/linux-dpdk/m4/odp_scheduler.m4])
 m4_include([platform/linux-dpdk/m4/odp_wfe.m4])
 m4_include([platform/linux-dpdk/m4/odp_ml.m4])
 
+# Target definitions are shared with linux-generic, which may already have
+# included the file as configure.ac includes both platform configure.m4 files.
+m4_ifdef([_ODP_TARGET_NAMES], [],
+	 [m4_include([platform/linux-generic/m4/odp_target.m4])])
+
 ODP_EVENT_VALIDATION
 ODP_PTHREAD
 ODP_SCHEDULER
+ODP_TARGET_OPTIONS
 ODP_TIMER
 
 ##########################################################################
@@ -68,6 +74,7 @@ AS_VAR_APPEND([PLAT_DEP_LIBS], ["${ATOMIC_LIBS} ${LIBCONFIG_LIBS} ${OPENSSL_LIBS
 # Add text to the end of configure with platform specific settings.
 # Make sure it's aligned same as other lines in configure.ac.
 AS_VAR_APPEND([PLAT_CFG_TEXT], ["
+	with_target:            ${with_target}
 	event_validation:       ${enable_event_validation}
 	openssl:                ${with_openssl}
 	openssl_rand:           ${openssl_rand}

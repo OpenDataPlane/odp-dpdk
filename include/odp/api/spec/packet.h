@@ -459,21 +459,23 @@ void odp_packet_prefetch(odp_packet_t pkt, uint32_t offset, uint32_t len);
  * pushed out up to 'headroom' bytes. Packet is not modified if there's not
  * enough headroom space.
  *
- * odp_packet_xxx:
- * seg_len  += len
- * len      += len
- * headroom -= len
- * data     -= len
+ * @code{.unparsed}
+ *     odp_packet_xxx:
+ *         seg_len  += len
+ *         len      += len
+ *         headroom -= len
+ *         data     -= len
+ * @endcode
  *
  * Operation does not modify packet segmentation or move data. Handles and
  * pointers remain valid. User is responsible to update packet metadata
  * offsets when needed.
  *
  * @param pkt  Packet handle
- * @param len  Number of bytes to push the head (0 ... headroom)
+ * @param len  Number of bytes to push the head
  *
  * @return The new data pointer
- * @retval NULL  Requested offset exceeds available headroom
+ * @retval NULL  len exceeds headroom
  *
  * @see odp_packet_headroom(), odp_packet_pull_head()
  */
@@ -487,11 +489,13 @@ void *odp_packet_push_head(odp_packet_t pkt, uint32_t len);
  * pointer must stay in the first segment). Packet is not modified if there's
  * not enough data in the first segment.
  *
- * odp_packet_xxx:
- * seg_len  -= len
- * len      -= len
- * data     += len
- * headroom += len, if the packet is not a referencing packet
+ * @code{.unparsed}
+ *     odp_packet_xxx:
+ *         seg_len  -= len
+ *         len      -= len
+ *         data     += len
+ *         headroom += len, if the packet is not a referencing packet
+ * @endcode
  *
  * If the packet is a referencing packet and the first segment shares data
  * with another packet, headroom does not increase. Otherwise headroom
@@ -502,10 +506,10 @@ void *odp_packet_push_head(odp_packet_t pkt, uint32_t len);
  * offsets when needed.
  *
  * @param pkt  Packet handle
- * @param len  Number of bytes to pull the head (0 ... seg_len - 1)
+ * @param len  Number of bytes to pull the head
  *
  * @return The new data pointer
- * @retval NULL  Requested offset exceeds packet segment length
+ * @retval NULL  len equals or exceeds first segment length
  *
  * @see odp_packet_seg_len(), odp_packet_push_head()
  */
@@ -519,22 +523,24 @@ void *odp_packet_pull_head(odp_packet_t pkt, uint32_t len);
  * pushed out up to 'tailroom' bytes. Packet is not modified if there's not
  * enough tailroom.
  *
- * last_seg:
- * data_len += len
+ * @code{.unparsed}
+ *     last_seg:
+ *         data_len += len
  *
- * odp_packet_xxx:
- * len      += len
- * tail     += len
- * tailroom -= len
+ *     odp_packet_xxx:
+ *         len      += len
+ *         tail     += len
+ *         tailroom -= len
+ * @endcode
  *
  * Operation does not modify packet segmentation or move data. Handles,
  * pointers and offsets remain valid.
  *
  * @param pkt  Packet handle
- * @param len  Number of bytes to push the tail (0 ... tailroom)
+ * @param len  Number of bytes to push the tail
  *
  * @return The old tail pointer
- * @retval NULL  Requested offset exceeds available tailroom
+ * @retval NULL  len exceeds tailroom
  *
  * @see odp_packet_tailroom(), odp_packet_pull_tail()
  */
@@ -548,13 +554,15 @@ void *odp_packet_push_tail(odp_packet_t pkt, uint32_t len);
  * in up to last segment data_len - 1 bytes. (i.e. packet tail must stay in the
  * last segment). Packet is not modified if there's not enough data.
  *
- * last_seg:
- * data_len -= len
+ * @code{.unparsed}
+ *     last_seg:
+ *         data_len -= len
  *
- * odp_packet_xxx:
- * len      -= len
- * tail     -= len
- * tailroom += len, if the packet is not a referencing packet
+ *     odp_packet_xxx:
+ *         len      -= len
+ *         tail     -= len
+ *         tailroom += len, if the packet is not a referencing packet
+ * @endcode
  *
  * If the packet is a referencing packet and the last segment shares data
  * with another packet, tailroom does not increase. Otherwise tailroom
@@ -565,10 +573,10 @@ void *odp_packet_push_tail(odp_packet_t pkt, uint32_t len);
  * offsets when needed.
  *
  * @param pkt  Packet handle
- * @param len  Number of bytes to pull the tail (0 ... last_seg:data_len - 1)
+ * @param len  Number of bytes to pull the tail
  *
  * @return The new tail pointer
- * @retval NULL  The specified offset exceeds allowable data length
+ * @retval NULL  len equals or exceeds last segment length
  */
 void *odp_packet_pull_tail(odp_packet_t pkt, uint32_t len);
 
@@ -955,13 +963,13 @@ uint32_t odp_packet_seg_data_len(odp_packet_t pkt, odp_packet_seg_t seg);
  * Otherwise the result packet is either a normal or referencing packet
  * depending on the packets and the implementation.
  *
- *  dst         src             result
- *  -------------------------------------------------
- *  normal      normal          normal
- *  normal      referenced      normal or referencing
- *  normal      referencing     normal or referencing
- *  normal      static ref      normal or referencing
- *  referencing any             referencing
+ *  | dst         | src             | result                |
+ *  |:-----------:|:---------------:|:---------------------:|
+ *  | normal      | normal          | normal                |
+ *  | normal      | referenced      | normal or referencing |
+ *  | normal      | referencing     | normal or referencing |
+ *  | normal      | static ref      | normal or referencing |
+ *  | referencing | any             | referencing           |
  *
  * On failure, both handles remain valid and packets are not modified.
  *
@@ -1229,10 +1237,12 @@ odp_packet_t odp_packet_ref_static(odp_packet_t pkt);
  * - odp_packet_{pull,trunc}_{head,tail}() functions can be used normally.
  *   Pulling and truncation can include shared packet data, in which case
  *   the shared packet data area shrinks. It is possible to pull or truncate
- *   the packet so much that it no longer shares any packet data, but that
- *   does not stop the referencing relationship between the packets and
- *   the restrictions that apply to the referencing and referenced packet
- *   still hold.
+ *   the packet so much that it no longer shares any packet data. In this case
+ *   it is implementation specific to what extent the referencing relationship
+ *   between the packets still holds. An application may use
+ *   odp_packet_is_referencing() on the referencing packet and
+ *   odp_packet_has_ref() on the referenced packet to determine, individually
+ *   for each packet, whether the referencing restrictions still apply.
  *
  * - odp_packet_{push,extend}_{head,tail}() functions can be used normally.
  *   The new packet data created by the functions is always private, even if
@@ -2222,9 +2232,9 @@ int odp_packet_payload_offset_set(odp_packet_t pkt, uint32_t offset);
  * Enable or disable Tx packet drop based on packet age. When enabled, packet will be dropped
  * if it is in Tx pktout queue or traffic shapers/schedulers for longer than timeout set.
  *
- * When tmo_ns is
- * !0: Aging is enabled
- *  0: Aging is disabled
+ * When tmo_ns is:
+ * - !0: Aging is enabled
+ * -  0: Aging is disabled
  *
  * Aging is disabled by default. Maximum tmo value is defined by max_tx_aging_tmo_ns capa.
  *

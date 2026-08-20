@@ -18,9 +18,9 @@
 #include <odp/api/plat/time_inlines.h>
 
 #include <odp_classification_internal.h>
+#include <odp_dpdk_common.h>
 #include <odp_debug_internal.h>
 #include <odp_libconfig_internal.h>
-#include <odp_packet_dpdk.h>
 #include <odp_packet_internal.h>
 #include <odp_packet_io_internal.h>
 #include <odp_pool_internal.h>
@@ -221,41 +221,6 @@ static int init_options(pktio_entry_t *pktio_entry,
 	return 0;
 }
 
-/* Test if s has only digits or not. Dpdk pktio uses only digits.*/
-static int _dpdk_netdev_is_valid(const char *s)
-{
-	while (*s) {
-		if (!isdigit(*s))
-			return 0;
-		s++;
-	}
-
-	return 1;
-}
-
-static void hash_proto_to_rss_conf(struct rte_eth_rss_conf *rss_conf,
-				   const odp_pktin_hash_proto_t *hash_proto)
-{
-	if (hash_proto->proto.ipv4_udp)
-		rss_conf->rss_hf |= RTE_ETH_RSS_NONFRAG_IPV4_UDP;
-	if (hash_proto->proto.ipv4_tcp)
-		rss_conf->rss_hf |= RTE_ETH_RSS_NONFRAG_IPV4_TCP;
-	if (hash_proto->proto.ipv4)
-		rss_conf->rss_hf |= RTE_ETH_RSS_IPV4 | RTE_ETH_RSS_FRAG_IPV4 |
-				    RTE_ETH_RSS_NONFRAG_IPV4_OTHER;
-	if (hash_proto->proto.ipv6_udp)
-		rss_conf->rss_hf |= RTE_ETH_RSS_NONFRAG_IPV6_UDP |
-				    RTE_ETH_RSS_IPV6_UDP_EX;
-	if (hash_proto->proto.ipv6_tcp)
-		rss_conf->rss_hf |= RTE_ETH_RSS_NONFRAG_IPV6_TCP |
-				    RTE_ETH_RSS_IPV6_TCP_EX;
-	if (hash_proto->proto.ipv6)
-		rss_conf->rss_hf |= RTE_ETH_RSS_IPV6 | RTE_ETH_RSS_FRAG_IPV6 |
-				    RTE_ETH_RSS_NONFRAG_IPV6_OTHER |
-				    RTE_ETH_RSS_IPV6_EX;
-	rss_conf->rss_key = NULL;
-}
-
 static int dpdk_maxlen_set(pktio_entry_t *pktio_entry, uint32_t maxlen_input,
 			   uint32_t maxlen_output ODP_UNUSED)
 {
@@ -363,72 +328,6 @@ static void _dpdk_print_port_mac(uint16_t port_id)
 		 eth_addr.addr_bytes[5]);
 }
 
-static void prepare_rss_conf(pktio_entry_t *pktio_entry,
-			     const odp_pktin_queue_param_t *p)
-{
-	struct rte_eth_dev_info dev_info;
-	uint64_t rss_hf_capa;
-	pkt_dpdk_t *pkt_dpdk = pkt_priv(pktio_entry);
-	uint16_t port_id = pkt_dpdk->port_id;
-	int ret;
-
-	memset(&pkt_dpdk->rss_conf, 0, sizeof(struct rte_eth_rss_conf));
-
-	/* Flow hashing not enabled */
-	if (!p->hash_enable)
-		return;
-
-	ret = rte_eth_dev_info_get(port_id, &dev_info);
-	if (ret) {
-		_ODP_ERR("Failed to read device info: %d\n", ret);
-		return;
-	}
-
-	rss_hf_capa = dev_info.flow_type_rss_offloads;
-
-	/* Flow hashing is enabled but device does not support RSS */
-	if (rss_hf_capa == 0) {
-		_ODP_WARN("DPDK: flow hashing is enabled but not supported by the device\n");
-		return;
-	}
-
-	/* Print debug info about unsupported hash protocols */
-	if (p->hash_proto.proto.ipv4 &&
-	    ((rss_hf_capa & RTE_ETH_RSS_IPV4) == 0))
-		_ODP_WARN("DPDK: hash_proto.ipv4 not supported (rss_hf_capa 0x%" PRIx64 ")\n",
-			  rss_hf_capa);
-
-	if (p->hash_proto.proto.ipv4_udp &&
-	    ((rss_hf_capa & RTE_ETH_RSS_NONFRAG_IPV4_UDP) == 0))
-		_ODP_WARN("DPDK: hash_proto.ipv4_udp not supported (rss_hf_capa 0x%" PRIx64 ")\n",
-			  rss_hf_capa);
-
-	if (p->hash_proto.proto.ipv4_tcp &&
-	    ((rss_hf_capa & RTE_ETH_RSS_NONFRAG_IPV4_TCP) == 0))
-		_ODP_WARN("DPDK: hash_proto.ipv4_tcp not supported (rss_hf_capa 0x%" PRIx64 ")\n",
-			  rss_hf_capa);
-
-	if (p->hash_proto.proto.ipv6 &&
-	    ((rss_hf_capa & RTE_ETH_RSS_IPV6) == 0))
-		_ODP_WARN("DPDK: hash_proto.ipv6 not supported (rss_hf_capa 0x%" PRIx64 ")\n",
-			  rss_hf_capa);
-
-	if (p->hash_proto.proto.ipv6_udp &&
-	    ((rss_hf_capa & RTE_ETH_RSS_NONFRAG_IPV6_UDP) == 0))
-		_ODP_WARN("DPDK: hash_proto.ipv6_udp not supported (rss_hf_capa 0x%" PRIx64 ")\n",
-			  rss_hf_capa);
-
-	if (p->hash_proto.proto.ipv6_tcp &&
-	    ((rss_hf_capa & RTE_ETH_RSS_NONFRAG_IPV6_TCP) == 0))
-		_ODP_WARN("DPDK: hash_proto.ipv6_tcp not supported (rss_hf_capa 0x%" PRIx64 ")\n",
-			  rss_hf_capa);
-
-	hash_proto_to_rss_conf(&pkt_dpdk->rss_conf, &p->hash_proto);
-
-	/* Filter out unsupported hash functions */
-	pkt_dpdk->rss_conf.rss_hf &= rss_hf_capa;
-}
-
 static int dpdk_input_queues_config(pktio_entry_t *pktio_entry,
 				    const odp_pktin_queue_param_t *p)
 {
@@ -436,7 +335,8 @@ static int dpdk_input_queues_config(pktio_entry_t *pktio_entry,
 	odp_pktin_mode_t mode = pktio_entry->param.in_mode;
 	uint8_t lockless;
 
-	prepare_rss_conf(pktio_entry, p);
+	if (_odp_dpdk_prepare_rss_conf(pkt_dpdk->port_id, &pkt_dpdk->rss_conf, p))
+		return -1;
 
 	/**
 	 * Scheduler synchronizes input queue polls. Only single thread
@@ -719,7 +619,7 @@ static int setup_pkt_dpdk(odp_pktio_t pktio ODP_UNUSED,
 
 	if (!rte_eth_dev_get_port_by_name(netdev, &port_id))
 		pkt_dpdk->port_id = port_id;
-	else if (_dpdk_netdev_is_valid(netdev))
+	else if (_odp_dpdk_netdev_is_valid(netdev))
 		pkt_dpdk->port_id = atoi(netdev);
 	else {
 		_ODP_ERR("Invalid interface name!: %s\n", netdev);
@@ -1138,117 +1038,6 @@ static int recv_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 	return 0;
 }
 
-static inline int check_proto(void *l3_hdr, odp_bool_t *l3_proto_v4,
-			      uint8_t *l4_proto)
-{
-	uint8_t l3_proto_ver = _ODP_IPV4HDR_VER(*(uint8_t *)l3_hdr);
-
-	if (l3_proto_ver == _ODP_IPV4) {
-		struct rte_ipv4_hdr *ip = (struct rte_ipv4_hdr *)l3_hdr;
-
-		*l3_proto_v4 = 1;
-		if (!rte_ipv4_frag_pkt_is_fragmented(ip))
-			*l4_proto = ip->next_proto_id;
-		else
-			*l4_proto = 0;
-
-		return 0;
-	} else if (l3_proto_ver == _ODP_IPV6) {
-		struct rte_ipv6_hdr *ipv6 = (struct rte_ipv6_hdr *)l3_hdr;
-
-		*l3_proto_v4 = 0;
-		*l4_proto = ipv6->proto;
-		return 0;
-	}
-
-	return -1;
-}
-
-static inline uint16_t phdr_csum(odp_bool_t ipv4, void *l3_hdr,
-				 uint64_t ol_flags)
-{
-	if (ipv4)
-		return rte_ipv4_phdr_cksum(l3_hdr, ol_flags);
-	else /*ipv6*/
-		return rte_ipv6_phdr_cksum(l3_hdr, ol_flags);
-}
-
-#define OL_TX_CHKSUM_PKT(_cfg, _capa, _proto, _ovr_set, _ovr) \
-	(_capa && _proto && (_ovr_set ? _ovr : _cfg))
-
-static inline void pkt_set_ol_tx(odp_pktout_config_opt_t *pktout_cfg,
-				 odp_pktout_config_opt_t *pktout_capa,
-				 odp_packet_hdr_t *pkt_hdr,
-				 struct rte_mbuf *mbuf,
-				 char *mbuf_data)
-{
-	void *l3_hdr, *l4_hdr;
-	uint8_t l4_proto;
-	odp_bool_t l3_proto_v4;
-	odp_bool_t ipv4_chksum_pkt, udp_chksum_pkt, tcp_chksum_pkt;
-	packet_parser_t *pkt_p = &pkt_hdr->p;
-
-	if (pkt_p->l3_offset == ODP_PACKET_OFFSET_INVALID)
-		return;
-
-	l3_hdr = (void *)(mbuf_data + pkt_p->l3_offset);
-
-	if (check_proto(l3_hdr, &l3_proto_v4, &l4_proto))
-		return;
-
-	ipv4_chksum_pkt = OL_TX_CHKSUM_PKT(pktout_cfg->bit.ipv4_chksum,
-					   pktout_capa->bit.ipv4_chksum,
-					   l3_proto_v4,
-					   pkt_p->flags.l3_chksum_set,
-					   pkt_p->flags.l3_chksum);
-	udp_chksum_pkt =  OL_TX_CHKSUM_PKT(pktout_cfg->bit.udp_chksum,
-					   pktout_capa->bit.udp_chksum,
-					   (l4_proto == _ODP_IPPROTO_UDP),
-					   pkt_p->flags.l4_chksum_set,
-					   pkt_p->flags.l4_chksum);
-	tcp_chksum_pkt =  OL_TX_CHKSUM_PKT(pktout_cfg->bit.tcp_chksum,
-					   pktout_capa->bit.tcp_chksum,
-					   (l4_proto == _ODP_IPPROTO_TCP),
-					   pkt_p->flags.l4_chksum_set,
-					   pkt_p->flags.l4_chksum);
-
-	if (!ipv4_chksum_pkt && !udp_chksum_pkt && !tcp_chksum_pkt)
-		return;
-
-	mbuf->l2_len = pkt_p->l3_offset - pkt_p->l2_offset;
-
-	if (l3_proto_v4)
-		mbuf->ol_flags = RTE_MBUF_F_TX_IPV4;
-	else
-		mbuf->ol_flags = RTE_MBUF_F_TX_IPV6;
-
-	if (ipv4_chksum_pkt) {
-		mbuf->ol_flags |=  RTE_MBUF_F_TX_IP_CKSUM;
-
-		((struct rte_ipv4_hdr *)l3_hdr)->hdr_checksum = 0;
-		mbuf->l3_len = _ODP_IPV4HDR_IHL(*(uint8_t *)l3_hdr) * 4;
-	}
-
-	if (pkt_p->l4_offset == ODP_PACKET_OFFSET_INVALID)
-		return;
-
-	mbuf->l3_len = pkt_p->l4_offset - pkt_p->l3_offset;
-
-	l4_hdr = (void *)(mbuf_data + pkt_p->l4_offset);
-
-	if (udp_chksum_pkt) {
-		mbuf->ol_flags |= RTE_MBUF_F_TX_UDP_CKSUM;
-
-		((struct rte_udp_hdr *)l4_hdr)->dgram_cksum =
-			phdr_csum(l3_proto_v4, l3_hdr, mbuf->ol_flags);
-	} else if (tcp_chksum_pkt) {
-		mbuf->ol_flags |= RTE_MBUF_F_TX_TCP_CKSUM;
-
-		((struct rte_tcp_hdr *)l4_hdr)->cksum =
-			phdr_csum(l3_proto_v4, l3_hdr, mbuf->ol_flags);
-	}
-}
-
 static int send_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 			 const odp_packet_t pkt_table[], int num)
 {
@@ -1266,8 +1055,8 @@ static int send_pkt_dpdk(pktio_entry_t *pktio_entry, int index,
 			odp_packet_hdr_t *pkt_hdr = packet_hdr(pkt_table[i]);
 
 			if (chksum_insert_ena)
-				pkt_set_ol_tx(pktout_cfg, pktout_capa, pkt_hdr, mbuf,
-					      rte_pktmbuf_mtod(mbuf, char *));
+				_odp_dpdk_pkt_set_ol_tx(pktout_cfg, pktout_capa, pkt_hdr, mbuf,
+							rte_pktmbuf_mtod(mbuf, char *));
 
 			if (odp_unlikely(tx_ts_ena && tx_ts_idx == 0 && pkt_hdr->p.flags.ts_set))
 				tx_ts_idx = i + 1;
@@ -1353,293 +1142,52 @@ static int capability_pkt_dpdk(pktio_entry_t *pktio_entry,
 
 static int link_status_pkt_dpdk(pktio_entry_t *pktio_entry)
 {
-	struct rte_eth_link link;
-	int ret;
-
-	ret = rte_eth_link_get_nowait(pkt_priv(pktio_entry)->port_id, &link);
-	if (ret) {
-		if (ret == -ENOTSUP)
-			_ODP_DBG("rte_eth_link_get_nowait() not supported\n");
-		else
-			_ODP_ERR("rte_eth_link_get_nowait() failed\n");
-		return ODP_PKTIO_LINK_STATUS_UNKNOWN;
-	}
-
-	if (link.link_status)
-		return ODP_PKTIO_LINK_STATUS_UP;
-	return ODP_PKTIO_LINK_STATUS_DOWN;
+	return _odp_dpdk_link_status_common(pkt_priv(pktio_entry)->port_id);
 }
 
 static int dpdk_link_info(pktio_entry_t *pktio_entry, odp_pktio_link_info_t *info)
 {
-	struct rte_eth_link link;
-	struct rte_eth_fc_conf fc_conf;
-	odp_pktio_link_info_t link_info;
-	uint16_t port_id = pkt_priv(pktio_entry)->port_id;
-	int ret;
-
-	memset(&fc_conf, 0, sizeof(struct rte_eth_fc_conf));
-	memset(&link, 0, sizeof(struct rte_eth_link));
-	memset(&link_info, 0, sizeof(odp_pktio_link_info_t));
-
-	ret = rte_eth_dev_flow_ctrl_get(port_id, &fc_conf);
-	if (ret) {
-		if (ret != -ENOTSUP) {
-			_ODP_ERR("rte_eth_dev_flow_ctrl_get() failed\n");
-			return -1;
-		}
-		_ODP_DBG("rte_eth_dev_flow_ctrl_get() not supported\n");
-		link_info.pause_rx = ODP_PKTIO_LINK_PAUSE_UNKNOWN;
-		link_info.pause_tx = ODP_PKTIO_LINK_PAUSE_UNKNOWN;
-	} else {
-		link_info.pause_rx = ODP_PKTIO_LINK_PAUSE_OFF;
-		link_info.pause_tx = ODP_PKTIO_LINK_PAUSE_OFF;
-		if (fc_conf.mode == RTE_ETH_FC_RX_PAUSE) {
-			link_info.pause_rx = ODP_PKTIO_LINK_PAUSE_ON;
-		} else if (fc_conf.mode == RTE_ETH_FC_TX_PAUSE) {
-			link_info.pause_tx = ODP_PKTIO_LINK_PAUSE_ON;
-		} else if (fc_conf.mode == RTE_ETH_FC_FULL) {
-			link_info.pause_rx = ODP_PKTIO_LINK_PAUSE_ON;
-			link_info.pause_tx = ODP_PKTIO_LINK_PAUSE_ON;
-		}
-	}
-
-	ret = rte_eth_link_get_nowait(port_id, &link);
-	if (ret) {
-		if (ret != -ENOTSUP) {
-			_ODP_ERR("rte_eth_link_get_nowait() failed\n");
-			return -1;
-		}
-		_ODP_DBG("rte_eth_link_get_nowait() not supported\n");
-		link_info.autoneg = ODP_PKTIO_LINK_AUTONEG_UNKNOWN;
-		link_info.duplex = ODP_PKTIO_LINK_DUPLEX_UNKNOWN;
-		link_info.speed = ODP_PKTIO_LINK_SPEED_UNKNOWN;
-		link_info.status = ODP_PKTIO_LINK_STATUS_UNKNOWN;
-	} else {
-		if (link.link_autoneg == RTE_ETH_LINK_AUTONEG)
-			link_info.autoneg = ODP_PKTIO_LINK_AUTONEG_ON;
-		else
-			link_info.autoneg = ODP_PKTIO_LINK_AUTONEG_OFF;
-
-		if (link.link_duplex == RTE_ETH_LINK_FULL_DUPLEX)
-			link_info.duplex = ODP_PKTIO_LINK_DUPLEX_FULL;
-		else
-			link_info.duplex = ODP_PKTIO_LINK_DUPLEX_HALF;
-
-		if (link.link_speed == RTE_ETH_SPEED_NUM_NONE)
-			link_info.speed = ODP_PKTIO_LINK_SPEED_UNKNOWN;
-		else
-			link_info.speed = link.link_speed;
-
-		if (link.link_status == RTE_ETH_LINK_UP)
-			link_info.status = ODP_PKTIO_LINK_STATUS_UP;
-		else
-			link_info.status = ODP_PKTIO_LINK_STATUS_DOWN;
-	}
-
-#if RTE_VERSION >= RTE_VERSION_NUM(25, 11, 0, 0)
-	if (link.link_connector == RTE_ETH_LINK_CONNECTOR_NONE)
-		link_info.media = "unknown";
-	else
-		link_info.media = rte_eth_link_connector_to_str(link.link_connector);
-#else
-	link_info.media = "unknown";
-#endif
-
-	*info = link_info;
-	return 0;
-}
-
-static void stats_convert(struct rte_eth_stats *rte_stats,
-			  odp_pktio_stats_t *stats)
-{
-	stats->in_octets = rte_stats->ibytes;
-	stats->in_packets = rte_stats->ipackets;
-	stats->in_ucast_pkts = 0;
-	stats->in_mcast_pkts = 0;
-	stats->in_bcast_pkts = 0;
-	stats->in_discards = rte_stats->imissed + rte_stats->rx_nombuf;
-	stats->in_errors = rte_stats->ierrors;
-	stats->out_octets = rte_stats->obytes;
-	stats->out_packets = rte_stats->opackets;
-	stats->out_ucast_pkts = 0;
-	stats->out_mcast_pkts = 0;
-	stats->out_bcast_pkts = 0;
-	stats->out_discards = 0;
-	stats->out_errors = rte_stats->oerrors;
+	return _odp_dpdk_link_info_common(pkt_priv(pktio_entry)->port_id, info);
 }
 
 static int stats_pkt_dpdk(pktio_entry_t *pktio_entry, odp_pktio_stats_t *stats)
 {
-	int ret;
-	struct rte_eth_stats rte_stats;
-
-	ret = rte_eth_stats_get(pkt_priv(pktio_entry)->port_id, &rte_stats);
-
-	if (ret == 0) {
-		stats_convert(&rte_stats, stats);
-		return 0;
-	}
-
-	if (ret > 0)
-		return -ret;
-	else
-		return ret;
+	return _odp_dpdk_stats_common(pkt_priv(pktio_entry)->port_id, stats);
 }
 
 static int stats_reset_pkt_dpdk(pktio_entry_t *pktio_entry)
 {
-	uint16_t port_id = pkt_priv(pktio_entry)->port_id;
-
-	(void)rte_eth_stats_reset(port_id);
-	(void)rte_eth_xstats_reset(port_id);
-	return 0;
+	return _odp_dpdk_stats_reset_common(pkt_priv(pktio_entry)->port_id);
 }
 
 static int dpdk_extra_stat_info(pktio_entry_t *pktio_entry,
 				odp_pktio_extra_stat_info_t info[], int num)
 {
-	uint16_t port_id = pkt_priv(pktio_entry)->port_id;
-	int num_stats, ret, i;
-
-	num_stats = rte_eth_xstats_get_names(port_id, NULL, 0);
-	if (num_stats < 0) {
-		_ODP_ERR("rte_eth_xstats_get_names() failed: %d\n", num_stats);
-		return num_stats;
-	} else if (info == NULL || num == 0 || num_stats == 0) {
-		return num_stats;
-	}
-
-	struct rte_eth_xstat_name xstats_names[num_stats];
-
-	ret = rte_eth_xstats_get_names(port_id, xstats_names, num_stats);
-	if (ret < 0 || ret > num_stats) {
-		_ODP_ERR("rte_eth_xstats_get_names() failed: %d\n", ret);
-		return -1;
-	}
-	num_stats = ret;
-
-	for (i = 0; i < num && i < num_stats; i++)
-		_odp_strcpy(info[i].name, xstats_names[i].name, ODP_PKTIO_STATS_EXTRA_NAME_LEN);
-
-	return num_stats;
+	return _odp_dpdk_extra_stat_info_common(pkt_priv(pktio_entry)->port_id, info, num);
 }
 
-static int dpdk_extra_stats(pktio_entry_t *pktio_entry,
-			    uint64_t stats[], int num)
+static int dpdk_extra_stats(pktio_entry_t *pktio_entry, uint64_t stats[], int num)
 {
-	uint16_t port_id = pkt_priv(pktio_entry)->port_id;
-	int num_stats, ret, i;
-
-	num_stats = rte_eth_xstats_get(port_id, NULL, 0);
-	if (num_stats < 0) {
-		_ODP_ERR("rte_eth_xstats_get() failed: %d\n", num_stats);
-		return num_stats;
-	} else if (stats == NULL || num == 0 || num_stats == 0) {
-		return num_stats;
-	}
-
-	struct rte_eth_xstat xstats[num_stats];
-
-	ret = rte_eth_xstats_get(port_id, xstats, num_stats);
-	if (ret < 0 || ret > num_stats) {
-		_ODP_ERR("rte_eth_xstats_get() failed: %d\n", ret);
-		return -1;
-	}
-	num_stats = ret;
-
-	for (i = 0; i < num && i < num_stats; i++)
-		stats[i] = xstats[i].value;
-
-	return num_stats;
+	return _odp_dpdk_extra_stats_common(pkt_priv(pktio_entry)->port_id, stats, num);
 }
 
 static int dpdk_extra_stat_counter(pktio_entry_t *pktio_entry, uint32_t id,
 				   uint64_t *stat)
 {
-	uint16_t port_id = pkt_priv(pktio_entry)->port_id;
-	uint64_t xstat_id = id;
-	int ret;
-
-	ret = rte_eth_xstats_get_by_id(port_id, &xstat_id, stat, 1);
-	if (ret != 1) {
-		_ODP_ERR("rte_eth_xstats_get_by_id() failed: %d\n", ret);
-		return -1;
-	}
-
-	return 0;
+	return _odp_dpdk_extra_stat_counter_common(pkt_priv(pktio_entry)->port_id, id, stat);
 }
 
-#if RTE_VERSION < RTE_VERSION_NUM(25, 11, 0, 0)
 static int dpdk_pktin_stats(pktio_entry_t *pktio_entry, uint32_t index,
 			    odp_pktin_queue_stats_t *pktin_stats)
 {
-	struct rte_eth_stats rte_stats;
-	int ret;
-
-	if (odp_unlikely(index > RTE_ETHDEV_QUEUE_STAT_CNTRS - 1)) {
-		_ODP_ERR("DPDK supports max %d per queue counters\n",
-			 RTE_ETHDEV_QUEUE_STAT_CNTRS);
-		return -1;
-	}
-
-	ret = rte_eth_stats_get(pkt_priv(pktio_entry)->port_id, &rte_stats);
-	if (odp_unlikely(ret)) {
-		_ODP_ERR("Failed to read DPDK pktio stats: %d\n", ret);
-		return -1;
-	}
-
-	memset(pktin_stats, 0, sizeof(odp_pktin_queue_stats_t));
-
-	pktin_stats->packets = rte_stats.q_ipackets[index];
-	pktin_stats->octets = rte_stats.q_ibytes[index];
-	pktin_stats->errors = rte_stats.q_errors[index];
-
-	return 0;
+	return _odp_dpdk_pktin_stats_common(pkt_priv(pktio_entry)->port_id, index, pktin_stats);
 }
-#else
-static int dpdk_pktin_stats(pktio_entry_t *pktio_entry ODP_UNUSED, uint32_t index ODP_UNUSED,
-			    odp_pktin_queue_stats_t *pktin_stats)
-{
-	memset(pktin_stats, 0, sizeof(*pktin_stats));
-	return 0;
-}
-#endif
 
-#if RTE_VERSION < RTE_VERSION_NUM(25, 11, 0, 0)
 static int dpdk_pktout_stats(pktio_entry_t *pktio_entry, uint32_t index,
 			     odp_pktout_queue_stats_t *pktout_stats)
 {
-	struct rte_eth_stats rte_stats;
-	int ret;
-
-	if (odp_unlikely(index > RTE_ETHDEV_QUEUE_STAT_CNTRS - 1)) {
-		_ODP_ERR("DPDK supports max %d per queue counters\n",
-			 RTE_ETHDEV_QUEUE_STAT_CNTRS);
-		return -1;
-	}
-
-	ret = rte_eth_stats_get(pkt_priv(pktio_entry)->port_id, &rte_stats);
-	if (odp_unlikely(ret)) {
-		_ODP_ERR("Failed to read DPDK pktio stats: %d\n", ret);
-		return -1;
-	}
-
-	memset(pktout_stats, 0, sizeof(odp_pktout_queue_stats_t));
-
-	pktout_stats->packets = rte_stats.q_opackets[index];
-	pktout_stats->octets = rte_stats.q_obytes[index];
-
-	return 0;
+	return _odp_dpdk_pktout_stats_common(pkt_priv(pktio_entry)->port_id, index, pktout_stats);
 }
-#else
-static int dpdk_pktout_stats(pktio_entry_t *pktio_entry ODP_UNUSED, uint32_t index ODP_UNUSED,
-			     odp_pktout_queue_stats_t *pktout_stats)
-{
-	memset(pktout_stats, 0, sizeof(*pktout_stats));
-	return 0;
-}
-#endif
 
 const pktio_if_ops_t _odp_dpdk_pktio_ops = {
 	.name = "odp-dpdk",

@@ -26,6 +26,7 @@ extern "C" {
 #include <odp/api/thread.h>
 
 #include <odp_config_internal.h>
+#include <odp_debug_internal.h>
 #include <odp_event_internal.h>
 #include <odp_pool_internal.h>
 
@@ -84,6 +85,8 @@ static inline uint32_t _odp_buffer_index(odp_buffer_t buf)
 
 static inline void _odp_buffer_free_sp(const odp_buffer_t buf[], int num)
 {
+	_ODP_ASSERT(num > 0);
+
 	_odp_event_free_sp((_odp_event_hdr_t **)(uintptr_t)buf, num);
 }
 

@@ -17,13 +17,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        conf: ['',
-               'CFLAGS=-O3',
+        conf: ['CFLAGS=-O3',
                'CFLAGS=-O1',
                'CFLAGS=-O0 --enable-debug=full',
                'CFLAGS=-Os',
                'CFLAGS=-pedantic',
-               '--enable-lto',
                '--enable-lto --enable-abi-compat',
                '--enable-pcapng-support --enable-icache-perf-test']
     steps:
@@ -40,8 +38,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        conf: ['',
-               'CFLAGS=-O3',
+        conf: ['CFLAGS=-O3',
                'CFLAGS=-O1',
                'CFLAGS=-O0 --enable-debug=full',
                'CFLAGS=-Os',
@@ -97,7 +94,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        cc_ver: [10, 11, 12, 13, 14]
+        # Gcc-13 is the default in Ubuntu 24.04 and gets used in Run_gcc
+        cc_ver: [10, 11, 12, 14]
         conf: ['', '--enable-abi-compat']
     steps:
       - uses: OpenDataPlane/action-clean-up@main
@@ -111,7 +109,7 @@ jobs:
     if: ${{ github.repository == 'OpenDataPlane/odp-dpdk' }}
     runs-on: ah-ubuntu_22_04-c7g_2x-50
     env:
-      OS: ubuntu_25.10
+      OS: ubuntu_26.04
     strategy:
       fail-fast: false
       matrix:
@@ -120,6 +118,23 @@ jobs:
       - uses: OpenDataPlane/action-clean-up@main
       - uses: actions/checkout@v6
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="gcc-15" -e CXX="g++-15"
+               -e CONF="${{matrix.conf}}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-graviton3 /odp/scripts/ci/build_${ARCH}.sh
+      - if: ${{ failure() }}
+        uses: ./.github/actions/build-failure-log
+
+  Build_clang_21:
+    if: ${{ github.repository == 'OpenDataPlane/odp-dpdk' }}
+    runs-on: ah-ubuntu_22_04-c7g_2x-50
+    env:
+      OS: ubuntu_26.04
+    strategy:
+      fail-fast: false
+      matrix:
+        conf: ['', '--enable-abi-compat']
+    steps:
+      - uses: OpenDataPlane/action-clean-up@main
+      - uses: actions/checkout@v6
+      - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="clang-21" -e CXX="clang++-21"
                -e CONF="${{matrix.conf}}" $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-graviton3 /odp/scripts/ci/build_${ARCH}.sh
       - if: ${{ failure() }}
         uses: ./.github/actions/build-failure-log
@@ -163,8 +178,9 @@ jobs:
                '--enable-dpdk-zero-copy --disable-static-applications',
                '--disable-host-optimization --enable-event-validation=warn',
                '--disable-host-optimization --enable-abi-compat',
+               '--enable-lto',
                '--without-openssl --without-pcap',
-               '--enable-wfe-locks']
+               '--with-target=neoverse-v1 --enable-wfe-locks']
     steps:
       - uses: OpenDataPlane/action-clean-up@main
       - uses: actions/checkout@v6
@@ -234,17 +250,6 @@ jobs:
       - uses: actions/checkout@v6
       - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}" -e ARCH="${ARCH}"
                -e CONF="${CONF}" -e ODP_CONFIG_FILE=/odp/platform/linux-dpdk/test/sched-basic.conf $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-graviton3 /odp/scripts/ci/check.sh
-      - if: ${{ failure() }}
-        uses: ./.github/actions/run-failure-log
-
-  Run_stash_config:
-    if: ${{ github.repository == 'OpenDataPlane/odp-dpdk' }}
-    runs-on: ah-ubuntu_22_04-c7g_2x-50
-    steps:
-      - uses: OpenDataPlane/action-clean-up@main
-      - uses: actions/checkout@v6
-      - run: sudo docker run -i -v `pwd`:/odp --privileged --shm-size 8g -e CC="${CC}" -e ARCH="${ARCH}"
-               -e CONF="${CONF}" -e ODP_CONFIG_FILE=/odp/platform/linux-dpdk/test/stash-custom.conf $CONTAINER_NAMESPACE/odp-ci-${OS}-${ARCH}-graviton3 /odp/scripts/ci/check.sh
       - if: ${{ failure() }}
         uses: ./.github/actions/run-failure-log
 

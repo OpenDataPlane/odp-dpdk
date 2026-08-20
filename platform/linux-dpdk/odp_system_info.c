@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2013-2018 Linaro Limited
- * Copyright (c) 2020-2025 Nokia
+ * Copyright (c) 2020-2026 Nokia
  *
  * Copyright(c) 2010-2014 Intel Corporation
  *   - lib/eal/linux/eal_hugepage_info.c
@@ -73,13 +73,16 @@ static int read_cache_line_size(void)
 
 static uint64_t default_huge_page_size(void)
 {
+	const char *proc_meminfo = "/proc/meminfo";
 	char str[1024];
 	unsigned long sz;
 	FILE *file;
 
-	file = fopen("/proc/meminfo", "rt");
-	if (!file)
+	file = fopen(proc_meminfo, "rt");
+	if (!file) {
+		_ODP_WARN("Unable to open %s\n", proc_meminfo);
 		return 0;
+	}
 
 	while (fgets(str, sizeof(str), file) != NULL) {
 		if (sscanf(str, "Hugepagesize:   %8lu kB", &sz) == 1) {
@@ -89,7 +92,7 @@ static uint64_t default_huge_page_size(void)
 		}
 	}
 
-	_ODP_ERR("unable to get default hp size\n");
+	_ODP_WARN("Unable to read default huge page size\n");
 	fclose(file);
 	return 0;
 }
@@ -568,6 +571,7 @@ void odp_sys_config_print(void)
 	_ODP_PRINT("CONFIG_BURST_SIZE:             %i\n", CONFIG_BURST_SIZE);
 	_ODP_PRINT("CONFIG_INTERNAL_POOLS:         %i\n", CONFIG_INTERNAL_POOLS);
 	_ODP_PRINT("CONFIG_POOLS:                  %i\n", CONFIG_POOLS);
+	_ODP_PRINT("CONFIG_MAX_TIMER_POOLS:        %i\n", CONFIG_MAX_TIMER_POOLS);
 	_ODP_PRINT("CONFIG_POOL_MAX_NUM:           %i\n", CONFIG_POOL_MAX_NUM);
 	_ODP_PRINT("CONFIG_IPSEC_MAX_NUM_SA:       %i\n", CONFIG_IPSEC_MAX_NUM_SA);
 	_ODP_PRINT("CONFIG_ML_MAX_MODELS:          %i\n", CONFIG_ML_MAX_MODELS);
