@@ -19,6 +19,9 @@ extern "C" {
 
 int _odp_shm_init_global(const odp_init_t *init);
 
+/* Must be called after all other ODP modules have been initialized */
+void _odp_shm_capa_init(void);
+
 int _odp_shm_init_local(void);
 
 int _odp_shm_term_global(void);
