@@ -716,6 +716,8 @@ int odp_init_global(odp_instance_t *instance,
 	}
 	stage = ML_INIT;
 
+	_odp_shm_capa_init();
+
 	/* Dummy support for single instance */
 	*instance = (odp_instance_t)odp_global_ro.main_pid;
 

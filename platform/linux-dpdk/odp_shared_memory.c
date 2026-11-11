@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2017-2018 Linaro Limited
- * Copyright (c) 2021-2023 Nokia
+ * Copyright (c) 2021-2026 Nokia
  */
 
 #include <odp_posix_extensions.h>
@@ -35,7 +35,6 @@
 
 #define SHM_MAX_ALIGN (0x80000000)
 #define SHM_BLOCK_NAME "%" PRIu64 "-%d-%s"
-#define SHM_MAX_NB_BLOCKS (CONFIG_INTERNAL_SHM_BLOCKS + CONFIG_SHM_BLOCKS)
 
 ODP_STATIC_ASSERT(ODP_SHM_NAME_LEN >= RTE_MEMZONE_NAMESIZE,
 		  "ODP_SHM_NAME_LEN < RTE_MEMZONE_NAMESIZE");
@@ -78,19 +77,24 @@ typedef struct {
  */
 typedef struct {
 	odp_spinlock_t  lock;
-	shm_block_t block[SHM_MAX_NB_BLOCKS];
+	uint32_t num_blocks;
+	uint32_t max_blocks;
+	shm_block_t block[];
 } shm_table_t;
 
 static shm_table_t *shm_tbl;
+
+static size_t shm_tbl_size(uint32_t num_blocks)
+{
+	return sizeof(shm_table_t) + num_blocks * sizeof(shm_block_t);
+}
 
 /**
  * Check if DPDK memzone name has been used already
  */
 static odp_bool_t mz_name_used(const char *name)
 {
-	int idx;
-
-	for (idx = 0; idx < SHM_MAX_NB_BLOCKS; idx++) {
+	for (uint32_t idx = 0; idx < shm_tbl->num_blocks; idx++) {
 		if (shm_tbl->block[idx].mz &&
 		    strncmp(name, shm_tbl->block[idx].mz->name,
 			    RTE_MEMZONE_NAMESIZE) == 0)
@@ -124,7 +128,7 @@ static shm_zone_t *shm_zone(const struct rte_memzone *mz)
 
 static shm_block_t *mz_to_shm_block(const struct rte_memzone *mz)
 {
-	for (int i = 0; i < SHM_MAX_NB_BLOCKS; i++) {
+	for (uint32_t i = 0; i < shm_tbl->num_blocks; i++) {
 		if (shm_tbl->block[i].mz == mz)
 			return &shm_tbl->block[i];
 	}
@@ -133,9 +137,7 @@ static shm_block_t *mz_to_shm_block(const struct rte_memzone *mz)
 
 static int find_free_block(void)
 {
-	int idx;
-
-	for (idx = 0; idx < SHM_MAX_NB_BLOCKS; idx++) {
+	for (uint32_t idx = 0; idx < shm_tbl->num_blocks; idx++) {
 		if (shm_tbl->block[idx].mz == NULL)
 			return idx;
 	}
@@ -156,7 +158,7 @@ static inline odp_bool_t handle_is_valid(odp_shm_t shm)
 {
 	int idx = handle_to_idx(shm);
 
-	if (idx < 0 || idx >= SHM_MAX_NB_BLOCKS ||
+	if (idx < 0 || (uint32_t)idx >= shm_tbl->num_blocks ||
 	    shm_tbl->block[idx].mz == NULL) {
 		_ODP_ERR("Invalid odp_shm_t handle: %" PRIu64 "\n", odp_shm_to_u64(shm));
 		return 0;
@@ -167,6 +169,7 @@ static inline odp_bool_t handle_is_valid(odp_shm_t shm)
 int _odp_shm_init_global(const odp_init_t *init ODP_UNUSED)
 {
 	void *addr;
+	uint32_t num_blocks;
 
 	if ((getpid() != odp_global_ro.main_pid) ||
 	    (syscall(SYS_gettid) != getpid())) {
@@ -174,8 +177,10 @@ int _odp_shm_init_global(const odp_init_t *init ODP_UNUSED)
 		return -1;
 	}
 
+	num_blocks = rte_memzone_max_get();
+
 	/* Allocate space for the internal shared mem block table */
-	addr = mmap(NULL, sizeof(shm_table_t), PROT_READ | PROT_WRITE,
+	addr = mmap(NULL, shm_tbl_size(num_blocks), PROT_READ | PROT_WRITE,
 		    MAP_SHARED | MAP_ANONYMOUS, -1, 0);
 	if (addr == MAP_FAILED) {
 		_ODP_ERR("Unable to mmap the shm block table\n");
@@ -183,11 +188,44 @@ int _odp_shm_init_global(const odp_init_t *init ODP_UNUSED)
 	}
 
 	shm_tbl = addr;
-	memset(shm_tbl, 0, sizeof(shm_table_t));
+	memset(shm_tbl, 0, shm_tbl_size(num_blocks));
+	shm_tbl->num_blocks = num_blocks;
 
 	odp_spinlock_init(&shm_tbl->lock);
 
 	return 0;
+}
+
+static void count_non_shm_memzone(const struct rte_memzone *mz, void *arg)
+{
+	uint32_t *num = arg;
+
+	if (mz_to_shm_block(mz) == NULL)
+		(*num)++;
+}
+
+void _odp_shm_capa_init(void)
+{
+	uint32_t num_non_shm = 0;
+	uint32_t num_reserved;
+
+	/* Memzones reserved directly by DPDK and ODP modules during global init (e.g. crypto
+	 * queue pair rings) are not available for SHM blocks. */
+	odp_spinlock_lock(&shm_tbl->lock);
+	rte_memzone_walk(count_non_shm_memzone, &num_non_shm);
+	odp_spinlock_unlock(&shm_tbl->lock);
+
+	num_reserved = CONFIG_INTERNAL_SHM_BLOCKS + num_non_shm;
+
+	if (shm_tbl->num_blocks <= num_reserved) {
+		_ODP_WARN("Too few DPDK memzones (%" PRIu32 "), at least %" PRIu32 " required for "
+			  "ODP internal usage. Limiting SHM max_blocks to one.\n",
+			  shm_tbl->num_blocks, num_reserved + 1);
+		shm_tbl->max_blocks = 1;
+		return;
+	}
+
+	shm_tbl->max_blocks = shm_tbl->num_blocks - num_reserved;
 }
 
 int _odp_shm_init_local(void)
@@ -198,7 +236,6 @@ int _odp_shm_init_local(void)
 int _odp_shm_term_global(void)
 {
 	shm_block_t *block;
-	int idx;
 
 	if ((getpid() != odp_global_ro.main_pid) ||
 	    (syscall(SYS_gettid) != getpid())) {
@@ -207,7 +244,7 @@ int _odp_shm_term_global(void)
 	}
 
 	/* Cleanup possibly non freed memory (and complain a bit) */
-	for (idx = 0; idx < SHM_MAX_NB_BLOCKS; idx++) {
+	for (uint32_t idx = 0; idx < shm_tbl->num_blocks; idx++) {
 		block = &shm_tbl->block[idx];
 		if (block->mz) {
 			_ODP_ERR("block '%s' was never freed (cleaning up...)\n", block->name);
@@ -215,7 +252,7 @@ int _odp_shm_term_global(void)
 		}
 	}
 	/* Free the shared memory block table */
-	if (munmap(shm_tbl, sizeof(shm_table_t)) < 0) {
+	if (munmap(shm_tbl, shm_tbl_size(shm_tbl->num_blocks)) < 0) {
 		_ODP_ERR("Unable to munmap the shm block table\n");
 		return -1;
 	}
@@ -231,7 +268,7 @@ int odp_shm_capability(odp_shm_capability_t *capa)
 {
 	memset(capa, 0, sizeof(odp_shm_capability_t));
 
-	capa->max_blocks = CONFIG_SHM_BLOCKS;
+	capa->max_blocks = shm_tbl->max_blocks;
 	capa->max_size = 0;
 	capa->max_align = SHM_MAX_ALIGN;
 	capa->flags = SUPPORTED_SHM_FLAGS;
@@ -387,11 +424,9 @@ int odp_shm_free(odp_shm_t shm)
 
 odp_shm_t odp_shm_lookup(const char *name)
 {
-	int idx;
-
 	odp_spinlock_lock(&shm_tbl->lock);
 
-	for (idx = 0; idx < SHM_MAX_NB_BLOCKS; idx++) {
+	for (uint32_t idx = 0; idx < shm_tbl->num_blocks; idx++) {
 		if (shm_tbl->block[idx].mz &&
 		    strncmp(name, shm_tbl->block[idx].name,
 			    ODP_SHM_NAME_LEN) == 0) {
@@ -546,13 +581,12 @@ int32_t odp_system_meminfo(odp_system_meminfo_t *info, odp_system_memblock_t mem
 void odp_shm_print_all(void)
 {
 	shm_block_t *block;
-	int idx;
 
 	odp_spinlock_lock(&shm_tbl->lock);
 
 	_ODP_PRINT("\nShared memory blocks\n--------------------\n");
 
-	for (idx = 0; idx < SHM_MAX_NB_BLOCKS; idx++) {
+	for (uint32_t idx = 0; idx < shm_tbl->num_blocks; idx++) {
 		block = &shm_tbl->block[idx];
 		if (block->mz == NULL)
 			continue;
