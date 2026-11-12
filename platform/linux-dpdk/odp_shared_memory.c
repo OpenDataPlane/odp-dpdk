@@ -385,6 +385,13 @@ odp_shm_t odp_shm_import(const char *remote_name, odp_instance_t odp_inst,
 
 	odp_spinlock_lock(&shm_tbl->lock);
 
+	/* An instance may have only a single handle to the same block */
+	if (mz_to_shm_block(mz) != NULL) {
+		odp_spinlock_unlock(&shm_tbl->lock);
+		_ODP_ERR("SHM block already exists: %s\n", remote_name);
+		return ODP_SHM_INVALID;
+	}
+
 	idx = find_free_block();
 	if (idx < 0) {
 		odp_spinlock_unlock(&shm_tbl->lock);
