@@ -51,6 +51,8 @@ typedef enum {
  * odp_shm_import().
  */
 typedef struct {
+	/* User requested SHM size */
+	uint64_t size;
 	/* Shared memory flags */
 	uint32_t flags;
 } shm_zone_t;
@@ -341,6 +343,7 @@ odp_shm_t odp_shm_reserve(const char *name, uint64_t size, uint64_t align,
 
 	/* Note: ODP_SHM_PROC/ODP_SHM_SINGLE_VA flags are currently ignored. */
 	shm_zone(mz)->flags = flags;
+	shm_zone(mz)->size = size;
 
 	odp_spinlock_unlock(&shm_tbl->lock);
 
@@ -393,6 +396,7 @@ odp_shm_t odp_shm_import(const char *remote_name, odp_instance_t odp_inst,
 		_odp_strcpy(block->name, local_name, ODP_SHM_NAME_LEN);
 
 	block->type = SHM_TYPE_REMOTE;
+	block->size = shm_zone(mz)->size;
 
 	odp_spinlock_unlock(&shm_tbl->lock);
 
