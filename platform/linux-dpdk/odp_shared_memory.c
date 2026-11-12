@@ -115,7 +115,7 @@ static void name_to_mz_name(const char *name, char *mz_name)
 	/* Use pid and counter to make name unique */
 	do {
 		snprintf(mz_name, RTE_MEMZONE_NAMESIZE, SHM_BLOCK_NAME,
-			 (odp_instance_t)odp_global_ro.main_pid, i++, name);
+			 (odp_instance_t)odp_global_ro.main_pid, i++, name ? name : "");
 		mz_name[RTE_MEMZONE_NAMESIZE - 1] = 0;
 	} while (mz_name_used(mz_name));
 }
@@ -175,7 +175,7 @@ int _odp_shm_init_global(const odp_init_t *init ODP_UNUSED)
 
 	if ((getpid() != odp_global_ro.main_pid) ||
 	    (syscall(SYS_gettid) != getpid())) {
-		_ODP_ERR("shm_init_global() must be performed by the main ODP process!\n.");
+		_ODP_ERR("shm_init_global() must be performed by the main ODP process!\n");
 		return -1;
 	}
 
@@ -241,7 +241,7 @@ int _odp_shm_term_global(void)
 
 	if ((getpid() != odp_global_ro.main_pid) ||
 	    (syscall(SYS_gettid) != getpid())) {
-		_ODP_ERR("shm_term_global() must be performed by the main ODP process!\n.");
+		_ODP_ERR("shm_term_global() must be performed by the main ODP process!\n");
 		return -1;
 	}
 
@@ -357,6 +357,11 @@ odp_shm_t odp_shm_import(const char *remote_name, odp_instance_t odp_inst,
 	const struct rte_memzone *mz;
 	char mz_name[RTE_MEMZONE_NAMESIZE];
 	int idx;
+
+	if (remote_name == NULL) {
+		_ODP_ERR("SHM remote name missing\n");
+		return ODP_SHM_INVALID;
+	}
 
 	if (local_name && strlen(local_name) + 1 > ODP_SHM_NAME_LEN) {
 		_ODP_ERR("SHM local name too long (max %d)\n", ODP_SHM_NAME_LEN);
