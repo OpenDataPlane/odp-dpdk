@@ -248,7 +248,9 @@ int _odp_shm_term_global(void)
 		block = &shm_tbl->block[idx];
 		if (block->mz) {
 			_ODP_ERR("block '%s' was never freed (cleaning up...)\n", block->name);
-			rte_memzone_free(block->mz);
+			/* Only the creator of memzone can free it */
+			if (block->type == SHM_TYPE_LOCAL)
+				rte_memzone_free(block->mz);
 		}
 	}
 	/* Free the shared memory block table */
