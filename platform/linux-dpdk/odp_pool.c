@@ -1623,7 +1623,7 @@ int odp_pool_ext_populate(odp_pool_t pool_hdl, void *buf[], uint32_t buf_size,
 		memhdr->mp = mp;
 		memhdr->addr = mb;
 		memhdr->iova = rte_mem_virt2iova(mb);
-		memhdr->len = buf_size;
+		memhdr->len = buf_size - SIZEOF_OBJHDR;
 		STAILQ_INSERT_TAIL(&mp->mem_list, memhdr, next);
 		mp->nb_mem_chunks++;
 
