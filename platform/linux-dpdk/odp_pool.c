@@ -1476,15 +1476,11 @@ static void init_ext_obj(struct rte_mempool *mp, void *arg, void *mbuf, unsigned
 	_odp_event_hdr_t *event_hdr = (_odp_event_hdr_t *)mbuf;
 	odp_event_vector_hdr_t *evv_hdr;
 	void **obj_uarea;
-	odp_pool_ext_param_t *p = &pool->ext_param;
 	uint32_t app_hdr_offset = sizeof(odp_packet_hdr_t);
-	uint32_t app_hdr_size = p->pkt.app_header_size;
-	uint32_t buf_size = p->pkt.buf_size;
 
 	RTE_ASSERT(mp->elt_size >= sizeof(struct rte_mbuf));
 	memset(mb, 0, app_hdr_offset);
-	memset((uint8_t *)mb + app_hdr_offset + app_hdr_size, 0,
-	       buf_size - app_hdr_offset - app_hdr_size);
+	memset((uint8_t *)mb + mb_ctor_arg->seg_buf_offset, 0, mb_ctor_arg->seg_buf_size);
 	/* Start of buffer is just after the ODP type specific header
 	 * which contains in the very beginning the rte_mbuf struct */
 	mb->buf_addr = (char *)mb + mb_ctor_arg->seg_buf_offset;
@@ -1608,11 +1604,6 @@ int odp_pool_ext_populate(odp_pool_t pool_hdl, void *buf[], uint32_t buf_size,
 			return -1;
 		}
 
-		if (rte_mempool_ops_enqueue_bulk(mp, (void *const *)&mb, 1) < 0) {
-			_ODP_ERR("Failed to enqueue buffer to rte_mempool\n");
-			return -1;
-		}
-
 		/*
 		 * Since we don't know anything about the caller's memory areas,
 		 * or even the page size, make a memhdr for each buffer.
@@ -1624,10 +1615,16 @@ int odp_pool_ext_populate(odp_pool_t pool_hdl, void *buf[], uint32_t buf_size,
 			return -1;
 		}
 
+		if (rte_mempool_ops_enqueue_bulk(mp, (void *const *)&mb, 1) < 0) {
+			_ODP_ERR("Failed to enqueue buffer to rte_mempool\n");
+			rte_free(memhdr);
+			return -1;
+		}
+
 		memhdr->mp = mp;
 		memhdr->addr = mb;
 		memhdr->iova = rte_mem_virt2iova(mb);
-		memhdr->len = buf_size;
+		memhdr->len = buf_size - SIZEOF_OBJHDR;
 		STAILQ_INSERT_TAIL(&mp->mem_list, memhdr, next);
 		mp->nb_mem_chunks++;
 
@@ -1643,7 +1640,7 @@ int odp_pool_ext_populate(odp_pool_t pool_hdl, void *buf[], uint32_t buf_size,
 		mb_ctor_arg.type = params->type;
 		mb_ctor_arg.event_type = pool->type;
 		mb_ctor_arg.pool = pool;
-		init_ext_obj(mp, (void *)&mb_ctor_arg, (void *)mb, num_populated);
+		init_ext_obj(mp, (void *)&mb_ctor_arg, (void *)mb, num_populated + i);
 		pool->num_populated++;
 	}
 
