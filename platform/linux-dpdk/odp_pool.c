@@ -1476,15 +1476,11 @@ static void init_ext_obj(struct rte_mempool *mp, void *arg, void *mbuf, unsigned
 	_odp_event_hdr_t *event_hdr = (_odp_event_hdr_t *)mbuf;
 	odp_event_vector_hdr_t *evv_hdr;
 	void **obj_uarea;
-	odp_pool_ext_param_t *p = &pool->ext_param;
 	uint32_t app_hdr_offset = sizeof(odp_packet_hdr_t);
-	uint32_t app_hdr_size = p->pkt.app_header_size;
-	uint32_t buf_size = p->pkt.buf_size;
 
 	RTE_ASSERT(mp->elt_size >= sizeof(struct rte_mbuf));
 	memset(mb, 0, app_hdr_offset);
-	memset((uint8_t *)mb + app_hdr_offset + app_hdr_size, 0,
-	       buf_size - app_hdr_offset - app_hdr_size);
+	memset((uint8_t *)mb + mb_ctor_arg->seg_buf_offset, 0, mb_ctor_arg->seg_buf_size);
 	/* Start of buffer is just after the ODP type specific header
 	 * which contains in the very beginning the rte_mbuf struct */
 	mb->buf_addr = (char *)mb + mb_ctor_arg->seg_buf_offset;
