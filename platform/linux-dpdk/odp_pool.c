@@ -1604,11 +1604,6 @@ int odp_pool_ext_populate(odp_pool_t pool_hdl, void *buf[], uint32_t buf_size,
 			return -1;
 		}
 
-		if (rte_mempool_ops_enqueue_bulk(mp, (void *const *)&mb, 1) < 0) {
-			_ODP_ERR("Failed to enqueue buffer to rte_mempool\n");
-			return -1;
-		}
-
 		/*
 		 * Since we don't know anything about the caller's memory areas,
 		 * or even the page size, make a memhdr for each buffer.
@@ -1617,6 +1612,12 @@ int odp_pool_ext_populate(odp_pool_t pool_hdl, void *buf[], uint32_t buf_size,
 
 		if (!memhdr) {
 			_ODP_ERR("Failed to allocate rte_mempool_memhdr\n");
+			return -1;
+		}
+
+		if (rte_mempool_ops_enqueue_bulk(mp, (void *const *)&mb, 1) < 0) {
+			_ODP_ERR("Failed to enqueue buffer to rte_mempool\n");
+			rte_free(memhdr);
 			return -1;
 		}
 
