@@ -1639,7 +1639,7 @@ int odp_pool_ext_populate(odp_pool_t pool_hdl, void *buf[], uint32_t buf_size,
 		mb_ctor_arg.type = params->type;
 		mb_ctor_arg.event_type = pool->type;
 		mb_ctor_arg.pool = pool;
-		init_ext_obj(mp, (void *)&mb_ctor_arg, (void *)mb, num_populated);
+		init_ext_obj(mp, (void *)&mb_ctor_arg, (void *)mb, num_populated + i);
 		pool->num_populated++;
 	}
 
